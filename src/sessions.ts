@@ -62,6 +62,10 @@ function evictOldest(): void {
   }
 }
 
+export function listSessionEntries(): { id: string; lastAccess: number }[] {
+  return Array.from(sessions, ([id, entry]) => ({ id, lastAccess: entry.lastAccess }));
+}
+
 export function isEvicted(id: string): boolean {
   return evictedSessions.has(id);
 }

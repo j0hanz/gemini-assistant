@@ -1,5 +1,6 @@
 import { McpServer, StdioServerTransport } from '@modelcontextprotocol/server';
 
+import { registerResources } from './resources.js';
 import { registerAnalyzeFileTool } from './tools/analyze-file.js';
 import { registerAskTool } from './tools/ask.js';
 import { registerCacheTools } from './tools/cache.js';
@@ -23,6 +24,7 @@ registerExecuteCodeTool(server);
 registerSearchTool(server);
 registerAnalyzeFileTool(server);
 registerCacheTools(server);
+registerResources(server);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

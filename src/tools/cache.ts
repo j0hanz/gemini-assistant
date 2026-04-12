@@ -168,6 +168,28 @@ export function registerCacheTools(server: McpServer): void {
     async ({ name }, ctx: ServerContext) => {
       const tc = extractToolContext(ctx);
       try {
+        // Attempt user confirmation via elicitation (graceful fallback if unsupported)
+        try {
+          const confirmation = await ctx.mcpReq.elicitInput({
+            mode: 'form',
+            message: `Confirm deletion of cache '${name}'?`,
+            requestedSchema: {
+              type: 'object',
+              properties: {
+                confirm: { type: 'boolean', title: 'Confirm deletion' },
+              },
+              required: ['confirm'],
+            },
+          });
+          if (confirmation.action !== 'accept' || !confirmation.content?.confirm) {
+            return {
+              content: [{ type: 'text', text: 'Cache deletion cancelled.' }],
+            };
+          }
+        } catch {
+          // Client does not support elicitation — proceed without confirmation
+        }
+
         await ai.caches.delete({ name });
         await tc.log('info', `Deleted cache: ${name}`);
         return {

@@ -66,6 +66,12 @@ export function listSessionEntries(): { id: string; lastAccess: number }[] {
   return Array.from(sessions, ([id, entry]) => ({ id, lastAccess: entry.lastAccess }));
 }
 
+export function getSessionEntry(id: string): { id: string; lastAccess: number } | undefined {
+  const entry = sessions.get(id);
+  if (!entry) return undefined;
+  return { id, lastAccess: entry.lastAccess };
+}
+
 export function isEvicted(id: string): boolean {
   return evictedSessions.has(id);
 }

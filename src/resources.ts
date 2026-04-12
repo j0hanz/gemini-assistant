@@ -1,7 +1,8 @@
 import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server';
+import { ResourceTemplate } from '@modelcontextprotocol/server';
 
 import { ai } from './client.js';
-import { listSessionEntries } from './sessions.js';
+import { getSessionEntry, listSessionEntries } from './sessions.js';
 
 export function registerResources(server: McpServer): void {
   server.registerResource(
@@ -20,6 +21,28 @@ export function registerResources(server: McpServer): void {
         },
       ],
     }),
+  );
+
+  server.registerResource(
+    'session-detail',
+    new ResourceTemplate('sessions://{sessionId}', {
+      list: () => ({
+        resources: listSessionEntries().map((s) => ({
+          uri: `sessions://${s.id}`,
+          name: `Session ${s.id}`,
+        })),
+      }),
+    }),
+    {
+      title: 'Chat Session Detail',
+      description: 'Metadata for a single chat session by ID.',
+      mimeType: 'application/json',
+    },
+    (uri, { sessionId }): ReadResourceResult => {
+      const entry = getSessionEntry(sessionId as string);
+      const text = entry ? JSON.stringify(entry) : JSON.stringify({ error: 'Session not found' });
+      return { contents: [{ uri: uri.href, text }] };
+    },
   );
 
   server.registerResource(

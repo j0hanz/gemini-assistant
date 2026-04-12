@@ -4,6 +4,7 @@ import { extractToolContext } from '../lib/context.js';
 import { geminiErrorResult } from '../lib/errors.js';
 import { extractTextOrError } from '../lib/response.js';
 import { SearchInputSchema } from '../schemas/inputs.js';
+import { SearchOutputSchema } from '../schemas/outputs.js';
 
 import { ai, MODEL } from '../client.js';
 
@@ -15,6 +16,7 @@ export function registerSearchTool(server: McpServer): void {
       description:
         'Answer questions using Gemini with Google Search grounding for up-to-date information.',
       inputSchema: SearchInputSchema,
+      outputSchema: SearchOutputSchema,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -58,7 +60,16 @@ export function registerSearchTool(server: McpServer): void {
           });
         }
 
-        return result;
+        const answerText =
+          result.content
+            .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+            .map((c) => c.text)
+            .join('') || '';
+
+        return {
+          ...result,
+          structuredContent: { answer: answerText, sources },
+        };
       } catch (err) {
         return geminiErrorResult('search', err);
       }

@@ -1,12 +1,14 @@
 import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
+import { completable } from '@modelcontextprotocol/server';
+
+import { z } from 'zod/v4';
 
 import { extractToolContext } from '../lib/context.js';
 import { errorResult, geminiErrorResult } from '../lib/errors.js';
 import { extractTextOrError } from '../lib/response.js';
-import { AskInputSchema } from '../schemas/inputs.js';
 
 import { ai, MODEL } from '../client.js';
-import { getSession, isEvicted, setSession } from '../sessions.js';
+import { getSession, isEvicted, listSessionEntries, setSession } from '../sessions.js';
 
 export function registerAskTool(server: McpServer): void {
   server.registerTool(
@@ -14,7 +16,40 @@ export function registerAskTool(server: McpServer): void {
     {
       title: 'Ask Gemini',
       description: 'Send a message to Gemini. Supports multi-turn chat via sessionId.',
-      inputSchema: AskInputSchema,
+      inputSchema: z.object({
+        message: z.string().describe('User message or prompt'),
+        sessionId: completable(
+          z.string().optional().describe('Session ID for multi-turn chat. Omit for single-turn.'),
+          (value) =>
+            listSessionEntries()
+              .map((s) => s.id)
+              .filter((id) => id.startsWith(value ?? '')),
+        ),
+        systemInstruction: z
+          .string()
+          .optional()
+          .describe('System prompt (used on session creation or single-turn)'),
+        cacheName: completable(
+          z
+            .string()
+            .optional()
+            .describe(
+              'Cache name from create_cache. Cannot be applied to an existing chat session.',
+            ),
+          async (value) => {
+            const names: string[] = [];
+            try {
+              const pager = await ai.caches.list();
+              for await (const cached of pager) {
+                if (cached.name?.startsWith(value ?? '')) names.push(cached.name);
+              }
+            } catch {
+              // Cache listing may fail — return empty completions
+            }
+            return names;
+          },
+        ),
+      }),
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,

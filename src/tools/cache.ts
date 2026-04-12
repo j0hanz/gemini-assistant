@@ -1,4 +1,5 @@
 import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
+import { completable } from '@modelcontextprotocol/server';
 
 import { stat } from 'node:fs/promises';
 
@@ -9,7 +10,7 @@ import { extractToolContext } from '../lib/context.js';
 import { geminiErrorResult } from '../lib/errors.js';
 import { getMimeType, MAX_FILE_SIZE } from '../lib/file-utils.js';
 import { resolveAndValidatePath } from '../lib/path-validation.js';
-import { CreateCacheInputSchema, DeleteCacheInputSchema } from '../schemas/inputs.js';
+import { CreateCacheInputSchema } from '../schemas/inputs.js';
 
 import { ai, MODEL } from '../client.js';
 
@@ -171,7 +172,26 @@ export function registerCacheTools(server: McpServer): void {
     {
       title: 'Delete Cache',
       description: 'Deletes a Gemini context cache by its resource name.',
-      inputSchema: DeleteCacheInputSchema,
+      inputSchema: z.object({
+        name: completable(
+          z
+            .string()
+            .min(1)
+            .describe('The cache resource name to delete (e.g., "cachedContents/...")'),
+          async (value) => {
+            const names: string[] = [];
+            try {
+              const pager = await ai.caches.list();
+              for await (const cached of pager) {
+                if (cached.name?.startsWith(value)) names.push(cached.name);
+              }
+            } catch {
+              // Cache listing may fail — return empty completions
+            }
+            return names;
+          },
+        ),
+      }),
       annotations: {
         destructiveHint: true,
         idempotentHint: true,

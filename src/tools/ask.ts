@@ -17,7 +17,7 @@ export function registerAskTool(server: McpServer): void {
       title: 'Ask Gemini',
       description: 'Send a message to Gemini. Supports multi-turn chat via sessionId.',
       inputSchema: z.object({
-        message: z.string().describe('User message or prompt'),
+        message: z.string().max(100_000).describe('User message or prompt'),
         sessionId: completable(
           z.string().optional().describe('Session ID for multi-turn chat. Omit for single-turn.'),
           (value) =>

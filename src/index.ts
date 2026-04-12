@@ -9,7 +9,13 @@ import { registerExecuteCodeTool } from './tools/execute-code.js';
 import { registerSearchTool } from './tools/search.js';
 
 const server = new McpServer(
-  { name: 'gemini-assistant', version: '1.0.0' },
+  {
+    name: 'gemini-assistant',
+    version: '1.0.0',
+    description:
+      'General-purpose Gemini AI assistant with multi-turn chat, sandboxed code execution, ' +
+      'Google Search grounding, file analysis, and context caching.',
+  },
   {
     capabilities: { logging: {} },
     instructions:

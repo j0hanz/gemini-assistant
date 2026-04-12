@@ -27,7 +27,7 @@ export const SearchInputSchema = z.object({
 });
 
 export const AnalyzeFileInputSchema = z.object({
-  filePath: z.string().min(1).describe('Absolute path to the file to analyze'),
+  filePath: z.string().trim().min(1).describe('Absolute path to the file to analyze'),
   question: z.string().min(1).describe('What to analyze or ask about the file'),
 });
 

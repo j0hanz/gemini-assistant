@@ -72,24 +72,37 @@ export function registerResources(server: McpServer): void {
       mimeType: 'application/json',
     },
     async (uri): Promise<ReadResourceResult> => {
-      const caches: Record<string, unknown>[] = [];
-      const pager = await ai.caches.list();
-      for await (const cached of pager) {
-        caches.push({
-          name: cached.name,
-          displayName: cached.displayName,
-          model: cached.model,
-          expireTime: cached.expireTime,
-        });
+      try {
+        const caches: Record<string, unknown>[] = [];
+        const pager = await ai.caches.list();
+        for await (const cached of pager) {
+          caches.push({
+            name: cached.name,
+            displayName: cached.displayName,
+            model: cached.model,
+            expireTime: cached.expireTime,
+          });
+        }
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              text: JSON.stringify(caches),
+            },
+          ],
+        };
+      } catch (err) {
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              text: JSON.stringify({
+                error: `Failed to list caches: ${err instanceof Error ? err.message : String(err)}`,
+              }),
+            },
+          ],
+        };
       }
-      return {
-        contents: [
-          {
-            uri: uri.href,
-            text: JSON.stringify(caches),
-          },
-        ],
-      };
     },
   );
 }

@@ -193,6 +193,7 @@ export function registerCacheTools(server: McpServer): void {
         ),
       }),
       annotations: {
+        readOnlyHint: false,
         destructiveHint: true,
         idempotentHint: true,
         openWorldHint: true,

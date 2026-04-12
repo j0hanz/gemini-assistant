@@ -20,6 +20,15 @@ const sessions = new Map<string, SessionEntry>();
 const evictedSessions = new Set<string>();
 
 let evictionTimer: ReturnType<typeof setInterval> | undefined;
+let changeCallback: (() => void) | undefined;
+
+export function onSessionChange(cb: () => void): void {
+  changeCallback = cb;
+}
+
+function notifyChange(): void {
+  changeCallback?.();
+}
 
 function trimEvictedSessions(): void {
   if (evictedSessions.size <= MAX_EVICTED_ENTRIES) return;
@@ -36,13 +45,16 @@ function startEvictionTimer(): void {
   if (evictionTimer) return;
   evictionTimer = setInterval(() => {
     const now = Date.now();
+    let evicted = false;
     for (const [id, entry] of sessions) {
       if (now - entry.lastAccess > SESSION_TTL_MS) {
         sessions.delete(id);
         evictedSessions.add(id);
+        evicted = true;
       }
     }
     trimEvictedSessions();
+    if (evicted) notifyChange();
   }, 60_000);
   evictionTimer.unref();
 }
@@ -59,6 +71,7 @@ function evictOldest(): void {
   if (oldestId) {
     sessions.delete(oldestId);
     evictedSessions.add(oldestId);
+    notifyChange();
   }
 }
 

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
+import { onSessionChange } from './sessions.js';
 import { registerAnalyzeFileTool } from './tools/analyze-file.js';
 import { registerAskTool } from './tools/ask.js';
 import { registerCacheTools } from './tools/cache.js';
@@ -24,7 +25,7 @@ const server = new McpServer(
       'Google Search grounding, file analysis, and context caching.',
   },
   {
-    capabilities: { logging: {} },
+    capabilities: { logging: {}, prompts: {}, resources: { listChanged: true } },
     instructions:
       'General-purpose Gemini AI assistant. Use "ask" for chat (supports multi-turn via sessionId), ' +
       '"execute_code" for sandboxed code execution, "search" for web-grounded answers, ' +
@@ -40,6 +41,10 @@ registerAnalyzeFileTool(server);
 registerCacheTools(server);
 registerPrompts(server);
 registerResources(server);
+
+onSessionChange(() => {
+  server.sendResourceListChanged();
+});
 
 const transport = new StdioServerTransport();
 try {

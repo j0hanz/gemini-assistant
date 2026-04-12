@@ -1,6 +1,27 @@
 import type { McpServer } from '@modelcontextprotocol/server';
+import { completable } from '@modelcontextprotocol/server';
 
 import { z } from 'zod/v4';
+
+const COMMON_LANGUAGES = [
+  'python',
+  'typescript',
+  'javascript',
+  'java',
+  'go',
+  'rust',
+  'c',
+  'cpp',
+  'csharp',
+  'ruby',
+  'swift',
+  'kotlin',
+  'php',
+  'sql',
+  'shell',
+];
+
+const SUMMARY_STYLES = ['brief', 'detailed', 'bullet-points'] as const;
 
 export function registerPrompts(server: McpServer): void {
   server.registerPrompt(
@@ -9,8 +30,11 @@ export function registerPrompts(server: McpServer): void {
       title: 'Code Review',
       description: 'Review code for bugs, best practices, and potential improvements.',
       argsSchema: z.object({
-        code: z.string().describe('The code to review'),
-        language: z.string().optional().describe('Programming language of the code'),
+        code: z.string().max(100_000).describe('The code to review'),
+        language: completable(
+          z.string().optional().describe('Programming language of the code'),
+          (value) => COMMON_LANGUAGES.filter((l) => l.startsWith(value?.toLowerCase() ?? '')),
+        ),
       }),
     },
     ({ code, language }) => ({
@@ -32,8 +56,10 @@ export function registerPrompts(server: McpServer): void {
       title: 'Summarize Text',
       description: 'Condense text into a concise summary.',
       argsSchema: z.object({
-        text: z.string().describe('The text to summarize'),
-        style: z.enum(['brief', 'detailed', 'bullet-points']).optional().describe('Summary style'),
+        text: z.string().max(100_000).describe('The text to summarize'),
+        style: completable(z.enum(SUMMARY_STYLES).optional().describe('Summary style'), (value) =>
+          SUMMARY_STYLES.filter((s) => s.startsWith(value ?? '')),
+        ),
       }),
     },
     ({ text, style }) => ({
@@ -55,8 +81,12 @@ export function registerPrompts(server: McpServer): void {
       title: 'Explain Error',
       description: 'Explain an error message and suggest fixes.',
       argsSchema: z.object({
-        error: z.string().describe('The error message or stack trace'),
-        context: z.string().optional().describe('Additional context about what was being done'),
+        error: z.string().max(100_000).describe('The error message or stack trace'),
+        context: z
+          .string()
+          .max(10_000)
+          .optional()
+          .describe('Additional context about what was being done'),
       }),
     },
     ({ error, context }) => ({

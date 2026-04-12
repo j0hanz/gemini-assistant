@@ -5,7 +5,6 @@ import {
   AnalyzeFileInputSchema,
   AskInputSchema,
   CreateCacheInputSchema,
-  DeleteCacheInputSchema,
   ExecuteCodeInputSchema,
   SearchInputSchema,
 } from '../../src/schemas/inputs.js';
@@ -140,23 +139,6 @@ describe('CreateCacheInputSchema', () => {
 
   it('rejects empty filePaths without systemInstruction', () => {
     const result = CreateCacheInputSchema.safeParse({ filePaths: [] });
-    assert.strictEqual(result.success, false);
-  });
-});
-
-describe('DeleteCacheInputSchema', () => {
-  it('accepts valid name', () => {
-    const result = DeleteCacheInputSchema.safeParse({ name: 'cachedContents/abc123' });
-    assert.ok(result.success);
-  });
-
-  it('rejects empty name', () => {
-    const result = DeleteCacheInputSchema.safeParse({ name: '' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects missing name', () => {
-    const result = DeleteCacheInputSchema.safeParse({});
     assert.strictEqual(result.success, false);
   });
 });

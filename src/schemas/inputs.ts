@@ -52,10 +52,3 @@ export const CreateCacheInputSchema = z
   .describe(
     'Creates a cache on the Gemini API. IMPORTANT: The combined content (files + instructions) MUST exceed ~32,000 tokens. Do not use for small contexts.',
   );
-
-export const DeleteCacheInputSchema = z.object({
-  name: z
-    .string()
-    .min(1)
-    .describe('The cache resource name to delete (e.g., "cachedContents/...")'),
-});

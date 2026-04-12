@@ -1,45 +1,14 @@
-import { stat } from 'node:fs/promises';
-import { extname } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/server';
+
+import { stat } from 'node:fs/promises';
+
 import { createPartFromUri } from '@google/genai';
-import { ai, MODEL } from '../client.js';
-import { AnalyzeFileInputSchema } from '../schemas/inputs.js';
+
 import { errorResult } from '../lib/errors.js';
+import { getMimeType, MAX_FILE_SIZE } from '../lib/file-utils.js';
+import { AnalyzeFileInputSchema } from '../schemas/inputs.js';
 
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
-
-const MIME_MAP: Record<string, string> = {
-  '.pdf': 'application/pdf',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.txt': 'text/plain',
-  '.md': 'text/plain',
-  '.csv': 'text/csv',
-  '.json': 'application/json',
-  '.xml': 'application/xml',
-  '.html': 'text/html',
-  '.js': 'text/javascript',
-  '.ts': 'text/plain',
-  '.py': 'text/plain',
-  '.java': 'text/plain',
-  '.c': 'text/plain',
-  '.cpp': 'text/plain',
-  '.go': 'text/plain',
-  '.rs': 'text/plain',
-  '.rb': 'text/plain',
-  '.sh': 'text/plain',
-  '.yaml': 'text/plain',
-  '.yml': 'text/plain',
-  '.toml': 'text/plain',
-};
-
-function getMimeType(filePath: string): string {
-  const ext = extname(filePath).toLowerCase();
-  return MIME_MAP[ext] ?? 'application/octet-stream';
-}
+import { ai, MODEL } from '../client.js';
 
 export function registerAnalyzeFileTool(server: McpServer): void {
   server.registerTool(

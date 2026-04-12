@@ -1,8 +1,10 @@
 import type { McpServer } from '@modelcontextprotocol/server';
-import { ai, MODEL } from '../client.js';
-import { getSession, setSession, isEvicted } from '../sessions.js';
-import { AskInputSchema } from '../schemas/inputs.js';
+
 import { errorResult } from '../lib/errors.js';
+import { AskInputSchema } from '../schemas/inputs.js';
+
+import { ai, MODEL } from '../client.js';
+import { getSession, isEvicted, setSession } from '../sessions.js';
 
 export function registerAskTool(server: McpServer): void {
   server.registerTool(
@@ -16,18 +18,33 @@ export function registerAskTool(server: McpServer): void {
         openWorldHint: true,
       },
     },
-    async ({ message, sessionId, systemInstruction }) => {
+    async ({ message, sessionId, systemInstruction, cacheName }) => {
       try {
         if (sessionId && isEvicted(sessionId)) {
           return errorResult(`Session '${sessionId}' has expired.`);
         }
+
+        // Mid-session conflict guard
+        if (sessionId && cacheName) {
+          const existing = getSession(sessionId);
+          if (existing) {
+            return errorResult(
+              'Cannot apply a cachedContent to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
+            );
+          }
+        }
+
+        const cacheConfig = cacheName ? { cachedContent: cacheName } : undefined;
 
         // Single-turn: no sessionId
         if (!sessionId) {
           const response = await ai.models.generateContent({
             model: MODEL,
             contents: message,
-            config: systemInstruction ? { systemInstruction } : undefined,
+            config: {
+              ...cacheConfig,
+              ...(systemInstruction ? { systemInstruction } : {}),
+            },
           });
           return {
             content: [{ type: 'text', text: response.text ?? '' }],
@@ -46,7 +63,10 @@ export function registerAskTool(server: McpServer): void {
         // Multi-turn: new session
         chat = ai.chats.create({
           model: MODEL,
-          config: systemInstruction ? { systemInstruction } : undefined,
+          config: {
+            ...cacheConfig,
+            ...(systemInstruction ? { systemInstruction } : {}),
+          },
         });
         const response = await chat.sendMessage({ message });
         setSession(sessionId, chat);

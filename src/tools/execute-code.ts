@@ -1,8 +1,10 @@
 import type { McpServer } from '@modelcontextprotocol/server';
-import { ai, MODEL } from '../client.js';
+
+import { errorResult } from '../lib/errors.js';
 import { ExecuteCodeInputSchema } from '../schemas/inputs.js';
 import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
-import { errorResult } from '../lib/errors.js';
+
+import { ai, MODEL } from '../client.js';
 
 export function registerExecuteCodeTool(server: McpServer): void {
   server.registerTool(

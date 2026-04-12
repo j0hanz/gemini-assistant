@@ -1,7 +1,9 @@
 import type { McpServer } from '@modelcontextprotocol/server';
-import { ai, MODEL } from '../client.js';
-import { SearchInputSchema } from '../schemas/inputs.js';
+
 import { errorResult } from '../lib/errors.js';
+import { SearchInputSchema } from '../schemas/inputs.js';
+
+import { ai, MODEL } from '../client.js';
 
 export function registerSearchTool(server: McpServer): void {
   server.registerTool(

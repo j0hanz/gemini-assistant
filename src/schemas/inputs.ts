@@ -10,6 +10,10 @@ export const AskInputSchema = z.object({
     .string()
     .optional()
     .describe('System prompt (used on session creation or single-turn)'),
+  cacheName: z
+    .string()
+    .optional()
+    .describe('Cache name from create_cache. Cannot be applied to an existing chat session.'),
 });
 
 export const ExecuteCodeInputSchema = z.object({
@@ -25,4 +29,27 @@ export const SearchInputSchema = z.object({
 export const AnalyzeFileInputSchema = z.object({
   filePath: z.string().describe('Absolute path to the file to analyze'),
   question: z.string().describe('What to analyze or ask about the file'),
+});
+
+export const CreateCacheInputSchema = z
+  .object({
+    filePaths: z
+      .array(z.string())
+      .optional()
+      .describe('Absolute paths to files to include in the cache'),
+    systemInstruction: z
+      .string()
+      .optional()
+      .describe('System instruction to cache alongside the files'),
+    ttl: z
+      .string()
+      .optional()
+      .describe('Time-to-live for the cache (e.g., "3600s"). Defaults to 1 hour.'),
+  })
+  .describe(
+    'Creates a cache on the Gemini API. IMPORTANT: The combined content (files + instructions) MUST exceed ~32,000 tokens. Do not use for small contexts.',
+  );
+
+export const DeleteCacheInputSchema = z.object({
+  name: z.string().describe('The cache resource name to delete (e.g., "cachedContents/...")'),
 });

@@ -55,7 +55,7 @@ export function registerCacheTools(server: McpServer): void {
               `Uploading files ${i + 1}-${Math.min(i + chunk.length, validPaths.length)}/${validPaths.length}`,
             );
 
-            const chunkPromises = chunk.map(async (validPath) => {
+            const chunkPromises = chunk.map(async (validPath: string | null) => {
               if (!validPath) return null;
 
               const fileStat = await stat(validPath);

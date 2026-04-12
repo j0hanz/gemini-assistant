@@ -7,7 +7,16 @@ import { getSessionEntry, listSessionEntries } from './sessions.js';
 export function registerResources(server: McpServer): void {
   server.registerResource(
     'sessions',
-    'sessions://list',
+    new ResourceTemplate('sessions://list', {
+      list: () => ({
+        resources: [
+          {
+            uri: 'sessions://list',
+            name: 'List of active multi-turn chat session IDs',
+          },
+        ],
+      }),
+    }),
     {
       title: 'Active Chat Sessions',
       description: 'List of active multi-turn chat session IDs and their last access time.',
@@ -47,7 +56,16 @@ export function registerResources(server: McpServer): void {
 
   server.registerResource(
     'caches',
-    'cache://list',
+    new ResourceTemplate('cache://list', {
+      list: () => ({
+        resources: [
+          {
+            uri: 'cache://list',
+            name: 'List of active Gemini context caches',
+          },
+        ],
+      }),
+    }),
     {
       title: 'Gemini Context Caches',
       description: 'List of active Gemini context caches with name, model, and expiry.',

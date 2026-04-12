@@ -29,8 +29,13 @@ registerPrompts(server);
 registerResources(server);
 
 const transport = new StdioServerTransport();
-await server.connect(transport);
-console.error('gemini-assistant MCP server running on stdio');
+try {
+  await server.connect(transport);
+  console.error('gemini-assistant MCP server running on stdio');
+} catch (err) {
+  console.error('Failed to connect transport:', err);
+  process.exit(1);
+}
 
 async function shutdown(): Promise<void> {
   await server.close();

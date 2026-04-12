@@ -9,6 +9,7 @@ import { registerSearchTool } from './tools/search.js';
 const server = new McpServer(
   { name: 'gemini-assistant', version: '1.0.0' },
   {
+    capabilities: { logging: {} },
     instructions:
       'General-purpose Gemini AI assistant. Use "ask" for chat (supports multi-turn via sessionId), ' +
       '"execute_code" for sandboxed code execution, "search" for web-grounded answers, ' +
@@ -26,3 +27,11 @@ registerCacheTools(server);
 const transport = new StdioServerTransport();
 await server.connect(transport);
 console.error('gemini-assistant MCP server running on stdio');
+
+async function shutdown(): Promise<void> {
+  await server.close();
+  process.exit(0);
+}
+
+process.on('SIGINT', () => void shutdown());
+process.on('SIGTERM', () => void shutdown());

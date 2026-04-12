@@ -27,14 +27,14 @@ export const SearchInputSchema = z.object({
 });
 
 export const AnalyzeFileInputSchema = z.object({
-  filePath: z.string().describe('Absolute path to the file to analyze'),
-  question: z.string().describe('What to analyze or ask about the file'),
+  filePath: z.string().min(1).describe('Absolute path to the file to analyze'),
+  question: z.string().min(1).describe('What to analyze or ask about the file'),
 });
 
 export const CreateCacheInputSchema = z
   .object({
     filePaths: z
-      .array(z.string())
+      .array(z.string().min(1))
       .optional()
       .describe('Absolute paths to files to include in the cache'),
     systemInstruction: z
@@ -46,10 +46,16 @@ export const CreateCacheInputSchema = z
       .optional()
       .describe('Time-to-live for the cache (e.g., "3600s"). Defaults to 1 hour.'),
   })
+  .refine((data) => (data.filePaths && data.filePaths.length > 0) ?? data.systemInstruction, {
+    message: 'At least one of filePaths or systemInstruction must be provided.',
+  })
   .describe(
     'Creates a cache on the Gemini API. IMPORTANT: The combined content (files + instructions) MUST exceed ~32,000 tokens. Do not use for small contexts.',
   );
 
 export const DeleteCacheInputSchema = z.object({
-  name: z.string().describe('The cache resource name to delete (e.g., "cachedContents/...")'),
+  name: z
+    .string()
+    .min(1)
+    .describe('The cache resource name to delete (e.g., "cachedContents/...")'),
 });

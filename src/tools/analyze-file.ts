@@ -4,8 +4,10 @@ import { stat } from 'node:fs/promises';
 
 import { createPartFromUri } from '@google/genai';
 
-import { errorResult } from '../lib/errors.js';
+import { geminiErrorResult } from '../lib/errors.js';
 import { getMimeType, MAX_FILE_SIZE } from '../lib/file-utils.js';
+import { resolveAndValidatePath } from '../lib/path-validation.js';
+import { extractTextOrError } from '../lib/response.js';
 import { AnalyzeFileInputSchema } from '../schemas/inputs.js';
 
 import { ai, MODEL } from '../client.js';
@@ -19,30 +21,41 @@ export function registerAnalyzeFileTool(server: McpServer): void {
         'Upload a file to Gemini and ask questions about it (PDFs, images, code files, etc.).',
       inputSchema: AnalyzeFileInputSchema,
       annotations: {
+        readOnlyHint: true,
         destructiveHint: false,
+        idempotentHint: true,
         openWorldHint: true,
       },
     },
     async ({ filePath, question }) => {
+      let uploadedFileName: string | undefined;
       try {
+        const validPath = await resolveAndValidatePath(filePath);
+
         // Validate file exists and check size
-        const fileStat = await stat(filePath);
+        const fileStat = await stat(validPath);
         if (fileStat.size > MAX_FILE_SIZE) {
-          return errorResult(
-            `File exceeds 20MB limit (${(fileStat.size / 1024 / 1024).toFixed(1)}MB)`,
+          return geminiErrorResult(
+            'analyze_file',
+            new Error(`File exceeds 20MB limit (${(fileStat.size / 1024 / 1024).toFixed(1)}MB)`),
           );
         }
 
-        const mimeType = getMimeType(filePath);
+        const mimeType = getMimeType(validPath);
 
         // Upload file to Gemini directly
         const uploadedFile = await ai.files.upload({
-          file: filePath,
+          file: validPath,
           config: { mimeType },
         });
 
+        uploadedFileName = uploadedFile.name;
+
         if (!uploadedFile.uri || !uploadedFile.mimeType) {
-          return errorResult('File upload succeeded but returned no URI');
+          return geminiErrorResult(
+            'analyze_file',
+            new Error('File upload succeeded but returned no URI'),
+          );
         }
 
         // Generate content with the file
@@ -54,13 +67,17 @@ export function registerAnalyzeFileTool(server: McpServer): void {
           ],
         });
 
-        return {
-          content: [{ type: 'text', text: response.text ?? '' }],
-        };
+        return extractTextOrError(response, 'analyze_file');
       } catch (err) {
-        return errorResult(
-          `analyze_file failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        return geminiErrorResult('analyze_file', err);
+      } finally {
+        if (uploadedFileName) {
+          try {
+            await ai.files.delete({ name: uploadedFileName });
+          } catch {
+            // Cleanup failure is non-critical
+          }
+        }
       }
     },
   );

@@ -1,6 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 
-import { errorResult } from '../lib/errors.js';
+import { Outcome } from '@google/genai';
+
+import { errorResult, geminiErrorResult } from '../lib/errors.js';
 import { ExecuteCodeInputSchema } from '../schemas/inputs.js';
 import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
 
@@ -16,7 +18,9 @@ export function registerExecuteCodeTool(server: McpServer): void {
       inputSchema: ExecuteCodeInputSchema,
       outputSchema: ExecuteCodeOutputSchema,
       annotations: {
+        readOnlyHint: true,
         destructiveHint: false,
+        idempotentHint: false,
         openWorldHint: false,
       },
     },
@@ -32,19 +36,38 @@ export function registerExecuteCodeTool(server: McpServer): void {
           },
         });
 
+        const candidate = response.candidates?.[0];
+        if (!candidate) {
+          const blockReason = response.promptFeedback?.blockReason ?? 'unknown';
+          return errorResult(`execute_code: prompt blocked by safety filter (${blockReason})`);
+        }
+
         let code = '';
         let output = '';
         let explanation = '';
+        let executionFailed = false;
 
-        const parts = response.candidates?.[0]?.content?.parts ?? [];
+        const parts = candidate.content?.parts ?? [];
         for (const part of parts) {
           if (part.executableCode) {
             code += (code ? '\n' : '') + (part.executableCode.code ?? '');
           } else if (part.codeExecutionResult) {
             output += (output ? '\n' : '') + (part.codeExecutionResult.output ?? '');
+            if (
+              part.codeExecutionResult.outcome &&
+              part.codeExecutionResult.outcome !== Outcome.OUTCOME_OK
+            ) {
+              executionFailed = true;
+            }
           } else if (part.text) {
             explanation += (explanation ? '\n' : '') + part.text;
           }
+        }
+
+        if (executionFailed) {
+          return errorResult(
+            `execute_code: code execution failed.\nCode:\n${code}\nOutput:\n${output}`,
+          );
         }
 
         const structured = { code, output, explanation };
@@ -54,9 +77,7 @@ export function registerExecuteCodeTool(server: McpServer): void {
           structuredContent: structured,
         };
       } catch (err) {
-        return errorResult(
-          `execute_code failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        return geminiErrorResult('execute_code', err);
       }
     },
   );

@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 
-import { errorResult } from '../lib/errors.js';
+import { geminiErrorResult } from '../lib/errors.js';
+import { extractTextOrError } from '../lib/response.js';
 import { SearchInputSchema } from '../schemas/inputs.js';
 
 import { ai, MODEL } from '../client.js';
@@ -14,7 +15,9 @@ export function registerSearchTool(server: McpServer): void {
         'Answer questions using Gemini with Google Search grounding for up-to-date information.',
       inputSchema: SearchInputSchema,
       annotations: {
+        readOnlyHint: true,
         destructiveHint: false,
+        idempotentHint: true,
         openWorldHint: true,
       },
     },
@@ -29,30 +32,32 @@ export function registerSearchTool(server: McpServer): void {
           },
         });
 
-        const answer = response.text ?? '';
+        const result = extractTextOrError(response, 'search');
+        if (result.isError) return result;
+
         const metadata = response.candidates?.[0]?.groundingMetadata;
 
         const sources: string[] = [];
         if (metadata?.groundingChunks) {
           for (const chunk of metadata.groundingChunks) {
-            if (chunk.web?.uri) {
-              sources.push(chunk.web.uri);
+            const title = chunk.web?.title;
+            const uri = chunk.web?.uri;
+            if (uri) {
+              sources.push(title ? `${title}: ${uri}` : uri);
             }
           }
         }
 
-        const parts: { type: 'text'; text: string }[] = [{ type: 'text', text: answer }];
-
         if (sources.length > 0) {
-          parts.push({
+          result.content.push({
             type: 'text',
             text: `\n\nSources:\n${sources.map((s) => `- ${s}`).join('\n')}`,
           });
         }
 
-        return { content: parts };
+        return result;
       } catch (err) {
-        return errorResult(`search failed: ${err instanceof Error ? err.message : String(err)}`);
+        return geminiErrorResult('search', err);
       }
     },
   );

@@ -3,9 +3,11 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { stat } from 'node:fs/promises';
 
 import { createPartFromUri } from '@google/genai';
+import { z } from 'zod/v4';
 
-import { errorResult } from '../lib/errors.js';
+import { geminiErrorResult } from '../lib/errors.js';
 import { getMimeType, MAX_FILE_SIZE } from '../lib/file-utils.js';
+import { resolveAndValidatePath } from '../lib/path-validation.js';
 import { CreateCacheInputSchema, DeleteCacheInputSchema } from '../schemas/inputs.js';
 
 import { ai, MODEL } from '../client.js';
@@ -20,42 +22,57 @@ export function registerCacheTools(server: McpServer): void {
         'The combined content MUST exceed ~32,000 tokens. Do not use for small contexts.',
       inputSchema: CreateCacheInputSchema,
       annotations: {
+        readOnlyHint: false,
         destructiveHint: false,
+        idempotentHint: false,
         openWorldHint: true,
       },
     },
     async ({ filePaths, systemInstruction, ttl }) => {
+      const uploadedFileNames: string[] = [];
       try {
         const parts: ReturnType<typeof createPartFromUri>[] = [];
 
         if (filePaths) {
-          for (const filePath of filePaths) {
-            const fileStat = await stat(filePath);
-            if (fileStat.size > MAX_FILE_SIZE) {
-              return errorResult(
-                `File exceeds 20MB limit: ${filePath} (${(fileStat.size / 1024 / 1024).toFixed(1)}MB)`,
-              );
-            }
+          // Validate all paths first
+          const validPaths = await Promise.all(filePaths.map(resolveAndValidatePath));
 
-            const mimeType = getMimeType(filePath);
-            const uploaded = await ai.files.upload({
-              file: filePath,
-              config: { mimeType },
-            });
+          // Upload files in parallel
+          const uploadResults = await Promise.all(
+            validPaths.map(async (validPath) => {
+              const fileStat = await stat(validPath);
+              if (fileStat.size > MAX_FILE_SIZE) {
+                throw new Error(
+                  `File exceeds 20MB limit: ${validPath} (${(fileStat.size / 1024 / 1024).toFixed(1)}MB)`,
+                );
+              }
 
-            if (!uploaded.uri || !uploaded.mimeType) {
-              return errorResult(`File upload succeeded but returned no URI: ${filePath}`);
-            }
+              const mimeType = getMimeType(validPath);
+              const uploaded = await ai.files.upload({
+                file: validPath,
+                config: { mimeType },
+              });
 
-            parts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
-          }
+              if (uploaded.name) {
+                uploadedFileNames.push(uploaded.name);
+              }
+
+              if (!uploaded.uri || !uploaded.mimeType) {
+                throw new Error(`File upload succeeded but returned no URI: ${validPath}`);
+              }
+
+              return createPartFromUri(uploaded.uri, uploaded.mimeType);
+            }),
+          );
+
+          parts.push(...uploadResults);
         }
 
         const cache = await ai.caches.create({
           model: MODEL,
           config: {
-            contents: parts.length > 0 ? [{ role: 'user', parts }] : undefined,
-            systemInstruction,
+            ...(parts.length > 0 ? { contents: [{ role: 'user' as const, parts }] } : {}),
+            ...(systemInstruction ? { systemInstruction } : {}),
             ttl: ttl ?? '3600s',
           },
         });
@@ -76,11 +93,15 @@ export function registerCacheTools(server: McpServer): void {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (message.includes('too few tokens') || message.includes('minimum')) {
-          return errorResult(
-            `create_cache failed: content is below the ~32,000 token minimum. ${message}`,
+          return geminiErrorResult(
+            'create_cache',
+            new Error(`content is below the ~32,000 token minimum. ${message}`),
           );
         }
-        return errorResult(`create_cache failed: ${message}`);
+        return geminiErrorResult('create_cache', err);
+      } finally {
+        // Clean up uploaded files — cache references them by URI, not by file ID
+        await Promise.allSettled(uploadedFileNames.map((name) => ai.files.delete({ name })));
       }
     },
   );
@@ -90,8 +111,11 @@ export function registerCacheTools(server: McpServer): void {
     {
       title: 'List Caches',
       description: 'Lists all active Gemini context caches.',
+      inputSchema: z.object({}),
       annotations: {
+        readOnlyHint: true,
         destructiveHint: false,
+        idempotentHint: true,
         openWorldHint: true,
       },
     },
@@ -111,9 +135,7 @@ export function registerCacheTools(server: McpServer): void {
           content: [{ type: 'text', text: JSON.stringify(caches, null, 2) }],
         };
       } catch (err) {
-        return errorResult(
-          `list_caches failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        return geminiErrorResult('list_caches', err);
       }
     },
   );
@@ -126,6 +148,7 @@ export function registerCacheTools(server: McpServer): void {
       inputSchema: DeleteCacheInputSchema,
       annotations: {
         destructiveHint: true,
+        idempotentHint: true,
         openWorldHint: true,
       },
     },
@@ -136,9 +159,7 @@ export function registerCacheTools(server: McpServer): void {
           content: [{ type: 'text', text: `Cache '${name}' deleted.` }],
         };
       } catch (err) {
-        return errorResult(
-          `delete_cache failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        return geminiErrorResult('delete_cache', err);
       }
     },
   );

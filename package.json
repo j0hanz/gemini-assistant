@@ -15,21 +15,23 @@
     "check": "tsc && eslint . && prettier --check . && knip",
     "inspector": "npm run build && npx -y @modelcontextprotocol/inspector node --env-file=.env dist/index.js"
   },
+  "engines": {
+    "node": ">=24"
+  },
   "dependencies": {
-    "@cfworker/json-schema": "^4.1.1",
-    "@google/genai": "^1.0.0",
-    "@modelcontextprotocol/server": "alpha",
-    "zod": "^4.0.0"
+    "@google/genai": "^1.49.0",
+    "@modelcontextprotocol/server": "2.0.0-alpha.2",
+    "zod": "^4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
-    "@types/node": "^24.0.0",
+    "@types/node": "^24",
     "eslint": "^10.2.0",
     "eslint-config-prettier": "^10.1.8",
-    "knip": "^6.4.0",
+    "knip": "^6.4.1",
     "prettier": "^3.8.2",
-    "typescript": "^5.8.0",
+    "typescript": "^6.0.2",
     "typescript-eslint": "^8.58.1"
   }
 }

@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 
-import { errorResult } from '../lib/errors.js';
+import { errorResult, geminiErrorResult } from '../lib/errors.js';
+import { extractTextOrError } from '../lib/response.js';
 import { AskInputSchema } from '../schemas/inputs.js';
 
 import { ai, MODEL } from '../client.js';
@@ -14,7 +15,9 @@ export function registerAskTool(server: McpServer): void {
       description: 'Send a message to Gemini. Supports multi-turn chat via sessionId.',
       inputSchema: AskInputSchema,
       annotations: {
+        readOnlyHint: true,
         destructiveHint: false,
+        idempotentHint: false,
         openWorldHint: true,
       },
     },
@@ -46,18 +49,14 @@ export function registerAskTool(server: McpServer): void {
               ...(systemInstruction ? { systemInstruction } : {}),
             },
           });
-          return {
-            content: [{ type: 'text', text: response.text ?? '' }],
-          };
+          return extractTextOrError(response, 'ask');
         }
 
         // Multi-turn: existing session
         let chat = getSession(sessionId);
         if (chat) {
           const response = await chat.sendMessage({ message });
-          return {
-            content: [{ type: 'text', text: response.text ?? '' }],
-          };
+          return extractTextOrError(response, 'ask');
         }
 
         // Multi-turn: new session
@@ -71,11 +70,9 @@ export function registerAskTool(server: McpServer): void {
         const response = await chat.sendMessage({ message });
         setSession(sessionId, chat);
 
-        return {
-          content: [{ type: 'text', text: response.text ?? '' }],
-        };
+        return extractTextOrError(response, 'ask');
       } catch (err) {
-        return errorResult(`ask failed: ${err instanceof Error ? err.message : String(err)}`);
+        return geminiErrorResult('ask', err);
       }
     },
   );

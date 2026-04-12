@@ -1,7 +1,15 @@
 import type { Chat } from '@google/genai';
 
-const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS) || 30 * 60 * 1000;
-const MAX_SESSIONS = Number(process.env.MAX_SESSIONS) || 50;
+const parsedTtl =
+  process.env.SESSION_TTL_MS !== undefined ? Number(process.env.SESSION_TTL_MS) : undefined;
+const SESSION_TTL_MS =
+  parsedTtl !== undefined && !Number.isNaN(parsedTtl) ? parsedTtl : 30 * 60 * 1000;
+
+const parsedMax =
+  process.env.MAX_SESSIONS !== undefined ? Number(process.env.MAX_SESSIONS) : undefined;
+const MAX_SESSIONS = parsedMax !== undefined && !Number.isNaN(parsedMax) ? parsedMax : 50;
+
+const MAX_EVICTED_ENTRIES = 1000;
 
 interface SessionEntry {
   chat: Chat;
@@ -13,6 +21,17 @@ const evictedSessions = new Set<string>();
 
 let evictionTimer: ReturnType<typeof setInterval> | undefined;
 
+function trimEvictedSessions(): void {
+  if (evictedSessions.size <= MAX_EVICTED_ENTRIES) return;
+  const excess = evictedSessions.size - Math.floor(MAX_EVICTED_ENTRIES / 2);
+  let removed = 0;
+  for (const id of evictedSessions) {
+    if (removed >= excess) break;
+    evictedSessions.delete(id);
+    removed++;
+  }
+}
+
 function startEvictionTimer(): void {
   if (evictionTimer) return;
   evictionTimer = setInterval(() => {
@@ -23,6 +42,7 @@ function startEvictionTimer(): void {
         evictedSessions.add(id);
       }
     }
+    trimEvictedSessions();
   }, 60_000);
   evictionTimer.unref();
 }

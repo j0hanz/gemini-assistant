@@ -1,5 +1,8 @@
 import { McpServer, StdioServerTransport } from '@modelcontextprotocol/server';
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
 import { registerAnalyzeFileTool } from './tools/analyze-file.js';
@@ -8,10 +11,14 @@ import { registerCacheTools } from './tools/cache.js';
 import { registerExecuteCodeTool } from './tools/execute-code.js';
 import { registerSearchTool } from './tools/search.js';
 
+const { version } = JSON.parse(
+  readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf-8'),
+) as { version: string };
+
 const server = new McpServer(
   {
     name: 'gemini-assistant',
-    version: '1.0.0',
+    version,
     description:
       'General-purpose Gemini AI assistant with multi-turn chat, sandboxed code execution, ' +
       'Google Search grounding, file analysis, and context caching.',

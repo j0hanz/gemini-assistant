@@ -4,6 +4,7 @@ import { Outcome } from '@google/genai';
 
 import { extractToolContext } from '../lib/context.js';
 import { errorResult, geminiErrorResult } from '../lib/errors.js';
+import { withRetry } from '../lib/retry.js';
 import { ExecuteCodeInputSchema } from '../schemas/inputs.js';
 import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
 
@@ -30,14 +31,18 @@ export function registerExecuteCodeTool(server: McpServer): void {
       try {
         const prompt = language ? `${task}\n\nPreferred language: ${language}` : task;
 
-        const response = await ai.models.generateContent({
-          model: MODEL,
-          contents: prompt,
-          config: {
-            tools: [{ codeExecution: {} }],
-            abortSignal: tc.signal,
-          },
-        });
+        const response = await withRetry(
+          () =>
+            ai.models.generateContent({
+              model: MODEL,
+              contents: prompt,
+              config: {
+                tools: [{ codeExecution: {} }],
+                abortSignal: tc.signal,
+              },
+            }),
+          { signal: tc.signal },
+        );
 
         const candidate = response.candidates?.[0];
         if (!candidate) {

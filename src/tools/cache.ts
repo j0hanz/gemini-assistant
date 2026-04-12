@@ -1,15 +1,13 @@
 import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 import { completable } from '@modelcontextprotocol/server';
 
-import { stat } from 'node:fs/promises';
-
 import { createPartFromUri } from '@google/genai';
 import { z } from 'zod/v4';
 
 import { extractToolContext } from '../lib/context.js';
 import { geminiErrorResult } from '../lib/errors.js';
-import { getMimeType, MAX_FILE_SIZE } from '../lib/file-utils.js';
-import { resolveAndValidatePath } from '../lib/path-validation.js';
+import { uploadFile } from '../lib/file-upload.js';
+import { withRetry } from '../lib/retry.js';
 import { CreateCacheInputSchema } from '../schemas/inputs.js';
 
 import { ai, MODEL } from '../client.js';
@@ -40,78 +38,64 @@ export function registerCacheTools(server: McpServer): void {
         if (filePaths) {
           await tc.log('info', `Caching ${filePaths.length} file(s)`);
 
-          // Validate all paths first
-          const validPaths = await Promise.all(filePaths.map(resolveAndValidatePath));
-
           // Process files in chunks to manage memory and provide progress updates
           const CHUNK_SIZE = 3;
-          for (let i = 0; i < validPaths.length; i += CHUNK_SIZE) {
+          for (let i = 0; i < filePaths.length; i += CHUNK_SIZE) {
             if (tc.signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
-            const chunk = validPaths.slice(i, i + CHUNK_SIZE);
+            const chunk = filePaths.slice(i, i + CHUNK_SIZE);
             await tc.reportProgress(
               i,
               totalSteps,
-              `Uploading files ${i + 1}-${Math.min(i + chunk.length, validPaths.length)}/${validPaths.length}`,
+              `Uploading files ${i + 1}-${Math.min(i + chunk.length, filePaths.length)}/${filePaths.length}`,
             );
 
-            const chunkPromises = chunk.map(async (validPath: string | null) => {
-              if (!validPath) return null;
-
-              const fileStat = await stat(validPath);
-              if (fileStat.size > MAX_FILE_SIZE) {
-                throw new Error(
-                  `File exceeds 20MB limit: ${validPath} (${(fileStat.size / 1024 / 1024).toFixed(1)}MB)`,
-                );
-              }
-
-              const mimeType = getMimeType(validPath);
-              const uploaded = await ai.files.upload({
-                file: validPath,
-                config: { mimeType, abortSignal: tc.signal },
-              });
-
-              if (uploaded.name) {
-                uploadedFileNames.push(uploaded.name);
-              }
-
-              if (!uploaded.uri || !uploaded.mimeType) {
-                throw new Error(`File upload succeeded but returned no URI: ${validPath}`);
-              }
-
+            const chunkPromises = chunk.map(async (fp: string) => {
+              const uploaded = await uploadFile(fp, tc.signal);
+              uploadedFileNames.push(uploaded.name);
               return createPartFromUri(uploaded.uri, uploaded.mimeType);
             });
 
             const results = await Promise.all(chunkPromises);
             for (const result of results) {
-              if (result) parts.push(result);
+              parts.push(result);
             }
           }
         }
 
         await tc.reportProgress(totalSteps - 1, totalSteps, 'Creating cache');
-        const cache = await ai.caches.create({
-          model: MODEL,
-          config: {
-            ...(parts.length > 0 ? { contents: [{ role: 'user' as const, parts }] } : {}),
-            ...(systemInstruction ? { systemInstruction } : {}),
-            ttl: ttl ?? '3600s',
-            abortSignal: tc.signal,
-          },
-        });
+        const cache = await withRetry(
+          () =>
+            ai.caches.create({
+              model: MODEL,
+              config: {
+                ...(parts.length > 0 ? { contents: [{ role: 'user' as const, parts }] } : {}),
+                ...(systemInstruction ? { systemInstruction } : {}),
+                ttl: ttl ?? '3600s',
+                abortSignal: tc.signal,
+              },
+            }),
+          { signal: tc.signal },
+        );
 
         await tc.reportProgress(totalSteps, totalSteps, 'Complete');
 
         return {
           content: [
             {
-              type: 'text',
+              type: 'text' as const,
               text: JSON.stringify({
                 name: cache.name,
                 displayName: cache.displayName,
                 model: cache.model,
                 expireTime: cache.expireTime,
               }),
+            },
+            {
+              type: 'resource_link' as const,
+              uri: 'cache://list',
+              name: 'Active Caches',
+              mimeType: 'application/json',
             },
           ],
         };
@@ -126,7 +110,14 @@ export function registerCacheTools(server: McpServer): void {
         return geminiErrorResult('create_cache', err);
       } finally {
         // Clean up uploaded files — cache references them by URI, not by file ID
-        await Promise.allSettled(uploadedFileNames.map((name) => ai.files.delete({ name })));
+        const cleanups = await Promise.allSettled(
+          uploadedFileNames.map((name) => ai.files.delete({ name })),
+        );
+        for (const c of cleanups) {
+          if (c.status === 'rejected') {
+            console.error('create_cache: file cleanup failed:', c.reason);
+          }
+        }
       }
     },
   );

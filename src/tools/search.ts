@@ -3,6 +3,7 @@ import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 import { extractToolContext } from '../lib/context.js';
 import { geminiErrorResult } from '../lib/errors.js';
 import { extractTextOrError } from '../lib/response.js';
+import { withRetry } from '../lib/retry.js';
 import { SearchInputSchema } from '../schemas/inputs.js';
 import { SearchOutputSchema } from '../schemas/outputs.js';
 
@@ -27,15 +28,19 @@ export function registerSearchTool(server: McpServer): void {
     async ({ query, systemInstruction }, ctx: ServerContext) => {
       const tc = extractToolContext(ctx);
       try {
-        const response = await ai.models.generateContent({
-          model: MODEL,
-          contents: query,
-          config: {
-            tools: [{ googleSearch: {} }],
-            ...(systemInstruction ? { systemInstruction } : {}),
-            abortSignal: tc.signal,
-          },
-        });
+        const response = await withRetry(
+          () =>
+            ai.models.generateContent({
+              model: MODEL,
+              contents: query,
+              config: {
+                tools: [{ googleSearch: {} }],
+                ...(systemInstruction ? { systemInstruction } : {}),
+                abortSignal: tc.signal,
+              },
+            }),
+          { signal: tc.signal },
+        );
 
         const result = extractTextOrError(response, 'search');
         if (result.isError) return result;

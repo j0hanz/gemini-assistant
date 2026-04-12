@@ -25,7 +25,7 @@ const server = new McpServer(
       'Google Search grounding, file analysis, and context caching.',
   },
   {
-    capabilities: { logging: {}, prompts: {}, resources: { listChanged: true } },
+    capabilities: { logging: {}, prompts: {}, resources: { listChanged: true, subscribe: true } },
     instructions:
       'General-purpose Gemini AI assistant. Use "ask" for chat (supports multi-turn via sessionId), ' +
       '"execute_code" for sandboxed code execution, "search" for web-grounded answers, ' +
@@ -44,6 +44,7 @@ registerResources(server);
 
 onSessionChange(() => {
   server.sendResourceListChanged();
+  void server.server.sendResourceUpdated({ uri: 'sessions://list' });
 });
 
 const transport = new StdioServerTransport();

@@ -12,7 +12,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "knip": "knip",
-    "check": "tsc && eslint . && prettier --check . && knip"
+    "check": "tsc && eslint . && prettier --check . && knip",
+    "inspector": "npm run build && npx -y @modelcontextprotocol/inspector node --env-file=.env dist/index.js"
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",

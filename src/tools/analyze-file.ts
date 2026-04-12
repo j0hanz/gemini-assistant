@@ -5,8 +5,8 @@ import { createPartFromUri } from '@google/genai';
 import { extractToolContext } from '../lib/context.js';
 import { geminiErrorResult } from '../lib/errors.js';
 import { uploadFile } from '../lib/file-upload.js';
-import { extractTextOrError } from '../lib/response.js';
 import { withRetry } from '../lib/retry.js';
+import { consumeStreamWithProgress, validateStreamResult } from '../lib/streaming.js';
 import { AnalyzeFileInputSchema } from '../schemas/inputs.js';
 
 import { ai, MODEL } from '../client.js';
@@ -38,18 +38,21 @@ export function registerAnalyzeFileTool(server: McpServer): void {
 
         // Generate content with the file
         await tc.reportProgress(1, 3, 'Analyzing content');
-        const response = await withRetry(
+        const stream = await withRetry(
           () =>
-            ai.models.generateContent({
+            ai.models.generateContentStream({
               model: MODEL,
               contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: question }],
-              config: { abortSignal: tc.signal },
+              config: {
+                thinkingConfig: { includeThoughts: true },
+                abortSignal: tc.signal,
+              },
             }),
           { signal: tc.signal },
         );
 
-        await tc.reportProgress(2, 3, 'Complete');
-        return extractTextOrError(response, 'analyze_file');
+        const streamResult = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
+        return validateStreamResult(streamResult, 'analyze_file');
       } catch (err) {
         await tc.log(
           'error',

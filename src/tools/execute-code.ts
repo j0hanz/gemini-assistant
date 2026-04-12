@@ -5,6 +5,7 @@ import { Outcome } from '@google/genai';
 import { extractToolContext } from '../lib/context.js';
 import { errorResult, geminiErrorResult } from '../lib/errors.js';
 import { withRetry } from '../lib/retry.js';
+import { consumeStreamWithProgress } from '../lib/streaming.js';
 import { ExecuteCodeInputSchema } from '../schemas/inputs.js';
 import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
 
@@ -31,23 +32,25 @@ export function registerExecuteCodeTool(server: McpServer): void {
       try {
         const prompt = language ? `${task}\n\nPreferred language: ${language}` : task;
 
-        const response = await withRetry(
+        const stream = await withRetry(
           () =>
-            ai.models.generateContent({
+            ai.models.generateContentStream({
               model: MODEL,
               contents: prompt,
               config: {
                 tools: [{ codeExecution: {} }],
+                thinkingConfig: { includeThoughts: true },
                 abortSignal: tc.signal,
               },
             }),
           { signal: tc.signal },
         );
 
-        const candidate = response.candidates?.[0];
-        if (!candidate) {
-          const blockReason = response.promptFeedback?.blockReason ?? 'unknown';
-          return errorResult(`execute_code: prompt blocked by safety filter (${blockReason})`);
+        const streamResult = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
+
+        const { parts } = streamResult;
+        if (parts.length === 0) {
+          return errorResult('execute_code: prompt blocked by safety filter (unknown)');
         }
 
         let code = '';
@@ -55,8 +58,8 @@ export function registerExecuteCodeTool(server: McpServer): void {
         let explanation = '';
         let executionFailed = false;
 
-        const parts = candidate.content?.parts ?? [];
         for (const part of parts) {
+          if (part.thought) continue;
           if (part.executableCode) {
             code += (code ? '\n' : '') + (part.executableCode.code ?? '');
           } else if (part.codeExecutionResult) {

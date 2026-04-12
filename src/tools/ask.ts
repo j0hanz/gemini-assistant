@@ -5,8 +5,8 @@ import { z } from 'zod/v4';
 
 import { extractToolContext } from '../lib/context.js';
 import { errorResult, geminiErrorResult } from '../lib/errors.js';
-import { extractTextOrError } from '../lib/response.js';
 import { withRetry } from '../lib/retry.js';
+import { consumeStreamWithProgress, validateStreamResult } from '../lib/streaming.js';
 
 import { ai, MODEL } from '../client.js';
 import { getSession, isEvicted, listSessionEntries, setSession } from '../sessions.js';
@@ -79,31 +79,34 @@ export function registerAskTool(server: McpServer): void {
 
         // Single-turn: no sessionId
         if (!sessionId) {
-          const response = await withRetry(
+          const stream = await withRetry(
             () =>
-              ai.models.generateContent({
+              ai.models.generateContentStream({
                 model: MODEL,
                 contents: message,
                 config: {
                   ...cacheConfig,
                   ...(systemInstruction ? { systemInstruction } : {}),
+                  thinkingConfig: { includeThoughts: true },
                   abortSignal: tc.signal,
                 },
               }),
             { signal: tc.signal },
           );
-          return extractTextOrError(response, 'ask');
+          const result = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
+          return validateStreamResult(result, 'ask');
         }
 
         // Multi-turn: existing session
         let chat = getSession(sessionId);
         if (chat) {
           await tc.log('debug', `Resuming session ${sessionId}`);
-          const response = await chat.sendMessage({
+          const stream = await chat.sendMessageStream({
             message,
             config: { abortSignal: tc.signal },
           });
-          return extractTextOrError(response, 'ask');
+          const result = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
+          return validateStreamResult(result, 'ask');
         }
 
         // Multi-turn: new session
@@ -113,15 +116,17 @@ export function registerAskTool(server: McpServer): void {
           config: {
             ...cacheConfig,
             ...(systemInstruction ? { systemInstruction } : {}),
+            thinkingConfig: { includeThoughts: true },
           },
         });
-        const response = await chat.sendMessage({
+        const stream = await chat.sendMessageStream({
           message,
           config: { abortSignal: tc.signal },
         });
         setSession(sessionId, chat);
 
-        const result = extractTextOrError(response, 'ask');
+        const streamResult = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
+        const result = validateStreamResult(streamResult, 'ask');
         if (!result.isError) {
           result.content.push({
             type: 'resource_link' as const,

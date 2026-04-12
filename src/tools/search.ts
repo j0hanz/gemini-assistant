@@ -2,8 +2,8 @@ import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { extractToolContext } from '../lib/context.js';
 import { geminiErrorResult } from '../lib/errors.js';
-import { extractTextOrError } from '../lib/response.js';
 import { withRetry } from '../lib/retry.js';
+import { consumeStreamWithProgress, validateStreamResult } from '../lib/streaming.js';
 import { SearchInputSchema } from '../schemas/inputs.js';
 import { SearchOutputSchema } from '../schemas/outputs.js';
 
@@ -28,24 +28,26 @@ export function registerSearchTool(server: McpServer): void {
     async ({ query, systemInstruction }, ctx: ServerContext) => {
       const tc = extractToolContext(ctx);
       try {
-        const response = await withRetry(
+        const stream = await withRetry(
           () =>
-            ai.models.generateContent({
+            ai.models.generateContentStream({
               model: MODEL,
               contents: query,
               config: {
                 tools: [{ googleSearch: {} }],
                 ...(systemInstruction ? { systemInstruction } : {}),
+                thinkingConfig: { includeThoughts: true },
                 abortSignal: tc.signal,
               },
             }),
           { signal: tc.signal },
         );
 
-        const result = extractTextOrError(response, 'search');
+        const streamResult = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
+        const result = validateStreamResult(streamResult, 'search');
         if (result.isError) return result;
 
-        const metadata = response.candidates?.[0]?.groundingMetadata;
+        const metadata = streamResult.groundingMetadata;
 
         const sources: string[] = [];
         if (metadata?.groundingChunks) {

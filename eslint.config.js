@@ -14,7 +14,9 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        projectService: true,
+        projectService: {
+          allowDefaultProject: ['*.js', '*.mjs'],
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -40,6 +42,33 @@ export default tseslint.config(
           varsIgnorePattern: '^_',
         },
       ],
+    },
+  },
+
+  // Test files: disable projectService, use explicit project + relaxed rules
+  {
+    files: ['__tests__/**/*.ts'],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: './tsconfig.test.json',
+      },
+    },
+    rules: {
+      // describe/it return promises in Node's test runner — top-level floating is expected
+      '@typescript-eslint/no-floating-promises': 'off',
+      // Mock stubs are often empty
+      '@typescript-eslint/no-empty-function': 'off',
+      // Mock callbacks often don't need await
+      '@typescript-eslint/require-await': 'off',
+      // Test assertions use bracket notation for flexibility
+      '@typescript-eslint/dot-notation': 'off',
+      // doesNotThrow expects void-returning callbacks
+      '@typescript-eslint/no-confusing-void-expression': 'off',
+      // Test assertions with mock data may use unsafe types
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      // Unnecessary condition checks after assert.ok() are fine in tests
+      '@typescript-eslint/no-unnecessary-condition': 'off',
     },
   },
 

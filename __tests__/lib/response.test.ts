@@ -1,0 +1,136 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import { FinishReason } from '@google/genai';
+import type { GenerateContentResponse } from '@google/genai';
+
+import { extractTextOrError } from '../../src/lib/response.js';
+
+function makeResponse(overrides: Partial<GenerateContentResponse> = {}): GenerateContentResponse {
+  return {
+    candidates: [
+      {
+        content: { parts: [{ text: 'Hello world' }] },
+        finishReason: FinishReason.STOP,
+      },
+    ],
+    text: 'Hello world',
+    ...overrides,
+  } as GenerateContentResponse;
+}
+
+describe('extractTextOrError', () => {
+  it('extracts text from a normal response', () => {
+    const result = extractTextOrError(makeResponse(), 'test');
+    assert.strictEqual(result.isError, undefined);
+    assert.strictEqual(result.content[0]?.text, 'Hello world');
+  });
+
+  it('returns error when no candidates (prompt blocked)', () => {
+    const result = extractTextOrError(
+      makeResponse({
+        candidates: undefined,
+        promptFeedback: { blockReason: 'SAFETY' } as GenerateContentResponse['promptFeedback'],
+      }),
+      'test',
+    );
+    assert.strictEqual(result.isError, true);
+    assert.match(result.content[0]?.text ?? '', /prompt blocked.*SAFETY/);
+  });
+
+  it('returns error when no candidates with unknown block reason', () => {
+    const result = extractTextOrError(makeResponse({ candidates: undefined }), 'test');
+    assert.strictEqual(result.isError, true);
+    assert.match(result.content[0]?.text ?? '', /unknown/);
+  });
+
+  it('returns error for SAFETY finish reason', () => {
+    const result = extractTextOrError(
+      makeResponse({
+        candidates: [
+          {
+            content: { parts: [] },
+            finishReason: FinishReason.SAFETY,
+          },
+        ],
+        text: '',
+      } as Partial<GenerateContentResponse>),
+      'test',
+    );
+    assert.strictEqual(result.isError, true);
+    assert.match(result.content[0]?.text ?? '', /safety filter/);
+  });
+
+  it('returns error for RECITATION finish reason', () => {
+    const result = extractTextOrError(
+      makeResponse({
+        candidates: [
+          {
+            content: { parts: [] },
+            finishReason: FinishReason.RECITATION,
+          },
+        ],
+        text: '',
+      } as Partial<GenerateContentResponse>),
+      'test',
+    );
+    assert.strictEqual(result.isError, true);
+    assert.match(result.content[0]?.text ?? '', /recitation/);
+  });
+
+  it('returns error for MAX_TOKENS with no text', () => {
+    const result = extractTextOrError(
+      makeResponse({
+        candidates: [
+          {
+            content: { parts: [] },
+            finishReason: FinishReason.MAX_TOKENS,
+          },
+        ],
+        text: '',
+      } as Partial<GenerateContentResponse>),
+      'test',
+    );
+    assert.strictEqual(result.isError, true);
+    assert.match(result.content[0]?.text ?? '', /max tokens/);
+  });
+
+  it('returns text when MAX_TOKENS but text exists', () => {
+    const result = extractTextOrError(
+      makeResponse({
+        candidates: [
+          {
+            content: { parts: [{ text: 'partial' }] },
+            finishReason: FinishReason.MAX_TOKENS,
+          },
+        ],
+        text: 'partial',
+      } as Partial<GenerateContentResponse>),
+      'test',
+    );
+    assert.strictEqual(result.isError, undefined);
+    assert.strictEqual(result.content[0]?.text, 'partial');
+  });
+
+  it('returns empty string text when response text is empty but not blocked', () => {
+    const result = extractTextOrError(
+      makeResponse({
+        candidates: [
+          {
+            content: { parts: [] },
+            finishReason: FinishReason.STOP,
+          },
+        ],
+        text: '',
+      } as Partial<GenerateContentResponse>),
+      'test',
+    );
+    assert.strictEqual(result.isError, undefined);
+    assert.strictEqual(result.content[0]?.text, '');
+  });
+
+  it('includes tool name in error messages', () => {
+    const result = extractTextOrError(makeResponse({ candidates: undefined }), 'my_tool');
+    assert.match(result.content[0]?.text ?? '', /my_tool/);
+  });
+});

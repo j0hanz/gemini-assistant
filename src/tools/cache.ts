@@ -42,36 +42,49 @@ export function registerCacheTools(server: McpServer): void {
           // Validate all paths first
           const validPaths = await Promise.all(filePaths.map(resolveAndValidatePath));
 
-          // Upload files sequentially with progress
-          for (let i = 0; i < validPaths.length; i++) {
-            const validPath = validPaths[i];
-            if (!validPath) continue;
+          // Process files in chunks to manage memory and provide progress updates
+          const CHUNK_SIZE = 3;
+          for (let i = 0; i < validPaths.length; i += CHUNK_SIZE) {
             if (tc.signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
-            await tc.reportProgress(i, totalSteps, `Uploading file ${i + 1}/${validPaths.length}`);
+            const chunk = validPaths.slice(i, i + CHUNK_SIZE);
+            await tc.reportProgress(
+              i,
+              totalSteps,
+              `Uploading files ${i + 1}-${Math.min(i + chunk.length, validPaths.length)}/${validPaths.length}`,
+            );
 
-            const fileStat = await stat(validPath);
-            if (fileStat.size > MAX_FILE_SIZE) {
-              throw new Error(
-                `File exceeds 20MB limit: ${validPath} (${(fileStat.size / 1024 / 1024).toFixed(1)}MB)`,
-              );
-            }
+            const chunkPromises = chunk.map(async (validPath) => {
+              if (!validPath) return null;
 
-            const mimeType = getMimeType(validPath);
-            const uploaded = await ai.files.upload({
-              file: validPath,
-              config: { mimeType, abortSignal: tc.signal },
+              const fileStat = await stat(validPath);
+              if (fileStat.size > MAX_FILE_SIZE) {
+                throw new Error(
+                  `File exceeds 20MB limit: ${validPath} (${(fileStat.size / 1024 / 1024).toFixed(1)}MB)`,
+                );
+              }
+
+              const mimeType = getMimeType(validPath);
+              const uploaded = await ai.files.upload({
+                file: validPath,
+                config: { mimeType, abortSignal: tc.signal },
+              });
+
+              if (uploaded.name) {
+                uploadedFileNames.push(uploaded.name);
+              }
+
+              if (!uploaded.uri || !uploaded.mimeType) {
+                throw new Error(`File upload succeeded but returned no URI: ${validPath}`);
+              }
+
+              return createPartFromUri(uploaded.uri, uploaded.mimeType);
             });
 
-            if (uploaded.name) {
-              uploadedFileNames.push(uploaded.name);
+            const results = await Promise.all(chunkPromises);
+            for (const result of results) {
+              if (result) parts.push(result);
             }
-
-            if (!uploaded.uri || !uploaded.mimeType) {
-              throw new Error(`File upload succeeded but returned no URI: ${validPath}`);
-            }
-
-            parts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
           }
         }
 

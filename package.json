@@ -11,6 +11,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "type-check": "tsc --noEmit",
     "knip": "knip",
     "check": "tsc && eslint . && prettier --check . && knip",
     "inspector": "npm run build && npx -y @modelcontextprotocol/inspector node --env-file=.env dist/index.js"

@@ -1,5 +1,6 @@
-import type { McpServer } from '@modelcontextprotocol/server';
+import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 
+import { extractToolContext } from '../lib/context.js';
 import { geminiErrorResult } from '../lib/errors.js';
 import { extractTextOrError } from '../lib/response.js';
 import { SearchInputSchema } from '../schemas/inputs.js';
@@ -21,7 +22,8 @@ export function registerSearchTool(server: McpServer): void {
         openWorldHint: true,
       },
     },
-    async ({ query, systemInstruction }) => {
+    async ({ query, systemInstruction }, ctx: ServerContext) => {
+      const tc = extractToolContext(ctx);
       try {
         const response = await ai.models.generateContent({
           model: MODEL,
@@ -29,6 +31,7 @@ export function registerSearchTool(server: McpServer): void {
           config: {
             tools: [{ googleSearch: {} }],
             ...(systemInstruction ? { systemInstruction } : {}),
+            abortSignal: tc.signal,
           },
         });
 

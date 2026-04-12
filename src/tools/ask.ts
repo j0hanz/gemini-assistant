@@ -1,5 +1,6 @@
-import type { McpServer } from '@modelcontextprotocol/server';
+import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 
+import { extractToolContext } from '../lib/context.js';
 import { errorResult, geminiErrorResult } from '../lib/errors.js';
 import { extractTextOrError } from '../lib/response.js';
 import { AskInputSchema } from '../schemas/inputs.js';
@@ -21,7 +22,8 @@ export function registerAskTool(server: McpServer): void {
         openWorldHint: true,
       },
     },
-    async ({ message, sessionId, systemInstruction, cacheName }) => {
+    async ({ message, sessionId, systemInstruction, cacheName }, ctx: ServerContext) => {
+      const tc = extractToolContext(ctx);
       try {
         if (sessionId && isEvicted(sessionId)) {
           return errorResult(`Session '${sessionId}' has expired.`);
@@ -47,6 +49,7 @@ export function registerAskTool(server: McpServer): void {
             config: {
               ...cacheConfig,
               ...(systemInstruction ? { systemInstruction } : {}),
+              abortSignal: tc.signal,
             },
           });
           return extractTextOrError(response, 'ask');
@@ -55,11 +58,16 @@ export function registerAskTool(server: McpServer): void {
         // Multi-turn: existing session
         let chat = getSession(sessionId);
         if (chat) {
-          const response = await chat.sendMessage({ message });
+          await tc.log('debug', `Resuming session ${sessionId}`);
+          const response = await chat.sendMessage({
+            message,
+            config: { abortSignal: tc.signal },
+          });
           return extractTextOrError(response, 'ask');
         }
 
         // Multi-turn: new session
+        await tc.log('debug', `Creating session ${sessionId}`);
         chat = ai.chats.create({
           model: MODEL,
           config: {
@@ -67,7 +75,10 @@ export function registerAskTool(server: McpServer): void {
             ...(systemInstruction ? { systemInstruction } : {}),
           },
         });
-        const response = await chat.sendMessage({ message });
+        const response = await chat.sendMessage({
+          message,
+          config: { abortSignal: tc.signal },
+        });
         setSession(sessionId, chat);
 
         return extractTextOrError(response, 'ask');

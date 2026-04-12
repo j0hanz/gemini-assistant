@@ -7,6 +7,10 @@ export function errorResult(message: string): CallToolResult {
   };
 }
 
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError';
+}
+
 const STATUS_MESSAGES: Record<number, string> = {
   400: 'Bad request',
   403: 'Permission denied / invalid API key',
@@ -17,6 +21,9 @@ const STATUS_MESSAGES: Record<number, string> = {
 };
 
 export function geminiErrorResult(toolName: string, err: unknown): CallToolResult {
+  if (isAbortError(err)) {
+    return errorResult(`${toolName}: cancelled by client`);
+  }
   if (err instanceof Error && 'status' in err && typeof err.status === 'number') {
     const hint = STATUS_MESSAGES[err.status] ?? `HTTP ${err.status}`;
     return errorResult(`${toolName} failed: ${hint} — ${err.message}`);

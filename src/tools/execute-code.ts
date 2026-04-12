@@ -1,7 +1,8 @@
-import type { McpServer } from '@modelcontextprotocol/server';
+import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { Outcome } from '@google/genai';
 
+import { extractToolContext } from '../lib/context.js';
 import { errorResult, geminiErrorResult } from '../lib/errors.js';
 import { ExecuteCodeInputSchema } from '../schemas/inputs.js';
 import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
@@ -24,7 +25,8 @@ export function registerExecuteCodeTool(server: McpServer): void {
         openWorldHint: false,
       },
     },
-    async ({ task, language }) => {
+    async ({ task, language }, ctx: ServerContext) => {
+      const tc = extractToolContext(ctx);
       try {
         const prompt = language ? `${task}\n\nPreferred language: ${language}` : task;
 
@@ -33,6 +35,7 @@ export function registerExecuteCodeTool(server: McpServer): void {
           contents: prompt,
           config: {
             tools: [{ codeExecution: {} }],
+            abortSignal: tc.signal,
           },
         });
 

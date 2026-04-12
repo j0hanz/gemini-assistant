@@ -1,10 +1,11 @@
-import type { McpServer } from '@modelcontextprotocol/server';
+import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { stat } from 'node:fs/promises';
 
 import { createPartFromUri } from '@google/genai';
 import { z } from 'zod/v4';
 
+import { extractToolContext } from '../lib/context.js';
 import { geminiErrorResult } from '../lib/errors.js';
 import { getMimeType, MAX_FILE_SIZE } from '../lib/file-utils.js';
 import { resolveAndValidatePath } from '../lib/path-validation.js';
@@ -28,54 +29,64 @@ export function registerCacheTools(server: McpServer): void {
         openWorldHint: true,
       },
     },
-    async ({ filePaths, systemInstruction, ttl }) => {
+    async ({ filePaths, systemInstruction, ttl }, ctx: ServerContext) => {
+      const tc = extractToolContext(ctx);
       const uploadedFileNames: string[] = [];
       try {
         const parts: ReturnType<typeof createPartFromUri>[] = [];
+        const totalSteps = (filePaths?.length ?? 0) + 1;
 
         if (filePaths) {
+          await tc.log('info', `Caching ${filePaths.length} file(s)`);
+
           // Validate all paths first
           const validPaths = await Promise.all(filePaths.map(resolveAndValidatePath));
 
-          // Upload files in parallel
-          const uploadResults = await Promise.all(
-            validPaths.map(async (validPath) => {
-              const fileStat = await stat(validPath);
-              if (fileStat.size > MAX_FILE_SIZE) {
-                throw new Error(
-                  `File exceeds 20MB limit: ${validPath} (${(fileStat.size / 1024 / 1024).toFixed(1)}MB)`,
-                );
-              }
+          // Upload files sequentially with progress
+          for (let i = 0; i < validPaths.length; i++) {
+            const validPath = validPaths[i];
+            if (!validPath) continue;
+            if (tc.signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
-              const mimeType = getMimeType(validPath);
-              const uploaded = await ai.files.upload({
-                file: validPath,
-                config: { mimeType },
-              });
+            await tc.reportProgress(i, totalSteps, `Uploading file ${i + 1}/${validPaths.length}`);
 
-              if (uploaded.name) {
-                uploadedFileNames.push(uploaded.name);
-              }
+            const fileStat = await stat(validPath);
+            if (fileStat.size > MAX_FILE_SIZE) {
+              throw new Error(
+                `File exceeds 20MB limit: ${validPath} (${(fileStat.size / 1024 / 1024).toFixed(1)}MB)`,
+              );
+            }
 
-              if (!uploaded.uri || !uploaded.mimeType) {
-                throw new Error(`File upload succeeded but returned no URI: ${validPath}`);
-              }
+            const mimeType = getMimeType(validPath);
+            const uploaded = await ai.files.upload({
+              file: validPath,
+              config: { mimeType, abortSignal: tc.signal },
+            });
 
-              return createPartFromUri(uploaded.uri, uploaded.mimeType);
-            }),
-          );
+            if (uploaded.name) {
+              uploadedFileNames.push(uploaded.name);
+            }
 
-          parts.push(...uploadResults);
+            if (!uploaded.uri || !uploaded.mimeType) {
+              throw new Error(`File upload succeeded but returned no URI: ${validPath}`);
+            }
+
+            parts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
+          }
         }
 
+        await tc.reportProgress(totalSteps - 1, totalSteps, 'Creating cache');
         const cache = await ai.caches.create({
           model: MODEL,
           config: {
             ...(parts.length > 0 ? { contents: [{ role: 'user' as const, parts }] } : {}),
             ...(systemInstruction ? { systemInstruction } : {}),
             ttl: ttl ?? '3600s',
+            abortSignal: tc.signal,
           },
         });
+
+        await tc.reportProgress(totalSteps, totalSteps, 'Complete');
 
         return {
           content: [
@@ -119,11 +130,13 @@ export function registerCacheTools(server: McpServer): void {
         openWorldHint: true,
       },
     },
-    async () => {
+    async (_args, ctx: ServerContext) => {
+      const tc = extractToolContext(ctx);
       try {
         const caches: Record<string, unknown>[] = [];
         const pager = await ai.caches.list();
         for await (const cached of pager) {
+          if (tc.signal.aborted) break;
           caches.push({
             name: cached.name,
             displayName: cached.displayName,
@@ -152,9 +165,11 @@ export function registerCacheTools(server: McpServer): void {
         openWorldHint: true,
       },
     },
-    async ({ name }) => {
+    async ({ name }, ctx: ServerContext) => {
+      const tc = extractToolContext(ctx);
       try {
         await ai.caches.delete({ name });
+        await tc.log('info', `Deleted cache: ${name}`);
         return {
           content: [{ type: 'text', text: `Cache '${name}' deleted.` }],
         };

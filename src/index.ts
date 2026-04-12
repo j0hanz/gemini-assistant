@@ -50,7 +50,11 @@ onSessionChange(() => {
 const transport = new StdioServerTransport();
 try {
   await server.connect(transport);
-  console.error('gemini-assistant MCP server running on stdio');
+  await server.sendLoggingMessage({
+    level: 'info',
+    logger: 'gemini-assistant',
+    data: 'MCP server running on stdio',
+  });
 } catch (err) {
   console.error('Failed to connect transport:', err);
   process.exit(1);
@@ -65,11 +69,19 @@ process.on('SIGINT', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
 
 process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
+  void server.sendLoggingMessage({
+    level: 'emergency',
+    logger: 'gemini-assistant',
+    data: `Uncaught Exception: ${err instanceof Error ? err.message : String(err)}`,
+  });
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled Rejection:', reason);
+  void server.sendLoggingMessage({
+    level: 'emergency',
+    logger: 'gemini-assistant',
+    data: `Unhandled Rejection: ${reason instanceof Error ? reason.message : String(reason)}`,
+  });
   process.exit(1);
 });

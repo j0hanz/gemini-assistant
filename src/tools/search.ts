@@ -76,6 +76,7 @@ export function registerSearchTool(server: McpServer): void {
           structuredContent: { answer: answerText, sources },
         };
       } catch (err) {
+        await tc.log('error', `search failed: ${err instanceof Error ? err.message : String(err)}`);
         return geminiErrorResult('search', err);
       }
     },

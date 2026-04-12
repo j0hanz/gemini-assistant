@@ -51,6 +51,10 @@ export function registerAnalyzeFileTool(server: McpServer): void {
         await tc.reportProgress(2, 3, 'Complete');
         return extractTextOrError(response, 'analyze_file');
       } catch (err) {
+        await tc.log(
+          'error',
+          `analyze_file failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         return geminiErrorResult('analyze_file', err);
       } finally {
         if (uploadedFileName) {

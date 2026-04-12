@@ -101,6 +101,7 @@ export function registerCacheTools(server: McpServer): void {
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        await tc.log('error', `create_cache failed: ${message}`);
         if (message.includes('too few tokens') || message.includes('minimum')) {
           return geminiErrorResult(
             'create_cache',
@@ -115,7 +116,10 @@ export function registerCacheTools(server: McpServer): void {
         );
         for (const c of cleanups) {
           if (c.status === 'rejected') {
-            console.error('create_cache: file cleanup failed:', c.reason);
+            await tc.log(
+              'warning',
+              `create_cache: file cleanup failed: ${c.reason instanceof Error ? c.reason.message : String(c.reason)}`,
+            );
           }
         }
       }
@@ -153,6 +157,10 @@ export function registerCacheTools(server: McpServer): void {
           content: [{ type: 'text', text: JSON.stringify(caches, null, 2) }],
         };
       } catch (err) {
+        await tc.log(
+          'error',
+          `list_caches failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         return geminiErrorResult('list_caches', err);
       }
     },
@@ -221,6 +229,10 @@ export function registerCacheTools(server: McpServer): void {
           content: [{ type: 'text', text: `Cache '${name}' deleted.` }],
         };
       } catch (err) {
+        await tc.log(
+          'error',
+          `delete_cache failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         return geminiErrorResult('delete_cache', err);
       }
     },

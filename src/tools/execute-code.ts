@@ -85,6 +85,10 @@ export function registerExecuteCodeTool(server: McpServer): void {
           structuredContent: structured,
         };
       } catch (err) {
+        await tc.log(
+          'error',
+          `execute_code failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         return geminiErrorResult('execute_code', err);
       }
     },

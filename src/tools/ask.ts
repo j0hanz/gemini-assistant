@@ -132,6 +132,7 @@ export function registerAskTool(server: McpServer): void {
         }
         return result;
       } catch (err) {
+        await tc.log('error', `ask failed: ${err instanceof Error ? err.message : String(err)}`);
         return geminiErrorResult('ask', err);
       }
     },

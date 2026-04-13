@@ -11,8 +11,8 @@ import { createPartFromUri } from '@google/genai';
 import { extractToolContext, reportCompletion, reportFailure } from '../lib/context.js';
 import { logAndReturnError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
-import { withRetry } from '../lib/retry.js';
-import { consumeStreamWithProgress, validateStreamResult } from '../lib/streaming.js';
+import { extractTextContent } from '../lib/response.js';
+import { executeToolStream } from '../lib/streaming.js';
 import { runToolAsTask, taskTtl } from '../lib/task-utils.js';
 import { AnalyzeFileInputSchema } from '../schemas/inputs.js';
 
@@ -39,32 +39,21 @@ async function analyzeFileWork(
 
     // Generate content with the file
     await tc.reportProgress(1, 3, `${TOOL_LABEL}: Analyzing content`);
-    const stream = await withRetry(
-      () =>
-        ai.models.generateContentStream({
-          model: MODEL,
-          contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: question }],
-          config: {
-            systemInstruction: ANALYZE_FILE_SYSTEM_INSTRUCTION,
-            thinkingConfig: { includeThoughts: true },
-            maxOutputTokens: 8192,
-            abortSignal: tc.signal,
-          },
-        }),
-      { signal: tc.signal },
+
+    const { result } = await executeToolStream(tc, 'analyze_file', TOOL_LABEL, () =>
+      ai.models.generateContentStream({
+        model: MODEL,
+        contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: question }],
+        config: {
+          systemInstruction: ANALYZE_FILE_SYSTEM_INSTRUCTION,
+          thinkingConfig: { includeThoughts: true },
+          maxOutputTokens: 8192,
+          abortSignal: tc.signal,
+        },
+      }),
     );
 
-    const streamResult = await consumeStreamWithProgress(
-      stream,
-      tc.reportProgress,
-      tc.signal,
-      TOOL_LABEL,
-    );
-    const result = validateStreamResult(streamResult, 'analyze_file');
-    const text = result.content
-      .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-      .map((c) => c.text)
-      .join('');
+    const text = extractTextContent(result.content);
     await reportCompletion(tc.reportProgress, TOOL_LABEL, `responded (${text.length} chars)`);
     return result;
   } catch (err) {

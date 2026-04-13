@@ -28,3 +28,15 @@ export function extractTextOrError(
     content: [{ type: 'text', text }],
   };
 }
+
+/**
+ * Helper to extract text from a CallToolResult's content array.
+ */
+export function extractTextContent(
+  content: { type: string; text?: string; [key: string]: unknown }[],
+): string {
+  return content
+    .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+    .map((c) => c.text)
+    .join('');
+}

@@ -4,8 +4,8 @@ import { ThinkingLevel } from '@google/genai';
 
 import { extractToolContext, reportCompletion, reportFailure } from '../lib/context.js';
 import { logAndReturnError } from '../lib/errors.js';
-import { withRetry } from '../lib/retry.js';
-import { consumeStreamWithProgress, validateStreamResult } from '../lib/streaming.js';
+import { extractTextContent } from '../lib/response.js';
+import { executeToolStream } from '../lib/streaming.js';
 import { SearchInputSchema } from '../schemas/inputs.js';
 import { SearchOutputSchema } from '../schemas/outputs.js';
 
@@ -36,32 +36,23 @@ export function registerSearchTool(server: McpServer): void {
       const tc = extractToolContext(ctx);
       const TOOL_LABEL = 'Web Search';
       try {
-        const stream = await withRetry(
-          () =>
-            ai.models.generateContentStream({
-              model: MODEL,
-              contents: query,
-              config: {
-                tools: [{ googleSearch: {} }],
-                systemInstruction: systemInstruction ?? SEARCH_SYSTEM_INSTRUCTION,
-                thinkingConfig: {
-                  includeThoughts: true,
-                  thinkingLevel: ThinkingLevel.LOW,
-                },
-                maxOutputTokens: 4096,
-                abortSignal: tc.signal,
+        const { streamResult, result } = await executeToolStream(tc, 'search', TOOL_LABEL, () =>
+          ai.models.generateContentStream({
+            model: MODEL,
+            contents: query,
+            config: {
+              tools: [{ googleSearch: {} }],
+              systemInstruction: systemInstruction ?? SEARCH_SYSTEM_INSTRUCTION,
+              thinkingConfig: {
+                includeThoughts: true,
+                thinkingLevel: ThinkingLevel.LOW,
               },
-            }),
-          { signal: tc.signal },
+              maxOutputTokens: 4096,
+              abortSignal: tc.signal,
+            },
+          }),
         );
 
-        const streamResult = await consumeStreamWithProgress(
-          stream,
-          tc.reportProgress,
-          tc.signal,
-          TOOL_LABEL,
-        );
-        const result = validateStreamResult(streamResult, 'search');
         if (result.isError) return result;
 
         const metadata = streamResult.groundingMetadata;
@@ -77,11 +68,7 @@ export function registerSearchTool(server: McpServer): void {
           }
         }
 
-        const answerText =
-          result.content
-            .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-            .map((c) => c.text)
-            .join('') || '';
+        const answerText = extractTextContent(result.content) || '';
 
         if (sources.length > 0) {
           result.content.push({

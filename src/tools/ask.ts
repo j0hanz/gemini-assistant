@@ -6,8 +6,8 @@ import { z } from 'zod/v4';
 
 import { extractToolContext, reportCompletion, reportFailure } from '../lib/context.js';
 import { errorResult, logAndReturnError } from '../lib/errors.js';
-import { withRetry } from '../lib/retry.js';
-import { consumeStreamWithProgress, validateStreamResult } from '../lib/streaming.js';
+import { extractTextContent } from '../lib/response.js';
+import { executeToolStream } from '../lib/streaming.js';
 
 import { ai, MODEL } from '../client.js';
 import { getSession, isEvicted, listSessionEntries, setSession } from '../sessions.js';
@@ -82,18 +82,6 @@ export function registerAskTool(server: McpServer): void {
       const tc = extractToolContext(ctx);
       const TOOL_LABEL = 'Ask Gemini';
 
-      const streamAndValidate = async (
-        stream: AsyncGenerator<import('@google/genai').GenerateContentResponse>,
-      ) => {
-        const streamResult = await consumeStreamWithProgress(
-          stream,
-          tc.reportProgress,
-          tc.signal,
-          TOOL_LABEL,
-        );
-        return validateStreamResult(streamResult, 'ask');
-      };
-
       try {
         if (sessionId && isEvicted(sessionId)) {
           return errorResult(`ask: Session '${sessionId}' has expired.`);
@@ -113,34 +101,27 @@ export function registerAskTool(server: McpServer): void {
 
         // Single-turn: no sessionId
         if (!sessionId) {
-          const stream = await withRetry(
-            () =>
-              ai.models.generateContentStream({
-                model: MODEL,
-                contents: message,
-                config: {
-                  ...cacheConfig,
-                  systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION,
-                  thinkingConfig: {
-                    includeThoughts: true,
-                    ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
-                  },
-                  maxOutputTokens: 8192,
-                  abortSignal: tc.signal,
+          const { result } = await executeToolStream(tc, 'ask', TOOL_LABEL, () =>
+            ai.models.generateContentStream({
+              model: MODEL,
+              contents: message,
+              config: {
+                ...cacheConfig,
+                systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION,
+                thinkingConfig: {
+                  includeThoughts: true,
+                  ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
                 },
-              }),
-            { signal: tc.signal },
+                maxOutputTokens: 8192,
+                abortSignal: tc.signal,
+              },
+            }),
           );
-          const result = await streamAndValidate(stream);
+
           await reportCompletion(
             tc.reportProgress,
             TOOL_LABEL,
-            `responded (${
-              result.content
-                .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-                .map((c) => c.text)
-                .join('').length
-            } chars)`,
+            `responded (${extractTextContent(result.content).length} chars)`,
           );
           return result;
         }
@@ -149,20 +130,16 @@ export function registerAskTool(server: McpServer): void {
         let chat = getSession(sessionId);
         if (chat) {
           await tc.log('debug', `Resuming session ${sessionId}`);
-          const stream = await chat.sendMessageStream({
-            message,
-            config: { abortSignal: tc.signal },
-          });
-          const result = await streamAndValidate(stream);
+
+          const currentChat = chat;
+          const { result } = await executeToolStream(tc, 'ask', TOOL_LABEL, () =>
+            currentChat.sendMessageStream({ message, config: { abortSignal: tc.signal } }),
+          );
+
           await reportCompletion(
             tc.reportProgress,
             TOOL_LABEL,
-            `responded (${
-              result.content
-                .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-                .map((c) => c.text)
-                .join('').length
-            } chars)`,
+            `responded (${extractTextContent(result.content).length} chars)`,
           );
           return result;
         }
@@ -181,12 +158,11 @@ export function registerAskTool(server: McpServer): void {
             maxOutputTokens: 8192,
           },
         });
-        const stream = await chat.sendMessageStream({
-          message,
-          config: { abortSignal: tc.signal },
-        });
 
-        const result = await streamAndValidate(stream);
+        const { result } = await executeToolStream(tc, 'ask', TOOL_LABEL, () =>
+          chat.sendMessageStream({ message, config: { abortSignal: tc.signal } }),
+        );
+
         if (!result.isError) {
           setSession(sessionId, chat);
           result.content.push({
@@ -198,10 +174,8 @@ export function registerAskTool(server: McpServer): void {
         } else {
           await tc.log('debug', `Session ${sessionId} not stored due to stream error`);
         }
-        const text = result.content
-          .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-          .map((c) => c.text)
-          .join('');
+
+        const text = extractTextContent(result.content);
         await reportCompletion(tc.reportProgress, TOOL_LABEL, `responded (${text.length} chars)`);
         return result;
       } catch (err) {

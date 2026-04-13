@@ -3,8 +3,9 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 import { FinishReason } from '@google/genai';
 import type { GenerateContentResponse, GroundingMetadata, Part } from '@google/genai';
 
-import type { ReportProgress } from './context.js';
+import type { ReportProgress, ToolContext } from './context.js';
 import { finishReasonError } from './errors.js';
+import { withRetry } from './retry.js';
 
 export interface StreamResult {
   text: string;
@@ -84,4 +85,21 @@ export function validateStreamResult(result: StreamResult, toolName: string): Ca
   return {
     content: [{ type: 'text', text: result.text }],
   };
+}
+
+export async function executeToolStream(
+  tc: ToolContext,
+  toolName: string,
+  toolLabel: string,
+  streamGenerator: () => Promise<AsyncGenerator<GenerateContentResponse>>,
+): Promise<{ streamResult: StreamResult; result: CallToolResult }> {
+  const stream = await withRetry(streamGenerator, { signal: tc.signal });
+  const streamResult = await consumeStreamWithProgress(
+    stream,
+    tc.reportProgress,
+    tc.signal,
+    toolLabel,
+  );
+  const result = validateStreamResult(streamResult, toolName);
+  return { streamResult, result };
 }

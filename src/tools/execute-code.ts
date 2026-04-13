@@ -4,8 +4,7 @@ import { Outcome } from '@google/genai';
 
 import { extractToolContext, reportCompletion, reportFailure } from '../lib/context.js';
 import { errorResult, logAndReturnError } from '../lib/errors.js';
-import { withRetry } from '../lib/retry.js';
-import { consumeStreamWithProgress } from '../lib/streaming.js';
+import { executeToolStream } from '../lib/streaming.js';
 import { ExecuteCodeInputSchema } from '../schemas/inputs.js';
 import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
 
@@ -41,27 +40,18 @@ export function registerExecuteCodeTool(server: McpServer): void {
           'Return working code. Handle edge cases. Keep output concise.',
         ].join('\n\n');
 
-        const stream = await withRetry(
-          () =>
-            ai.models.generateContentStream({
-              model: MODEL,
-              contents: prompt,
-              config: {
-                tools: [{ codeExecution: {} }],
-                systemInstruction: EXECUTE_CODE_SYSTEM_INSTRUCTION,
-                thinkingConfig: { includeThoughts: true },
-                maxOutputTokens: 8192,
-                abortSignal: tc.signal,
-              },
-            }),
-          { signal: tc.signal },
-        );
-
-        const streamResult = await consumeStreamWithProgress(
-          stream,
-          tc.reportProgress,
-          tc.signal,
-          TOOL_LABEL,
+        const { streamResult } = await executeToolStream(tc, 'execute_code', TOOL_LABEL, () =>
+          ai.models.generateContentStream({
+            model: MODEL,
+            contents: prompt,
+            config: {
+              tools: [{ codeExecution: {} }],
+              systemInstruction: EXECUTE_CODE_SYSTEM_INSTRUCTION,
+              thinkingConfig: { includeThoughts: true },
+              maxOutputTokens: 8192,
+              abortSignal: tc.signal,
+            },
+          }),
         );
 
         const { parts } = streamResult;

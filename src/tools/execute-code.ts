@@ -74,6 +74,24 @@ async function executeCodeWork(
       }
     }
 
+    // If no executable code was returned but there is an explanation, attempt to extract code from the explanation (e.g. from a fenced code block).
+    if (codeLines.length === 0 && explanationLines.length > 0) {
+      const joined = explanationLines.join('\n');
+      const fenced = /```[\w]*\n([\s\S]*?)```/g;
+      let match: RegExpExecArray | null;
+      const extracted: string[] = [];
+      while ((match = fenced.exec(joined)) !== null) {
+        const block = match[1];
+        if (block !== undefined) extracted.push(block.trimEnd());
+      }
+      if (extracted.length > 0) {
+        codeLines.push(...extracted);
+        const cleaned = joined.replace(/```[\w]*\n[\s\S]*?```/g, '').trim();
+        explanationLines.length = 0;
+        if (cleaned) explanationLines.push(cleaned);
+      }
+    }
+
     const code = codeLines.join('\n');
     const output = outputLines.join('\n');
     const explanation = explanationLines.join('\n');

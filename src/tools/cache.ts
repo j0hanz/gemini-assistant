@@ -192,7 +192,7 @@ export function registerCacheTools(server: McpServer): void {
       title: 'Delete Cache',
       description: 'Deletes a Gemini context cache by its resource name.',
       inputSchema: z.object({
-        name: completable(
+        cacheName: completable(
           z
             .string()
             .min(1)
@@ -218,13 +218,13 @@ export function registerCacheTools(server: McpServer): void {
         openWorldHint: true,
       },
     },
-    async ({ name }, ctx: ServerContext) => {
+    async ({ cacheName }, ctx: ServerContext) => {
       try {
         // Attempt user confirmation via elicitation (graceful fallback if unsupported)
         try {
           const confirmation = await ctx.mcpReq.elicitInput({
             mode: 'form',
-            message: `Confirm deletion of cache '${name}'?`,
+            message: `Confirm deletion of cache '${cacheName}'?`,
             requestedSchema: {
               type: 'object',
               properties: {
@@ -242,10 +242,10 @@ export function registerCacheTools(server: McpServer): void {
           // Client does not support elicitation — proceed without confirmation
         }
 
-        await ai.caches.delete({ name });
-        await ctx.mcpReq.log('info', `Deleted cache: ${name}`);
+        await ai.caches.delete({ name: cacheName });
+        await ctx.mcpReq.log('info', `Deleted cache: ${cacheName}`);
         return {
-          content: [{ type: 'text', text: `Cache '${name}' deleted.` }],
+          content: [{ type: 'text', text: `Cache '${cacheName}' deleted.` }],
         };
       } catch (err) {
         return await logAndReturnError(ctx, 'delete_cache', err);

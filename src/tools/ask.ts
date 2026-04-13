@@ -73,6 +73,13 @@ async function askWork(
       }
     }
 
+    // Cache + systemInstruction conflict guard
+    if (cacheName && systemInstruction) {
+      return errorResult(
+        'ask: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via create_cache instead.',
+      );
+    }
+
     const cacheConfig = cacheName ? { cachedContent: cacheName } : undefined;
 
     // Single-turn: no sessionId
@@ -83,7 +90,9 @@ async function askWork(
           contents: message,
           config: {
             ...cacheConfig,
-            systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION,
+            ...(cacheName
+              ? {}
+              : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
             thinkingConfig: {
               includeThoughts: true,
               ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
@@ -129,7 +138,9 @@ async function askWork(
       model: MODEL,
       config: {
         ...cacheConfig,
-        systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION,
+        ...(cacheName
+          ? {}
+          : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
         thinkingConfig: {
           includeThoughts: true,
           ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),

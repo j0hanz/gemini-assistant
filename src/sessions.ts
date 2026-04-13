@@ -59,14 +59,20 @@ function removeSession(id: string, trackEviction = false): boolean {
   return deleted;
 }
 
-function updateSessionAccess(entry: SessionEntry): Chat {
+function setSessionEntry(id: string, entry: SessionEntry): void {
+  sessions.delete(id);
+  sessions.set(id, entry);
+}
+
+function updateSessionAccess(id: string, entry: SessionEntry): Chat {
   entry.lastAccess = now();
+  setSessionEntry(id, entry);
   return entry.chat;
 }
 
 function storeSession(id: string, chat: Chat): void {
   evictedSessions.delete(id);
-  sessions.set(id, { chat, lastAccess: now() });
+  setSessionEntry(id, { chat, lastAccess: now() });
 }
 
 function trimEvictedSessions(): void {
@@ -103,17 +109,8 @@ function startEvictionTimer(): void {
 }
 
 function oldestSessionId(): string | undefined {
-  let oldestId: string | undefined;
-  let oldestTime = Infinity;
-
-  for (const [id, entry] of sessions) {
-    if (entry.lastAccess < oldestTime) {
-      oldestTime = entry.lastAccess;
-      oldestId = id;
-    }
-  }
-
-  return oldestId;
+  const oldest = sessions.keys().next();
+  return oldest.done ? undefined : oldest.value;
 }
 
 function evictOldest(): void {
@@ -141,7 +138,7 @@ export function isEvicted(id: string): boolean {
 export function getSession(id: string): Chat | undefined {
   const entry = sessions.get(id);
   if (!entry) return undefined;
-  return updateSessionAccess(entry);
+  return updateSessionAccess(id, entry);
 }
 
 export function setSession(id: string, chat: Chat): void {

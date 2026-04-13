@@ -30,6 +30,35 @@ const enum Phase {
   Generating = 2,
 }
 
+interface StreamMetadata {
+  finishReason?: FinishReason;
+  groundingMetadata?: GroundingMetadata;
+  urlContextMetadata?: UrlContextMetadata;
+  usageMetadata?: GenerateContentResponseUsageMetadata;
+}
+
+function updateStreamMetadata(
+  chunk: GenerateContentResponse,
+  candidate: NonNullable<GenerateContentResponse['candidates']>[number],
+  metadata: StreamMetadata,
+): void {
+  if (candidate.finishReason) {
+    metadata.finishReason = candidate.finishReason;
+  }
+
+  if (candidate.groundingMetadata) {
+    metadata.groundingMetadata = candidate.groundingMetadata;
+  }
+
+  if (candidate.urlContextMetadata) {
+    metadata.urlContextMetadata = candidate.urlContextMetadata;
+  }
+
+  if (chunk.usageMetadata) {
+    metadata.usageMetadata = chunk.usageMetadata;
+  }
+}
+
 export async function consumeStreamWithProgress(
   stream: AsyncGenerator<GenerateContentResponse>,
   ctx: ServerContext,
@@ -38,10 +67,7 @@ export async function consumeStreamWithProgress(
   const parts: Part[] = [];
   let text = '';
   let thoughtText = '';
-  let finishReason: FinishReason | undefined;
-  let groundingMetadata: GroundingMetadata | undefined;
-  let urlContextMetadata: UrlContextMetadata | undefined;
-  let usageMetadata: GenerateContentResponseUsageMetadata | undefined;
+  const metadata: StreamMetadata = {};
   let phase: Phase = Phase.Waiting;
 
   const msg = (m: string): string => (toolLabel ? `${toolLabel}: ${m}` : m);
@@ -54,43 +80,37 @@ export async function consumeStreamWithProgress(
     const candidate = chunk.candidates?.[0];
     if (!candidate) continue;
 
-    if (candidate.finishReason) {
-      finishReason = candidate.finishReason;
-    }
-
-    if (candidate.groundingMetadata) {
-      groundingMetadata = candidate.groundingMetadata;
-    }
-
-    if (candidate.urlContextMetadata) {
-      urlContextMetadata = candidate.urlContextMetadata;
-    }
-
-    if (chunk.usageMetadata) {
-      usageMetadata = chunk.usageMetadata;
-    }
+    updateStreamMetadata(chunk, candidate, metadata);
 
     const chunkParts = candidate.content?.parts ?? [];
     for (const part of chunkParts) {
       parts.push(part);
 
-      if (part.thought && phase < Phase.Thinking) {
-        phase = Phase.Thinking;
-        await sendProgress(ctx, 50, 100, msg('Thinking'));
+      const partText = part.text;
+
+      if (part.thought) {
+        if (phase < Phase.Thinking) {
+          phase = Phase.Thinking;
+          await sendProgress(ctx, 50, 100, msg('Thinking'));
+        }
+
+        if (partText !== undefined) {
+          thoughtText += partText;
+        }
+
+        continue;
       }
 
-      if (part.thought && part.text !== undefined) {
-        thoughtText += part.text;
+      if (partText === undefined) {
+        continue;
       }
 
-      if (!part.thought && part.text !== undefined && phase < Phase.Generating) {
+      if (phase < Phase.Generating) {
         phase = Phase.Generating;
         await sendProgress(ctx, 75, 100, msg('Generating response'));
       }
 
-      if (!part.thought && part.text !== undefined) {
-        text += part.text;
-      }
+      text += partText;
     }
   }
 
@@ -98,10 +118,7 @@ export async function consumeStreamWithProgress(
     text,
     thoughtText,
     parts,
-    ...(finishReason ? { finishReason } : {}),
-    ...(groundingMetadata ? { groundingMetadata } : {}),
-    ...(urlContextMetadata ? { urlContextMetadata } : {}),
-    ...(usageMetadata ? { usageMetadata } : {}),
+    ...pickDefined({ ...metadata }),
   };
 }
 
@@ -143,7 +160,7 @@ export async function handleToolExecution<T extends Record<string, unknown>>(
   streamGenerator: () => Promise<AsyncGenerator<GenerateContentResponse>>,
   responseBuilder: (
     streamResult: StreamResult,
-    textText: string,
+    text: string,
   ) => {
     resultMod?: (r: CallToolResult) => Partial<CallToolResult>;
     structuredContent?: T;

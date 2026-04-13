@@ -87,5 +87,20 @@ describe('sessions', () => {
       assert.strictEqual(isEvicted(`${prefix}0`), false);
       assert.strictEqual(getSession(`${prefix}0`), revived);
     });
+
+    it('evicts the least recently used active session', () => {
+      const prefix = 'sess-lru-order-';
+
+      for (let i = 0; i <= 60; i += 1) {
+        setSession(`${prefix}${String(i)}`, mockChat(`lru-${String(i)}`) as never);
+      }
+
+      assert.ok(getSession(`${prefix}11`));
+
+      setSession(`${prefix}61`, mockChat('lru-overflow') as never);
+
+      assert.strictEqual(isEvicted(`${prefix}11`), false);
+      assert.strictEqual(isEvicted(`${prefix}12`), true);
+    });
   });
 });

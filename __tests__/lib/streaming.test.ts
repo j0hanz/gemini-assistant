@@ -113,6 +113,19 @@ describe('consumeStreamWithProgress', () => {
     assert.ok(!messages.includes('Complete'));
   });
 
+  it('keeps thought text separate from visible output', async () => {
+    const { ctx } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ text: 'chain-of-thought', thought: true }]),
+      makeChunk([{ text: 'final answer' }], FinishReason.STOP),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.strictEqual(result.thoughtText, 'chain-of-thought');
+    assert.strictEqual(result.text, 'final answer');
+  });
+
   it('handles empty stream', async () => {
     const { ctx, progressCalls } = makeMockContext();
     const stream = fakeStream([]);

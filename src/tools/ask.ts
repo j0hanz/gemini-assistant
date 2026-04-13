@@ -285,7 +285,7 @@ export function registerAskTool(server: McpServer): void {
       }),
       outputSchema: AskOutputSchema,
       annotations: {
-        readOnlyHint: true,
+        readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: false,
         openWorldHint: true,

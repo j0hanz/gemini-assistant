@@ -6,7 +6,7 @@ import { extractTextContent } from '../lib/response.js';
 import { executeToolStream, extractUsage } from '../lib/streaming.js';
 import { createToolTaskHandlers } from '../lib/task-utils.js';
 import { AnalyzeUrlInputSchema } from '../schemas/inputs.js';
-import { AnalyzeUrlOutputSchema } from '../schemas/outputs.js';
+import { AnalyzeUrlOutputSchema, type UrlMetadataEntry } from '../schemas/outputs.js';
 
 import { ai, MODEL } from '../client.js';
 
@@ -15,11 +15,6 @@ const ANALYZE_URL_SYSTEM_INSTRUCTION =
   'Structure findings clearly with headings. ' +
   'Reference specific sections or data from the retrieved pages. ' +
   'Base analysis strictly on retrieved content. Do not speculate beyond what the pages confirm.';
-
-interface UrlMetadataEntry {
-  url: string;
-  status: string;
-}
 
 function collectUrlMetadata(
   streamResult: Awaited<ReturnType<typeof executeToolStream>>['streamResult'],

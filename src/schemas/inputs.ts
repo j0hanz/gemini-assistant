@@ -1,26 +1,5 @@
 import { z } from 'zod/v4';
 
-export const AskInputSchema = z.object({
-  message: z.string().min(1).max(100_000).describe('User message or prompt'),
-  sessionId: z
-    .string()
-    .max(256)
-    .optional()
-    .describe('Session ID for multi-turn chat. Omit for single-turn.'),
-  systemInstruction: z
-    .string()
-    .optional()
-    .describe('System prompt (used on session creation or single-turn)'),
-  thinkingLevel: z
-    .enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'])
-    .optional()
-    .describe('Thinking depth: MINIMAL (fastest), LOW, MEDIUM, HIGH (deepest).'),
-  cacheName: z
-    .string()
-    .optional()
-    .describe('Cache name from create_cache. Cannot be applied to an existing chat session.'),
-});
-
 export const ExecuteCodeInputSchema = z.object({
   task: z.string().min(1).describe('Description of the code task to perform'),
   language: z.string().optional().describe('Preferred language hint (Python is sandbox default)'),

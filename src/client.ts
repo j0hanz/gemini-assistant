@@ -2,8 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 
 const apiKey = process.env.API_KEY;
 if (!apiKey) {
-  console.error('API_KEY environment variable is required');
-  process.exit(1);
+  throw new Error('API_KEY environment variable is required');
 }
 
 export const MODEL = process.env.GEMINI_MODEL ?? 'gemini-3-flash-preview';
@@ -36,8 +35,8 @@ export async function listCacheSummaries(signal?: AbortSignal): Promise<CacheSum
   return caches;
 }
 
-export async function listCacheNames(prefix?: string): Promise<string[]> {
-  return (await listCacheSummaries())
+export async function listCacheNames(prefix?: string, signal?: AbortSignal): Promise<string[]> {
+  return (await listCacheSummaries(signal))
     .map((cache) => cache.name)
     .filter((name): name is string => name?.startsWith(prefix ?? '') === true);
 }

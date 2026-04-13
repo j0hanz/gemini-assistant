@@ -93,10 +93,16 @@ if (transportMode === 'http') {
 }
 
 async function shutdown(): Promise<void> {
-  taskStore.cleanup();
-  eventStore?.cleanup();
-  if (httpResult) await httpResult.close();
-  await server.close();
+  const forceExit = setTimeout(() => process.exit(1), 10_000);
+  forceExit.unref();
+  try {
+    taskStore.cleanup();
+    eventStore?.cleanup();
+    if (httpResult) await httpResult.close();
+    await server.close();
+  } finally {
+    clearTimeout(forceExit);
+  }
   process.exit(0);
 }
 

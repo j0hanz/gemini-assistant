@@ -4,68 +4,10 @@ import { describe, it } from 'node:test';
 import {
   AnalyzeFileInputSchema,
   AnalyzeUrlInputSchema,
-  AskInputSchema,
   CreateCacheInputSchema,
   ExecuteCodeInputSchema,
   SearchInputSchema,
 } from '../../src/schemas/inputs.js';
-
-describe('AskInputSchema', () => {
-  it('accepts valid minimal input', () => {
-    const result = AskInputSchema.safeParse({ message: 'Hello' });
-    assert.ok(result.success);
-  });
-
-  it('accepts all optional fields', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'Hello',
-      sessionId: 'sess-1',
-      systemInstruction: 'Be concise',
-      cacheName: 'cachedContents/abc',
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects missing message', () => {
-    const result = AskInputSchema.safeParse({});
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects non-string message', () => {
-    const result = AskInputSchema.safeParse({ message: 123 });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects empty message', () => {
-    const result = AskInputSchema.safeParse({ message: '' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects sessionId exceeding 256 chars', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'hi',
-      sessionId: 'x'.repeat(257),
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('accepts valid thinkingLevel', () => {
-    const result = AskInputSchema.safeParse({ message: 'Hello', thinkingLevel: 'LOW' });
-    assert.ok(result.success);
-  });
-
-  it('accepts all thinkingLevel values', () => {
-    for (const level of ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH']) {
-      const result = AskInputSchema.safeParse({ message: 'Hello', thinkingLevel: level });
-      assert.ok(result.success, `thinkingLevel '${level}' should be valid`);
-    }
-  });
-
-  it('rejects invalid thinkingLevel', () => {
-    const result = AskInputSchema.safeParse({ message: 'Hello', thinkingLevel: 'ULTRA' });
-    assert.strictEqual(result.success, false);
-  });
-});
 
 describe('ExecuteCodeInputSchema', () => {
   it('accepts valid input', () => {

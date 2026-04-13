@@ -24,6 +24,8 @@ const UrlMetadataEntrySchema = z.object({
   status: z.string().describe('Retrieval status (e.g. URL_RETRIEVAL_STATUS_SUCCESS)'),
 });
 
+export type UrlMetadataEntry = z.infer<typeof UrlMetadataEntrySchema>;
+
 export const SearchOutputSchema = z.object({
   answer: z.string().describe('Grounded answer text'),
   sources: z.array(z.string()).describe('Source URLs from Google Search'),

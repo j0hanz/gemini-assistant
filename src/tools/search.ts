@@ -9,7 +9,7 @@ import { extractTextContent } from '../lib/response.js';
 import { executeToolStream, extractUsage } from '../lib/streaming.js';
 import { createToolTaskHandlers } from '../lib/task-utils.js';
 import { SearchInputSchema } from '../schemas/inputs.js';
-import { SearchOutputSchema } from '../schemas/outputs.js';
+import { SearchOutputSchema, type UrlMetadataEntry } from '../schemas/outputs.js';
 
 import { ai, MODEL } from '../client.js';
 
@@ -35,11 +35,6 @@ function collectGroundedSources(
   }
 
   return sources;
-}
-
-interface UrlMetadataEntry {
-  url: string;
-  status: string;
 }
 
 function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlMetadataEntry[] {

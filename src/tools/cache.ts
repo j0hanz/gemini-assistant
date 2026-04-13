@@ -35,6 +35,10 @@ function formatCacheListMarkdown(caches: CacheSummary[]): string {
   );
 }
 
+function truncateName(name: string, maxLen = 10): string {
+  return name.length > maxLen ? `${name.slice(0, maxLen)}…` : name;
+}
+
 function toCreateCacheError(err: unknown): unknown {
   const message = err instanceof Error ? err.message : String(err);
   if (message.includes('too few tokens') || message.includes('minimum')) {
@@ -62,7 +66,7 @@ async function createCacheWork(
     const totalSteps = (filePaths?.length ?? 0) + 1;
 
     if (filePaths) {
-      await ctx.mcpReq.log('info', `Caching ${filePaths.length} file(s)`);
+      await ctx.mcpReq.log('info', `Caching ${filePaths.length}`);
 
       // Process files in chunks to manage memory and provide progress updates
       const CHUNK_SIZE = 3;
@@ -103,7 +107,9 @@ async function createCacheWork(
       { signal: ctx.mcpReq.signal },
     );
 
-    await reportCompletion(ctx, TOOL_LABEL, `cached ${cache.name ?? ''}`);
+    const cacheName = cache.name ?? 'N/A';
+    const shortName = truncateName(cacheName);
+    await reportCompletion(ctx, TOOL_LABEL, `cached ${shortName}`);
 
     return {
       content: [
@@ -111,7 +117,7 @@ async function createCacheWork(
           type: 'text' as const,
           text:
             `**Cache Created**\n\n` +
-            `- **Name:** ${cache.name ?? 'N/A'}\n` +
+            `- **Name:** ${shortName} (\`${cacheName}\`)\n` +
             `- **Display Name:** ${cache.displayName ?? 'N/A'}\n` +
             `- **Model:** ${cache.model ?? 'N/A'}\n` +
             `- **Expires:** ${cache.expireTime ?? 'N/A'}`,

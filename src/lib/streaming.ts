@@ -1,9 +1,9 @@
-import type { CallToolResult } from '@modelcontextprotocol/server';
+import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
 import type { GenerateContentResponse, GroundingMetadata, Part } from '@google/genai';
 
-import type { ReportProgress, ToolContext } from './context.js';
+import { sendProgress } from './context.js';
 import { finishReasonError } from './errors.js';
 import { withRetry } from './retry.js';
 
@@ -22,8 +22,7 @@ const enum Phase {
 
 export async function consumeStreamWithProgress(
   stream: AsyncGenerator<GenerateContentResponse>,
-  reportProgress: ReportProgress,
-  signal?: AbortSignal,
+  ctx: ServerContext,
   toolLabel?: string,
 ): Promise<StreamResult> {
   const parts: Part[] = [];
@@ -34,10 +33,10 @@ export async function consumeStreamWithProgress(
 
   const msg = (m: string): string => (toolLabel ? `${toolLabel}: ${m}` : m);
 
-  await reportProgress(0, 100, msg('Evaluating prompt'));
+  await sendProgress(ctx, 0, 100, msg('Evaluating prompt'));
 
   for await (const chunk of stream) {
-    if (signal?.aborted) break;
+    if (ctx.mcpReq.signal.aborted) break;
 
     const candidate = chunk.candidates?.[0];
     if (!candidate) continue;
@@ -56,12 +55,12 @@ export async function consumeStreamWithProgress(
 
       if (part.thought && phase < Phase.Thinking) {
         phase = Phase.Thinking;
-        await reportProgress(20, 100, msg('Thinking'));
+        await sendProgress(ctx, 20, 100, msg('Thinking'));
       }
 
       if (!part.thought && part.text !== undefined && phase < Phase.Generating) {
         phase = Phase.Generating;
-        await reportProgress(60, 100, msg('Generating response'));
+        await sendProgress(ctx, 60, 100, msg('Generating response'));
       }
 
       if (!part.thought && part.text !== undefined) {
@@ -88,18 +87,13 @@ export function validateStreamResult(result: StreamResult, toolName: string): Ca
 }
 
 export async function executeToolStream(
-  tc: ToolContext,
+  ctx: ServerContext,
   toolName: string,
   toolLabel: string,
   streamGenerator: () => Promise<AsyncGenerator<GenerateContentResponse>>,
 ): Promise<{ streamResult: StreamResult; result: CallToolResult }> {
-  const stream = await withRetry(streamGenerator, { signal: tc.signal });
-  const streamResult = await consumeStreamWithProgress(
-    stream,
-    tc.reportProgress,
-    tc.signal,
-    toolLabel,
-  );
+  const stream = await withRetry(streamGenerator, { signal: ctx.mcpReq.signal });
+  const streamResult = await consumeStreamWithProgress(stream, ctx, toolLabel);
   const result = validateStreamResult(streamResult, toolName);
   return { streamResult, result };
 }

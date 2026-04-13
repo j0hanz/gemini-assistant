@@ -8,7 +8,7 @@ import type {
 
 import { createPartFromUri } from '@google/genai';
 
-import { extractToolContext, reportCompletion, reportFailure } from '../lib/context.js';
+import { reportCompletion, reportFailure, sendProgress } from '../lib/context.js';
 import { logAndReturnError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { extractTextContent } from '../lib/response.js';
@@ -27,20 +27,19 @@ async function analyzeFileWork(
   { filePath, question }: { filePath: string; question: string },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const tc = extractToolContext(ctx);
   const TOOL_LABEL = 'Analyze File';
   let uploadedFileName: string | undefined;
   try {
-    await tc.reportProgress(0, 3, `${TOOL_LABEL}: Uploading to Gemini`);
-    const uploaded = await uploadFile(filePath, tc.signal);
+    await sendProgress(ctx, 0, 3, `${TOOL_LABEL}: Uploading to Gemini`);
+    const uploaded = await uploadFile(filePath, ctx.mcpReq.signal);
     uploadedFileName = uploaded.name;
 
-    await tc.log('info', `Analyzing ${filePath} (${uploaded.mimeType})`);
+    await ctx.mcpReq.log('info', `Analyzing ${filePath} (${uploaded.mimeType})`);
 
     // Generate content with the file
-    await tc.reportProgress(1, 3, `${TOOL_LABEL}: Analyzing content`);
+    await sendProgress(ctx, 1, 3, `${TOOL_LABEL}: Analyzing content`);
 
-    const { result } = await executeToolStream(tc, 'analyze_file', TOOL_LABEL, () =>
+    const { result } = await executeToolStream(ctx, 'analyze_file', TOOL_LABEL, () =>
       ai.models.generateContentStream({
         model: MODEL,
         contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: question }],
@@ -48,17 +47,17 @@ async function analyzeFileWork(
           systemInstruction: ANALYZE_FILE_SYSTEM_INSTRUCTION,
           thinkingConfig: { includeThoughts: true },
           maxOutputTokens: 8192,
-          abortSignal: tc.signal,
+          abortSignal: ctx.mcpReq.signal,
         },
       }),
     );
 
     const text = extractTextContent(result.content);
-    await reportCompletion(tc.reportProgress, TOOL_LABEL, `responded (${text.length} chars)`);
+    await reportCompletion(ctx, TOOL_LABEL, `responded (${text.length} chars)`);
     return result;
   } catch (err) {
-    await reportFailure(tc.reportProgress, TOOL_LABEL, err);
-    return await logAndReturnError(tc.log, 'analyze_file', err);
+    await reportFailure(ctx, TOOL_LABEL, err);
+    return await logAndReturnError(ctx, 'analyze_file', err);
   } finally {
     await deleteUploadedFiles(uploadedFileName ? [uploadedFileName] : []);
   }

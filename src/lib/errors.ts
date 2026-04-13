@@ -1,4 +1,4 @@
-import type { CallToolResult } from '@modelcontextprotocol/server';
+import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
 
@@ -55,10 +55,13 @@ export function geminiErrorResult(toolName: string, err: unknown): CallToolResul
 }
 
 export async function logAndReturnError(
-  log: (level: 'error', data: unknown) => Promise<void>,
+  ctx: ServerContext,
   toolName: string,
   err: unknown,
 ): Promise<CallToolResult> {
-  await log('error', `${toolName} failed: ${err instanceof Error ? err.message : String(err)}`);
+  await ctx.mcpReq.log(
+    'error',
+    `${toolName} failed: ${err instanceof Error ? err.message : String(err)}`,
+  );
   return geminiErrorResult(toolName, err);
 }

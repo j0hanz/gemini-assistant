@@ -3,7 +3,7 @@ import type { ServerContext } from '@modelcontextprotocol/server';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { extractToolContext } from '../../src/lib/context.js';
+import { sendProgress } from '../../src/lib/context.js';
 
 function makeMockContext(overrides: {
   progressToken?: string | number;
@@ -35,28 +35,14 @@ function makeMockContext(overrides: {
   } as unknown as ServerContext;
 }
 
-describe('extractToolContext', () => {
-  it('returns signal from context', () => {
+describe('sendProgress', () => {
+  it('is a no-op without progressToken', async () => {
     const ctx = makeMockContext({});
-    const tc = extractToolContext(ctx);
-    assert.ok(tc.signal instanceof AbortSignal);
-    assert.strictEqual(tc.signal.aborted, false);
-  });
-
-  it('returns aborted signal when context is aborted', () => {
-    const ctx = makeMockContext({ aborted: true });
-    const tc = extractToolContext(ctx);
-    assert.strictEqual(tc.signal.aborted, true);
-  });
-
-  it('reportProgress is a no-op without progressToken', async () => {
-    const ctx = makeMockContext({});
-    const tc = extractToolContext(ctx);
     // Should not throw
-    await tc.reportProgress(1, 3, 'step 1');
+    await sendProgress(ctx, 1, 3, 'step 1');
   });
 
-  it('reportProgress calls notify with progressToken', async () => {
+  it('calls notify with progressToken', async () => {
     let notifyCalled = false;
     const ctx = makeMockContext({ progressToken: 'tok-1' });
     (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async (
@@ -73,12 +59,11 @@ describe('extractToolContext', () => {
       assert.strictEqual(n.params.total, 5);
       assert.strictEqual(n.params.message, 'uploading');
     };
-    const tc = extractToolContext(ctx);
-    await tc.reportProgress(2, 5, 'uploading');
+    await sendProgress(ctx, 2, 5, 'uploading');
     assert.ok(notifyCalled);
   });
 
-  it('reportProgress omits message when not provided', async () => {
+  it('omits message when not provided', async () => {
     const ctx = makeMockContext({ progressToken: 'tok-2' });
     let capturedParams: Record<string, unknown> = {};
     (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async (
@@ -86,29 +71,26 @@ describe('extractToolContext', () => {
     ) => {
       capturedParams = (notification as { params: Record<string, unknown> }).params;
     };
-    const tc = extractToolContext(ctx);
-    await tc.reportProgress(1, 1);
+    await sendProgress(ctx, 1, 1);
     assert.strictEqual(capturedParams['message'], undefined);
   });
 
-  it('reportProgress swallows notify errors', async () => {
+  it('swallows notify errors', async () => {
     const ctx = makeMockContext({ progressToken: 'tok-3' });
     (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async () => {
       throw new Error('transport closed');
     };
-    const tc = extractToolContext(ctx);
     // Should not throw
-    await tc.reportProgress(1, 1);
+    await sendProgress(ctx, 1, 1);
   });
 
-  it('reportProgress is a no-op when signal is aborted', async () => {
+  it('is a no-op when signal is aborted', async () => {
     let notifyCalled = false;
     const ctx = makeMockContext({ progressToken: 'tok-4', aborted: true });
     (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async () => {
       notifyCalled = true;
     };
-    const tc = extractToolContext(ctx);
-    await tc.reportProgress(1, 1);
+    await sendProgress(ctx, 1, 1);
     assert.strictEqual(notifyCalled, false);
   });
 });

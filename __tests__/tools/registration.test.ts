@@ -1,4 +1,8 @@
-import { McpServer } from '@modelcontextprotocol/server';
+import {
+  InMemoryTaskMessageQueue,
+  InMemoryTaskStore,
+  McpServer,
+} from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -16,7 +20,16 @@ const { registerResources } = await import('../../src/resources.js');
 function createServer(): McpServer {
   return new McpServer(
     { name: 'test-server', version: '0.0.1' },
-    { capabilities: { logging: {} } },
+    {
+      capabilities: {
+        logging: {},
+        tasks: {
+          requests: { tools: { call: {} } },
+          taskStore: new InMemoryTaskStore(),
+          taskMessageQueue: new InMemoryTaskMessageQueue(),
+        },
+      },
+    },
   );
 }
 

@@ -10,7 +10,7 @@ import { completable } from '@modelcontextprotocol/server';
 import { createPartFromUri } from '@google/genai';
 import { z } from 'zod/v4';
 
-import { extractToolContext, reportCompletion, reportFailure } from '../lib/context.js';
+import { reportCompletion, reportFailure, sendProgress } from '../lib/context.js';
 import { logAndReturnError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { withRetry } from '../lib/retry.js';
@@ -31,7 +31,6 @@ async function createCacheWork(
   },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const tc = extractToolContext(ctx);
   const TOOL_LABEL = 'Create Cache';
   const uploadedFileNames: string[] = [];
   try {
@@ -39,22 +38,23 @@ async function createCacheWork(
     const totalSteps = (filePaths?.length ?? 0) + 1;
 
     if (filePaths) {
-      await tc.log('info', `Caching ${filePaths.length} file(s)`);
+      await ctx.mcpReq.log('info', `Caching ${filePaths.length} file(s)`);
 
       // Process files in chunks to manage memory and provide progress updates
       const CHUNK_SIZE = 3;
       for (let i = 0; i < filePaths.length; i += CHUNK_SIZE) {
-        if (tc.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+        if (ctx.mcpReq.signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
         const chunk = filePaths.slice(i, i + CHUNK_SIZE);
-        await tc.reportProgress(
+        await sendProgress(
+          ctx,
           i,
           totalSteps,
           `${TOOL_LABEL}: Uploading files ${i + 1}-${Math.min(i + chunk.length, filePaths.length)}/${filePaths.length}`,
         );
 
         const chunkPromises = chunk.map(async (fp: string) => {
-          const uploaded = await uploadFile(fp, tc.signal);
+          const uploaded = await uploadFile(fp, ctx.mcpReq.signal);
           uploadedFileNames.push(uploaded.name);
           return createPartFromUri(uploaded.uri, uploaded.mimeType);
         });
@@ -64,7 +64,7 @@ async function createCacheWork(
       }
     }
 
-    await tc.reportProgress(totalSteps - 1, totalSteps, `${TOOL_LABEL}: Creating cache`);
+    await sendProgress(ctx, totalSteps - 1, totalSteps, `${TOOL_LABEL}: Creating cache`);
     const cache = await withRetry(
       () =>
         ai.caches.create({
@@ -73,13 +73,13 @@ async function createCacheWork(
             ...(parts.length > 0 ? { contents: [{ role: 'user' as const, parts }] } : {}),
             ...(systemInstruction ? { systemInstruction } : {}),
             ttl: ttl ?? '3600s',
-            abortSignal: tc.signal,
+            abortSignal: ctx.mcpReq.signal,
           },
         }),
-      { signal: tc.signal },
+      { signal: ctx.mcpReq.signal },
     );
 
-    await reportCompletion(tc.reportProgress, TOOL_LABEL, `cached ${cache.name ?? ''}`);
+    await reportCompletion(ctx, TOOL_LABEL, `cached ${cache.name ?? ''}`);
 
     return {
       content: [
@@ -103,15 +103,15 @@ async function createCacheWork(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes('too few tokens') || message.includes('minimum')) {
-      await reportFailure(tc.reportProgress, TOOL_LABEL, err);
+      await reportFailure(ctx, TOOL_LABEL, err);
       return await logAndReturnError(
-        tc.log,
+        ctx,
         'create_cache',
         new Error(`content is below the ~32,000 token minimum. ${message}`),
       );
     }
-    await reportFailure(tc.reportProgress, TOOL_LABEL, err);
-    return await logAndReturnError(tc.log, 'create_cache', err);
+    await reportFailure(ctx, TOOL_LABEL, err);
+    return await logAndReturnError(ctx, 'create_cache', err);
   } finally {
     await deleteUploadedFiles(uploadedFileNames);
   }
@@ -165,12 +165,11 @@ export function registerCacheTools(server: McpServer): void {
       },
     },
     async (_args, ctx: ServerContext) => {
-      const tc = extractToolContext(ctx);
       try {
         const caches: Record<string, unknown>[] = [];
         const pager = await ai.caches.list();
         for await (const cached of pager) {
-          if (tc.signal.aborted) break;
+          if (ctx.mcpReq.signal.aborted) break;
           caches.push({
             name: cached.name,
             displayName: cached.displayName,
@@ -182,7 +181,7 @@ export function registerCacheTools(server: McpServer): void {
           content: [{ type: 'text', text: JSON.stringify(caches, null, 2) }],
         };
       } catch (err) {
-        return await logAndReturnError(tc.log, 'list_caches', err);
+        return await logAndReturnError(ctx, 'list_caches', err);
       }
     },
   );
@@ -220,7 +219,6 @@ export function registerCacheTools(server: McpServer): void {
       },
     },
     async ({ name }, ctx: ServerContext) => {
-      const tc = extractToolContext(ctx);
       try {
         // Attempt user confirmation via elicitation (graceful fallback if unsupported)
         try {
@@ -245,12 +243,12 @@ export function registerCacheTools(server: McpServer): void {
         }
 
         await ai.caches.delete({ name });
-        await tc.log('info', `Deleted cache: ${name}`);
+        await ctx.mcpReq.log('info', `Deleted cache: ${name}`);
         return {
           content: [{ type: 'text', text: `Cache '${name}' deleted.` }],
         };
       } catch (err) {
-        return await logAndReturnError(tc.log, 'delete_cache', err);
+        return await logAndReturnError(ctx, 'delete_cache', err);
       }
     },
   );

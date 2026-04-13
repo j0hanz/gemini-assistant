@@ -1,3 +1,5 @@
+import type { ServerContext } from '@modelcontextprotocol/server';
+
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
@@ -29,55 +31,81 @@ async function* fakeStream(
   }
 }
 
-function makeProgressTracker(): {
-  calls: { progress: number; total: number; message?: string }[];
-  fn: (progress: number, total: number, message?: string) => Promise<void>;
+function makeMockContext(overrides?: { aborted?: boolean }): {
+  ctx: ServerContext;
+  progressCalls: { progress: number; total: number; message?: string }[];
 } {
-  const calls: { progress: number; total: number; message?: string }[] = [];
-  return {
-    calls,
-    fn: async (progress, total, message) => {
-      calls.push({ progress, total, ...(message ? { message } : {}) });
+  const controller = new AbortController();
+  if (overrides?.aborted) controller.abort();
+  const progressCalls: { progress: number; total: number; message?: string }[] = [];
+
+  const ctx = {
+    mcpReq: {
+      _meta: { progressToken: 'test-token' },
+      signal: controller.signal,
+      log: Object.assign(
+        async () => {
+          /* noop */
+        },
+        {
+          debug: async () => {},
+          info: async () => {},
+          warning: async () => {},
+          error: async () => {},
+        },
+      ),
+      notify: async (notification: unknown) => {
+        const n = notification as {
+          params: { progress: number; total: number; message?: string };
+        };
+        progressCalls.push({
+          progress: n.params.progress,
+          total: n.params.total,
+          ...(n.params.message ? { message: n.params.message } : {}),
+        });
+      },
     },
-  };
+  } as unknown as ServerContext;
+
+  return { ctx, progressCalls };
 }
 
 describe('consumeStreamWithProgress', () => {
   it('reports progress phases for text-only stream', async () => {
-    const tracker = makeProgressTracker();
+    const { ctx, progressCalls } = makeMockContext();
     const stream = fakeStream([
       makeChunk([{ text: 'Hello ' }]),
       makeChunk([{ text: 'world' }], FinishReason.STOP),
     ]);
 
-    const result = await consumeStreamWithProgress(stream, tracker.fn);
+    const result = await consumeStreamWithProgress(stream, ctx);
 
     assert.strictEqual(result.text, 'Hello world');
     assert.strictEqual(result.parts.length, 2);
     assert.strictEqual(result.finishReason, FinishReason.STOP);
 
     // Should have: Evaluating prompt, Generating response (no terminal 'Complete' — callers own that)
-    const messages = tracker.calls.map((c) => c.message);
+    const messages = progressCalls.map((c) => c.message);
     assert.ok(messages.includes('Evaluating prompt'));
     assert.ok(messages.includes('Generating response'));
     assert.ok(!messages.includes('Complete'));
   });
 
   it('reports thinking phase when thought parts present', async () => {
-    const tracker = makeProgressTracker();
+    const { ctx, progressCalls } = makeMockContext();
     const stream = fakeStream([
       makeChunk([{ text: 'reasoning...', thought: true }]),
       makeChunk([{ text: 'answer' }], FinishReason.STOP),
     ]);
 
-    const result = await consumeStreamWithProgress(stream, tracker.fn);
+    const result = await consumeStreamWithProgress(stream, ctx);
 
     // Thought text should NOT be included in accumulated text
     assert.strictEqual(result.text, 'answer');
     // But thought parts should be in the parts array
     assert.strictEqual(result.parts.length, 2);
 
-    const messages = tracker.calls.map((c) => c.message);
+    const messages = progressCalls.map((c) => c.message);
     assert.ok(messages.includes('Evaluating prompt'));
     assert.ok(messages.includes('Thinking'));
     assert.ok(messages.includes('Generating response'));
@@ -85,34 +113,34 @@ describe('consumeStreamWithProgress', () => {
   });
 
   it('handles empty stream', async () => {
-    const tracker = makeProgressTracker();
+    const { ctx, progressCalls } = makeMockContext();
     const stream = fakeStream([]);
 
-    const result = await consumeStreamWithProgress(stream, tracker.fn);
+    const result = await consumeStreamWithProgress(stream, ctx);
 
     assert.strictEqual(result.text, '');
     assert.strictEqual(result.parts.length, 0);
     assert.strictEqual(result.finishReason, undefined);
 
-    const messages = tracker.calls.map((c) => c.message);
+    const messages = progressCalls.map((c) => c.message);
     assert.ok(messages.includes('Evaluating prompt'));
     assert.ok(!messages.includes('Complete'));
   });
 
   it('captures finishReason from last chunk', async () => {
-    const tracker = makeProgressTracker();
+    const { ctx } = makeMockContext();
     const stream = fakeStream([
       makeChunk([{ text: 'partial' }]),
       makeChunk([{ text: '' }], FinishReason.MAX_TOKENS),
     ]);
 
-    const result = await consumeStreamWithProgress(stream, tracker.fn);
+    const result = await consumeStreamWithProgress(stream, ctx);
 
     assert.strictEqual(result.finishReason, FinishReason.MAX_TOKENS);
   });
 
   it('captures groundingMetadata from chunks', async () => {
-    const tracker = makeProgressTracker();
+    const { ctx } = makeMockContext();
     const metadata = {
       groundingChunks: [{ web: { title: 'Test', uri: 'https://example.com' } }],
     };
@@ -125,14 +153,26 @@ describe('consumeStreamWithProgress', () => {
 
     const stream = fakeStream([chunk]);
 
-    const result = await consumeStreamWithProgress(stream, tracker.fn);
+    const result = await consumeStreamWithProgress(stream, ctx);
 
     assert.deepStrictEqual(result.groundingMetadata, metadata);
   });
 
   it('stops consuming when signal is aborted', async () => {
-    const tracker = makeProgressTracker();
     const controller = new AbortController();
+    const ctx = {
+      mcpReq: {
+        _meta: { progressToken: 'test-token' },
+        signal: controller.signal,
+        log: Object.assign(async () => {}, {
+          debug: async () => {},
+          info: async () => {},
+          warning: async () => {},
+          error: async () => {},
+        }),
+        notify: async () => {},
+      },
+    } as unknown as ServerContext;
 
     async function* abortingStream(): AsyncGenerator<GenerateContentResponse> {
       yield makeChunk([{ text: 'first' }]);
@@ -140,7 +180,7 @@ describe('consumeStreamWithProgress', () => {
       yield makeChunk([{ text: 'second' }]);
     }
 
-    const result = await consumeStreamWithProgress(abortingStream(), tracker.fn, controller.signal);
+    const result = await consumeStreamWithProgress(abortingStream(), ctx);
 
     assert.strictEqual(result.text, 'first');
   });

@@ -4,7 +4,7 @@ import { completable } from '@modelcontextprotocol/server';
 import type { ThinkingLevel } from '@google/genai';
 import { z } from 'zod/v4';
 
-import { extractToolContext, reportCompletion, reportFailure } from '../lib/context.js';
+import { reportCompletion, reportFailure } from '../lib/context.js';
 import { errorResult, logAndReturnError } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
 import { executeToolStream } from '../lib/streaming.js';
@@ -95,7 +95,6 @@ export function registerAskTool(server: McpServer): void {
       { message, sessionId, systemInstruction, thinkingLevel, cacheName },
       ctx: ServerContext,
     ) => {
-      const tc = extractToolContext(ctx);
       const TOOL_LABEL = 'Ask Gemini';
 
       try {
@@ -117,7 +116,7 @@ export function registerAskTool(server: McpServer): void {
 
         // Single-turn: no sessionId
         if (!sessionId) {
-          const { result } = await executeToolStream(tc, 'ask', TOOL_LABEL, () =>
+          const { result } = await executeToolStream(ctx, 'ask', TOOL_LABEL, () =>
             ai.models.generateContentStream({
               model: MODEL,
               contents: message,
@@ -129,13 +128,13 @@ export function registerAskTool(server: McpServer): void {
                   ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
                 },
                 maxOutputTokens: 8192,
-                abortSignal: tc.signal,
+                abortSignal: ctx.mcpReq.signal,
               },
             }),
           );
 
           await reportCompletion(
-            tc.reportProgress,
+            ctx,
             TOOL_LABEL,
             `responded (${extractTextContent(result.content).length} chars)`,
           );
@@ -145,15 +144,18 @@ export function registerAskTool(server: McpServer): void {
         // Multi-turn: existing session
         let chat = getSession(sessionId);
         if (chat) {
-          await tc.log('debug', `Resuming session ${sessionId}`);
+          await ctx.mcpReq.log('debug', `Resuming session ${sessionId}`);
 
           const currentChat = chat;
-          const { result } = await executeToolStream(tc, 'ask', TOOL_LABEL, () =>
-            currentChat.sendMessageStream({ message, config: { abortSignal: tc.signal } }),
+          const { result } = await executeToolStream(ctx, 'ask', TOOL_LABEL, () =>
+            currentChat.sendMessageStream({
+              message,
+              config: { abortSignal: ctx.mcpReq.signal },
+            }),
           );
 
           await reportCompletion(
-            tc.reportProgress,
+            ctx,
             TOOL_LABEL,
             `responded (${extractTextContent(result.content).length} chars)`,
           );
@@ -161,7 +163,7 @@ export function registerAskTool(server: McpServer): void {
         }
 
         // Multi-turn: new session
-        await tc.log('debug', `Creating session ${sessionId}`);
+        await ctx.mcpReq.log('debug', `Creating session ${sessionId}`);
         chat = ai.chats.create({
           model: MODEL,
           config: {
@@ -175,8 +177,11 @@ export function registerAskTool(server: McpServer): void {
           },
         });
 
-        const { result } = await executeToolStream(tc, 'ask', TOOL_LABEL, () =>
-          chat.sendMessageStream({ message, config: { abortSignal: tc.signal } }),
+        const { result } = await executeToolStream(ctx, 'ask', TOOL_LABEL, () =>
+          chat.sendMessageStream({
+            message,
+            config: { abortSignal: ctx.mcpReq.signal },
+          }),
         );
 
         if (!result.isError) {
@@ -188,15 +193,15 @@ export function registerAskTool(server: McpServer): void {
             mimeType: 'application/json',
           });
         } else {
-          await tc.log('debug', `Session ${sessionId} not stored due to stream error`);
+          await ctx.mcpReq.log('debug', `Session ${sessionId} not stored due to stream error`);
         }
 
         const text = extractTextContent(result.content);
-        await reportCompletion(tc.reportProgress, TOOL_LABEL, `responded (${text.length} chars)`);
+        await reportCompletion(ctx, TOOL_LABEL, `responded (${text.length} chars)`);
         return formatStructuredResult(result);
       } catch (err) {
-        await reportFailure(tc.reportProgress, TOOL_LABEL, err);
-        return await logAndReturnError(tc.log, 'ask', err);
+        await reportFailure(ctx, TOOL_LABEL, err);
+        return await logAndReturnError(ctx, 'ask', err);
       }
     },
   );

@@ -98,24 +98,30 @@ async function createCacheWork(
 
     if (filePaths) {
       await ctx.mcpReq.log('info', `Caching ${filePaths.length}`);
-
-      // Process files in chunks to manage memory and provide progress updates
+      await sendProgress(
+        ctx,
+        0,
+        totalSteps,
+        `${TOOL_LABEL}: Preparing ${filePaths.length}`,
+      );
+      let filesUploaded = 0;
       const CHUNK_SIZE = 3;
       for (let i = 0; i < filePaths.length; i += CHUNK_SIZE) {
         if (ctx.mcpReq.signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
         const chunk = filePaths.slice(i, i + CHUNK_SIZE);
-        await sendProgress(
-          ctx,
-          i,
-          totalSteps,
-          `${TOOL_LABEL}: Uploading files ${i + 1}-${Math.min(i + chunk.length, filePaths.length)}/${filePaths.length}`,
-        );
-
         const chunkPromises = chunk.map(async (fp: string) => {
-          const uploaded = await uploadFile(fp, ctx.mcpReq.signal);
-          uploadedFileNames.push(uploaded.name);
-          return createPartFromUri(uploaded.uri, uploaded.mimeType);
+          const result = await uploadFile(fp, ctx.mcpReq.signal);
+          uploadedFileNames.push(result.name);
+          filesUploaded++;
+          const fileName = fp.split(/[\\/]/).pop() ?? fp;
+          await sendProgress(
+            ctx,
+            filesUploaded,
+            totalSteps,
+            `${TOOL_LABEL}: Uploaded ${fileName} (${filesUploaded}/${filePaths.length})`,
+          );
+          return createPartFromUri(result.uri, result.mimeType);
         });
 
         const results = await Promise.all(chunkPromises);

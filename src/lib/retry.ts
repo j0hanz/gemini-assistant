@@ -10,9 +10,21 @@ function isRetryableError(err: unknown): boolean {
   return hasHttpStatus(err) && RETRYABLE_STATUS_CODES.has(err.status);
 }
 
-function computeDelay(attempt: number): number {
+function extractRetryAfterMs(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const details = err as Record<string, unknown>;
+  if (typeof details.retryAfter === 'number' && details.retryAfter > 0) {
+    return details.retryAfter;
+  }
+  return undefined;
+}
+
+function computeDelay(attempt: number, retryAfterMs?: number): number {
   const exponential = Math.min(Math.pow(2, attempt) * BASE_DELAY_MS, MAX_DELAY_MS);
   const jitter = Math.random() * JITTER_MS;
+  if (retryAfterMs !== undefined) {
+    return Math.max(retryAfterMs, exponential) + jitter;
+  }
   return exponential + jitter;
 }
 
@@ -30,7 +42,7 @@ export async function withRetry<T>(
       if (options?.signal?.aborted) throw err;
 
       await new Promise<void>((resolve, reject) => {
-        const delay = computeDelay(attempt);
+        const delay = computeDelay(attempt, extractRetryAfterMs(err));
 
         const onAbort = () => {
           clearTimeout(timer);

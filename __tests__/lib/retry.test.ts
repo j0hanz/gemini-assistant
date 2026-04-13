@@ -122,4 +122,19 @@ describe('withRetry', () => {
     );
     assert.strictEqual(calls, 1);
   });
+
+  it('retries on 429 with retryAfter hint on error', async () => {
+    let calls = 0;
+    const result = await withRetry(() => {
+      calls++;
+      if (calls < 2) {
+        const err = createStatusError(429);
+        (err as Record<string, unknown>).retryAfter = 100;
+        throw err;
+      }
+      return Promise.resolve('recovered');
+    });
+    assert.strictEqual(result, 'recovered');
+    assert.strictEqual(calls, 2);
+  });
 });

@@ -16,6 +16,12 @@ import {
   TASK_EXECUTION,
 } from '../lib/task-utils.js';
 import { CreateCacheInputSchema } from '../schemas/inputs.js';
+import {
+  CreateCacheOutputSchema,
+  DeleteCacheOutputSchema,
+  ListCachesOutputSchema,
+  UpdateCacheOutputSchema,
+} from '../schemas/outputs.js';
 
 import { ai, type CacheSummary, completeCacheNames, listCacheSummaries, MODEL } from '../client.js';
 
@@ -218,6 +224,12 @@ function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
             mimeType: 'application/json',
           },
         ],
+        structuredContent: {
+          name: cacheName,
+          ...(cache.displayName ? { displayName: cache.displayName } : {}),
+          ...(cache.model ? { model: cache.model } : {}),
+          ...(cache.expireTime ? { expireTime: cache.expireTime } : {}),
+        },
       };
     } catch (err) {
       const normalizedError = normalizeCreateCacheError(err);
@@ -239,6 +251,7 @@ export function registerCacheTools(server: McpServer): void {
         'Create a Gemini context cache from files and/or a system instruction. ' +
         'Combined content MUST exceed ~32,000 tokens.',
       inputSchema: CreateCacheInputSchema,
+      outputSchema: CreateCacheOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
       execution: TASK_EXECUTION,
     },
@@ -251,6 +264,7 @@ export function registerCacheTools(server: McpServer): void {
       title: 'List Caches',
       description: 'List all active Gemini context caches.',
       inputSchema: z.object({}),
+      outputSchema: ListCachesOutputSchema,
       annotations: READONLY_ANNOTATIONS,
     },
     async (_args, ctx: ServerContext) => {
@@ -258,6 +272,7 @@ export function registerCacheTools(server: McpServer): void {
         const caches = await listCacheSummaries(ctx.mcpReq.signal);
         return {
           content: [{ type: 'text', text: formatCacheListMarkdown(caches) }],
+          structuredContent: { caches, count: caches.length },
         };
       } catch (err) {
         return await logAndReturnError(ctx, 'list_caches', err);
@@ -276,6 +291,7 @@ export function registerCacheTools(server: McpServer): void {
           completeCacheNames,
         ),
       }),
+      outputSchema: DeleteCacheOutputSchema,
       annotations: {
         ...MUTABLE_ANNOTATIONS,
         destructiveHint: true,
@@ -286,14 +302,16 @@ export function registerCacheTools(server: McpServer): void {
         if (!(await confirmCacheDeletion(ctx, cacheName))) {
           return {
             content: [{ type: 'text', text: 'Cache deletion cancelled.' }],
+            structuredContent: { cacheName, deleted: false },
           };
         }
 
-        await ai.caches.delete({ name: cacheName });
+        await ai.caches.delete({ name: cacheName, config: { abortSignal: ctx.mcpReq.signal } });
         notifyCacheChange(ctx.task?.id);
         await ctx.mcpReq.log('info', `Deleted cache: ${cacheName}`);
         return {
           content: [{ type: 'text', text: `Cache '${cacheName}' deleted.` }],
+          structuredContent: { cacheName, deleted: true },
         };
       } catch (err) {
         return await logAndReturnError(ctx, 'delete_cache', err);
@@ -313,11 +331,15 @@ export function registerCacheTools(server: McpServer): void {
         ),
         ttl: z.string().min(1).describe('New TTL from now (e.g., "7200s" for 2 hours)'),
       }),
+      outputSchema: UpdateCacheOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
     },
     async ({ cacheName, ttl }, ctx: ServerContext) => {
       try {
-        const updated = await ai.caches.update({ name: cacheName, config: { ttl } });
+        const updated = await ai.caches.update({
+          name: cacheName,
+          config: { ttl, abortSignal: ctx.mcpReq.signal },
+        });
         notifyCacheChange(ctx.task?.id);
         await ctx.mcpReq.log('info', `Updated cache TTL: ${cacheName}`);
         return {
@@ -330,6 +352,10 @@ export function registerCacheTools(server: McpServer): void {
                 `- **Expires:** ${updated.expireTime ?? 'N/A'}`,
             },
           ],
+          structuredContent: {
+            cacheName,
+            ...(updated.expireTime ? { expireTime: updated.expireTime } : {}),
+          },
         };
       } catch (err) {
         return await logAndReturnError(ctx, 'update_cache', err);

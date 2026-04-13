@@ -5,8 +5,12 @@ import {
   AnalyzeFileOutputSchema,
   AnalyzeUrlOutputSchema,
   AskOutputSchema,
+  CreateCacheOutputSchema,
+  DeleteCacheOutputSchema,
   ExecuteCodeOutputSchema,
+  ListCachesOutputSchema,
   SearchOutputSchema,
+  UpdateCacheOutputSchema,
   UsageMetadataSchema,
 } from '../../src/schemas/outputs.js';
 
@@ -194,6 +198,104 @@ describe('UsageMetadataSchema', () => {
 
   it('rejects non-number values', () => {
     const result = UsageMetadataSchema.safeParse({ promptTokenCount: 'many' });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('CreateCacheOutputSchema', () => {
+  it('accepts valid cache output', () => {
+    const result = CreateCacheOutputSchema.safeParse({
+      name: 'cachedContents/abc123',
+      displayName: 'My Cache',
+      model: 'gemini-3-flash-preview',
+      expireTime: '2026-04-14T00:00:00Z',
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts name-only output', () => {
+    const result = CreateCacheOutputSchema.safeParse({ name: 'cachedContents/abc123' });
+    assert.ok(result.success);
+  });
+
+  it('rejects missing name', () => {
+    const result = CreateCacheOutputSchema.safeParse({ displayName: 'My Cache' });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('ListCachesOutputSchema', () => {
+  it('accepts valid list output', () => {
+    const result = ListCachesOutputSchema.safeParse({
+      caches: [{ name: 'cachedContents/abc', displayName: 'Test' }],
+      count: 1,
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts empty caches', () => {
+    const result = ListCachesOutputSchema.safeParse({ caches: [], count: 0 });
+    assert.ok(result.success);
+  });
+
+  it('accepts caches with partial fields', () => {
+    const result = ListCachesOutputSchema.safeParse({
+      caches: [{ name: 'cachedContents/xyz' }, {}],
+      count: 2,
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects missing count', () => {
+    const result = ListCachesOutputSchema.safeParse({ caches: [] });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('DeleteCacheOutputSchema', () => {
+  it('accepts successful deletion', () => {
+    const result = DeleteCacheOutputSchema.safeParse({
+      cacheName: 'cachedContents/abc123',
+      deleted: true,
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts cancelled deletion', () => {
+    const result = DeleteCacheOutputSchema.safeParse({
+      cacheName: 'cachedContents/abc123',
+      deleted: false,
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects missing cacheName', () => {
+    const result = DeleteCacheOutputSchema.safeParse({ deleted: true });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects missing deleted', () => {
+    const result = DeleteCacheOutputSchema.safeParse({ cacheName: 'cachedContents/abc123' });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('UpdateCacheOutputSchema', () => {
+  it('accepts valid update output', () => {
+    const result = UpdateCacheOutputSchema.safeParse({
+      cacheName: 'cachedContents/abc123',
+      expireTime: '2026-04-14T00:00:00Z',
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts update without expireTime', () => {
+    const result = UpdateCacheOutputSchema.safeParse({ cacheName: 'cachedContents/abc123' });
+    assert.ok(result.success);
+  });
+
+  it('rejects missing cacheName', () => {
+    const result = UpdateCacheOutputSchema.safeParse({ expireTime: '2026-04-14T00:00:00Z' });
     assert.strictEqual(result.success, false);
   });
 });

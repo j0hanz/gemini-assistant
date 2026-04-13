@@ -2,6 +2,7 @@ import type { CachedContent } from '@google/genai';
 import { GoogleGenAI } from '@google/genai';
 
 import { pickDefined } from './lib/response.js';
+import { withRetry } from './lib/retry.js';
 
 const apiKey = process.env.API_KEY;
 if (!apiKey) {
@@ -35,16 +36,20 @@ function toCacheSummary(cache: CachedContent): CacheSummary {
 }
 
 export async function getCacheSummary(name: string, signal?: AbortSignal): Promise<CacheSummary> {
-  const cache = await ai.caches.get({
-    name,
-    ...(signal ? { config: { abortSignal: signal } } : {}),
-  });
+  const cache = await withRetry(
+    () =>
+      ai.caches.get({
+        name,
+        ...(signal ? { config: { abortSignal: signal } } : {}),
+      }),
+    ...(signal ? [{ signal }] : []),
+  );
   return toCacheSummary(cache);
 }
 
 export async function listCacheSummaries(signal?: AbortSignal): Promise<CacheSummary[]> {
   const caches: CacheSummary[] = [];
-  const pager = await ai.caches.list();
+  const pager = await withRetry(() => ai.caches.list(), ...(signal ? [{ signal }] : []));
   for await (const cache of pager) {
     if (signal?.aborted) break;
     caches.push(toCacheSummary(cache));

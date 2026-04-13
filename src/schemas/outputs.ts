@@ -49,3 +49,35 @@ export const AnalyzeFileOutputSchema = z.object({
   thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
   usage: UsageMetadataSchema.optional().describe('Token usage'),
 });
+
+const CacheSummarySchema = z.object({
+  name: z.string().optional().describe('Cache resource name'),
+  displayName: z.string().optional().describe('Human-readable label'),
+  model: z.string().optional().describe('Model used'),
+  expireTime: z.string().optional().describe('Expiration timestamp'),
+  createTime: z.string().optional().describe('Creation timestamp'),
+  updateTime: z.string().optional().describe('Last update timestamp'),
+  totalTokenCount: z.number().optional().describe('Total cached tokens'),
+});
+
+export const CreateCacheOutputSchema = z.object({
+  name: z.string().describe('Cache resource name'),
+  displayName: z.string().optional().describe('Human-readable label'),
+  model: z.string().optional().describe('Model used'),
+  expireTime: z.string().optional().describe('Expiration timestamp'),
+});
+
+export const ListCachesOutputSchema = z.object({
+  caches: z.array(CacheSummarySchema).describe('Active caches'),
+  count: z.number().describe('Number of active caches'),
+});
+
+export const DeleteCacheOutputSchema = z.object({
+  cacheName: z.string().describe('Cache resource name'),
+  deleted: z.boolean().describe('Whether deletion was performed'),
+});
+
+export const UpdateCacheOutputSchema = z.object({
+  cacheName: z.string().describe('Cache resource name'),
+  expireTime: z.string().optional().describe('New expiration timestamp'),
+});

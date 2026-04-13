@@ -1,5 +1,9 @@
 import { z } from 'zod/v4';
 
+export const AskOutputSchema = z.object({
+  answer: z.string().describe('The generated response text'),
+});
+
 export const ExecuteCodeOutputSchema = z.object({
   code: z.string().describe('Generated code'),
   output: z.string().describe('Execution output'),

@@ -87,9 +87,12 @@ export function registerExecuteCodeTool(server: McpServer): void {
 
         if (executionFailed) {
           await reportCompletion(tc.reportProgress, TOOL_LABEL, 'execution failed');
-          return errorResult(
-            `execute_code: code execution failed.\nCode:\n${code}\nOutput:\n${output}`,
-          );
+          const structured = { code, output, explanation };
+          return {
+            content: [{ type: 'text', text: JSON.stringify(structured) }],
+            structuredContent: structured,
+            isError: true,
+          };
         }
 
         const structured = { code, output, explanation };

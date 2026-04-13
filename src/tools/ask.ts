@@ -1,4 +1,4 @@
-import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
+import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 import { completable } from '@modelcontextprotocol/server';
 
 import type { ThinkingLevel } from '@google/genai';
@@ -8,6 +8,7 @@ import { extractToolContext, reportCompletion, reportFailure } from '../lib/cont
 import { errorResult, logAndReturnError } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
 import { executeToolStream } from '../lib/streaming.js';
+import { AskOutputSchema } from '../schemas/outputs.js';
 
 import { ai, MODEL } from '../client.js';
 import { getSession, isEvicted, listSessionEntries, setSession } from '../sessions.js';
@@ -17,6 +18,20 @@ const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
 const DEFAULT_SYSTEM_INSTRUCTION =
   'You are a helpful AI assistant. Provide direct, accurate answers. ' +
   'Use Markdown formatting for structure. Be concise.';
+
+function formatStructuredResult(result: CallToolResult): CallToolResult {
+  if (result.isError) return result;
+  const text = extractTextContent(result.content);
+  const structured = { answer: text };
+  return {
+    ...result,
+    content: [
+      { type: 'text', text: JSON.stringify(structured) },
+      ...result.content.filter((c) => c.type !== 'text'),
+    ],
+    structuredContent: structured,
+  };
+}
 
 export function registerAskTool(server: McpServer): void {
   server.registerTool(
@@ -68,6 +83,7 @@ export function registerAskTool(server: McpServer): void {
           },
         ),
       }),
+      outputSchema: AskOutputSchema,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -123,7 +139,7 @@ export function registerAskTool(server: McpServer): void {
             TOOL_LABEL,
             `responded (${extractTextContent(result.content).length} chars)`,
           );
-          return result;
+          return formatStructuredResult(result);
         }
 
         // Multi-turn: existing session
@@ -141,7 +157,7 @@ export function registerAskTool(server: McpServer): void {
             TOOL_LABEL,
             `responded (${extractTextContent(result.content).length} chars)`,
           );
-          return result;
+          return formatStructuredResult(result);
         }
 
         // Multi-turn: new session
@@ -177,7 +193,7 @@ export function registerAskTool(server: McpServer): void {
 
         const text = extractTextContent(result.content);
         await reportCompletion(tc.reportProgress, TOOL_LABEL, `responded (${text.length} chars)`);
-        return result;
+        return formatStructuredResult(result);
       } catch (err) {
         await reportFailure(tc.reportProgress, TOOL_LABEL, err);
         return await logAndReturnError(tc.log, 'ask', err);

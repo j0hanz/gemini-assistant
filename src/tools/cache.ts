@@ -212,6 +212,12 @@ function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
           },
           {
             type: 'resource_link' as const,
+            uri: `caches://${encodeURIComponent(cacheName)}`,
+            name: cache.displayName ?? cacheName,
+            mimeType: 'application/json',
+          },
+          {
+            type: 'resource_link' as const,
             uri: 'caches://list',
             name: 'Active Caches',
             mimeType: 'application/json',
@@ -263,8 +269,16 @@ export function registerCacheTools(server: McpServer): void {
     async (_args, ctx: ServerContext) => {
       try {
         const caches = await listCacheSummaries(ctx.mcpReq.signal);
+        const cacheLinks = caches
+          .filter((c): c is typeof c & { name: string } => typeof c.name === 'string')
+          .map((c) => ({
+            type: 'resource_link' as const,
+            uri: `caches://${encodeURIComponent(c.name)}`,
+            name: c.displayName ?? c.name,
+            mimeType: 'application/json',
+          }));
         return {
-          content: [{ type: 'text', text: formatCacheListMarkdown(caches) }],
+          content: [{ type: 'text', text: formatCacheListMarkdown(caches) }, ...cacheLinks],
           structuredContent: { caches, count: caches.length },
         };
       } catch (err) {
@@ -303,7 +317,15 @@ export function registerCacheTools(server: McpServer): void {
         notifyCacheChange(ctx.task?.id);
         await ctx.mcpReq.log('info', `Deleted cache: ${cacheName}`);
         return {
-          content: [{ type: 'text', text: `Cache '${cacheName}' deleted.` }],
+          content: [
+            { type: 'text', text: `Cache '${cacheName}' deleted.` },
+            {
+              type: 'resource_link' as const,
+              uri: 'caches://list',
+              name: 'Active Caches',
+              mimeType: 'application/json',
+            },
+          ],
           structuredContent: { cacheName, deleted: true },
         };
       } catch (err) {
@@ -343,6 +365,12 @@ export function registerCacheTools(server: McpServer): void {
                 `**Cache Updated**\n\n` +
                 `- **Name:** ${updated.name ?? cacheName}\n` +
                 `- **Expires:** ${updated.expireTime ?? 'N/A'}`,
+            },
+            {
+              type: 'resource_link' as const,
+              uri: `caches://${encodeURIComponent(cacheName)}`,
+              name: `Cache ${truncateName(cacheName)}`,
+              mimeType: 'application/json',
             },
           ],
           structuredContent: {

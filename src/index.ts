@@ -35,6 +35,7 @@ const server = new McpServer(
     description:
       'Gemini AI assistant: multi-turn chat, sandboxed code execution, ' +
       'Google Search grounding, file analysis, and context caching.',
+    websiteUrl: 'https://github.com/j0hanz/gemini-assistant',
   },
   {
     capabilities: {

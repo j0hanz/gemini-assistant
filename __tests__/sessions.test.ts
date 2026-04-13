@@ -71,5 +71,21 @@ describe('sessions', () => {
       const retrieved = getSession('sess-overwrite');
       assert.strictEqual(retrieved, chat2);
     });
+
+    it('clears evicted state when a session ID is reused', () => {
+      const prefix = 'sess-evicted-reuse-';
+
+      for (let i = 0; i < 60; i += 1) {
+        setSession(`${prefix}${String(i)}`, mockChat(`bulk-${String(i)}`) as never);
+      }
+
+      assert.strictEqual(isEvicted(`${prefix}0`), true);
+
+      const revived = mockChat('revived');
+      setSession(`${prefix}0`, revived as never);
+
+      assert.strictEqual(isEvicted(`${prefix}0`), false);
+      assert.strictEqual(getSession(`${prefix}0`), revived);
+    });
   });
 });

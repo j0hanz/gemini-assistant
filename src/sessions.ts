@@ -11,9 +11,16 @@ const SESSION_TTL_MS = parseIntEnv('SESSION_TTL_MS', 30 * 60 * 1000);
 const MAX_SESSIONS = parseIntEnv('MAX_SESSIONS', 50);
 
 const MAX_EVICTED_ENTRIES = 1000;
+const EVICTED_TRIM_TARGET = Math.floor(MAX_EVICTED_ENTRIES / 2);
+const EVICTION_SWEEP_INTERVAL_MS = 60_000;
 
 interface SessionEntry {
   chat: Chat;
+  lastAccess: number;
+}
+
+interface SessionSummary {
+  id: string;
   lastAccess: number;
 }
 
@@ -31,9 +38,40 @@ function notifyChange(): void {
   changeCallback?.();
 }
 
+function now(): number {
+  return Date.now();
+}
+
+function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {
+  return { id, lastAccess: entry.lastAccess };
+}
+
+function recordEvictedSession(id: string): void {
+  evictedSessions.add(id);
+  trimEvictedSessions();
+}
+
+function removeSession(id: string, trackEviction = false): boolean {
+  const deleted = sessions.delete(id);
+  if (deleted && trackEviction) {
+    recordEvictedSession(id);
+  }
+  return deleted;
+}
+
+function updateSessionAccess(entry: SessionEntry): Chat {
+  entry.lastAccess = now();
+  return entry.chat;
+}
+
+function storeSession(id: string, chat: Chat): void {
+  evictedSessions.delete(id);
+  sessions.set(id, { chat, lastAccess: now() });
+}
+
 function trimEvictedSessions(): void {
   if (evictedSessions.size <= MAX_EVICTED_ENTRIES) return;
-  const excess = evictedSessions.size - Math.floor(MAX_EVICTED_ENTRIES / 2);
+  const excess = evictedSessions.size - EVICTED_TRIM_TARGET;
   let removed = 0;
   for (const id of evictedSessions) {
     if (removed >= excess) break;
@@ -42,48 +80,58 @@ function trimEvictedSessions(): void {
   }
 }
 
+function evictExpiredSessions(): boolean {
+  const currentTime = now();
+  let evicted = false;
+
+  for (const [id, entry] of sessions) {
+    if (currentTime - entry.lastAccess > SESSION_TTL_MS) {
+      removeSession(id, true);
+      evicted = true;
+    }
+  }
+
+  return evicted;
+}
+
 function startEvictionTimer(): void {
   if (evictionTimer) return;
   evictionTimer = setInterval(() => {
-    const now = Date.now();
-    let evicted = false;
-    for (const [id, entry] of sessions) {
-      if (now - entry.lastAccess > SESSION_TTL_MS) {
-        sessions.delete(id);
-        evictedSessions.add(id);
-        evicted = true;
-      }
-    }
-    trimEvictedSessions();
-    if (evicted) notifyChange();
-  }, 60_000);
+    if (evictExpiredSessions()) notifyChange();
+  }, EVICTION_SWEEP_INTERVAL_MS);
   evictionTimer.unref();
 }
 
-function evictOldest(): void {
+function oldestSessionId(): string | undefined {
   let oldestId: string | undefined;
   let oldestTime = Infinity;
+
   for (const [id, entry] of sessions) {
     if (entry.lastAccess < oldestTime) {
       oldestTime = entry.lastAccess;
       oldestId = id;
     }
   }
+
+  return oldestId;
+}
+
+function evictOldest(): void {
+  const oldestId = oldestSessionId();
   if (oldestId) {
-    sessions.delete(oldestId);
-    evictedSessions.add(oldestId);
+    removeSession(oldestId, true);
     notifyChange();
   }
 }
 
-export function listSessionEntries(): { id: string; lastAccess: number }[] {
-  return Array.from(sessions, ([id, entry]) => ({ id, lastAccess: entry.lastAccess }));
+export function listSessionEntries(): SessionSummary[] {
+  return Array.from(sessions, ([id, entry]) => toSessionSummary(id, entry));
 }
 
-export function getSessionEntry(id: string): { id: string; lastAccess: number } | undefined {
+export function getSessionEntry(id: string): SessionSummary | undefined {
   const entry = sessions.get(id);
   if (!entry) return undefined;
-  return { id, lastAccess: entry.lastAccess };
+  return toSessionSummary(id, entry);
 }
 
 export function isEvicted(id: string): boolean {
@@ -93,15 +141,14 @@ export function isEvicted(id: string): boolean {
 export function getSession(id: string): Chat | undefined {
   const entry = sessions.get(id);
   if (!entry) return undefined;
-  entry.lastAccess = Date.now();
-  return entry.chat;
+  return updateSessionAccess(entry);
 }
 
 export function setSession(id: string, chat: Chat): void {
   if (sessions.size >= MAX_SESSIONS && !sessions.has(id)) {
     evictOldest();
   }
-  sessions.set(id, { chat, lastAccess: Date.now() });
+  storeSession(id, chat);
   startEvictionTimer();
   notifyChange();
 }

@@ -4,30 +4,70 @@ import { ResourceTemplate } from '@modelcontextprotocol/server';
 import { listCacheSummaries } from './client.js';
 import { getSessionEntry, listSessionEntries } from './sessions.js';
 
-function jsonResource(uri: string, value: unknown): ReadResourceResult {
+interface ResourceListEntry {
+  uri: string;
+  name: string;
+}
+
+function jsonResource(uri: string, data: unknown): ReadResourceResult {
   return {
     contents: [
       {
         uri,
-        text: JSON.stringify(value),
+        text: JSON.stringify(data),
       },
     ],
   };
 }
 
+function resourceList(resources: ResourceListEntry[]) {
+  return {
+    list: () => ({ resources }),
+  };
+}
+
+function singleResource(resource: ResourceListEntry) {
+  return resourceList([resource]);
+}
+
+function normalizeTemplateParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function asyncJsonResource(
+  load: () => Promise<unknown>,
+  mapError: (err: unknown) => unknown,
+): (uri: URL) => Promise<ReadResourceResult> {
+  return async (uri) => {
+    try {
+      return jsonResource(uri.href, await load());
+    } catch (err) {
+      return jsonResource(uri.href, mapError(err));
+    }
+  };
+}
+
+const SESSION_LIST_RESOURCE: ResourceListEntry = {
+  uri: 'sessions://list',
+  name: 'List of active multi-turn chat session IDs',
+};
+
+const CACHE_LIST_RESOURCE: ResourceListEntry = {
+  uri: 'caches://list',
+  name: 'List of active Gemini context caches',
+};
+
+function sessionDetailResources(): ResourceListEntry[] {
+  return listSessionEntries().map((session) => ({
+    uri: `sessions://${session.id}`,
+    name: `Session ${session.id}`,
+  }));
+}
+
 export function registerResources(server: McpServer): void {
   server.registerResource(
     'sessions',
-    new ResourceTemplate('sessions://list', {
-      list: () => ({
-        resources: [
-          {
-            uri: 'sessions://list',
-            name: 'List of active multi-turn chat session IDs',
-          },
-        ],
-      }),
-    }),
+    new ResourceTemplate('sessions://list', singleResource(SESSION_LIST_RESOURCE)),
     {
       title: 'Active Chat Sessions',
       description: 'List of active multi-turn chat session IDs and their last access time.',
@@ -39,12 +79,7 @@ export function registerResources(server: McpServer): void {
   server.registerResource(
     'session-detail',
     new ResourceTemplate('sessions://{sessionId}', {
-      list: () => ({
-        resources: listSessionEntries().map((s) => ({
-          uri: `sessions://${s.id}`,
-          name: `Session ${s.id}`,
-        })),
-      }),
+      list: () => ({ resources: sessionDetailResources() }),
     }),
     {
       title: 'Chat Session Detail',
@@ -52,7 +87,7 @@ export function registerResources(server: McpServer): void {
       mimeType: 'application/json',
     },
     (uri, { sessionId }): ReadResourceResult => {
-      const id = Array.isArray(sessionId) ? sessionId[0] : sessionId;
+      const id = normalizeTemplateParam(sessionId);
       const entry = id ? getSessionEntry(id) : undefined;
       return jsonResource(uri.href, entry ?? { error: 'Session not found' });
     },
@@ -60,29 +95,17 @@ export function registerResources(server: McpServer): void {
 
   server.registerResource(
     'caches',
-    new ResourceTemplate('caches://list', {
-      list: () => ({
-        resources: [
-          {
-            uri: 'caches://list',
-            name: 'List of active Gemini context caches',
-          },
-        ],
-      }),
-    }),
+    new ResourceTemplate('caches://list', singleResource(CACHE_LIST_RESOURCE)),
     {
       title: 'Gemini Context Caches',
       description: 'List of active Gemini context caches with name, model, and expiry.',
       mimeType: 'application/json',
     },
-    async (uri): Promise<ReadResourceResult> => {
-      try {
-        return jsonResource(uri.href, await listCacheSummaries());
-      } catch (err) {
-        return jsonResource(uri.href, {
-          error: `Failed to list caches: ${err instanceof Error ? err.message : String(err)}`,
-        });
-      }
-    },
+    asyncJsonResource(
+      () => listCacheSummaries(),
+      (err) => ({
+        error: `Failed to list caches: ${err instanceof Error ? err.message : String(err)}`,
+      }),
+    ),
   );
 }

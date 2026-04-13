@@ -2,6 +2,7 @@ import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprot
 
 import { Outcome } from '@google/genai';
 
+import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
 import { reportCompletion } from '../lib/context.js';
 import { errorResult, handleToolError } from '../lib/errors.js';
 import { executeToolStream, extractUsage } from '../lib/streaming.js';
@@ -40,23 +41,29 @@ function extractFencedCodeBlocks(text: string): { code: string[]; explanation: s
 }
 
 async function executeCodeWork(
-  { task, language }: { task: string; language?: string | undefined },
+  {
+    task,
+    language,
+    thinkingLevel,
+  }: { task: string; language?: string | undefined; thinkingLevel?: AskThinkingLevel | undefined },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Execute Code';
   try {
     const prompt = [task, ...(language ? [`Language: ${language}`] : [])].join('\n\n');
-
     const { streamResult } = await executeToolStream(ctx, 'execute_code', TOOL_LABEL, () =>
       ai.models.generateContentStream({
         model: MODEL,
         contents: prompt,
         config: {
           tools: [{ codeExecution: {} }],
-          systemInstruction: EXECUTE_CODE_SYSTEM_INSTRUCTION,
-          thinkingConfig: { includeThoughts: true },
-          maxOutputTokens: 8192,
-          abortSignal: ctx.mcpReq.signal,
+          ...buildGenerateContentConfig(
+            {
+              systemInstruction: EXECUTE_CODE_SYSTEM_INSTRUCTION,
+              thinkingLevel: thinkingLevel ?? 'LOW',
+            },
+            ctx.mcpReq.signal,
+          ),
         },
       }),
     );
@@ -105,7 +112,13 @@ async function executeCodeWork(
     if (executionFailed) {
       await reportCompletion(ctx, TOOL_LABEL, 'execution failed');
       const usage = extractUsage(streamResult.usageMetadata);
-      const structured = { code, output, explanation, ...(usage ? { usage } : {}) };
+      const structured = {
+        code,
+        output,
+        explanation,
+        ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
+        ...(usage ? { usage } : {}),
+      };
       return {
         content: [{ type: 'text', text: formatExecuteCodeMarkdown(code, output, explanation) }],
         structuredContent: structured,

@@ -1,8 +1,11 @@
 import { z } from 'zod/v4';
 
+import { THINKING_LEVELS } from '../lib/config-utils.js';
+
 export const ExecuteCodeInputSchema = z.object({
   task: z.string().min(1).describe('Code task to perform'),
   language: z.string().optional().describe('Preferred language (Python is sandbox default)'),
+  thinkingLevel: z.enum(THINKING_LEVELS).optional().describe('Thinking depth for reasoning.'),
 });
 
 export const SearchInputSchema = z.object({
@@ -13,11 +16,16 @@ export const SearchInputSchema = z.object({
     .max(20)
     .optional()
     .describe('URLs to deeply analyze alongside search results (max 20). Enables URL Context.'),
+  thinkingLevel: z.enum(THINKING_LEVELS).optional().describe('Thinking depth for reasoning.'),
 });
 
 export const AnalyzeFileInputSchema = z.object({
   filePath: z.string().trim().min(1).describe('Absolute path to the file'),
   question: z.string().min(1).describe('What to analyze or ask about the file'),
+  thinkingLevel: z
+    .enum(THINKING_LEVELS)
+    .optional()
+    .describe("Thinking depth for analysis. Use 'LOW' for fast, 'HIGH' for deep reasoning."),
 });
 
 export const AnalyzeUrlInputSchema = z.object({
@@ -28,6 +36,7 @@ export const AnalyzeUrlInputSchema = z.object({
     .describe('URLs to analyze (max 20). Must be publicly accessible.'),
   question: z.string().min(1).describe('What to analyze or ask about the URL content'),
   systemInstruction: z.string().optional().describe('Custom system instruction for analysis'),
+  thinkingLevel: z.enum(THINKING_LEVELS).optional().describe('Thinking depth for analysis.'),
 });
 
 export const CreateCacheInputSchema = z

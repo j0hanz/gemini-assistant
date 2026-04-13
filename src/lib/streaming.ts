@@ -16,6 +16,7 @@ import { withRetry } from './retry.js';
 
 export interface StreamResult {
   text: string;
+  thoughtText: string;
   parts: Part[];
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
@@ -36,6 +37,7 @@ export async function consumeStreamWithProgress(
 ): Promise<StreamResult> {
   const parts: Part[] = [];
   let text = '';
+  let thoughtText = '';
   let finishReason: FinishReason | undefined;
   let groundingMetadata: GroundingMetadata | undefined;
   let urlContextMetadata: UrlContextMetadata | undefined;
@@ -77,6 +79,10 @@ export async function consumeStreamWithProgress(
         await sendProgress(ctx, 50, 100, msg('Thinking'));
       }
 
+      if (part.thought && part.text !== undefined) {
+        thoughtText += part.text;
+      }
+
       if (!part.thought && part.text !== undefined && phase < Phase.Generating) {
         phase = Phase.Generating;
         await sendProgress(ctx, 75, 100, msg('Generating response'));
@@ -90,6 +96,7 @@ export async function consumeStreamWithProgress(
 
   return {
     text,
+    thoughtText,
     parts,
     ...(finishReason ? { finishReason } : {}),
     ...(groundingMetadata ? { groundingMetadata } : {}),

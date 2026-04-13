@@ -1,5 +1,6 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
+import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
 import { reportCompletion } from '../lib/context.js';
 import { handleToolError } from '../lib/errors.js';
 import { appendUrlStatus, collectUrlMetadata, extractTextContent } from '../lib/response.js';
@@ -24,7 +25,13 @@ async function analyzeUrlWork(
     urls,
     question,
     systemInstruction,
-  }: { urls: string[]; question: string; systemInstruction?: string | undefined },
+    thinkingLevel,
+  }: {
+    urls: string[];
+    question: string;
+    systemInstruction?: string | undefined;
+    thinkingLevel?: AskThinkingLevel | undefined;
+  },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Analyze URL';
@@ -35,10 +42,13 @@ async function analyzeUrlWork(
         contents: buildPromptWithUrls(urls, question),
         config: {
           tools: [{ urlContext: {} }],
-          systemInstruction: systemInstruction ?? ANALYZE_URL_SYSTEM_INSTRUCTION,
-          thinkingConfig: { includeThoughts: true },
-          maxOutputTokens: 8192,
-          abortSignal: ctx.mcpReq.signal,
+          ...buildGenerateContentConfig(
+            {
+              systemInstruction: systemInstruction ?? ANALYZE_URL_SYSTEM_INSTRUCTION,
+              thinkingLevel: thinkingLevel ?? 'LOW',
+            },
+            ctx.mcpReq.signal,
+          ),
         },
       }),
     );
@@ -56,11 +66,11 @@ async function analyzeUrlWork(
     );
 
     const usage = extractUsage(streamResult.usageMetadata);
-
     return {
       ...result,
       structuredContent: {
         answer: answerText,
+        ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
         ...(urlMetadata.length > 0 ? { urlMetadata } : {}),
         ...(usage ? { usage } : {}),
       },

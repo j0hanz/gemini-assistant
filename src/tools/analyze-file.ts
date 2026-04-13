@@ -2,6 +2,7 @@ import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprot
 
 import { createPartFromUri } from '@google/genai';
 
+import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
 import { reportCompletion, sendProgress } from '../lib/context.js';
 import { handleToolError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
@@ -18,7 +19,11 @@ const ANALYZE_FILE_SYSTEM_INSTRUCTION =
   'Base analysis strictly on the file content.';
 
 async function analyzeFileWork(
-  { filePath, question }: { filePath: string; question: string },
+  {
+    filePath,
+    question,
+    thinkingLevel,
+  }: { filePath: string; question: string; thinkingLevel?: AskThinkingLevel | undefined },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Analyze File';
@@ -37,12 +42,13 @@ async function analyzeFileWork(
       ai.models.generateContentStream({
         model: MODEL,
         contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: question }],
-        config: {
-          systemInstruction: ANALYZE_FILE_SYSTEM_INSTRUCTION,
-          thinkingConfig: { includeThoughts: true },
-          maxOutputTokens: 8192,
-          abortSignal: ctx.mcpReq.signal,
-        },
+        config: buildGenerateContentConfig(
+          {
+            systemInstruction: ANALYZE_FILE_SYSTEM_INSTRUCTION,
+            thinkingLevel: thinkingLevel ?? 'LOW',
+          },
+          ctx.mcpReq.signal,
+        ),
       }),
     );
 
@@ -51,7 +57,11 @@ async function analyzeFileWork(
     const usage = extractUsage(streamResult.usageMetadata);
     return {
       ...result,
-      structuredContent: { analysis: text, ...(usage ? { usage } : {}) },
+      structuredContent: {
+        analysis: text,
+        ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
+        ...(usage ? { usage } : {}),
+      },
     };
   } catch (err) {
     return await handleToolError(ctx, 'analyze_file', TOOL_LABEL, err);

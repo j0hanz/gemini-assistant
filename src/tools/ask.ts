@@ -1,9 +1,13 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 import { completable } from '@modelcontextprotocol/server';
 
-import type { ThinkingLevel } from '@google/genai';
 import { z } from 'zod/v4';
 
+import {
+  AskThinkingLevel,
+  buildGenerateContentConfig,
+  THINKING_LEVELS,
+} from '../lib/config-utils.js';
 import { reportCompletion } from '../lib/context.js';
 import { errorResult, handleToolError, throwInvalidParams } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
@@ -20,9 +24,6 @@ import {
   setSession,
 } from '../sessions.js';
 
-const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
-type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
-
 interface AskArgs {
   message: string;
   sessionId?: string | undefined;
@@ -33,9 +34,6 @@ interface AskArgs {
 }
 
 const ASK_TOOL_LABEL = 'Ask Gemini';
-
-const DEFAULT_SYSTEM_INSTRUCTION =
-  'Provide direct, accurate answers. Use Markdown for structure. Be concise.';
 
 function formatStructuredResult(
   result: CallToolResult,
@@ -66,13 +64,6 @@ function formatStructuredResult(
   };
 }
 
-function buildThinkingConfig(thinkingLevel?: AskThinkingLevel) {
-  return {
-    includeThoughts: true,
-    ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
-  };
-}
-
 function buildAskConfig(
   {
     systemInstruction,
@@ -82,16 +73,15 @@ function buildAskConfig(
   }: Pick<AskArgs, 'systemInstruction' | 'thinkingLevel' | 'cacheName' | 'responseSchema'>,
   signal?: AbortSignal,
 ) {
-  return {
-    ...(cacheName ? { cachedContent: cacheName } : {}),
-    ...(cacheName ? {} : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
-    // Structured output (responseSchema) is incompatible with thinking — omit thinkingConfig when JSON mode is active
-    ...(responseSchema
-      ? { responseMimeType: 'application/json', responseSchema }
-      : { thinkingConfig: buildThinkingConfig(thinkingLevel) }),
-    maxOutputTokens: 8192,
-    ...(signal ? { abortSignal: signal } : {}),
-  };
+  return buildGenerateContentConfig(
+    {
+      systemInstruction,
+      thinkingLevel,
+      cacheName,
+      responseSchema,
+    },
+    signal,
+  );
 }
 
 function validateAskRequest({

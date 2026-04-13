@@ -9,6 +9,7 @@ export const UsageMetadataSchema = z.object({
 
 export const AskOutputSchema = z.object({
   answer: z.string().describe('Generated response'),
+  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
   usage: UsageMetadataSchema.optional().describe('Token usage'),
 });
 
@@ -16,6 +17,7 @@ export const ExecuteCodeOutputSchema = z.object({
   code: z.string().describe('Generated code'),
   output: z.string().describe('Execution output'),
   explanation: z.string().describe('Model explanation'),
+  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
   usage: UsageMetadataSchema.optional().describe('Token usage'),
 });
 
@@ -30,16 +32,19 @@ export const SearchOutputSchema = z.object({
   answer: z.string().describe('Grounded answer'),
   sources: z.array(z.string()).describe('Source URLs from search'),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
+  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
   usage: UsageMetadataSchema.optional().describe('Token usage'),
 });
 
 export const AnalyzeUrlOutputSchema = z.object({
   answer: z.string().describe('URL content analysis'),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('Retrieval status per URL'),
+  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
   usage: UsageMetadataSchema.optional().describe('Token usage'),
 });
 
 export const AnalyzeFileOutputSchema = z.object({
   analysis: z.string().describe('File analysis result'),
+  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
   usage: UsageMetadataSchema.optional().describe('Token usage'),
 });

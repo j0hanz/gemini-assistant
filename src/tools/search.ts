@@ -1,7 +1,6 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import { ThinkingLevel } from '@google/genai';
-
+import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
 import { reportCompletion } from '../lib/context.js';
 import { handleToolError } from '../lib/errors.js';
 import { appendUrlStatus, collectUrlMetadata, extractTextContent } from '../lib/response.js';
@@ -40,10 +39,12 @@ async function searchWork(
     query,
     systemInstruction,
     urls,
+    thinkingLevel,
   }: {
     query: string;
     systemInstruction?: string | undefined;
     urls?: string[] | undefined;
+    thinkingLevel?: AskThinkingLevel | undefined;
   },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -56,20 +57,20 @@ async function searchWork(
       { googleSearch: {} },
       ...(hasUrls ? [{ urlContext: {} }] : []),
     ];
-
     const { streamResult, result } = await executeToolStream(ctx, 'search', TOOL_LABEL, () =>
       ai.models.generateContentStream({
         model: MODEL,
         contents,
         config: {
           tools,
-          systemInstruction: systemInstruction ?? SEARCH_SYSTEM_INSTRUCTION,
-          thinkingConfig: {
-            includeThoughts: true,
-            thinkingLevel: ThinkingLevel.LOW,
-          },
+          ...buildGenerateContentConfig(
+            {
+              systemInstruction: systemInstruction ?? SEARCH_SYSTEM_INSTRUCTION,
+              thinkingLevel: thinkingLevel ?? 'LOW',
+            },
+            ctx.mcpReq.signal,
+          ),
           maxOutputTokens: 4096,
-          abortSignal: ctx.mcpReq.signal,
         },
       }),
     );
@@ -97,12 +98,12 @@ async function searchWork(
     );
 
     const usage = extractUsage(streamResult.usageMetadata);
-
     return {
       ...result,
       structuredContent: {
         answer: answerText,
         sources,
+        ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
         ...(urlMeta.length > 0 ? { urlMetadata: urlMeta } : {}),
         ...(usage ? { usage } : {}),
       },

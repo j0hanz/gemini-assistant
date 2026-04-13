@@ -1,3 +1,5 @@
+import type { McpServer } from '@modelcontextprotocol/server';
+
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,4 +73,11 @@ export async function resolveAndValidatePath(
   }
 
   return resolved;
+}
+
+export function buildServerRootsFetcher(server: McpServer): RootsFetcher {
+  return buildRootsFetcher(
+    () => server.server.getClientCapabilities(),
+    () => server.server.listRoots(),
+  );
 }

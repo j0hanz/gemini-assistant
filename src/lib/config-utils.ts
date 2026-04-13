@@ -3,6 +3,13 @@ import type { GenerateContentConfig, ThinkingLevel } from '@google/genai';
 export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
 export type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
 
+export function parseIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const parsed = Number(raw);
+  return Number.isNaN(parsed) ? fallback : parsed;
+}
+
 const DEFAULT_SYSTEM_INSTRUCTION =
   'Provide direct, accurate answers. Use Markdown for structure. Be concise.';
 

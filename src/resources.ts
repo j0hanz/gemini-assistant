@@ -1,6 +1,8 @@
 import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server';
 import { ResourceTemplate } from '@modelcontextprotocol/server';
 
+import { formatError } from './lib/errors.js';
+
 import { completeCacheNames, getCacheSummary, listCacheSummaries } from './client.js';
 import { getSessionEntry, listSessionEntries } from './sessions.js';
 
@@ -110,7 +112,7 @@ export function registerResources(server: McpServer): void {
     asyncJsonResource(
       () => listCacheSummaries(),
       (err) => ({
-        error: `Failed to list caches: ${err instanceof Error ? err.message : String(err)}`,
+        error: `Failed to list caches: ${formatError(err)}`,
       }),
     ),
   );
@@ -150,7 +152,7 @@ export function registerResources(server: McpServer): void {
         return jsonResource(uri.href, await getCacheSummary(decoded));
       } catch (err) {
         return jsonResource(uri.href, {
-          error: `Failed to get cache: ${err instanceof Error ? err.message : String(err)}`,
+          error: `Failed to get cache: ${formatError(err)}`,
         });
       }
     },

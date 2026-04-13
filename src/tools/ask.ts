@@ -101,26 +101,6 @@ function formatStructuredResult(
   };
 }
 
-function buildAskConfig(
-  {
-    systemInstruction,
-    thinkingLevel,
-    cacheName,
-    responseSchema,
-  }: Pick<AskArgs, 'systemInstruction' | 'thinkingLevel' | 'cacheName' | 'responseSchema'>,
-  signal?: AbortSignal,
-) {
-  return buildGenerateContentConfig(
-    {
-      systemInstruction,
-      thinkingLevel,
-      cacheName,
-      responseSchema,
-    },
-    signal,
-  );
-}
-
 function validateAskRequest({
   sessionId,
   systemInstruction,
@@ -199,7 +179,7 @@ async function askSingleTurn(args: AskArgs, ctx: ServerContext): Promise<CallToo
       ai.models.generateContentStream({
         model: MODEL,
         contents: args.message,
-        config: buildAskConfig(args, ctx.mcpReq.signal),
+        config: buildGenerateContentConfig(args, ctx.mcpReq.signal),
       }),
     !!args.responseSchema,
   );
@@ -223,7 +203,7 @@ async function askNewSession(
   await ctx.mcpReq.log('debug', `Creating session ${args.sessionId}`);
   const chat = ai.chats.create({
     model: MODEL,
-    config: buildAskConfig(args),
+    config: buildGenerateContentConfig(args),
   });
 
   const result = await askWithChat(chat, args, ctx);

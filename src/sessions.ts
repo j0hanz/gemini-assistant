@@ -1,11 +1,6 @@
 import type { Chat } from '@google/genai';
 
-function parseIntEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined) return fallback;
-  const parsed = Number(raw);
-  return Number.isNaN(parsed) ? fallback : parsed;
-}
+import { parseIntEnv } from './lib/config-utils.js';
 
 const SESSION_TTL_MS = parseIntEnv('SESSION_TTL_MS', 30 * 60 * 1000);
 const MAX_SESSIONS = parseIntEnv('MAX_SESSIONS', 50);

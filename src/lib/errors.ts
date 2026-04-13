@@ -5,6 +5,10 @@ import { FinishReason } from '@google/genai';
 
 import { reportFailure } from './context.js';
 
+export function formatError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export function throwInvalidParams(message: string): never {
   throw new ProtocolError(INVALID_PARAMS, message);
 }
@@ -58,7 +62,7 @@ export function geminiErrorResult(toolName: string, err: unknown): CallToolResul
     const hint = STATUS_MESSAGES[err.status] ?? `HTTP ${err.status}`;
     return errorResult(`${toolName} failed: ${hint} — ${err.message}`);
   }
-  return errorResult(`${toolName} failed: ${err instanceof Error ? err.message : String(err)}`);
+  return errorResult(`${toolName} failed: ${formatError(err)}`);
 }
 
 export async function logAndReturnError(
@@ -66,10 +70,7 @@ export async function logAndReturnError(
   toolName: string,
   err: unknown,
 ): Promise<CallToolResult> {
-  await ctx.mcpReq.log(
-    'error',
-    `${toolName} failed: ${err instanceof Error ? err.message : String(err)}`,
-  );
+  await ctx.mcpReq.log('error', `${toolName} failed: ${formatError(err)}`);
   return geminiErrorResult(toolName, err);
 }
 
@@ -81,4 +82,10 @@ export async function handleToolError(
 ): Promise<CallToolResult> {
   await reportFailure(ctx, toolLabel, err);
   return logAndReturnError(ctx, toolName, err);
+}
+
+export function cleanupErrorLogger(ctx: ServerContext): (reason: unknown) => void {
+  return (reason) => {
+    void ctx.mcpReq.log('warning', `File cleanup failed: ${formatError(reason)}`);
+  };
 }

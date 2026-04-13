@@ -8,6 +8,7 @@ import {
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { formatError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 
 import { registerPrompts } from './prompts.js';
@@ -64,22 +65,20 @@ registerCacheTools(server);
 registerPrompts(server);
 registerResources(server);
 
-onSessionChange((taskId) => {
+function sendResourceChanged(uri: string, taskId?: string): void {
   if (!server.isConnected()) return;
   server.sendResourceListChanged();
   void server.server.sendResourceUpdated({
-    uri: 'sessions://list',
+    uri,
     ...(taskId ? { _meta: { 'io.modelcontextprotocol/related-task': { taskId } } } : {}),
   });
-});
+}
 
+onSessionChange((taskId) => {
+  sendResourceChanged('sessions://list', taskId);
+});
 onCacheChange((taskId) => {
-  if (!server.isConnected()) return;
-  server.sendResourceListChanged();
-  void server.server.sendResourceUpdated({
-    uri: 'caches://list',
-    ...(taskId ? { _meta: { 'io.modelcontextprotocol/related-task': { taskId } } } : {}),
-  });
+  sendResourceChanged('caches://list', taskId);
 });
 
 const transportMode = process.env.MCP_TRANSPORT ?? 'stdio';
@@ -122,24 +121,20 @@ async function shutdown(): Promise<void> {
 process.on('SIGINT', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
 
-process.on('uncaughtException', (err) => {
+function logCriticalAndExit(label: string, err: unknown): void {
   if (server.isConnected()) {
     void server.sendLoggingMessage({
       level: 'emergency',
       logger: 'gemini-assistant',
-      data: `Uncaught Exception: ${err instanceof Error ? err.message : String(err)}`,
+      data: `${label}: ${formatError(err)}`,
     });
   }
   process.exit(1);
-});
+}
 
+process.on('uncaughtException', (err) => {
+  logCriticalAndExit('Uncaught Exception', err);
+});
 process.on('unhandledRejection', (reason) => {
-  if (server.isConnected()) {
-    void server.sendLoggingMessage({
-      level: 'emergency',
-      logger: 'gemini-assistant',
-      data: `Unhandled Rejection: ${reason instanceof Error ? reason.message : String(reason)}`,
-    });
-  }
-  process.exit(1);
+  logCriticalAndExit('Unhandled Rejection', reason);
 });

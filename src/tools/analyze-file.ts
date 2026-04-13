@@ -4,10 +4,9 @@ import { createPartFromUri } from '@google/genai';
 
 import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
 import { sendProgress } from '../lib/context.js';
-import { handleToolError } from '../lib/errors.js';
+import { cleanupErrorLogger, handleToolError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
-import type { RootsFetcher } from '../lib/path-validation.js';
-import { buildRootsFetcher } from '../lib/path-validation.js';
+import { buildServerRootsFetcher, type RootsFetcher } from '../lib/path-validation.js';
 import { handleToolExecution } from '../lib/streaming.js';
 import { createToolTaskHandlers, READONLY_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
 import { AnalyzeFileInputSchema } from '../schemas/inputs.js';
@@ -65,21 +64,16 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
     } catch (err) {
       return await handleToolError(ctx, 'analyze_file', TOOL_LABEL, err);
     } finally {
-      await deleteUploadedFiles(uploadedFileName ? [uploadedFileName] : [], (reason) => {
-        void ctx.mcpReq.log(
-          'warning',
-          `File cleanup failed: ${reason instanceof Error ? reason.message : String(reason)}`,
-        );
-      });
+      await deleteUploadedFiles(
+        uploadedFileName ? [uploadedFileName] : [],
+        cleanupErrorLogger(ctx),
+      );
     }
   };
 }
 
 export function registerAnalyzeFileTool(server: McpServer): void {
-  const rootsFetcher = buildRootsFetcher(
-    () => server.server.getClientCapabilities(),
-    () => server.server.listRoots(),
-  );
+  const rootsFetcher = buildServerRootsFetcher(server);
 
   server.experimental.tasks.registerToolTask(
     'analyze_file',

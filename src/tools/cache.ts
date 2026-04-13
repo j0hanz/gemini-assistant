@@ -5,10 +5,9 @@ import { createPartFromUri } from '@google/genai';
 import { z } from 'zod/v4';
 
 import { reportCompletion, sendProgress } from '../lib/context.js';
-import { handleToolError, logAndReturnError } from '../lib/errors.js';
+import { cleanupErrorLogger, handleToolError, logAndReturnError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
-import type { RootsFetcher } from '../lib/path-validation.js';
-import { buildRootsFetcher } from '../lib/path-validation.js';
+import { buildServerRootsFetcher, type RootsFetcher } from '../lib/path-validation.js';
 import { withRetry } from '../lib/retry.js';
 import {
   createToolTaskHandlers,
@@ -223,21 +222,13 @@ function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
       const normalizedError = normalizeCreateCacheError(err);
       return await handleToolError(ctx, 'create_cache', TOOL_LABEL, normalizedError);
     } finally {
-      await deleteUploadedFiles(uploadedFileNames, (reason) => {
-        void ctx.mcpReq.log(
-          'warning',
-          `File cleanup failed: ${reason instanceof Error ? reason.message : String(reason)}`,
-        );
-      });
+      await deleteUploadedFiles(uploadedFileNames, cleanupErrorLogger(ctx));
     }
   };
 }
 
 export function registerCacheTools(server: McpServer): void {
-  const rootsFetcher = buildRootsFetcher(
-    () => server.server.getClientCapabilities(),
-    () => server.server.listRoots(),
-  );
+  const rootsFetcher = buildServerRootsFetcher(server);
 
   server.experimental.tasks.registerToolTask(
     'create_cache',

@@ -4,14 +4,19 @@ import { completable } from '@modelcontextprotocol/server';
 import { createPartFromUri } from '@google/genai';
 import { z } from 'zod/v4';
 
-import { reportCompletion, reportFailure, sendProgress } from '../lib/context.js';
-import { logAndReturnError } from '../lib/errors.js';
+import { reportCompletion, sendProgress } from '../lib/context.js';
+import { handleToolError, logAndReturnError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { withRetry } from '../lib/retry.js';
-import { createToolTaskHandlers } from '../lib/task-utils.js';
+import {
+  createToolTaskHandlers,
+  MUTABLE_ANNOTATIONS,
+  READONLY_ANNOTATIONS,
+  TASK_EXECUTION,
+} from '../lib/task-utils.js';
 import { CreateCacheInputSchema } from '../schemas/inputs.js';
 
-import { ai, type CacheSummary, listCacheNames, listCacheSummaries, MODEL } from '../client.js';
+import { ai, type CacheSummary, completeCacheNames, listCacheSummaries, MODEL } from '../client.js';
 
 function formatCacheListMarkdown(caches: CacheSummary[]): string {
   if (caches.length === 0) return 'No active caches found.';
@@ -28,14 +33,6 @@ function formatCacheListMarkdown(caches: CacheSummary[]): string {
       )
       .join('\n')
   );
-}
-
-async function completeCacheNames(prefix?: string): Promise<string[]> {
-  try {
-    return await listCacheNames(prefix);
-  } catch {
-    return [];
-  }
 }
 
 function toCreateCacheError(err: unknown): unknown {
@@ -129,8 +126,7 @@ async function createCacheWork(
     };
   } catch (err) {
     const normalizedError = toCreateCacheError(err);
-    await reportFailure(ctx, TOOL_LABEL, normalizedError);
-    return await logAndReturnError(ctx, 'create_cache', normalizedError);
+    return await handleToolError(ctx, 'create_cache', TOOL_LABEL, normalizedError);
   } finally {
     await deleteUploadedFiles(uploadedFileNames);
   }
@@ -145,13 +141,8 @@ export function registerCacheTools(server: McpServer): void {
         'Creates a Gemini context cache from files and/or a system instruction. ' +
         'The combined content MUST exceed ~32,000 tokens. Do not use for small contexts.',
       inputSchema: CreateCacheInputSchema,
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: true,
-      },
-      execution: { taskSupport: 'optional' },
+      annotations: MUTABLE_ANNOTATIONS,
+      execution: TASK_EXECUTION,
     },
     createToolTaskHandlers(createCacheWork),
   );
@@ -162,12 +153,7 @@ export function registerCacheTools(server: McpServer): void {
       title: 'List Caches',
       description: 'Lists all active Gemini context caches.',
       inputSchema: z.object({}),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
+      annotations: READONLY_ANNOTATIONS,
     },
     async (_args, ctx: ServerContext) => {
       try {
@@ -196,10 +182,8 @@ export function registerCacheTools(server: McpServer): void {
         ),
       }),
       annotations: {
-        readOnlyHint: false,
+        ...MUTABLE_ANNOTATIONS,
         destructiveHint: true,
-        idempotentHint: false,
-        openWorldHint: true,
       },
     },
     async ({ cacheName }, ctx: ServerContext) => {

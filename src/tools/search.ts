@@ -1,15 +1,14 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import type { UrlMetadata } from '@google/genai';
 import { ThinkingLevel } from '@google/genai';
 
-import { reportCompletion, reportFailure } from '../lib/context.js';
-import { logAndReturnError } from '../lib/errors.js';
-import { extractTextContent } from '../lib/response.js';
+import { reportCompletion } from '../lib/context.js';
+import { handleToolError } from '../lib/errors.js';
+import { appendUrlStatus, collectUrlMetadata, extractTextContent } from '../lib/response.js';
 import { executeToolStream, extractUsage } from '../lib/streaming.js';
-import { createToolTaskHandlers } from '../lib/task-utils.js';
+import { createToolTaskHandlers, READONLY_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
 import { SearchInputSchema } from '../schemas/inputs.js';
-import { SearchOutputSchema, type UrlMetadataEntry } from '../schemas/outputs.js';
+import { SearchOutputSchema } from '../schemas/outputs.js';
 
 import { ai, MODEL } from '../client.js';
 
@@ -35,22 +34,6 @@ function collectGroundedSources(
   }
 
   return sources;
-}
-
-function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlMetadataEntry[] {
-  const entries: UrlMetadataEntry[] = [];
-  if (!urlMetadata) return entries;
-
-  for (const meta of urlMetadata) {
-    if (meta.retrievedUrl) {
-      entries.push({
-        url: meta.retrievedUrl,
-        status: meta.urlRetrievalStatus ?? 'UNKNOWN',
-      });
-    }
-  }
-
-  return entries;
 }
 
 async function searchWork(
@@ -106,13 +89,7 @@ async function searchWork(
       });
     }
 
-    if (urlMeta.length > 0) {
-      const statusSummary = urlMeta.map((m) => `- ${m.url}: ${m.status}`).join('\n');
-      result.content.push({
-        type: 'text',
-        text: `\n\nURL Retrieval Status:\n${statusSummary}`,
-      });
-    }
+    appendUrlStatus(result.content, urlMeta);
 
     await reportCompletion(
       ctx,
@@ -132,8 +109,7 @@ async function searchWork(
       },
     };
   } catch (err) {
-    await reportFailure(ctx, TOOL_LABEL, err);
-    return await logAndReturnError(ctx, 'search', err);
+    return await handleToolError(ctx, 'search', TOOL_LABEL, err);
   }
 }
 
@@ -147,13 +123,8 @@ export function registerSearchTool(server: McpServer): void {
         'Optionally provide URLs for deep analysis via URL Context.',
       inputSchema: SearchInputSchema,
       outputSchema: SearchOutputSchema,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
-      execution: { taskSupport: 'optional' },
+      annotations: READONLY_ANNOTATIONS,
+      execution: TASK_EXECUTION,
     },
     createToolTaskHandlers(searchWork),
   );

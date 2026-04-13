@@ -3,6 +3,22 @@ import type { CreateTaskResult, GetTaskResult, ServerContext } from '@modelconte
 
 const DEFAULT_TTL = 300_000;
 
+export const READONLY_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
+} as const;
+
+export const MUTABLE_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true,
+} as const;
+
+export const TASK_EXECUTION = { taskSupport: 'optional' } as const;
+
 type TaskWork<TArgs> = (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>;
 
 interface ToolTaskHandlers<TArgs> {

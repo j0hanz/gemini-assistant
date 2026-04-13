@@ -4,14 +4,14 @@ import { completable } from '@modelcontextprotocol/server';
 import type { ThinkingLevel } from '@google/genai';
 import { z } from 'zod/v4';
 
-import { reportCompletion, reportFailure } from '../lib/context.js';
-import { errorResult, logAndReturnError, throwInvalidParams } from '../lib/errors.js';
+import { reportCompletion } from '../lib/context.js';
+import { errorResult, handleToolError, throwInvalidParams } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
 import { executeToolStream, extractUsage } from '../lib/streaming.js';
-import { createToolTaskHandlers } from '../lib/task-utils.js';
+import { createToolTaskHandlers, MUTABLE_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
 import { AskOutputSchema } from '../schemas/outputs.js';
 
-import { ai, listCacheNames, MODEL } from '../client.js';
+import { ai, completeCacheNames, MODEL } from '../client.js';
 import {
   getSession,
   getSessionEntry,
@@ -152,14 +152,6 @@ function appendSessionResource(result: CallToolResult, sessionId: string): void 
   });
 }
 
-async function completeCacheNames(prefix?: string): Promise<string[]> {
-  try {
-    return await listCacheNames(prefix);
-  } catch {
-    return [];
-  }
-}
-
 async function askSingleTurn(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
   return await runAskStream(
     ctx,
@@ -233,8 +225,7 @@ async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResul
 
     return await askNewSession(args as AskArgs & { sessionId: string }, ctx);
   } catch (err) {
-    await reportFailure(ctx, ASK_TOOL_LABEL, err);
-    return await logAndReturnError(ctx, 'ask', err);
+    return await handleToolError(ctx, 'ask', ASK_TOOL_LABEL, err);
   }
 }
 
@@ -284,13 +275,8 @@ export function registerAskTool(server: McpServer): void {
           ),
       }),
       outputSchema: AskOutputSchema,
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: true,
-      },
-      execution: { taskSupport: 'optional' },
+      annotations: MUTABLE_ANNOTATIONS,
+      execution: TASK_EXECUTION,
     },
     createToolTaskHandlers(askWork),
   );

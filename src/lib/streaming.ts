@@ -11,6 +11,7 @@ import type {
 
 import { sendProgress } from './context.js';
 import { finishReasonError } from './errors.js';
+import { pickDefined } from './response.js';
 import { withRetry } from './retry.js';
 
 export interface StreamResult {
@@ -108,16 +109,12 @@ export function validateStreamResult(result: StreamResult, toolName: string): Ca
 
 export function extractUsage(meta?: GenerateContentResponseUsageMetadata) {
   if (!meta) return undefined;
-  return {
-    ...(meta.promptTokenCount !== undefined ? { promptTokenCount: meta.promptTokenCount } : {}),
-    ...(meta.candidatesTokenCount !== undefined
-      ? { candidatesTokenCount: meta.candidatesTokenCount }
-      : {}),
-    ...(meta.thoughtsTokenCount !== undefined
-      ? { thoughtsTokenCount: meta.thoughtsTokenCount }
-      : {}),
-    ...(meta.totalTokenCount !== undefined ? { totalTokenCount: meta.totalTokenCount } : {}),
-  };
+  return pickDefined({
+    promptTokenCount: meta.promptTokenCount,
+    candidatesTokenCount: meta.candidatesTokenCount,
+    thoughtsTokenCount: meta.thoughtsTokenCount,
+    totalTokenCount: meta.totalTokenCount,
+  });
 }
 
 export async function executeToolStream(

@@ -2,10 +2,10 @@ import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprot
 
 import { Outcome } from '@google/genai';
 
-import { reportCompletion, reportFailure } from '../lib/context.js';
-import { errorResult, logAndReturnError } from '../lib/errors.js';
+import { reportCompletion } from '../lib/context.js';
+import { errorResult, handleToolError } from '../lib/errors.js';
 import { executeToolStream, extractUsage } from '../lib/streaming.js';
-import { createToolTaskHandlers } from '../lib/task-utils.js';
+import { createToolTaskHandlers, MUTABLE_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
 import { ExecuteCodeInputSchema } from '../schemas/inputs.js';
 import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
 
@@ -126,8 +126,7 @@ async function executeCodeWork(
       structuredContent: structured,
     };
   } catch (err) {
-    await reportFailure(ctx, TOOL_LABEL, err);
-    return await logAndReturnError(ctx, 'execute_code', err);
+    return await handleToolError(ctx, 'execute_code', TOOL_LABEL, err);
   }
 }
 
@@ -140,13 +139,8 @@ export function registerExecuteCodeTool(server: McpServer): void {
         'Have Gemini generate and execute code in a sandbox. Returns the code, output, and explanation.',
       inputSchema: ExecuteCodeInputSchema,
       outputSchema: ExecuteCodeOutputSchema,
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-      },
-      execution: { taskSupport: 'optional' },
+      annotations: { ...MUTABLE_ANNOTATIONS, openWorldHint: false },
+      execution: TASK_EXECUTION,
     },
     createToolTaskHandlers(executeCodeWork),
   );

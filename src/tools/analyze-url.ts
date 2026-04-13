@@ -1,12 +1,12 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import { reportCompletion, reportFailure } from '../lib/context.js';
-import { logAndReturnError } from '../lib/errors.js';
-import { extractTextContent } from '../lib/response.js';
+import { reportCompletion } from '../lib/context.js';
+import { handleToolError } from '../lib/errors.js';
+import { appendUrlStatus, collectUrlMetadata, extractTextContent } from '../lib/response.js';
 import { executeToolStream, extractUsage } from '../lib/streaming.js';
-import { createToolTaskHandlers } from '../lib/task-utils.js';
+import { createToolTaskHandlers, READONLY_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
 import { AnalyzeUrlInputSchema } from '../schemas/inputs.js';
-import { AnalyzeUrlOutputSchema, type UrlMetadataEntry } from '../schemas/outputs.js';
+import { AnalyzeUrlOutputSchema } from '../schemas/outputs.js';
 
 import { ai, MODEL } from '../client.js';
 
@@ -15,25 +15,6 @@ const ANALYZE_URL_SYSTEM_INSTRUCTION =
   'Structure findings clearly with headings. ' +
   'Reference specific sections or data from the retrieved pages. ' +
   'Base analysis strictly on retrieved content. Do not speculate beyond what the pages confirm.';
-
-function collectUrlMetadata(
-  streamResult: Awaited<ReturnType<typeof executeToolStream>>['streamResult'],
-): UrlMetadataEntry[] {
-  const entries: UrlMetadataEntry[] = [];
-  const urlMetadata = streamResult.urlContextMetadata?.urlMetadata;
-  if (!urlMetadata) return entries;
-
-  for (const meta of urlMetadata) {
-    if (meta.retrievedUrl) {
-      entries.push({
-        url: meta.retrievedUrl,
-        status: meta.urlRetrievalStatus ?? 'UNKNOWN',
-      });
-    }
-  }
-
-  return entries;
-}
 
 function buildPromptWithUrls(urls: string[], question: string): string {
   const urlList = urls.join('\n');
@@ -67,15 +48,8 @@ async function analyzeUrlWork(
     if (result.isError) return result;
 
     const answerText = extractTextContent(result.content) || '';
-    const urlMetadata = collectUrlMetadata(streamResult);
-
-    if (urlMetadata.length > 0) {
-      const statusSummary = urlMetadata.map((m) => `- ${m.url}: ${m.status}`).join('\n');
-      result.content.push({
-        type: 'text',
-        text: `\n\nURL Retrieval Status:\n${statusSummary}`,
-      });
-    }
+    const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
+    appendUrlStatus(result.content, urlMetadata);
 
     await reportCompletion(
       ctx,
@@ -94,8 +68,7 @@ async function analyzeUrlWork(
       },
     };
   } catch (err) {
-    await reportFailure(ctx, TOOL_LABEL, err);
-    return await logAndReturnError(ctx, 'analyze_url', err);
+    return await handleToolError(ctx, 'analyze_url', TOOL_LABEL, err);
   }
 }
 
@@ -109,13 +82,8 @@ export function registerAnalyzeUrlTool(server: McpServer): void {
         'Supports web pages, PDFs, images, and other public content (max 20 URLs).',
       inputSchema: AnalyzeUrlInputSchema,
       outputSchema: AnalyzeUrlOutputSchema,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
-      execution: { taskSupport: 'optional' },
+      annotations: READONLY_ANNOTATIONS,
+      execution: TASK_EXECUTION,
     },
     createToolTaskHandlers(analyzeUrlWork),
   );

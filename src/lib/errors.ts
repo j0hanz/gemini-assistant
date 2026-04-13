@@ -3,6 +3,8 @@ import { INVALID_PARAMS, ProtocolError } from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
 
+import { reportFailure } from './context.js';
+
 export function throwInvalidParams(message: string): never {
   throw new ProtocolError(INVALID_PARAMS, message);
 }
@@ -69,4 +71,14 @@ export async function logAndReturnError(
     `${toolName} failed: ${err instanceof Error ? err.message : String(err)}`,
   );
   return geminiErrorResult(toolName, err);
+}
+
+export async function handleToolError(
+  ctx: ServerContext,
+  toolName: string,
+  toolLabel: string,
+  err: unknown,
+): Promise<CallToolResult> {
+  await reportFailure(ctx, toolLabel, err);
+  return logAndReturnError(ctx, toolName, err);
 }

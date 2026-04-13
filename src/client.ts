@@ -1,5 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 
+import { pickDefined } from './lib/response.js';
+
 const apiKey = process.env.API_KEY;
 if (!apiKey) {
   throw new Error('API_KEY environment variable is required');
@@ -17,12 +19,12 @@ export interface CacheSummary {
 }
 
 function toCacheSummary(cache: CacheSummary): CacheSummary {
-  return {
-    ...(cache.name !== undefined ? { name: cache.name } : {}),
-    ...(cache.displayName !== undefined ? { displayName: cache.displayName } : {}),
-    ...(cache.model !== undefined ? { model: cache.model } : {}),
-    ...(cache.expireTime !== undefined ? { expireTime: cache.expireTime } : {}),
-  };
+  return pickDefined({
+    name: cache.name,
+    displayName: cache.displayName,
+    model: cache.model,
+    expireTime: cache.expireTime,
+  }) as CacheSummary;
 }
 
 export async function listCacheSummaries(signal?: AbortSignal): Promise<CacheSummary[]> {
@@ -39,4 +41,12 @@ export async function listCacheNames(prefix?: string, signal?: AbortSignal): Pro
   return (await listCacheSummaries(signal))
     .map((cache) => cache.name)
     .filter((name): name is string => name?.startsWith(prefix ?? '') === true);
+}
+
+export async function completeCacheNames(prefix?: string): Promise<string[]> {
+  try {
+    return await listCacheNames(prefix);
+  } catch {
+    return [];
+  }
 }

@@ -2,12 +2,12 @@ import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprot
 
 import { createPartFromUri } from '@google/genai';
 
-import { reportCompletion, reportFailure, sendProgress } from '../lib/context.js';
-import { logAndReturnError } from '../lib/errors.js';
+import { reportCompletion, sendProgress } from '../lib/context.js';
+import { handleToolError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { extractTextContent } from '../lib/response.js';
 import { executeToolStream, extractUsage } from '../lib/streaming.js';
-import { createToolTaskHandlers } from '../lib/task-utils.js';
+import { createToolTaskHandlers, READONLY_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
 import { AnalyzeFileInputSchema } from '../schemas/inputs.js';
 import { AnalyzeFileOutputSchema } from '../schemas/outputs.js';
 
@@ -55,8 +55,7 @@ async function analyzeFileWork(
       structuredContent: { analysis: text, ...(usage ? { usage } : {}) },
     };
   } catch (err) {
-    await reportFailure(ctx, TOOL_LABEL, err);
-    return await logAndReturnError(ctx, 'analyze_file', err);
+    return await handleToolError(ctx, 'analyze_file', TOOL_LABEL, err);
   } finally {
     await deleteUploadedFiles(uploadedFileName ? [uploadedFileName] : []);
   }
@@ -71,13 +70,8 @@ export function registerAnalyzeFileTool(server: McpServer): void {
         'Upload a file to Gemini and ask questions about it (PDFs, images, code files, etc.).',
       inputSchema: AnalyzeFileInputSchema,
       outputSchema: AnalyzeFileOutputSchema,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
-      execution: { taskSupport: 'optional' },
+      annotations: READONLY_ANNOTATIONS,
+      execution: TASK_EXECUTION,
     },
     createToolTaskHandlers(analyzeFileWork),
   );

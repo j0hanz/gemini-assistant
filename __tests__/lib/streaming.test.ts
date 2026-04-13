@@ -34,11 +34,11 @@ async function* fakeStream(
 
 function makeMockContext(overrides?: { aborted?: boolean }): {
   ctx: ServerContext;
-  progressCalls: { progress: number; total: number; message?: string }[];
+  progressCalls: { progress: number; total?: number; message?: string }[];
 } {
   const controller = new AbortController();
   if (overrides?.aborted) controller.abort();
-  const progressCalls: { progress: number; total: number; message?: string }[] = [];
+  const progressCalls: { progress: number; total?: number; message?: string }[] = [];
 
   const ctx = {
     mcpReq: {
@@ -57,11 +57,11 @@ function makeMockContext(overrides?: { aborted?: boolean }): {
       ),
       notify: async (notification: unknown) => {
         const n = notification as {
-          params: { progress: number; total: number; message?: string };
+          params: { progress: number; total?: number; message?: string };
         };
         progressCalls.push({
           progress: n.params.progress,
-          total: n.params.total,
+          ...(n.params.total !== undefined ? { total: n.params.total } : {}),
           ...(n.params.message ? { message: n.params.message } : {}),
         });
       },

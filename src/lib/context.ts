@@ -3,7 +3,7 @@ import type { ProgressNotification, ServerContext } from '@modelcontextprotocol/
 export async function sendProgress(
   ctx: ServerContext,
   progress: number,
-  total: number,
+  total?: number,
   message?: string,
 ): Promise<void> {
   const progressToken = ctx.mcpReq._meta?.progressToken;
@@ -14,7 +14,7 @@ export async function sendProgress(
       params: {
         progressToken,
         progress,
-        total,
+        ...(total !== undefined ? { total } : {}),
         ...(message ? { message } : {}),
       },
     };

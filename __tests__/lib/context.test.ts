@@ -75,6 +75,20 @@ describe('sendProgress', () => {
     assert.strictEqual(capturedParams['message'], undefined);
   });
 
+  it('omits total when not provided (indeterminate)', async () => {
+    const ctx = makeMockContext({ progressToken: 'tok-5' });
+    let capturedParams: Record<string, unknown> = {};
+    (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async (
+      notification: unknown,
+    ) => {
+      capturedParams = (notification as { params: Record<string, unknown> }).params;
+    };
+    await sendProgress(ctx, 1, undefined, 'phase 1');
+    assert.strictEqual(capturedParams['total'], undefined);
+    assert.strictEqual(capturedParams['progress'], 1);
+    assert.strictEqual(capturedParams['message'], 'phase 1');
+  });
+
   it('swallows notify errors', async () => {
     const ctx = makeMockContext({ progressToken: 'tok-3' });
     (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async () => {

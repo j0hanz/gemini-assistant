@@ -1,6 +1,6 @@
 import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import { extractToolContext } from '../lib/context.js';
+import { extractToolContext, reportCompletion, reportFailure } from '../lib/context.js';
 import { logAndReturnError } from '../lib/errors.js';
 import { withRetry } from '../lib/retry.js';
 import { consumeStreamWithProgress, validateStreamResult } from '../lib/streaming.js';
@@ -27,6 +27,7 @@ export function registerSearchTool(server: McpServer): void {
     },
     async ({ query, systemInstruction }, ctx: ServerContext) => {
       const tc = extractToolContext(ctx);
+      const TOOL_LABEL = 'Web Search';
       try {
         const stream = await withRetry(
           () =>
@@ -43,7 +44,12 @@ export function registerSearchTool(server: McpServer): void {
           { signal: tc.signal },
         );
 
-        const streamResult = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
+        const streamResult = await consumeStreamWithProgress(
+          stream,
+          tc.reportProgress,
+          tc.signal,
+          TOOL_LABEL,
+        );
         const result = validateStreamResult(streamResult, 'search');
         if (result.isError) return result;
 
@@ -67,6 +73,12 @@ export function registerSearchTool(server: McpServer): void {
           });
         }
 
+        await reportCompletion(
+          tc.reportProgress,
+          TOOL_LABEL,
+          `${sources.length} source${sources.length === 1 ? '' : 's'} found`,
+        );
+
         const answerText =
           result.content
             .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
@@ -78,6 +90,7 @@ export function registerSearchTool(server: McpServer): void {
           structuredContent: { answer: answerText, sources },
         };
       } catch (err) {
+        await reportFailure(tc.reportProgress, TOOL_LABEL, err);
         return await logAndReturnError(tc.log, 'search', err);
       }
     },

@@ -3,7 +3,7 @@ import { completable } from '@modelcontextprotocol/server';
 
 import { z } from 'zod/v4';
 
-import { extractToolContext } from '../lib/context.js';
+import { extractToolContext, reportCompletion, reportFailure } from '../lib/context.js';
 import { errorResult, logAndReturnError } from '../lib/errors.js';
 import { withRetry } from '../lib/retry.js';
 import { consumeStreamWithProgress, validateStreamResult } from '../lib/streaming.js';
@@ -60,11 +60,17 @@ export function registerAskTool(server: McpServer): void {
     },
     async ({ message, sessionId, systemInstruction, cacheName }, ctx: ServerContext) => {
       const tc = extractToolContext(ctx);
+      const TOOL_LABEL = 'Ask Gemini';
 
       const streamAndValidate = async (
         stream: AsyncGenerator<import('@google/genai').GenerateContentResponse>,
       ) => {
-        const streamResult = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
+        const streamResult = await consumeStreamWithProgress(
+          stream,
+          tc.reportProgress,
+          tc.signal,
+          TOOL_LABEL,
+        );
         return validateStreamResult(streamResult, 'ask');
       };
 
@@ -101,7 +107,18 @@ export function registerAskTool(server: McpServer): void {
               }),
             { signal: tc.signal },
           );
-          return await streamAndValidate(stream);
+          const result = await streamAndValidate(stream);
+          await reportCompletion(
+            tc.reportProgress,
+            TOOL_LABEL,
+            `responded (${
+              result.content
+                .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+                .map((c) => c.text)
+                .join('').length
+            } chars)`,
+          );
+          return result;
         }
 
         // Multi-turn: existing session
@@ -112,7 +129,18 @@ export function registerAskTool(server: McpServer): void {
             message,
             config: { abortSignal: tc.signal },
           });
-          return await streamAndValidate(stream);
+          const result = await streamAndValidate(stream);
+          await reportCompletion(
+            tc.reportProgress,
+            TOOL_LABEL,
+            `responded (${
+              result.content
+                .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+                .map((c) => c.text)
+                .join('').length
+            } chars)`,
+          );
+          return result;
         }
 
         // Multi-turn: new session
@@ -140,8 +168,14 @@ export function registerAskTool(server: McpServer): void {
             mimeType: 'application/json',
           });
         }
+        const text = result.content
+          .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+          .map((c) => c.text)
+          .join('');
+        await reportCompletion(tc.reportProgress, TOOL_LABEL, `responded (${text.length} chars)`);
         return result;
       } catch (err) {
+        await reportFailure(tc.reportProgress, TOOL_LABEL, err);
         return await logAndReturnError(tc.log, 'ask', err);
       }
     },

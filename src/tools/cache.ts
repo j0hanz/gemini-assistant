@@ -4,7 +4,7 @@ import { completable } from '@modelcontextprotocol/server';
 import { createPartFromUri } from '@google/genai';
 import { z } from 'zod/v4';
 
-import { extractToolContext } from '../lib/context.js';
+import { extractToolContext, reportCompletion, reportFailure } from '../lib/context.js';
 import { logAndReturnError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { withRetry } from '../lib/retry.js';
@@ -30,6 +30,7 @@ export function registerCacheTools(server: McpServer): void {
     },
     async ({ filePaths, systemInstruction, ttl }, ctx: ServerContext) => {
       const tc = extractToolContext(ctx);
+      const TOOL_LABEL = 'Create Cache';
       const uploadedFileNames: string[] = [];
       try {
         const parts: ReturnType<typeof createPartFromUri>[] = [];
@@ -47,7 +48,7 @@ export function registerCacheTools(server: McpServer): void {
             await tc.reportProgress(
               i,
               totalSteps,
-              `Uploading files ${i + 1}-${Math.min(i + chunk.length, filePaths.length)}/${filePaths.length}`,
+              `${TOOL_LABEL}: Uploading files ${i + 1}-${Math.min(i + chunk.length, filePaths.length)}/${filePaths.length}`,
             );
 
             const chunkPromises = chunk.map(async (fp: string) => {
@@ -61,7 +62,7 @@ export function registerCacheTools(server: McpServer): void {
           }
         }
 
-        await tc.reportProgress(totalSteps - 1, totalSteps, 'Creating cache');
+        await tc.reportProgress(totalSteps - 1, totalSteps, `${TOOL_LABEL}: Creating cache`);
         const cache = await withRetry(
           () =>
             ai.caches.create({
@@ -76,7 +77,7 @@ export function registerCacheTools(server: McpServer): void {
           { signal: tc.signal },
         );
 
-        await tc.reportProgress(totalSteps, totalSteps, 'Complete');
+        await reportCompletion(tc.reportProgress, TOOL_LABEL, `cached ${cache.name ?? ''}`);
 
         return {
           content: [
@@ -100,12 +101,14 @@ export function registerCacheTools(server: McpServer): void {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (message.includes('too few tokens') || message.includes('minimum')) {
+          await reportFailure(tc.reportProgress, TOOL_LABEL, err);
           return await logAndReturnError(
             tc.log,
             'create_cache',
             new Error(`content is below the ~32,000 token minimum. ${message}`),
           );
         }
+        await reportFailure(tc.reportProgress, TOOL_LABEL, err);
         return await logAndReturnError(tc.log, 'create_cache', err);
       } finally {
         await deleteUploadedFiles(uploadedFileNames);

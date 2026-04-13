@@ -8,6 +8,24 @@ interface ToolContext {
   reportProgress: ReportProgress;
 }
 
+export async function reportCompletion(
+  reportProgress: ReportProgress,
+  toolLabel: string,
+  detail: string,
+): Promise<void> {
+  await reportProgress(100, 100, `${toolLabel}: ${detail}`);
+}
+
+export async function reportFailure(
+  reportProgress: ReportProgress,
+  toolLabel: string,
+  error: unknown,
+): Promise<void> {
+  const raw = error instanceof Error ? error.message : String(error);
+  const short = raw.length > 80 ? `${raw.substring(0, 77)}...` : raw;
+  await reportProgress(100, 100, `${toolLabel}: failed — ${short}`);
+}
+
 export function extractToolContext(ctx: ServerContext): ToolContext {
   const progressToken = ctx.mcpReq._meta?.progressToken;
 

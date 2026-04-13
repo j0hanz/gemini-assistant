@@ -23,6 +23,7 @@ export async function consumeStreamWithProgress(
   stream: AsyncGenerator<GenerateContentResponse>,
   reportProgress: ReportProgress,
   signal?: AbortSignal,
+  toolLabel?: string,
 ): Promise<StreamResult> {
   const parts: Part[] = [];
   let text = '';
@@ -30,7 +31,9 @@ export async function consumeStreamWithProgress(
   let groundingMetadata: GroundingMetadata | undefined;
   let phase: Phase = Phase.Waiting;
 
-  await reportProgress(0, 100, 'Evaluating prompt');
+  const msg = (m: string): string => (toolLabel ? `${toolLabel}: ${m}` : m);
+
+  await reportProgress(0, 100, msg('Evaluating prompt'));
 
   for await (const chunk of stream) {
     if (signal?.aborted) break;
@@ -52,12 +55,12 @@ export async function consumeStreamWithProgress(
 
       if (part.thought && phase < Phase.Thinking) {
         phase = Phase.Thinking;
-        await reportProgress(20, 100, 'Thinking');
+        await reportProgress(20, 100, msg('Thinking'));
       }
 
       if (!part.thought && part.text !== undefined && phase < Phase.Generating) {
         phase = Phase.Generating;
-        await reportProgress(60, 100, 'Generating response');
+        await reportProgress(60, 100, msg('Generating response'));
       }
 
       if (!part.thought && part.text !== undefined) {
@@ -65,8 +68,6 @@ export async function consumeStreamWithProgress(
       }
     }
   }
-
-  await reportProgress(100, 100, 'Complete');
 
   return {
     text,

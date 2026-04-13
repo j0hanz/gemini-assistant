@@ -56,11 +56,11 @@ describe('consumeStreamWithProgress', () => {
     assert.strictEqual(result.parts.length, 2);
     assert.strictEqual(result.finishReason, FinishReason.STOP);
 
-    // Should have: Evaluating prompt, Generating response, Complete
+    // Should have: Evaluating prompt, Generating response (no terminal 'Complete' — callers own that)
     const messages = tracker.calls.map((c) => c.message);
     assert.ok(messages.includes('Evaluating prompt'));
     assert.ok(messages.includes('Generating response'));
-    assert.ok(messages.includes('Complete'));
+    assert.ok(!messages.includes('Complete'));
   });
 
   it('reports thinking phase when thought parts present', async () => {
@@ -81,7 +81,7 @@ describe('consumeStreamWithProgress', () => {
     assert.ok(messages.includes('Evaluating prompt'));
     assert.ok(messages.includes('Thinking'));
     assert.ok(messages.includes('Generating response'));
-    assert.ok(messages.includes('Complete'));
+    assert.ok(!messages.includes('Complete'));
   });
 
   it('handles empty stream', async () => {
@@ -96,7 +96,7 @@ describe('consumeStreamWithProgress', () => {
 
     const messages = tracker.calls.map((c) => c.message);
     assert.ok(messages.includes('Evaluating prompt'));
-    assert.ok(messages.includes('Complete'));
+    assert.ok(!messages.includes('Complete'));
   });
 
   it('captures finishReason from last chunk', async () => {

@@ -2,7 +2,7 @@ import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { Outcome } from '@google/genai';
 
-import { extractToolContext } from '../lib/context.js';
+import { extractToolContext, reportCompletion, reportFailure } from '../lib/context.js';
 import { errorResult, logAndReturnError } from '../lib/errors.js';
 import { withRetry } from '../lib/retry.js';
 import { consumeStreamWithProgress } from '../lib/streaming.js';
@@ -29,6 +29,7 @@ export function registerExecuteCodeTool(server: McpServer): void {
     },
     async ({ task, language }, ctx: ServerContext) => {
       const tc = extractToolContext(ctx);
+      const TOOL_LABEL = 'Execute Code';
       try {
         const prompt = language ? `${task}\n\nPreferred language: ${language}` : task;
 
@@ -46,7 +47,12 @@ export function registerExecuteCodeTool(server: McpServer): void {
           { signal: tc.signal },
         );
 
-        const streamResult = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
+        const streamResult = await consumeStreamWithProgress(
+          stream,
+          tc.reportProgress,
+          tc.signal,
+          TOOL_LABEL,
+        );
 
         const { parts } = streamResult;
         if (parts.length === 0) {
@@ -80,6 +86,7 @@ export function registerExecuteCodeTool(server: McpServer): void {
         const explanation = explanationLines.join('\n');
 
         if (executionFailed) {
+          await reportCompletion(tc.reportProgress, TOOL_LABEL, 'execution failed');
           return errorResult(
             `execute_code: code execution failed.\nCode:\n${code}\nOutput:\n${output}`,
           );
@@ -87,11 +94,13 @@ export function registerExecuteCodeTool(server: McpServer): void {
 
         const structured = { code, output, explanation };
 
+        await reportCompletion(tc.reportProgress, TOOL_LABEL, 'completed');
         return {
           content: [{ type: 'text', text: JSON.stringify(structured) }],
           structuredContent: structured,
         };
       } catch (err) {
+        await reportFailure(tc.reportProgress, TOOL_LABEL, err);
         return await logAndReturnError(tc.log, 'execute_code', err);
       }
     },

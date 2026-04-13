@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Uses TypeScript, JavaScript.
+This document provides an overview of the Gemini Assistant project, including its tooling, architecture, testing strategy, commands, safety boundaries, directory structure, and navigation.
 
 ## Tooling
 

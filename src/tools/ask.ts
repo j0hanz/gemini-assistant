@@ -1,6 +1,7 @@
 import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 import { completable } from '@modelcontextprotocol/server';
 
+import type { ThinkingLevel } from '@google/genai';
 import { z } from 'zod/v4';
 
 import { extractToolContext, reportCompletion, reportFailure } from '../lib/context.js';
@@ -10,6 +11,12 @@ import { consumeStreamWithProgress, validateStreamResult } from '../lib/streamin
 
 import { ai, MODEL } from '../client.js';
 import { getSession, isEvicted, listSessionEntries, setSession } from '../sessions.js';
+
+const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
+
+const DEFAULT_SYSTEM_INSTRUCTION =
+  'You are a helpful AI assistant. Provide direct, accurate answers. ' +
+  'Use Markdown formatting for structure. Be concise.';
 
 export function registerAskTool(server: McpServer): void {
   server.registerTool(
@@ -34,6 +41,12 @@ export function registerAskTool(server: McpServer): void {
           .string()
           .optional()
           .describe('System prompt (used on session creation or single-turn)'),
+        thinkingLevel: z
+          .enum(THINKING_LEVELS)
+          .optional()
+          .describe(
+            'Thinking depth (applies at session creation or single-turn). MINIMAL (fastest), LOW, MEDIUM, HIGH (deepest).',
+          ),
         cacheName: completable(
           z
             .string()
@@ -62,7 +75,10 @@ export function registerAskTool(server: McpServer): void {
         openWorldHint: true,
       },
     },
-    async ({ message, sessionId, systemInstruction, cacheName }, ctx: ServerContext) => {
+    async (
+      { message, sessionId, systemInstruction, thinkingLevel, cacheName },
+      ctx: ServerContext,
+    ) => {
       const tc = extractToolContext(ctx);
       const TOOL_LABEL = 'Ask Gemini';
 
@@ -104,8 +120,12 @@ export function registerAskTool(server: McpServer): void {
                 contents: message,
                 config: {
                   ...cacheConfig,
-                  ...(systemInstruction ? { systemInstruction } : {}),
-                  thinkingConfig: { includeThoughts: true },
+                  systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION,
+                  thinkingConfig: {
+                    includeThoughts: true,
+                    ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
+                  },
+                  maxOutputTokens: 8192,
                   abortSignal: tc.signal,
                 },
               }),
@@ -153,8 +173,12 @@ export function registerAskTool(server: McpServer): void {
           model: MODEL,
           config: {
             ...cacheConfig,
-            ...(systemInstruction ? { systemInstruction } : {}),
-            thinkingConfig: { includeThoughts: true },
+            systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION,
+            thinkingConfig: {
+              includeThoughts: true,
+              ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
+            },
+            maxOutputTokens: 8192,
           },
         });
         const stream = await chat.sendMessageStream({

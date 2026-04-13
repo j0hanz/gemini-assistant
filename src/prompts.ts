@@ -43,7 +43,7 @@ export function registerPrompts(server: McpServer): void {
           role: 'user' as const,
           content: {
             type: 'text' as const,
-            text: `Review the following${language ? ` ${language}` : ''} code for bugs, best practices, and improvements:\n\n\`\`\`${language ?? ''}\n${code}\n\`\`\``,
+            text: `Review the following${language ? ` ${language}` : ''} code for bugs, best practices, and improvements:\n\n\`\`\`${language ?? ''}\n${code}\n\`\`\`\n\nStructure findings as: 1) Bugs, 2) Best practices, 3) Improvements.\nDo not explain obvious syntax. Do not suggest complete rewrites unless critical.`,
           },
         },
       ],
@@ -62,17 +62,25 @@ export function registerPrompts(server: McpServer): void {
         ),
       }),
     },
-    ({ text, style }) => ({
-      messages: [
-        {
-          role: 'user' as const,
-          content: {
-            type: 'text' as const,
-            text: `Summarize the following text${style ? ` in ${style} style` : ''}:\n\n${text}`,
+    ({ text, style }) => {
+      const constraint =
+        style === 'brief'
+          ? ' Maximum 3 sentences.'
+          : style === 'bullet-points'
+            ? ' Use dash-prefixed bullets, one per key point.'
+            : '';
+      return {
+        messages: [
+          {
+            role: 'user' as const,
+            content: {
+              type: 'text' as const,
+              text: `Summarize the following text${style ? ` in ${style} style` : ''}:\n\n${text}\n\nProvide only the summary, no meta-commentary.${constraint}`,
+            },
           },
-        },
-      ],
-    }),
+        ],
+      };
+    },
   );
 
   server.registerPrompt(
@@ -95,7 +103,7 @@ export function registerPrompts(server: McpServer): void {
           role: 'user' as const,
           content: {
             type: 'text' as const,
-            text: `Explain the following error and suggest how to fix it${context ? `. Context: ${context}` : ''}:\n\n${error}`,
+            text: `Explain the following error and suggest how to fix it${context ? `. Context: ${context}` : ''}:\n\n${error}\n\nStructure response as: 1) Root cause, 2) Fix, 3) Prevention. Be concise.`,
           },
         },
       ],

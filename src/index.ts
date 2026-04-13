@@ -43,10 +43,10 @@ const server = new McpServer(
       },
     },
     instructions:
-      'General-purpose Gemini AI assistant. Use "ask" for chat (supports multi-turn via sessionId), ' +
-      '"execute_code" for sandboxed code execution, "search" for web-grounded answers, ' +
-      '"analyze_file" to analyze uploaded files, and "create_cache"/"list_caches"/"delete_cache" ' +
-      'to manage Gemini context caches for large payloads (>32k tokens).',
+      'Tools: ask (chat, multi-turn via sessionId), execute_code (sandboxed code), ' +
+      'search (web-grounded answers), analyze_file (file upload analysis), ' +
+      'create_cache/list_caches/delete_cache (context caching, ≥32k tokens). ' +
+      'Use cacheName with ask to attach cached context.',
   },
 );
 

@@ -1,5 +1,7 @@
 import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 
+import { ThinkingLevel } from '@google/genai';
+
 import { extractToolContext, reportCompletion, reportFailure } from '../lib/context.js';
 import { logAndReturnError } from '../lib/errors.js';
 import { withRetry } from '../lib/retry.js';
@@ -8,6 +10,11 @@ import { SearchInputSchema } from '../schemas/inputs.js';
 import { SearchOutputSchema } from '../schemas/outputs.js';
 
 import { ai, MODEL } from '../client.js';
+
+const SEARCH_SYSTEM_INSTRUCTION =
+  'Synthesize information from search results into a direct answer. ' +
+  'Base answers strictly on the provided search grounding. ' +
+  'Do not speculate beyond what sources confirm. Be concise and factual.';
 
 export function registerSearchTool(server: McpServer): void {
   server.registerTool(
@@ -36,8 +43,12 @@ export function registerSearchTool(server: McpServer): void {
               contents: query,
               config: {
                 tools: [{ googleSearch: {} }],
-                ...(systemInstruction ? { systemInstruction } : {}),
-                thinkingConfig: { includeThoughts: true },
+                systemInstruction: systemInstruction ?? SEARCH_SYSTEM_INSTRUCTION,
+                thinkingConfig: {
+                  includeThoughts: true,
+                  thinkingLevel: ThinkingLevel.LOW,
+                },
+                maxOutputTokens: 4096,
                 abortSignal: tc.signal,
               },
             }),

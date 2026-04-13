@@ -47,6 +47,23 @@ describe('AskInputSchema', () => {
     });
     assert.strictEqual(result.success, false);
   });
+
+  it('accepts valid thinkingLevel', () => {
+    const result = AskInputSchema.safeParse({ message: 'Hello', thinkingLevel: 'LOW' });
+    assert.ok(result.success);
+  });
+
+  it('accepts all thinkingLevel values', () => {
+    for (const level of ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH']) {
+      const result = AskInputSchema.safeParse({ message: 'Hello', thinkingLevel: level });
+      assert.ok(result.success, `thinkingLevel '${level}' should be valid`);
+    }
+  });
+
+  it('rejects invalid thinkingLevel', () => {
+    const result = AskInputSchema.safeParse({ message: 'Hello', thinkingLevel: 'ULTRA' });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('ExecuteCodeInputSchema', () => {

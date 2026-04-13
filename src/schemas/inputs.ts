@@ -11,6 +11,10 @@ export const AskInputSchema = z.object({
     .string()
     .optional()
     .describe('System prompt (used on session creation or single-turn)'),
+  thinkingLevel: z
+    .enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'])
+    .optional()
+    .describe('Thinking depth: MINIMAL (fastest), LOW, MEDIUM, HIGH (deepest).'),
   cacheName: z
     .string()
     .optional()

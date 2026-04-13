@@ -18,6 +18,11 @@ import { AnalyzeFileInputSchema } from '../schemas/inputs.js';
 
 import { ai, MODEL } from '../client.js';
 
+const ANALYZE_FILE_SYSTEM_INSTRUCTION =
+  'Analyze the uploaded file thoroughly. Structure findings clearly with headings. ' +
+  'Reference specific sections, lines, or elements from the file. ' +
+  'Base analysis strictly on the file content. Do not introduce external information.';
+
 async function analyzeFileWork(
   { filePath, question }: { filePath: string; question: string },
   ctx: ServerContext,
@@ -40,7 +45,9 @@ async function analyzeFileWork(
           model: MODEL,
           contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: question }],
           config: {
+            systemInstruction: ANALYZE_FILE_SYSTEM_INSTRUCTION,
             thinkingConfig: { includeThoughts: true },
+            maxOutputTokens: 8192,
             abortSignal: tc.signal,
           },
         }),

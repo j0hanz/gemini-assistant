@@ -11,6 +11,10 @@ import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
 
 import { ai, MODEL } from '../client.js';
 
+const EXECUTE_CODE_SYSTEM_INSTRUCTION =
+  'Generate clean, working code that solves the task. Include brief comments for non-obvious logic. ' +
+  'Handle edge cases. Provide a concise explanation of the approach after execution.';
+
 export function registerExecuteCodeTool(server: McpServer): void {
   server.registerTool(
     'execute_code',
@@ -31,7 +35,11 @@ export function registerExecuteCodeTool(server: McpServer): void {
       const tc = extractToolContext(ctx);
       const TOOL_LABEL = 'Execute Code';
       try {
-        const prompt = language ? `${task}\n\nPreferred language: ${language}` : task;
+        const prompt = [
+          task,
+          ...(language ? [`Preferred language: ${language}`] : []),
+          'Return working code. Handle edge cases. Keep output concise.',
+        ].join('\n\n');
 
         const stream = await withRetry(
           () =>
@@ -40,7 +48,9 @@ export function registerExecuteCodeTool(server: McpServer): void {
               contents: prompt,
               config: {
                 tools: [{ codeExecution: {} }],
+                systemInstruction: EXECUTE_CODE_SYSTEM_INSTRUCTION,
                 thinkingConfig: { includeThoughts: true },
+                maxOutputTokens: 8192,
                 abortSignal: tc.signal,
               },
             }),

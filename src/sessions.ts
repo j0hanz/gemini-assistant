@@ -117,7 +117,6 @@ function evictOldest(): void {
   const oldestId = oldestSessionId();
   if (oldestId) {
     removeSession(oldestId, true);
-    notifyChange();
   }
 }
 
@@ -138,7 +137,9 @@ export function isEvicted(id: string): boolean {
 export function getSession(id: string): Chat | undefined {
   const entry = sessions.get(id);
   if (!entry) return undefined;
-  return updateSessionAccess(id, entry);
+  const chat = updateSessionAccess(id, entry);
+  notifyChange();
+  return chat;
 }
 
 export function setSession(id: string, chat: Chat): void {

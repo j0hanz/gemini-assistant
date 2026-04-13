@@ -1,6 +1,7 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 import { completable } from '@modelcontextprotocol/server';
 
+import type { Chat } from '@google/genai';
 import { z } from 'zod/v4';
 
 import {
@@ -11,7 +12,7 @@ import {
 import { reportCompletion } from '../lib/context.js';
 import { errorResult, handleToolError, throwInvalidParams } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
-import { executeToolStream, extractUsage } from '../lib/streaming.js';
+import { executeToolStream, extractUsage, type StreamResult } from '../lib/streaming.js';
 import { createToolTaskHandlers, MUTABLE_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
 import { AskOutputSchema } from '../schemas/outputs.js';
 
@@ -34,32 +35,68 @@ interface AskArgs {
 }
 
 const ASK_TOOL_LABEL = 'Ask Gemini';
+const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
+
+function tryParseJsonResponse(text: string): unknown {
+  const candidates = [text.trim()];
+  const fencedMatch = JSON_CODE_BLOCK_PATTERN.exec(text)?.[1]?.trim();
+  if (fencedMatch && fencedMatch !== candidates[0]) {
+    candidates.push(fencedMatch);
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+
+    try {
+      return JSON.parse(candidate) as unknown;
+    } catch {
+      // Ignore invalid JSON candidates and fall back to raw text output.
+    }
+  }
+
+  return undefined;
+}
+
+function buildAskStructuredContent(
+  text: string,
+  streamResult: Pick<StreamResult, 'thoughtText' | 'usageMetadata'>,
+  jsonMode?: boolean,
+): {
+  answer: string;
+  data?: unknown;
+  thoughts?: string;
+  usage?: ReturnType<typeof extractUsage>;
+} {
+  const parsedData = jsonMode ? tryParseJsonResponse(text) : undefined;
+  const answer = parsedData === undefined ? text : JSON.stringify(parsedData, null, 2);
+  const usage = extractUsage(streamResult.usageMetadata);
+
+  return {
+    answer,
+    ...(parsedData !== undefined ? { data: parsedData } : {}),
+    ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
+    ...(usage ? { usage } : {}),
+  };
+}
 
 function formatStructuredResult(
   result: CallToolResult,
-  usageMetadata?: ReturnType<typeof extractUsage>,
+  streamResult: Pick<StreamResult, 'thoughtText' | 'usageMetadata'>,
   jsonMode?: boolean,
 ): CallToolResult {
   if (result.isError) return result;
-  const text = extractTextContent(result.content);
-
-  let structured: Record<string, unknown>;
-  if (jsonMode) {
-    try {
-      structured = {
-        ...(JSON.parse(text) as Record<string, unknown>),
-        ...(usageMetadata ? { usage: usageMetadata } : {}),
-      };
-    } catch {
-      structured = { answer: text, ...(usageMetadata ? { usage: usageMetadata } : {}) };
-    }
-  } else {
-    structured = { answer: text, ...(usageMetadata ? { usage: usageMetadata } : {}) };
-  }
+  const structured = buildAskStructuredContent(
+    extractTextContent(result.content),
+    streamResult,
+    jsonMode,
+  );
 
   return {
     ...result,
-    content: [{ type: 'text', text }, ...result.content.filter((c) => c.type !== 'text')],
+    content: [
+      { type: 'text', text: structured.answer },
+      ...result.content.filter((c) => c.type !== 'text'),
+    ],
     structuredContent: structured,
   };
 }
@@ -90,11 +127,13 @@ function validateAskRequest({
   cacheName,
   responseSchema,
 }: AskArgs): CallToolResult | undefined {
+  const hasExistingSession = sessionId ? getSessionEntry(sessionId) !== undefined : false;
+
   if (sessionId && isEvicted(sessionId)) {
     return errorResult(`ask: Session '${sessionId}' has expired.`);
   }
 
-  if (sessionId && cacheName && getSessionEntry(sessionId)) {
+  if (sessionId && cacheName && hasExistingSession) {
     throwInvalidParams(
       'ask: Cannot apply a cachedContent to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
     );
@@ -106,7 +145,7 @@ function validateAskRequest({
     );
   }
 
-  if (responseSchema && sessionId && getSessionEntry(sessionId)) {
+  if (responseSchema && sessionId && hasExistingSession) {
     throwInvalidParams(
       'ask: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
     );
@@ -128,7 +167,19 @@ async function runAskStream(
   );
   const text = extractTextContent(result.content);
   await reportCompletion(ctx, ASK_TOOL_LABEL, `responded (${text.length} chars)`);
-  return formatStructuredResult(result, extractUsage(streamResult.usageMetadata), jsonMode);
+  return formatStructuredResult(result, streamResult, jsonMode);
+}
+
+async function askWithChat(chat: Chat, args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
+  return await runAskStream(
+    ctx,
+    () =>
+      chat.sendMessageStream({
+        message: args.message,
+        config: { abortSignal: ctx.mcpReq.signal },
+      }),
+    Boolean(args.responseSchema),
+  );
 }
 
 function appendSessionResource(result: CallToolResult, sessionId: string): void {
@@ -162,12 +213,7 @@ async function askExistingSession(
   if (!chat) return undefined;
 
   await ctx.mcpReq.log('debug', `Resuming session ${args.sessionId}`);
-  return await runAskStream(ctx, () =>
-    chat.sendMessageStream({
-      message: args.message,
-      config: { abortSignal: ctx.mcpReq.signal },
-    }),
-  );
+  return await askWithChat(chat, args, ctx);
 }
 
 async function askNewSession(
@@ -180,15 +226,7 @@ async function askNewSession(
     config: buildAskConfig(args),
   });
 
-  const result = await runAskStream(
-    ctx,
-    () =>
-      chat.sendMessageStream({
-        message: args.message,
-        config: { abortSignal: ctx.mcpReq.signal },
-      }),
-    !!args.responseSchema,
-  );
+  const result = await askWithChat(chat, args, ctx);
 
   if (!result.isError) {
     setSession(args.sessionId, chat);

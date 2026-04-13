@@ -9,6 +9,7 @@ export const UsageMetadataSchema = z.object({
 
 export const AskOutputSchema = z.object({
   answer: z.string().describe('Generated response'),
+  data: z.unknown().optional().describe('Parsed structured response when JSON mode is used'),
   thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
   usage: UsageMetadataSchema.optional().describe('Token usage'),
 });

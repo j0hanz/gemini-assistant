@@ -4,10 +4,32 @@ import { describe, it } from 'node:test';
 import {
   AnalyzeFileOutputSchema,
   AnalyzeUrlOutputSchema,
+  AskOutputSchema,
   ExecuteCodeOutputSchema,
   SearchOutputSchema,
   UsageMetadataSchema,
 } from '../../src/schemas/outputs.js';
+
+describe('AskOutputSchema', () => {
+  it('accepts a plain text answer', () => {
+    const result = AskOutputSchema.safeParse({ answer: 'Hello world' });
+    assert.ok(result.success);
+  });
+
+  it('accepts structured data alongside the answer', () => {
+    const result = AskOutputSchema.safeParse({
+      answer: '{"status":"ok"}',
+      data: { status: 'ok' },
+      usage: { totalTokenCount: 42 },
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects a missing answer field', () => {
+    const result = AskOutputSchema.safeParse({ data: { status: 'ok' } });
+    assert.strictEqual(result.success, false);
+  });
+});
 
 describe('ExecuteCodeOutputSchema', () => {
   it('accepts valid structured output', () => {

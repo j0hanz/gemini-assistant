@@ -3,7 +3,13 @@ import { describe, it } from 'node:test';
 
 // Sessions module uses module-level state. We import fresh each test via dynamic import.
 // Since ESM caches modules, we test the exported API directly.
-import { getSession, isEvicted, listSessionEntries, setSession } from '../src/sessions.js';
+import {
+  getSession,
+  isEvicted,
+  listSessionEntries,
+  onSessionChange,
+  setSession,
+} from '../src/sessions.js';
 
 // Minimal mock Chat object — sessions only store the reference
 function mockChat(label = 'chat'): { _label: string } {
@@ -101,6 +107,37 @@ describe('sessions', () => {
 
       assert.strictEqual(isEvicted(`${prefix}11`), false);
       assert.strictEqual(isEvicted(`${prefix}12`), true);
+    });
+  });
+
+  describe('change notifications', () => {
+    it('notifies when reading a session updates lastAccess', () => {
+      let calls = 0;
+      onSessionChange(() => {
+        calls += 1;
+      });
+
+      setSession('sess-read-notify', mockChat('read-notify') as never);
+      calls = 0;
+
+      assert.ok(getSession('sess-read-notify'));
+      assert.strictEqual(calls, 1);
+    });
+
+    it('notifies once when adding a session over capacity', () => {
+      const prefix = 'sess-overflow-notify-';
+
+      for (let i = 0; i < 60; i += 1) {
+        setSession(`${prefix}${String(i)}`, mockChat(`notify-${String(i)}`) as never);
+      }
+
+      let calls = 0;
+      onSessionChange(() => {
+        calls += 1;
+      });
+
+      setSession(`${prefix}overflow`, mockChat('notify-overflow') as never);
+      assert.strictEqual(calls, 1);
     });
   });
 });

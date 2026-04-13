@@ -1,8 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
 
-const apiKey = process.env.GEMINI_API_KEY;
+const apiKey = process.env.API_KEY;
 if (!apiKey) {
-  console.error('GEMINI_API_KEY environment variable is required');
+  console.error('API_KEY environment variable is required');
   process.exit(1);
 }
 

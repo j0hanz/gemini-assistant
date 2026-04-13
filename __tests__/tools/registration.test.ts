@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 // Set dummy API key so client.ts doesn't exit
-process.env.GEMINI_API_KEY ??= 'test-key-for-registration';
+process.env.API_KEY ??= 'test-key-for-registration';
 
 const { registerAskTool } = await import('../../src/tools/ask.js');
 const { registerSearchTool } = await import('../../src/tools/search.js');

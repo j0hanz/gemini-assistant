@@ -103,4 +103,5 @@ export function setSession(id: string, chat: Chat): void {
   }
   sessions.set(id, { chat, lastAccess: Date.now() });
   startEvictionTimer();
+  notifyChange();
 }

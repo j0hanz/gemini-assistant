@@ -34,6 +34,19 @@ describe('AskInputSchema', () => {
     const result = AskInputSchema.safeParse({ message: 123 });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects empty message', () => {
+    const result = AskInputSchema.safeParse({ message: '' });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects sessionId exceeding 256 chars', () => {
+    const result = AskInputSchema.safeParse({
+      message: 'hi',
+      sessionId: 'x'.repeat(257),
+    });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('ExecuteCodeInputSchema', () => {
@@ -54,6 +67,11 @@ describe('ExecuteCodeInputSchema', () => {
     const result = ExecuteCodeInputSchema.safeParse({});
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects empty task', () => {
+    const result = ExecuteCodeInputSchema.safeParse({ task: '' });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('SearchInputSchema', () => {
@@ -72,6 +90,11 @@ describe('SearchInputSchema', () => {
 
   it('rejects missing query', () => {
     const result = SearchInputSchema.safeParse({});
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects empty query', () => {
+    const result = SearchInputSchema.safeParse({ query: '' });
     assert.strictEqual(result.success, false);
   });
 });
@@ -139,6 +162,12 @@ describe('CreateCacheInputSchema', () => {
 
   it('rejects empty filePaths without systemInstruction', () => {
     const result = CreateCacheInputSchema.safeParse({ filePaths: [] });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects filePaths exceeding 50 entries', () => {
+    const paths = Array.from({ length: 51 }, (_, i) => `/file${i}.txt`);
+    const result = CreateCacheInputSchema.safeParse({ filePaths: paths });
     assert.strictEqual(result.success, false);
   });
 });

@@ -34,7 +34,7 @@ export async function withRetry<T>(
 
         const onAbort = () => {
           clearTimeout(timer);
-          reject(err instanceof Error ? err : new Error(String(err)));
+          reject(new DOMException('Aborted', 'AbortError'));
         };
 
         const timer = setTimeout(() => {

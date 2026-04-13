@@ -18,9 +18,13 @@ export function registerAskTool(server: McpServer): void {
       title: 'Ask Gemini',
       description: 'Send a message to Gemini. Supports multi-turn chat via sessionId.',
       inputSchema: z.object({
-        message: z.string().max(100_000).describe('User message or prompt'),
+        message: z.string().min(1).max(100_000).describe('User message or prompt'),
         sessionId: completable(
-          z.string().optional().describe('Session ID for multi-turn chat. Omit for single-turn.'),
+          z
+            .string()
+            .max(256)
+            .optional()
+            .describe('Session ID for multi-turn chat. Omit for single-turn.'),
           (value) =>
             listSessionEntries()
               .map((s) => s.id)
@@ -157,16 +161,18 @@ export function registerAskTool(server: McpServer): void {
           message,
           config: { abortSignal: tc.signal },
         });
-        setSession(sessionId, chat);
 
         const result = await streamAndValidate(stream);
         if (!result.isError) {
+          setSession(sessionId, chat);
           result.content.push({
             type: 'resource_link' as const,
             uri: `sessions://${sessionId}`,
             name: `Chat Session ${sessionId}`,
             mimeType: 'application/json',
           });
+        } else {
+          await tc.log('debug', `Session ${sessionId} not stored due to stream error`);
         }
         const text = result.content
           .filter((c): c is { type: 'text'; text: string } => c.type === 'text')

@@ -66,6 +66,12 @@ export function registerSearchTool(server: McpServer): void {
           }
         }
 
+        const answerText =
+          result.content
+            .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+            .map((c) => c.text)
+            .join('') || '';
+
         if (sources.length > 0) {
           result.content.push({
             type: 'text',
@@ -78,12 +84,6 @@ export function registerSearchTool(server: McpServer): void {
           TOOL_LABEL,
           `${sources.length} source${sources.length === 1 ? '' : 's'} found`,
         );
-
-        const answerText =
-          result.content
-            .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-            .map((c) => c.text)
-            .join('') || '';
 
         return {
           ...result,

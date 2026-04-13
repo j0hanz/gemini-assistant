@@ -1,9 +1,10 @@
 import { z } from 'zod/v4';
 
 export const AskInputSchema = z.object({
-  message: z.string().max(100_000).describe('User message or prompt'),
+  message: z.string().min(1).max(100_000).describe('User message or prompt'),
   sessionId: z
     .string()
+    .max(256)
     .optional()
     .describe('Session ID for multi-turn chat. Omit for single-turn.'),
   systemInstruction: z
@@ -17,12 +18,12 @@ export const AskInputSchema = z.object({
 });
 
 export const ExecuteCodeInputSchema = z.object({
-  task: z.string().describe('Description of the code task to perform'),
+  task: z.string().min(1).describe('Description of the code task to perform'),
   language: z.string().optional().describe('Preferred language hint (Python is sandbox default)'),
 });
 
 export const SearchInputSchema = z.object({
-  query: z.string().describe('Question or topic to research'),
+  query: z.string().min(1).describe('Question or topic to research'),
   systemInstruction: z.string().optional().describe('Custom instructions for result presentation'),
 });
 
@@ -35,6 +36,7 @@ export const CreateCacheInputSchema = z
   .object({
     filePaths: z
       .array(z.string().min(1))
+      .max(50)
       .optional()
       .describe('Absolute paths to files to include in the cache'),
     systemInstruction: z

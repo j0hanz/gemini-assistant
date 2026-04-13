@@ -48,7 +48,8 @@ export function registerResources(server: McpServer): void {
       mimeType: 'application/json',
     },
     (uri, { sessionId }): ReadResourceResult => {
-      const entry = getSessionEntry(sessionId as string);
+      const id = Array.isArray(sessionId) ? sessionId[0] : sessionId;
+      const entry = id ? getSessionEntry(id) : undefined;
       const text = entry ? JSON.stringify(entry) : JSON.stringify({ error: 'Session not found' });
       return { contents: [{ uri: uri.href, text }] };
     },
@@ -56,11 +57,11 @@ export function registerResources(server: McpServer): void {
 
   server.registerResource(
     'caches',
-    new ResourceTemplate('cache://list', {
+    new ResourceTemplate('caches://list', {
       list: () => ({
         resources: [
           {
-            uri: 'cache://list',
+            uri: 'caches://list',
             name: 'List of active Gemini context caches',
           },
         ],

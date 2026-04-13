@@ -5,8 +5,8 @@ import { createPartFromUri } from '@google/genai';
 import { z } from 'zod/v4';
 
 import { extractToolContext } from '../lib/context.js';
-import { geminiErrorResult } from '../lib/errors.js';
-import { uploadFile } from '../lib/file-upload.js';
+import { logAndReturnError } from '../lib/errors.js';
+import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { withRetry } from '../lib/retry.js';
 import { CreateCacheInputSchema } from '../schemas/inputs.js';
 
@@ -57,9 +57,7 @@ export function registerCacheTools(server: McpServer): void {
             });
 
             const results = await Promise.all(chunkPromises);
-            for (const result of results) {
-              parts.push(result);
-            }
+            parts.push(...results);
           }
         }
 
@@ -93,7 +91,7 @@ export function registerCacheTools(server: McpServer): void {
             },
             {
               type: 'resource_link' as const,
-              uri: 'cache://list',
+              uri: 'caches://list',
               name: 'Active Caches',
               mimeType: 'application/json',
             },
@@ -101,27 +99,16 @@ export function registerCacheTools(server: McpServer): void {
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        await tc.log('error', `create_cache failed: ${message}`);
         if (message.includes('too few tokens') || message.includes('minimum')) {
-          return geminiErrorResult(
+          return await logAndReturnError(
+            tc.log,
             'create_cache',
             new Error(`content is below the ~32,000 token minimum. ${message}`),
           );
         }
-        return geminiErrorResult('create_cache', err);
+        return await logAndReturnError(tc.log, 'create_cache', err);
       } finally {
-        // Clean up uploaded files — cache references them by URI, not by file ID
-        const cleanups = await Promise.allSettled(
-          uploadedFileNames.map((name) => ai.files.delete({ name })),
-        );
-        for (const c of cleanups) {
-          if (c.status === 'rejected') {
-            await tc.log(
-              'warning',
-              `create_cache: file cleanup failed: ${c.reason instanceof Error ? c.reason.message : String(c.reason)}`,
-            );
-          }
-        }
+        await deleteUploadedFiles(uploadedFileNames);
       }
     },
   );
@@ -157,11 +144,7 @@ export function registerCacheTools(server: McpServer): void {
           content: [{ type: 'text', text: JSON.stringify(caches, null, 2) }],
         };
       } catch (err) {
-        await tc.log(
-          'error',
-          `list_caches failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        return geminiErrorResult('list_caches', err);
+        return await logAndReturnError(tc.log, 'list_caches', err);
       }
     },
   );
@@ -229,11 +212,7 @@ export function registerCacheTools(server: McpServer): void {
           content: [{ type: 'text', text: `Cache '${name}' deleted.` }],
         };
       } catch (err) {
-        await tc.log(
-          'error',
-          `delete_cache failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        return geminiErrorResult('delete_cache', err);
+        return await logAndReturnError(tc.log, 'delete_cache', err);
       }
     },
   );

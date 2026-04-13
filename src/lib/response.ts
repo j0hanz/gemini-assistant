@@ -1,8 +1,8 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 
-import { FinishReason, type GenerateContentResponse } from '@google/genai';
+import type { GenerateContentResponse } from '@google/genai';
 
-import { errorResult } from './errors.js';
+import { errorResult, finishReasonError } from './errors.js';
 
 /**
  * Extracts text from a Gemini response, returning an errorResult if the
@@ -20,21 +20,9 @@ export function extractTextOrError(
     return errorResult(`${toolName}: prompt blocked by safety filter (${blockReason})`);
   }
 
-  const { finishReason } = candidate;
-
-  if (finishReason === FinishReason.SAFETY) {
-    return errorResult(`${toolName}: response blocked by safety filter`);
-  }
-
-  if (finishReason === FinishReason.RECITATION) {
-    return errorResult(`${toolName}: response blocked due to recitation policy`);
-  }
-
   const text = response.text ?? '';
-
-  if (!text && finishReason === FinishReason.MAX_TOKENS) {
-    return errorResult(`${toolName}: response truncated — max tokens reached with no output`);
-  }
+  const errResult = finishReasonError(candidate.finishReason, text, toolName);
+  if (errResult) return errResult;
 
   return {
     content: [{ type: 'text', text }],

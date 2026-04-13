@@ -1,13 +1,14 @@
 import type { Chat } from '@google/genai';
 
-const parsedTtl =
-  process.env.SESSION_TTL_MS !== undefined ? Number(process.env.SESSION_TTL_MS) : undefined;
-const SESSION_TTL_MS =
-  parsedTtl !== undefined && !Number.isNaN(parsedTtl) ? parsedTtl : 30 * 60 * 1000;
+function parseIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const parsed = Number(raw);
+  return Number.isNaN(parsed) ? fallback : parsed;
+}
 
-const parsedMax =
-  process.env.MAX_SESSIONS !== undefined ? Number(process.env.MAX_SESSIONS) : undefined;
-const MAX_SESSIONS = parsedMax !== undefined && !Number.isNaN(parsedMax) ? parsedMax : 50;
+const SESSION_TTL_MS = parseIntEnv('SESSION_TTL_MS', 30 * 60 * 1000);
+const MAX_SESSIONS = parseIntEnv('MAX_SESSIONS', 50);
 
 const MAX_EVICTED_ENTRIES = 1000;
 

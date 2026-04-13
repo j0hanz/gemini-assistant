@@ -1,9 +1,11 @@
 import type { ServerContext } from '@modelcontextprotocol/server';
 
+export type ReportProgress = (progress: number, total: number, message?: string) => Promise<void>;
+
 interface ToolContext {
   signal: AbortSignal;
   log: ServerContext['mcpReq']['log'];
-  reportProgress: (progress: number, total: number, message?: string) => Promise<void>;
+  reportProgress: ReportProgress;
 }
 
 export function extractToolContext(ctx: ServerContext): ToolContext {

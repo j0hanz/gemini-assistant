@@ -3,7 +3,7 @@ import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 import { Outcome } from '@google/genai';
 
 import { extractToolContext } from '../lib/context.js';
-import { errorResult, geminiErrorResult } from '../lib/errors.js';
+import { errorResult, logAndReturnError } from '../lib/errors.js';
 import { withRetry } from '../lib/retry.js';
 import { consumeStreamWithProgress } from '../lib/streaming.js';
 import { ExecuteCodeInputSchema } from '../schemas/inputs.js';
@@ -53,17 +53,17 @@ export function registerExecuteCodeTool(server: McpServer): void {
           return errorResult('execute_code: prompt blocked by safety filter (unknown)');
         }
 
-        let code = '';
-        let output = '';
-        let explanation = '';
+        const codeLines: string[] = [];
+        const outputLines: string[] = [];
+        const explanationLines: string[] = [];
         let executionFailed = false;
 
         for (const part of parts) {
           if (part.thought) continue;
           if (part.executableCode) {
-            code += (code ? '\n' : '') + (part.executableCode.code ?? '');
+            codeLines.push(part.executableCode.code ?? '');
           } else if (part.codeExecutionResult) {
-            output += (output ? '\n' : '') + (part.codeExecutionResult.output ?? '');
+            outputLines.push(part.codeExecutionResult.output ?? '');
             if (
               part.codeExecutionResult.outcome &&
               part.codeExecutionResult.outcome !== Outcome.OUTCOME_OK
@@ -71,9 +71,13 @@ export function registerExecuteCodeTool(server: McpServer): void {
               executionFailed = true;
             }
           } else if (part.text) {
-            explanation += (explanation ? '\n' : '') + part.text;
+            explanationLines.push(part.text);
           }
         }
+
+        const code = codeLines.join('\n');
+        const output = outputLines.join('\n');
+        const explanation = explanationLines.join('\n');
 
         if (executionFailed) {
           return errorResult(
@@ -88,11 +92,7 @@ export function registerExecuteCodeTool(server: McpServer): void {
           structuredContent: structured,
         };
       } catch (err) {
-        await tc.log(
-          'error',
-          `execute_code failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        return geminiErrorResult('execute_code', err);
+        return await logAndReturnError(tc.log, 'execute_code', err);
       }
     },
   );

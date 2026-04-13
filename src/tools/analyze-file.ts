@@ -3,8 +3,8 @@ import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 import { createPartFromUri } from '@google/genai';
 
 import { extractToolContext } from '../lib/context.js';
-import { geminiErrorResult } from '../lib/errors.js';
-import { uploadFile } from '../lib/file-upload.js';
+import { logAndReturnError } from '../lib/errors.js';
+import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { withRetry } from '../lib/retry.js';
 import { consumeStreamWithProgress, validateStreamResult } from '../lib/streaming.js';
 import { AnalyzeFileInputSchema } from '../schemas/inputs.js';
@@ -54,19 +54,9 @@ export function registerAnalyzeFileTool(server: McpServer): void {
         const streamResult = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
         return validateStreamResult(streamResult, 'analyze_file');
       } catch (err) {
-        await tc.log(
-          'error',
-          `analyze_file failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        return geminiErrorResult('analyze_file', err);
+        return await logAndReturnError(tc.log, 'analyze_file', err);
       } finally {
-        if (uploadedFileName) {
-          try {
-            await ai.files.delete({ name: uploadedFileName });
-          } catch {
-            // Cleanup failure is non-critical
-          }
-        }
+        await deleteUploadedFiles(uploadedFileName ? [uploadedFileName] : []);
       }
     },
   );

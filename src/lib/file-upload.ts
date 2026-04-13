@@ -34,3 +34,13 @@ export async function uploadFile(filePath: string, signal: AbortSignal): Promise
 
   return { name: uploaded.name ?? '', uri: uploaded.uri, mimeType: uploaded.mimeType };
 }
+
+export async function deleteUploadedFiles(names: string[]): Promise<void> {
+  if (names.length === 0) return;
+  const results = await Promise.allSettled(names.map((n) => ai.files.delete({ name: n })));
+  for (const r of results) {
+    if (r.status === 'rejected') {
+      console.error('File cleanup failed:', r.reason);
+    }
+  }
+}

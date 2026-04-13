@@ -1,7 +1,7 @@
 import { z } from 'zod/v4';
 
 export const AskInputSchema = z.object({
-  message: z.string().describe('User message or prompt'),
+  message: z.string().max(100_000).describe('User message or prompt'),
   sessionId: z
     .string()
     .optional()
@@ -46,7 +46,8 @@ export const CreateCacheInputSchema = z
       .optional()
       .describe('Time-to-live for the cache (e.g., "3600s"). Defaults to 1 hour.'),
   })
-  .refine((data) => (data.filePaths && data.filePaths.length > 0) ?? data.systemInstruction, {
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- LHS is boolean; ?? would not fall through on `false`
+  .refine((data) => (data.filePaths && data.filePaths.length > 0) || data.systemInstruction, {
     message: 'At least one of filePaths or systemInstruction must be provided.',
   })
   .describe(

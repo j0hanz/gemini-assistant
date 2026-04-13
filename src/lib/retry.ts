@@ -1,3 +1,5 @@
+import { hasHttpStatus } from './errors.js';
+
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 503]);
 const DEFAULT_MAX_RETRIES = 2;
 const BASE_DELAY_MS = 1000;
@@ -5,12 +7,7 @@ const MAX_DELAY_MS = 10_000;
 const JITTER_MS = 500;
 
 function isRetryableError(err: unknown): boolean {
-  return (
-    err instanceof Error &&
-    'status' in err &&
-    typeof err.status === 'number' &&
-    RETRYABLE_STATUS_CODES.has(err.status)
-  );
+  return hasHttpStatus(err) && RETRYABLE_STATUS_CODES.has(err.status);
 }
 
 function computeDelay(attempt: number): number {

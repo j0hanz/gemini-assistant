@@ -3,7 +3,8 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 import { FinishReason } from '@google/genai';
 import type { GenerateContentResponse, GroundingMetadata, Part } from '@google/genai';
 
-import { errorResult } from './errors.js';
+import type { ReportProgress } from './context.js';
+import { finishReasonError } from './errors.js';
 
 export interface StreamResult {
   text: string;
@@ -11,8 +12,6 @@ export interface StreamResult {
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
 }
-
-type ReportProgress = (progress: number, total: number, message?: string) => Promise<void>;
 
 const enum Phase {
   Waiting = 0,
@@ -78,21 +77,10 @@ export async function consumeStreamWithProgress(
 }
 
 export function validateStreamResult(result: StreamResult, toolName: string): CallToolResult {
-  const { finishReason, text } = result;
-
-  if (finishReason === FinishReason.SAFETY) {
-    return errorResult(`${toolName}: response blocked by safety filter`);
-  }
-
-  if (finishReason === FinishReason.RECITATION) {
-    return errorResult(`${toolName}: response blocked due to recitation policy`);
-  }
-
-  if (!text && finishReason === FinishReason.MAX_TOKENS) {
-    return errorResult(`${toolName}: response truncated — max tokens reached with no output`);
-  }
+  const errResult = finishReasonError(result.finishReason, result.text, toolName);
+  if (errResult) return errResult;
 
   return {
-    content: [{ type: 'text', text }],
+    content: [{ type: 'text', text: result.text }],
   };
 }

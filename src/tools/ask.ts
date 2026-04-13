@@ -4,7 +4,7 @@ import { completable } from '@modelcontextprotocol/server';
 import { z } from 'zod/v4';
 
 import { extractToolContext } from '../lib/context.js';
-import { errorResult, geminiErrorResult } from '../lib/errors.js';
+import { errorResult, logAndReturnError } from '../lib/errors.js';
 import { withRetry } from '../lib/retry.js';
 import { consumeStreamWithProgress, validateStreamResult } from '../lib/streaming.js';
 
@@ -60,6 +60,14 @@ export function registerAskTool(server: McpServer): void {
     },
     async ({ message, sessionId, systemInstruction, cacheName }, ctx: ServerContext) => {
       const tc = extractToolContext(ctx);
+
+      const streamAndValidate = async (
+        stream: AsyncGenerator<import('@google/genai').GenerateContentResponse>,
+      ) => {
+        const streamResult = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
+        return validateStreamResult(streamResult, 'ask');
+      };
+
       try {
         if (sessionId && isEvicted(sessionId)) {
           return errorResult(`ask: Session '${sessionId}' has expired.`);
@@ -93,8 +101,7 @@ export function registerAskTool(server: McpServer): void {
               }),
             { signal: tc.signal },
           );
-          const result = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
-          return validateStreamResult(result, 'ask');
+          return await streamAndValidate(stream);
         }
 
         // Multi-turn: existing session
@@ -105,8 +112,7 @@ export function registerAskTool(server: McpServer): void {
             message,
             config: { abortSignal: tc.signal },
           });
-          const result = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
-          return validateStreamResult(result, 'ask');
+          return await streamAndValidate(stream);
         }
 
         // Multi-turn: new session
@@ -125,8 +131,7 @@ export function registerAskTool(server: McpServer): void {
         });
         setSession(sessionId, chat);
 
-        const streamResult = await consumeStreamWithProgress(stream, tc.reportProgress, tc.signal);
-        const result = validateStreamResult(streamResult, 'ask');
+        const result = await streamAndValidate(stream);
         if (!result.isError) {
           result.content.push({
             type: 'resource_link' as const,
@@ -137,8 +142,7 @@ export function registerAskTool(server: McpServer): void {
         }
         return result;
       } catch (err) {
-        await tc.log('error', `ask failed: ${err instanceof Error ? err.message : String(err)}`);
-        return geminiErrorResult('ask', err);
+        return await logAndReturnError(tc.log, 'ask', err);
       }
     },
   );

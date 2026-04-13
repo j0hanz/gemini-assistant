@@ -1,7 +1,7 @@
 import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { extractToolContext } from '../lib/context.js';
-import { geminiErrorResult } from '../lib/errors.js';
+import { logAndReturnError } from '../lib/errors.js';
 import { withRetry } from '../lib/retry.js';
 import { consumeStreamWithProgress, validateStreamResult } from '../lib/streaming.js';
 import { SearchInputSchema } from '../schemas/inputs.js';
@@ -78,8 +78,7 @@ export function registerSearchTool(server: McpServer): void {
           structuredContent: { answer: answerText, sources },
         };
       } catch (err) {
-        await tc.log('error', `search failed: ${err instanceof Error ? err.message : String(err)}`);
-        return geminiErrorResult('search', err);
+        return await logAndReturnError(tc.log, 'search', err);
       }
     },
   );

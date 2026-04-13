@@ -14,6 +14,7 @@ const { registerAskTool } = await import('../../src/tools/ask.js');
 const { registerSearchTool } = await import('../../src/tools/search.js');
 const { registerExecuteCodeTool } = await import('../../src/tools/execute-code.js');
 const { registerAnalyzeFileTool } = await import('../../src/tools/analyze-file.js');
+const { registerAnalyzeUrlTool } = await import('../../src/tools/analyze-url.js');
 const { registerCacheTools } = await import('../../src/tools/cache.js');
 const { registerResources } = await import('../../src/resources.js');
 
@@ -54,6 +55,11 @@ describe('tool registration', () => {
     assert.doesNotThrow(() => registerAnalyzeFileTool(server));
   });
 
+  it('registers analyze_url tool without error', () => {
+    const server = createServer();
+    assert.doesNotThrow(() => registerAnalyzeUrlTool(server));
+  });
+
   it('registers cache tools (create, list, delete) without error', () => {
     const server = createServer();
     assert.doesNotThrow(() => registerCacheTools(server));
@@ -71,6 +77,7 @@ describe('tool registration', () => {
       registerExecuteCodeTool(server);
       registerSearchTool(server);
       registerAnalyzeFileTool(server);
+      registerAnalyzeUrlTool(server);
       registerCacheTools(server);
       registerResources(server);
     });

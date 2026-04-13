@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   AnalyzeFileInputSchema,
+  AnalyzeUrlInputSchema,
   AskInputSchema,
   CreateCacheInputSchema,
   ExecuteCodeInputSchema,
@@ -114,6 +115,33 @@ describe('SearchInputSchema', () => {
     const result = SearchInputSchema.safeParse({ query: '' });
     assert.strictEqual(result.success, false);
   });
+
+  it('accepts with urls', () => {
+    const result = SearchInputSchema.safeParse({
+      query: 'compare recipes',
+      urls: ['https://example.com/recipe1', 'https://example.com/recipe2'],
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts without urls (backward compatible)', () => {
+    const result = SearchInputSchema.safeParse({ query: 'latest news' });
+    assert.ok(result.success);
+  });
+
+  it('rejects invalid urls', () => {
+    const result = SearchInputSchema.safeParse({
+      query: 'test',
+      urls: ['not-a-url'],
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects more than 20 urls', () => {
+    const urls = Array.from({ length: 21 }, (_, i) => `https://example.com/${i}`);
+    const result = SearchInputSchema.safeParse({ query: 'test', urls });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('AnalyzeFileInputSchema', () => {
@@ -185,6 +213,73 @@ describe('CreateCacheInputSchema', () => {
   it('rejects filePaths exceeding 50 entries', () => {
     const paths = Array.from({ length: 51 }, (_, i) => `/file${i}.txt`);
     const result = CreateCacheInputSchema.safeParse({ filePaths: paths });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('AnalyzeUrlInputSchema', () => {
+  it('accepts valid input', () => {
+    const result = AnalyzeUrlInputSchema.safeParse({
+      urls: ['https://example.com'],
+      question: 'Summarize this page',
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts multiple urls', () => {
+    const result = AnalyzeUrlInputSchema.safeParse({
+      urls: ['https://example.com/a', 'https://example.com/b'],
+      question: 'Compare these',
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts with systemInstruction', () => {
+    const result = AnalyzeUrlInputSchema.safeParse({
+      urls: ['https://example.com'],
+      question: 'Summarize',
+      systemInstruction: 'Be concise',
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects empty urls array', () => {
+    const result = AnalyzeUrlInputSchema.safeParse({
+      urls: [],
+      question: 'test',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects invalid urls', () => {
+    const result = AnalyzeUrlInputSchema.safeParse({
+      urls: ['not-a-url'],
+      question: 'test',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects more than 20 urls', () => {
+    const urls = Array.from({ length: 21 }, (_, i) => `https://example.com/${i}`);
+    const result = AnalyzeUrlInputSchema.safeParse({ urls, question: 'test' });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects missing question', () => {
+    const result = AnalyzeUrlInputSchema.safeParse({ urls: ['https://example.com'] });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects empty question', () => {
+    const result = AnalyzeUrlInputSchema.safeParse({
+      urls: ['https://example.com'],
+      question: '',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects missing urls', () => {
+    const result = AnalyzeUrlInputSchema.safeParse({ question: 'test' });
     assert.strictEqual(result.success, false);
   });
 });

@@ -1,5 +1,6 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
+import type { UrlMetadata } from '@google/genai';
 import { ThinkingLevel } from '@google/genai';
 
 import { reportCompletion, reportFailure } from '../lib/context.js';
@@ -36,18 +37,51 @@ function collectGroundedSources(
   return sources;
 }
 
+interface UrlMetadataEntry {
+  url: string;
+  status: string;
+}
+
+function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlMetadataEntry[] {
+  const entries: UrlMetadataEntry[] = [];
+  if (!urlMetadata) return entries;
+
+  for (const meta of urlMetadata) {
+    if (meta.retrievedUrl) {
+      entries.push({
+        url: meta.retrievedUrl,
+        status: meta.urlRetrievalStatus ?? 'UNKNOWN',
+      });
+    }
+  }
+
+  return entries;
+}
+
 async function searchWork(
-  { query, systemInstruction }: { query: string; systemInstruction?: string | undefined },
+  {
+    query,
+    systemInstruction,
+    urls,
+  }: { query: string; systemInstruction?: string | undefined; urls?: string[] | undefined },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Web Search';
   try {
+    const hasUrls = urls && urls.length > 0;
+    const contents = hasUrls ? `${query}\n\nAlso analyze content from:\n${urls.join('\n')}` : query;
+
+    const tools: Record<string, Record<string, never>>[] = [
+      { googleSearch: {} },
+      ...(hasUrls ? [{ urlContext: {} }] : []),
+    ];
+
     const { streamResult, result } = await executeToolStream(ctx, 'search', TOOL_LABEL, () =>
       ai.models.generateContentStream({
         model: MODEL,
-        contents: query,
+        contents,
         config: {
-          tools: [{ googleSearch: {} }],
+          tools,
           systemInstruction: systemInstruction ?? SEARCH_SYSTEM_INSTRUCTION,
           thinkingConfig: {
             includeThoughts: true,
@@ -62,6 +96,7 @@ async function searchWork(
     if (result.isError) return result;
 
     const sources = collectGroundedSources(streamResult.groundingMetadata);
+    const urlMeta = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
 
     const answerText = extractTextContent(result.content) || '';
 
@@ -69,6 +104,14 @@ async function searchWork(
       result.content.push({
         type: 'text',
         text: `\n\nSources:\n${sources.map((s) => `- ${s}`).join('\n')}`,
+      });
+    }
+
+    if (urlMeta.length > 0) {
+      const statusSummary = urlMeta.map((m) => `- ${m.url}: ${m.status}`).join('\n');
+      result.content.push({
+        type: 'text',
+        text: `\n\nURL Retrieval Status:\n${statusSummary}`,
       });
     }
 
@@ -80,7 +123,11 @@ async function searchWork(
 
     return {
       ...result,
-      structuredContent: { answer: answerText, sources },
+      structuredContent: {
+        answer: answerText,
+        sources,
+        ...(urlMeta.length > 0 ? { urlMetadata: urlMeta } : {}),
+      },
     };
   } catch (err) {
     await reportFailure(ctx, TOOL_LABEL, err);
@@ -94,7 +141,8 @@ export function registerSearchTool(server: McpServer): void {
     {
       title: 'Web Search',
       description:
-        'Answer questions using Gemini with Google Search grounding for up-to-date information.',
+        'Answer questions using Gemini with Google Search grounding. ' +
+        'Optionally provide URLs for deep analysis via URL Context.',
       inputSchema: SearchInputSchema,
       outputSchema: SearchOutputSchema,
       annotations: {

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { ExecuteCodeOutputSchema } from '../../src/schemas/outputs.js';
+import {
+  AnalyzeUrlOutputSchema,
+  ExecuteCodeOutputSchema,
+  SearchOutputSchema,
+} from '../../src/schemas/outputs.js';
 
 describe('ExecuteCodeOutputSchema', () => {
   it('accepts valid structured output', () => {
@@ -66,5 +70,59 @@ describe('ExecuteCodeOutputSchema', () => {
     if (result.success) {
       assert.strictEqual('extra' in result.data, false);
     }
+  });
+});
+
+describe('SearchOutputSchema', () => {
+  it('accepts valid output without urlMetadata', () => {
+    const result = SearchOutputSchema.safeParse({
+      answer: 'The answer is 42',
+      sources: ['https://example.com'],
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts output with urlMetadata', () => {
+    const result = SearchOutputSchema.safeParse({
+      answer: 'Analysis result',
+      sources: ['https://example.com'],
+      urlMetadata: [{ url: 'https://example.com', status: 'URL_RETRIEVAL_STATUS_SUCCESS' }],
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts empty sources and no urlMetadata', () => {
+    const result = SearchOutputSchema.safeParse({
+      answer: 'No sources found',
+      sources: [],
+    });
+    assert.ok(result.success);
+  });
+});
+
+describe('AnalyzeUrlOutputSchema', () => {
+  it('accepts valid output', () => {
+    const result = AnalyzeUrlOutputSchema.safeParse({
+      answer: 'The page discusses X',
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts output with urlMetadata', () => {
+    const result = AnalyzeUrlOutputSchema.safeParse({
+      answer: 'Analysis result',
+      urlMetadata: [{ url: 'https://example.com', status: 'URL_RETRIEVAL_STATUS_SUCCESS' }],
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects missing answer', () => {
+    const result = AnalyzeUrlOutputSchema.safeParse({});
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects non-string answer', () => {
+    const result = AnalyzeUrlOutputSchema.safeParse({ answer: 123 });
+    assert.strictEqual(result.success, false);
   });
 });

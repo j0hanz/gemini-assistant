@@ -1,7 +1,12 @@
 import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
-import type { GenerateContentResponse, GroundingMetadata, Part } from '@google/genai';
+import type {
+  GenerateContentResponse,
+  GroundingMetadata,
+  Part,
+  UrlContextMetadata,
+} from '@google/genai';
 
 import { sendProgress } from './context.js';
 import { finishReasonError } from './errors.js';
@@ -12,6 +17,7 @@ export interface StreamResult {
   parts: Part[];
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
+  urlContextMetadata?: UrlContextMetadata;
 }
 
 const enum Phase {
@@ -29,6 +35,7 @@ export async function consumeStreamWithProgress(
   let text = '';
   let finishReason: FinishReason | undefined;
   let groundingMetadata: GroundingMetadata | undefined;
+  let urlContextMetadata: UrlContextMetadata | undefined;
   let phase: Phase = Phase.Waiting;
 
   const msg = (m: string): string => (toolLabel ? `${toolLabel}: ${m}` : m);
@@ -47,6 +54,10 @@ export async function consumeStreamWithProgress(
 
     if (candidate.groundingMetadata) {
       groundingMetadata = candidate.groundingMetadata;
+    }
+
+    if (candidate.urlContextMetadata) {
+      urlContextMetadata = candidate.urlContextMetadata;
     }
 
     const chunkParts = candidate.content?.parts ?? [];
@@ -74,6 +85,7 @@ export async function consumeStreamWithProgress(
     parts,
     ...(finishReason ? { finishReason } : {}),
     ...(groundingMetadata ? { groundingMetadata } : {}),
+    ...(urlContextMetadata ? { urlContextMetadata } : {}),
   };
 }
 

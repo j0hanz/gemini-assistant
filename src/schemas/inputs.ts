@@ -29,11 +29,26 @@ export const ExecuteCodeInputSchema = z.object({
 export const SearchInputSchema = z.object({
   query: z.string().min(1).describe('Question or topic to research'),
   systemInstruction: z.string().optional().describe('Custom instructions for result presentation'),
+  urls: z
+    .array(z.url())
+    .max(20)
+    .optional()
+    .describe('URLs to deeply analyze alongside search results (max 20). Enables URL Context.'),
 });
 
 export const AnalyzeFileInputSchema = z.object({
   filePath: z.string().trim().min(1).describe('Absolute path to the file to analyze'),
   question: z.string().min(1).describe('What to analyze or ask about the file'),
+});
+
+export const AnalyzeUrlInputSchema = z.object({
+  urls: z
+    .array(z.url())
+    .min(1)
+    .max(20)
+    .describe('URLs to analyze (max 20). Must be publicly accessible.'),
+  question: z.string().min(1).describe('What to analyze or ask about the URL content'),
+  systemInstruction: z.string().optional().describe('Custom system instruction for URL analysis'),
 });
 
 export const CreateCacheInputSchema = z

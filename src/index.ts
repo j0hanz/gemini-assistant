@@ -12,6 +12,7 @@ import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
 import { onSessionChange } from './sessions.js';
 import { registerAnalyzeFileTool } from './tools/analyze-file.js';
+import { registerAnalyzeUrlTool } from './tools/analyze-url.js';
 import { registerAskTool } from './tools/ask.js';
 import { registerCacheTools } from './tools/cache.js';
 import { registerExecuteCodeTool } from './tools/execute-code.js';
@@ -44,7 +45,8 @@ const server = new McpServer(
     },
     instructions:
       'Tools: ask (chat, multi-turn via sessionId), execute_code (sandboxed code), ' +
-      'search (web-grounded answers), analyze_file (file upload analysis), ' +
+      'search (web-grounded answers, optional URL Context), analyze_file (file upload analysis), ' +
+      'analyze_url (URL content analysis via URL Context), ' +
       'create_cache/list_caches/delete_cache (context caching, ≥32k tokens). ' +
       'Use cacheName with ask to attach cached context.',
   },
@@ -54,6 +56,7 @@ registerAskTool(server);
 registerExecuteCodeTool(server);
 registerSearchTool(server);
 registerAnalyzeFileTool(server);
+registerAnalyzeUrlTool(server);
 registerCacheTools(server);
 registerPrompts(server);
 registerResources(server);

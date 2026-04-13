@@ -44,7 +44,7 @@ export async function consumeStreamWithProgress(
 
   const msg = (m: string): string => (toolLabel ? `${toolLabel}: ${m}` : m);
 
-  await sendProgress(ctx, 0, 100, msg('Evaluating prompt'));
+  await sendProgress(ctx, 25, 100, msg('Evaluating prompt'));
 
   for await (const chunk of stream) {
     if (ctx.mcpReq.signal.aborted) break;
@@ -74,12 +74,12 @@ export async function consumeStreamWithProgress(
 
       if (part.thought && phase < Phase.Thinking) {
         phase = Phase.Thinking;
-        await sendProgress(ctx, 20, 100, msg('Thinking'));
+        await sendProgress(ctx, 50, 100, msg('Thinking'));
       }
 
       if (!part.thought && part.text !== undefined && phase < Phase.Generating) {
         phase = Phase.Generating;
-        await sendProgress(ctx, 60, 100, msg('Generating response'));
+        await sendProgress(ctx, 75, 100, msg('Generating response'));
       }
 
       if (!part.thought && part.text !== undefined) {

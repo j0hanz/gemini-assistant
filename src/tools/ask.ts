@@ -35,8 +35,7 @@ interface AskArgs {
 const ASK_TOOL_LABEL = 'Ask Gemini';
 
 const DEFAULT_SYSTEM_INSTRUCTION =
-  'You are a helpful AI assistant. Provide direct, accurate answers. ' +
-  'Use Markdown formatting for structure. Be concise.';
+  'Provide direct, accurate answers. Use Markdown for structure. Be concise.';
 
 function formatStructuredResult(
   result: CallToolResult,
@@ -255,9 +254,7 @@ export function registerAskTool(server: McpServer): void {
         thinkingLevel: z
           .enum(THINKING_LEVELS)
           .optional()
-          .describe(
-            'Thinking depth (applies at session creation or single-turn). MINIMAL (fastest), LOW, MEDIUM, HIGH (deepest).',
-          ),
+          .describe('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
         cacheName: completable(
           z
             .string()
@@ -271,7 +268,7 @@ export function registerAskTool(server: McpServer): void {
           .record(z.string(), z.unknown())
           .optional()
           .describe(
-            'JSON Schema object for structured output. When set, Gemini returns JSON conforming to this schema. Disables thinking mode.',
+            'JSON Schema for structured output. Gemini returns conforming JSON. Disables thinking.',
           ),
       }),
       outputSchema: AskOutputSchema,

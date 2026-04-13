@@ -12,8 +12,8 @@ import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
 import { ai, MODEL } from '../client.js';
 
 const EXECUTE_CODE_SYSTEM_INSTRUCTION =
-  'Generate clean, working code that solves the task. Include brief comments for non-obvious logic. ' +
-  'Handle edge cases. Provide a concise explanation of the approach after execution.';
+  'Generate clean, working code. Include brief comments for non-obvious logic. ' +
+  'Handle edge cases. Provide a concise explanation after execution.';
 
 function formatExecuteCodeMarkdown(code: string, output: string, explanation: string): string {
   const sections: string[] = [];
@@ -45,11 +45,7 @@ async function executeCodeWork(
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Execute Code';
   try {
-    const prompt = [
-      task,
-      ...(language ? [`Preferred language: ${language}`] : []),
-      'Return working code. Handle edge cases. Keep output concise.',
-    ].join('\n\n');
+    const prompt = [task, ...(language ? [`Language: ${language}`] : [])].join('\n\n');
 
     const { streamResult } = await executeToolStream(ctx, 'execute_code', TOOL_LABEL, () =>
       ai.models.generateContentStream({
@@ -136,7 +132,7 @@ export function registerExecuteCodeTool(server: McpServer): void {
     {
       title: 'Execute Code',
       description:
-        'Have Gemini generate and execute code in a sandbox. Returns the code, output, and explanation.',
+        'Generate and execute code in a Gemini sandbox. Returns code, output, and explanation.',
       inputSchema: ExecuteCodeInputSchema,
       outputSchema: ExecuteCodeOutputSchema,
       annotations: { ...MUTABLE_ANNOTATIONS, openWorldHint: false },

@@ -8,15 +8,15 @@ export const UsageMetadataSchema = z.object({
 });
 
 export const AskOutputSchema = z.object({
-  answer: z.string().describe('The generated response text'),
-  usage: UsageMetadataSchema.optional().describe('Token usage metadata'),
+  answer: z.string().describe('Generated response'),
+  usage: UsageMetadataSchema.optional().describe('Token usage'),
 });
 
 export const ExecuteCodeOutputSchema = z.object({
   code: z.string().describe('Generated code'),
   output: z.string().describe('Execution output'),
-  explanation: z.string().describe('Explanatory text from the model'),
-  usage: UsageMetadataSchema.optional().describe('Token usage metadata'),
+  explanation: z.string().describe('Model explanation'),
+  usage: UsageMetadataSchema.optional().describe('Token usage'),
 });
 
 const UrlMetadataEntrySchema = z.object({
@@ -27,19 +27,19 @@ const UrlMetadataEntrySchema = z.object({
 export type UrlMetadataEntry = z.infer<typeof UrlMetadataEntrySchema>;
 
 export const SearchOutputSchema = z.object({
-  answer: z.string().describe('Grounded answer text'),
-  sources: z.array(z.string()).describe('Source URLs from Google Search'),
-  urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL Context retrieval status'),
-  usage: UsageMetadataSchema.optional().describe('Token usage metadata'),
+  answer: z.string().describe('Grounded answer'),
+  sources: z.array(z.string()).describe('Source URLs from search'),
+  urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
+  usage: UsageMetadataSchema.optional().describe('Token usage'),
 });
 
 export const AnalyzeUrlOutputSchema = z.object({
-  answer: z.string().describe('Analysis of the URL content'),
+  answer: z.string().describe('URL content analysis'),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('Retrieval status per URL'),
-  usage: UsageMetadataSchema.optional().describe('Token usage metadata'),
+  usage: UsageMetadataSchema.optional().describe('Token usage'),
 });
 
 export const AnalyzeFileOutputSchema = z.object({
-  analysis: z.string().describe('Analysis of the uploaded file'),
-  usage: UsageMetadataSchema.optional().describe('Token usage metadata'),
+  analysis: z.string().describe('File analysis result'),
+  usage: UsageMetadataSchema.optional().describe('Token usage'),
 });

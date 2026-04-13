@@ -13,9 +13,8 @@ import { SearchOutputSchema } from '../schemas/outputs.js';
 import { ai, MODEL } from '../client.js';
 
 const SEARCH_SYSTEM_INSTRUCTION =
-  'Synthesize information from search results into a direct answer. ' +
-  'Base answers strictly on the provided search grounding. ' +
-  'Do not speculate beyond what sources confirm. Be concise and factual.';
+  'Synthesize search results into a direct, factual answer. ' +
+  'Base answers strictly on the provided search grounding. Be concise.';
 
 function collectGroundedSources(
   groundingMetadata: Awaited<
@@ -119,8 +118,8 @@ export function registerSearchTool(server: McpServer): void {
     {
       title: 'Web Search',
       description:
-        'Answer questions using Gemini with Google Search grounding. ' +
-        'Optionally provide URLs for deep analysis via URL Context.',
+        'Answer questions with Google Search grounding. ' +
+        'Optionally include URLs for deep analysis via URL Context.',
       inputSchema: SearchInputSchema,
       outputSchema: SearchOutputSchema,
       annotations: READONLY_ANNOTATIONS,

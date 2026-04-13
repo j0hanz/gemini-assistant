@@ -183,8 +183,8 @@ export function registerCacheTools(server: McpServer): void {
     {
       title: 'Create Cache',
       description:
-        'Creates a Gemini context cache from files and/or a system instruction. ' +
-        'The combined content MUST exceed ~32,000 tokens. Do not use for small contexts.',
+        'Create a Gemini context cache from files and/or a system instruction. ' +
+        'Combined content MUST exceed ~32,000 tokens.',
       inputSchema: CreateCacheInputSchema,
       annotations: MUTABLE_ANNOTATIONS,
       execution: TASK_EXECUTION,
@@ -196,7 +196,7 @@ export function registerCacheTools(server: McpServer): void {
     'list_caches',
     {
       title: 'List Caches',
-      description: 'Lists all active Gemini context caches.',
+      description: 'List all active Gemini context caches.',
       inputSchema: z.object({}),
       annotations: READONLY_ANNOTATIONS,
     },
@@ -216,13 +216,10 @@ export function registerCacheTools(server: McpServer): void {
     'delete_cache',
     {
       title: 'Delete Cache',
-      description: 'Deletes a Gemini context cache by its resource name.',
+      description: 'Delete a Gemini context cache by resource name.',
       inputSchema: z.object({
         cacheName: completable(
-          z
-            .string()
-            .min(1)
-            .describe('The cache resource name to delete (e.g., "cachedContents/...")'),
+          z.string().min(1).describe('Cache resource name to delete (e.g., "cachedContents/...")'),
           completeCacheNames,
         ),
       }),
@@ -271,16 +268,13 @@ export function registerCacheTools(server: McpServer): void {
     'update_cache',
     {
       title: 'Update Cache',
-      description: 'Updates the TTL of an existing Gemini context cache to extend its lifetime.',
+      description: 'Update the TTL of an existing Gemini context cache.',
       inputSchema: z.object({
         cacheName: completable(
-          z
-            .string()
-            .min(1)
-            .describe('The cache resource name to update (e.g., "cachedContents/...")'),
+          z.string().min(1).describe('Cache resource name to update (e.g., "cachedContents/...")'),
           completeCacheNames,
         ),
-        ttl: z.string().min(1).describe('New time-to-live from now (e.g., "7200s" for 2 hours)'),
+        ttl: z.string().min(1).describe('New TTL from now (e.g., "7200s" for 2 hours)'),
       }),
       annotations: MUTABLE_ANNOTATIONS,
     },

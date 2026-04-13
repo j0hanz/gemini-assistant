@@ -98,7 +98,7 @@ export function registerPrompts(server: McpServer): void {
     },
     ({ code, language }) =>
       userPromptMessage(
-        `Review the following${language ? ` ${language}` : ''} code for bugs, best practices, and improvements:\n\n${fencedCodeBlock(code, language)}\n\nStructure findings as: 1) Bugs, 2) Best practices, 3) Improvements.\nDo not explain obvious syntax. Do not suggest complete rewrites unless critical.`,
+        `Review this${language ? ` ${language}` : ''} code.\n\n${fencedCodeBlock(code, language)}\n\nStructure: 1) Bugs 2) Best practices 3) Improvements. Focus on actionable findings only.`,
       ),
   );
 
@@ -117,7 +117,7 @@ export function registerPrompts(server: McpServer): void {
     },
     ({ text, style }) =>
       userPromptMessage(
-        `Summarize the following text${style ? ` in ${style} style` : ''}:\n\n${text}\n\nProvide only the summary, no meta-commentary.${summarizeConstraint(style)}`,
+        `Summarize this text${style ? ` (${style})` : ''}:\n\n${text}\n\nReturn only the summary.${summarizeConstraint(style)}`,
       ),
   );
 
@@ -133,7 +133,7 @@ export function registerPrompts(server: McpServer): void {
     },
     ({ error, context }) =>
       userPromptMessage(
-        `Explain the following error and suggest how to fix it${context ? `. Context: ${context}` : ''}:\n\n${error}\n\nStructure response as: 1) Root cause, 2) Fix, 3) Prevention. Be concise.`,
+        `Explain this error${context ? ` (context: ${context})` : ''}:\n\n${error}\n\nStructure: 1) Root cause 2) Fix 3) Prevention.`,
       ),
   );
 }

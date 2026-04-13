@@ -14,9 +14,8 @@ import { AnalyzeFileOutputSchema } from '../schemas/outputs.js';
 import { ai, MODEL } from '../client.js';
 
 const ANALYZE_FILE_SYSTEM_INSTRUCTION =
-  'Analyze the uploaded file thoroughly. Structure findings clearly with headings. ' +
-  'Reference specific sections, lines, or elements from the file. ' +
-  'Base analysis strictly on the file content. Do not introduce external information.';
+  'Structure findings with headings. Reference specific sections, lines, or elements. ' +
+  'Base analysis strictly on the file content.';
 
 async function analyzeFileWork(
   { filePath, question }: { filePath: string; question: string },

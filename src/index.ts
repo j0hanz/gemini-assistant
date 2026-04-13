@@ -32,7 +32,7 @@ const server = new McpServer(
     name: 'gemini-assistant',
     version,
     description:
-      'General-purpose Gemini AI assistant with multi-turn chat, sandboxed code execution, ' +
+      'Gemini AI assistant: multi-turn chat, sandboxed code execution, ' +
       'Google Search grounding, file analysis, and context caching.',
   },
   {
@@ -48,10 +48,10 @@ const server = new McpServer(
     },
     instructions:
       'Tools: ask (chat, multi-turn via sessionId), execute_code (sandboxed code), ' +
-      'search (web-grounded answers, optional URL Context), analyze_file (file upload analysis), ' +
-      'analyze_url (URL content analysis via URL Context), ' +
+      'search (web-grounded answers, optional URL Context), analyze_file (file upload), ' +
+      'analyze_url (URL content analysis), ' +
       'create_cache/list_caches/update_cache/delete_cache (context caching, ≥32k tokens). ' +
-      'Use cacheName with ask to attach cached context. Use displayName to auto-replace stale caches.',
+      'Use cacheName with ask to attach cached context. displayName auto-replaces stale caches.',
   },
 );
 

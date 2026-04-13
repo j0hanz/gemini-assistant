@@ -11,10 +11,8 @@ import { AnalyzeUrlOutputSchema } from '../schemas/outputs.js';
 import { ai, MODEL } from '../client.js';
 
 const ANALYZE_URL_SYSTEM_INSTRUCTION =
-  'Analyze the content from the provided URLs thoroughly. ' +
-  'Structure findings clearly with headings. ' +
-  'Reference specific sections or data from the retrieved pages. ' +
-  'Base analysis strictly on retrieved content. Do not speculate beyond what the pages confirm.';
+  'Structure findings with headings. Reference specific sections or data from the retrieved pages. ' +
+  'Base analysis strictly on retrieved content.';
 
 function buildPromptWithUrls(urls: string[], question: string): string {
   const urlList = urls.join('\n');
@@ -78,8 +76,8 @@ export function registerAnalyzeUrlTool(server: McpServer): void {
     {
       title: 'Analyze URL',
       description:
-        'Fetch and analyze content from one or more public URLs using Gemini URL Context. ' +
-        'Supports web pages, PDFs, images, and other public content (max 20 URLs).',
+        'Fetch and analyze one or more public URLs via Gemini URL Context (max 20). ' +
+        'Supports web pages, PDFs, images, and other public content.',
       inputSchema: AnalyzeUrlInputSchema,
       outputSchema: AnalyzeUrlOutputSchema,
       annotations: READONLY_ANNOTATIONS,

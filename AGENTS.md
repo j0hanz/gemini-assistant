@@ -29,15 +29,15 @@ src/
 
 ## Tools
 
-| Tool           | Description                                                                                                           |
-| -------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `ask`          | Send a message to Gemini. Supports multi-turn chat via `sessionId`, optional `systemInstruction` and `cacheName`.     |
-| `execute_code` | Have Gemini generate and execute code in a sandbox. Returns structured `{ code, output, explanation }`.               |
-| `search`       | Answer questions using Gemini with Google Search grounding. Appends source URLs.                                      |
-| `analyze_file` | Upload a local file to Gemini and ask questions about it. Supports PDFs, images, code, docs, audio, video. Max 20 MB. |
-| `create_cache` | Create a Gemini context cache from files and/or system instructions. Content must exceed ~32k tokens.                 |
-| `list_caches`  | List all active Gemini context caches.                                                                                |
-| `delete_cache` | Delete a Gemini context cache by resource name.                                                                       |
+| Tool           | Description                                                                                                           | Task Support |
+| -------------- | --------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `ask`          | Send a message to Gemini. Supports multi-turn chat via `sessionId`, optional `systemInstruction` and `cacheName`.     | —            |
+| `execute_code` | Have Gemini generate and execute code in a sandbox. Returns structured `{ code, output, explanation }`.               | —            |
+| `search`       | Answer questions using Gemini with Google Search grounding. Appends source URLs.                                      | —            |
+| `analyze_file` | Upload a local file to Gemini and ask questions about it. Supports PDFs, images, code, docs, audio, video. Max 20 MB. | `optional`   |
+| `create_cache` | Create a Gemini context cache from files and/or system instructions. Content must exceed ~32k tokens.                 | `optional`   |
+| `list_caches`  | List all active Gemini context caches.                                                                                | —            |
+| `delete_cache` | Delete a Gemini context cache by resource name.                                                                       | —            |
 
 ## Build & Run
 
@@ -86,3 +86,12 @@ Multi-turn chat sessions are stored in-memory with LRU-style eviction:
 - Paths are resolved through `realpath` to prevent symlink escapes
 - All paths are validated against `ALLOWED_FILE_ROOTS` (case-insensitive on Windows)
 - Max file size: 20 MB
+
+## Task Support (Experimental)
+
+Long-running tools (`create_cache`, `analyze_file`) advertise `execution.taskSupport: 'optional'`. This enables the MCP V2 "call-now, fetch-later" pattern:
+
+- **Sync clients** (default): handler runs inline — no behavior change
+- **Task-aware clients**: send `task: { ttl }` in `_meta` → SDK creates a background task, returns `CreateTaskResult` immediately, client polls via `tasks/get` / `tasks/result`
+
+Task state is stored in-memory via `InMemoryTaskStore` + `InMemoryTaskMessageQueue` (sufficient for single-session stdio). The store is cleaned up on `SIGINT`/`SIGTERM`.

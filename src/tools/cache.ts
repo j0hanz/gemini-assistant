@@ -1,4 +1,10 @@
-import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
+import type {
+  CallToolResult,
+  CreateTaskResult,
+  GetTaskResult,
+  McpServer,
+  ServerContext,
+} from '@modelcontextprotocol/server';
 import { completable } from '@modelcontextprotocol/server';
 
 import { createPartFromUri } from '@google/genai';
@@ -8,12 +14,111 @@ import { extractToolContext, reportCompletion, reportFailure } from '../lib/cont
 import { logAndReturnError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { withRetry } from '../lib/retry.js';
+import { runToolAsTask, taskTtl } from '../lib/task-utils.js';
 import { CreateCacheInputSchema } from '../schemas/inputs.js';
 
 import { ai, MODEL } from '../client.js';
 
+async function createCacheWork(
+  {
+    filePaths,
+    systemInstruction,
+    ttl,
+  }: {
+    filePaths: string[] | undefined;
+    systemInstruction: string | undefined;
+    ttl: string | undefined;
+  },
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const tc = extractToolContext(ctx);
+  const TOOL_LABEL = 'Create Cache';
+  const uploadedFileNames: string[] = [];
+  try {
+    const parts: ReturnType<typeof createPartFromUri>[] = [];
+    const totalSteps = (filePaths?.length ?? 0) + 1;
+
+    if (filePaths) {
+      await tc.log('info', `Caching ${filePaths.length} file(s)`);
+
+      // Process files in chunks to manage memory and provide progress updates
+      const CHUNK_SIZE = 3;
+      for (let i = 0; i < filePaths.length; i += CHUNK_SIZE) {
+        if (tc.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+        const chunk = filePaths.slice(i, i + CHUNK_SIZE);
+        await tc.reportProgress(
+          i,
+          totalSteps,
+          `${TOOL_LABEL}: Uploading files ${i + 1}-${Math.min(i + chunk.length, filePaths.length)}/${filePaths.length}`,
+        );
+
+        const chunkPromises = chunk.map(async (fp: string) => {
+          const uploaded = await uploadFile(fp, tc.signal);
+          uploadedFileNames.push(uploaded.name);
+          return createPartFromUri(uploaded.uri, uploaded.mimeType);
+        });
+
+        const results = await Promise.all(chunkPromises);
+        parts.push(...results);
+      }
+    }
+
+    await tc.reportProgress(totalSteps - 1, totalSteps, `${TOOL_LABEL}: Creating cache`);
+    const cache = await withRetry(
+      () =>
+        ai.caches.create({
+          model: MODEL,
+          config: {
+            ...(parts.length > 0 ? { contents: [{ role: 'user' as const, parts }] } : {}),
+            ...(systemInstruction ? { systemInstruction } : {}),
+            ttl: ttl ?? '3600s',
+            abortSignal: tc.signal,
+          },
+        }),
+      { signal: tc.signal },
+    );
+
+    await reportCompletion(tc.reportProgress, TOOL_LABEL, `cached ${cache.name ?? ''}`);
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify({
+            name: cache.name,
+            displayName: cache.displayName,
+            model: cache.model,
+            expireTime: cache.expireTime,
+          }),
+        },
+        {
+          type: 'resource_link' as const,
+          uri: 'caches://list',
+          name: 'Active Caches',
+          mimeType: 'application/json',
+        },
+      ],
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('too few tokens') || message.includes('minimum')) {
+      await reportFailure(tc.reportProgress, TOOL_LABEL, err);
+      return await logAndReturnError(
+        tc.log,
+        'create_cache',
+        new Error(`content is below the ~32,000 token minimum. ${message}`),
+      );
+    }
+    await reportFailure(tc.reportProgress, TOOL_LABEL, err);
+    return await logAndReturnError(tc.log, 'create_cache', err);
+  } finally {
+    await deleteUploadedFiles(uploadedFileNames);
+  }
+}
+
 export function registerCacheTools(server: McpServer): void {
-  server.registerTool(
+  server.experimental.tasks.registerToolTask(
     'create_cache',
     {
       title: 'Create Cache',
@@ -27,92 +132,22 @@ export function registerCacheTools(server: McpServer): void {
         idempotentHint: false,
         openWorldHint: true,
       },
+      execution: { taskSupport: 'optional' },
     },
-    async ({ filePaths, systemInstruction, ttl }, ctx: ServerContext) => {
-      const tc = extractToolContext(ctx);
-      const TOOL_LABEL = 'Create Cache';
-      const uploadedFileNames: string[] = [];
-      try {
-        const parts: ReturnType<typeof createPartFromUri>[] = [];
-        const totalSteps = (filePaths?.length ?? 0) + 1;
-
-        if (filePaths) {
-          await tc.log('info', `Caching ${filePaths.length} file(s)`);
-
-          // Process files in chunks to manage memory and provide progress updates
-          const CHUNK_SIZE = 3;
-          for (let i = 0; i < filePaths.length; i += CHUNK_SIZE) {
-            if (tc.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-
-            const chunk = filePaths.slice(i, i + CHUNK_SIZE);
-            await tc.reportProgress(
-              i,
-              totalSteps,
-              `${TOOL_LABEL}: Uploading files ${i + 1}-${Math.min(i + chunk.length, filePaths.length)}/${filePaths.length}`,
-            );
-
-            const chunkPromises = chunk.map(async (fp: string) => {
-              const uploaded = await uploadFile(fp, tc.signal);
-              uploadedFileNames.push(uploaded.name);
-              return createPartFromUri(uploaded.uri, uploaded.mimeType);
-            });
-
-            const results = await Promise.all(chunkPromises);
-            parts.push(...results);
-          }
-        }
-
-        await tc.reportProgress(totalSteps - 1, totalSteps, `${TOOL_LABEL}: Creating cache`);
-        const cache = await withRetry(
-          () =>
-            ai.caches.create({
-              model: MODEL,
-              config: {
-                ...(parts.length > 0 ? { contents: [{ role: 'user' as const, parts }] } : {}),
-                ...(systemInstruction ? { systemInstruction } : {}),
-                ttl: ttl ?? '3600s',
-                abortSignal: tc.signal,
-              },
-            }),
-          { signal: tc.signal },
+    {
+      createTask: async ({ filePaths, systemInstruction, ttl }, ctx) => {
+        const task = await ctx.task.store.createTask({ ttl: taskTtl(ctx.task.requestedTtl) });
+        runToolAsTask(
+          ctx.task.store,
+          task,
+          createCacheWork({ filePaths, systemInstruction, ttl }, ctx),
         );
-
-        await reportCompletion(tc.reportProgress, TOOL_LABEL, `cached ${cache.name ?? ''}`);
-
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({
-                name: cache.name,
-                displayName: cache.displayName,
-                model: cache.model,
-                expireTime: cache.expireTime,
-              }),
-            },
-            {
-              type: 'resource_link' as const,
-              uri: 'caches://list',
-              name: 'Active Caches',
-              mimeType: 'application/json',
-            },
-          ],
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (message.includes('too few tokens') || message.includes('minimum')) {
-          await reportFailure(tc.reportProgress, TOOL_LABEL, err);
-          return await logAndReturnError(
-            tc.log,
-            'create_cache',
-            new Error(`content is below the ~32,000 token minimum. ${message}`),
-          );
-        }
-        await reportFailure(tc.reportProgress, TOOL_LABEL, err);
-        return await logAndReturnError(tc.log, 'create_cache', err);
-      } finally {
-        await deleteUploadedFiles(uploadedFileNames);
-      }
+        return { task } as CreateTaskResult;
+      },
+      getTask: async (_args, ctx) =>
+        ({ task: await ctx.task.store.getTask(ctx.task.id) }) as unknown as GetTaskResult,
+      getTaskResult: async (_args, ctx) =>
+        (await ctx.task.store.getTaskResult(ctx.task.id)) as CallToolResult,
     },
   );
 

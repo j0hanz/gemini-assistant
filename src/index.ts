@@ -1,4 +1,9 @@
-import { McpServer, StdioServerTransport } from '@modelcontextprotocol/server';
+import {
+  InMemoryTaskMessageQueue,
+  InMemoryTaskStore,
+  McpServer,
+  StdioServerTransport,
+} from '@modelcontextprotocol/server';
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,6 +21,8 @@ const { version } = JSON.parse(
   readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf-8'),
 ) as { version: string };
 
+const taskStore = new InMemoryTaskStore();
+
 const server = new McpServer(
   {
     name: 'gemini-assistant',
@@ -25,7 +32,16 @@ const server = new McpServer(
       'Google Search grounding, file analysis, and context caching.',
   },
   {
-    capabilities: { logging: {}, prompts: {}, resources: { listChanged: true, subscribe: true } },
+    capabilities: {
+      logging: {},
+      prompts: {},
+      resources: { listChanged: true, subscribe: true },
+      tasks: {
+        requests: { tools: { call: {} } },
+        taskStore,
+        taskMessageQueue: new InMemoryTaskMessageQueue(),
+      },
+    },
     instructions:
       'General-purpose Gemini AI assistant. Use "ask" for chat (supports multi-turn via sessionId), ' +
       '"execute_code" for sandboxed code execution, "search" for web-grounded answers, ' +
@@ -61,6 +77,7 @@ try {
 }
 
 async function shutdown(): Promise<void> {
+  taskStore.cleanup();
   await server.close();
   process.exit(0);
 }

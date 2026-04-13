@@ -46,7 +46,6 @@ export function buildGenerateContentConfig(
   return {
     ...(cacheName ? { cachedContent: cacheName } : {}),
     ...(cacheName ? {} : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
-    // Structured output (responseSchema/jsonMode) is incompatible with thinking — omit thinkingConfig when JSON mode is active
     ...(isJson
       ? {
           responseMimeType: 'application/json',

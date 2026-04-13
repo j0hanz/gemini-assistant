@@ -1,10 +1,8 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
-import { reportCompletion } from '../lib/context.js';
-import { handleToolError } from '../lib/errors.js';
-import { appendUrlStatus, collectUrlMetadata, extractTextContent } from '../lib/response.js';
-import { executeToolStream, extractUsage } from '../lib/streaming.js';
+import { appendUrlStatus, collectUrlMetadata } from '../lib/response.js';
+import { executeToolStream, handleToolExecution } from '../lib/streaming.js';
 import { createToolTaskHandlers, READONLY_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
 import { SearchInputSchema } from '../schemas/inputs.js';
 import { SearchOutputSchema } from '../schemas/outputs.js';
@@ -49,15 +47,19 @@ async function searchWork(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Web Search';
-  try {
-    const hasUrls = urls && urls.length > 0;
-    const contents = hasUrls ? `${query}\n\nAlso analyze content from:\n${urls.join('\n')}` : query;
+  const hasUrls = urls && urls.length > 0;
+  const contents = hasUrls ? `${query}\n\nAlso analyze content from:\n${urls.join('\n')}` : query;
 
-    const tools: Record<string, Record<string, never>>[] = [
-      { googleSearch: {} },
-      ...(hasUrls ? [{ urlContext: {} }] : []),
-    ];
-    const { streamResult, result } = await executeToolStream(ctx, 'search', TOOL_LABEL, () =>
+  const tools: Record<string, Record<string, never>>[] = [
+    { googleSearch: {} },
+    ...(hasUrls ? [{ urlContext: {} }] : []),
+  ];
+
+  return await handleToolExecution(
+    ctx,
+    'search',
+    TOOL_LABEL,
+    () =>
       ai.models.generateContentStream({
         model: MODEL,
         contents,
@@ -73,44 +75,37 @@ async function searchWork(
           maxOutputTokens: 4096,
         },
       }),
-    );
+    (streamResult, textContent) => {
+      const sources = collectGroundedSources(streamResult.groundingMetadata);
+      const urlMeta = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
 
-    if (result.isError) return result;
+      const contentPush: CallToolResult['content'] = [];
 
-    const sources = collectGroundedSources(streamResult.groundingMetadata);
-    const urlMeta = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
+      if (sources.length > 0) {
+        contentPush.push({
+          type: 'text',
+          text: `\n\nSources:\n${sources.map((s) => `- ${s}`).join('\n')}`,
+        });
+      }
 
-    const answerText = extractTextContent(result.content) || '';
+      appendUrlStatus(contentPush, urlMeta);
 
-    if (sources.length > 0) {
-      result.content.push({
-        type: 'text',
-        text: `\n\nSources:\n${sources.map((s) => `- ${s}`).join('\n')}`,
-      });
-    }
-
-    appendUrlStatus(result.content, urlMeta);
-
-    await reportCompletion(
-      ctx,
-      TOOL_LABEL,
-      `${sources.length} source${sources.length === 1 ? '' : 's'} found`,
-    );
-
-    const usage = extractUsage(streamResult.usageMetadata);
-    return {
-      ...result,
-      structuredContent: {
-        answer: answerText,
-        sources,
-        ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
-        ...(urlMeta.length > 0 ? { urlMetadata: urlMeta } : {}),
-        ...(usage ? { usage } : {}),
-      },
-    };
-  } catch (err) {
-    return await handleToolError(ctx, 'search', TOOL_LABEL, err);
-  }
+      return {
+        resultMod: (r) => ({
+          content: [...r.content, ...contentPush],
+        }),
+        structuredContent: {
+          answer: textContent || '',
+          sources,
+          ...(urlMeta.length > 0 ? { urlMetadata: urlMeta } : {}),
+        },
+        reportMessage:
+          sources.length > 0
+            ? `${sources.length} source${sources.length === 1 ? '' : 's'} found`
+            : `responded (${textContent.length} chars)`,
+      };
+    },
+  );
 }
 
 export function registerSearchTool(server: McpServer): void {

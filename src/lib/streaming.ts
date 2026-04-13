@@ -9,9 +9,9 @@ import type {
   UrlContextMetadata,
 } from '@google/genai';
 
-import { sendProgress } from './context.js';
-import { finishReasonError } from './errors.js';
-import { pickDefined } from './response.js';
+import { reportCompletion, sendProgress } from './context.js';
+import { finishReasonError, handleToolError } from './errors.js';
+import { extractTextContent, pickDefined } from './response.js';
 import { withRetry } from './retry.js';
 
 export interface StreamResult {
@@ -134,4 +134,52 @@ export async function executeToolStream(
   const streamResult = await consumeStreamWithProgress(stream, ctx, toolLabel);
   const result = validateStreamResult(streamResult, toolName);
   return { streamResult, result };
+}
+
+export async function handleToolExecution<T extends Record<string, unknown>>(
+  ctx: ServerContext,
+  toolName: string,
+  toolLabel: string,
+  streamGenerator: () => Promise<AsyncGenerator<GenerateContentResponse>>,
+  responseBuilder: (
+    streamResult: StreamResult,
+    textText: string,
+  ) => {
+    resultMod?: (r: CallToolResult) => Partial<CallToolResult>;
+    structuredContent?: T;
+    reportMessage?: string;
+  } = (s, t) => ({ structuredContent: { answer: t } as unknown as T }),
+): Promise<CallToolResult> {
+  try {
+    const { streamResult, result } = await executeToolStream(
+      ctx,
+      toolName,
+      toolLabel,
+      streamGenerator,
+    );
+    if (result.isError) return result;
+
+    const text = extractTextContent(result.content);
+    const built = responseBuilder(streamResult, text);
+
+    if (built.reportMessage) {
+      await reportCompletion(ctx, toolLabel, built.reportMessage);
+    } else {
+      await reportCompletion(ctx, toolLabel, `responded (${text.length} chars)`);
+    }
+
+    const usage = extractUsage(streamResult.usageMetadata);
+
+    return {
+      ...result,
+      ...(built.resultMod ? built.resultMod(result) : {}),
+      structuredContent: {
+        ...(built.structuredContent ?? {}),
+        ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
+        ...(usage ? { usage } : {}),
+      },
+    };
+  } catch (err) {
+    return await handleToolError(ctx, toolName, toolLabel, err);
+  }
 }

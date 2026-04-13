@@ -3,11 +3,10 @@ import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprot
 import { createPartFromUri } from '@google/genai';
 
 import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
-import { reportCompletion, sendProgress } from '../lib/context.js';
+import { sendProgress } from '../lib/context.js';
 import { handleToolError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
-import { extractTextContent } from '../lib/response.js';
-import { executeToolStream, extractUsage } from '../lib/streaming.js';
+import { handleToolExecution } from '../lib/streaming.js';
 import { createToolTaskHandlers, READONLY_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
 import { AnalyzeFileInputSchema } from '../schemas/inputs.js';
 import { AnalyzeFileOutputSchema } from '../schemas/outputs.js';
@@ -38,31 +37,28 @@ async function analyzeFileWork(
     // Generate content with the file
     await sendProgress(ctx, 1, 3, `${TOOL_LABEL}: Analyzing content`);
 
-    const { streamResult, result } = await executeToolStream(ctx, 'analyze_file', TOOL_LABEL, () =>
-      ai.models.generateContentStream({
-        model: MODEL,
-        contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: question }],
-        config: buildGenerateContentConfig(
-          {
-            systemInstruction: ANALYZE_FILE_SYSTEM_INSTRUCTION,
-            thinkingLevel: thinkingLevel ?? 'LOW',
-          },
-          ctx.mcpReq.signal,
-        ),
+    return await handleToolExecution(
+      ctx,
+      'analyze_file',
+      TOOL_LABEL,
+      () =>
+        ai.models.generateContentStream({
+          model: MODEL,
+          contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: question }],
+          config: buildGenerateContentConfig(
+            {
+              systemInstruction: ANALYZE_FILE_SYSTEM_INSTRUCTION,
+              thinkingLevel: thinkingLevel ?? 'LOW',
+            },
+            ctx.mcpReq.signal,
+          ),
+        }),
+      (streamResult, textContent) => ({
+        structuredContent: {
+          analysis: textContent || '',
+        },
       }),
     );
-
-    const text = extractTextContent(result.content);
-    await reportCompletion(ctx, TOOL_LABEL, `responded (${text.length} chars)`);
-    const usage = extractUsage(streamResult.usageMetadata);
-    return {
-      ...result,
-      structuredContent: {
-        analysis: text,
-        ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
-        ...(usage ? { usage } : {}),
-      },
-    };
   } catch (err) {
     return await handleToolError(ctx, 'analyze_file', TOOL_LABEL, err);
   } finally {

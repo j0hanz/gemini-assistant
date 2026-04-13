@@ -3,9 +3,8 @@ import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprot
 import { Outcome } from '@google/genai';
 
 import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
-import { reportCompletion } from '../lib/context.js';
-import { errorResult, handleToolError } from '../lib/errors.js';
-import { executeToolStream, extractUsage } from '../lib/streaming.js';
+import { errorResult } from '../lib/errors.js';
+import { handleToolExecution } from '../lib/streaming.js';
 import { createToolTaskHandlers, MUTABLE_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
 import { ExecuteCodeInputSchema } from '../schemas/inputs.js';
 import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
@@ -49,9 +48,13 @@ async function executeCodeWork(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Execute Code';
-  try {
-    const prompt = [task, ...(language ? [`Language: ${language}`] : [])].join('\n\n');
-    const { streamResult } = await executeToolStream(ctx, 'execute_code', TOOL_LABEL, () =>
+  const prompt = [task, ...(language ? [`Language: ${language}`] : [])].join('\n\n');
+
+  return await handleToolExecution(
+    ctx,
+    'execute_code',
+    TOOL_LABEL,
+    () =>
       ai.models.generateContentStream({
         model: MODEL,
         contents: prompt,
@@ -66,77 +69,63 @@ async function executeCodeWork(
           ),
         },
       }),
-    );
+    (streamResult) => {
+      const { parts } = streamResult;
+      if (parts.length === 0) {
+        return {
+          resultMod: () => errorResult('execute_code: prompt blocked by safety filter (unknown)'),
+        };
+      }
 
-    const { parts } = streamResult;
-    if (parts.length === 0) {
-      return errorResult('execute_code: prompt blocked by safety filter (unknown)');
-    }
+      const codeLines: string[] = [];
+      const outputLines: string[] = [];
+      const explanationLines: string[] = [];
+      let executionFailed = false;
 
-    const codeLines: string[] = [];
-    const outputLines: string[] = [];
-    const explanationLines: string[] = [];
-    let executionFailed = false;
-
-    for (const part of parts) {
-      if (part.thought) continue;
-      if (part.executableCode) {
-        codeLines.push(part.executableCode.code ?? '');
-      } else if (part.codeExecutionResult) {
-        outputLines.push(part.codeExecutionResult.output ?? '');
-        if (
-          part.codeExecutionResult.outcome &&
-          part.codeExecutionResult.outcome !== Outcome.OUTCOME_OK
-        ) {
-          executionFailed = true;
+      for (const part of parts) {
+        if (part.thought) continue;
+        if (part.executableCode) {
+          codeLines.push(part.executableCode.code ?? '');
+        } else if (part.codeExecutionResult) {
+          outputLines.push(part.codeExecutionResult.output ?? '');
+          if (
+            part.codeExecutionResult.outcome &&
+            part.codeExecutionResult.outcome !== Outcome.OUTCOME_OK
+          ) {
+            executionFailed = true;
+          }
+        } else if (part.text) {
+          explanationLines.push(part.text);
         }
-      } else if (part.text) {
-        explanationLines.push(part.text);
       }
-    }
 
-    // If no executable code was returned but there is an explanation, attempt to extract code from the explanation (e.g. from a fenced code block).
-    if (codeLines.length === 0 && explanationLines.length > 0) {
-      const extracted = extractFencedCodeBlocks(explanationLines.join('\n'));
-      if (extracted.code.length > 0) {
-        codeLines.push(...extracted.code);
-        explanationLines.length = 0;
-        if (extracted.explanation) explanationLines.push(extracted.explanation);
+      if (codeLines.length === 0 && explanationLines.length > 0) {
+        const extracted = extractFencedCodeBlocks(explanationLines.join('\n'));
+        if (extracted.code.length > 0) {
+          codeLines.push(...extracted.code);
+          explanationLines.length = 0;
+          if (extracted.explanation) explanationLines.push(extracted.explanation);
+        }
       }
-    }
 
-    const code = codeLines.join('\n');
-    const output = outputLines.join('\n');
-    const explanation = explanationLines.join('\n');
+      const code = codeLines.join('\n');
+      const output = outputLines.join('\n');
+      const explanation = explanationLines.join('\n');
 
-    if (executionFailed) {
-      await reportCompletion(ctx, TOOL_LABEL, 'execution failed');
-      const usage = extractUsage(streamResult.usageMetadata);
-      const structured = {
-        code,
-        output,
-        explanation,
-        ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
-        ...(usage ? { usage } : {}),
-      };
       return {
-        content: [{ type: 'text', text: formatExecuteCodeMarkdown(code, output, explanation) }],
-        structuredContent: structured,
-        isError: true,
+        resultMod: () => ({
+          isError: executionFailed ? true : undefined,
+          content: [{ type: 'text', text: formatExecuteCodeMarkdown(code, output, explanation) }],
+        }),
+        structuredContent: {
+          code,
+          output,
+          explanation,
+        },
+        reportMessage: executionFailed ? 'execution failed' : 'completed',
       };
-    }
-
-    const usage = extractUsage(streamResult.usageMetadata);
-    const structured = { code, output, explanation, ...(usage ? { usage } : {}) };
-
-    await reportCompletion(ctx, TOOL_LABEL, 'completed');
-    return {
-      content: [{ type: 'text', text: formatExecuteCodeMarkdown(code, output, explanation) }],
-      structuredContent: structured,
-    };
-  } catch (err) {
-    return await handleToolError(ctx, 'execute_code', TOOL_LABEL, err);
-  }
+    },
+  );
 }
 
 export function registerExecuteCodeTool(server: McpServer): void {

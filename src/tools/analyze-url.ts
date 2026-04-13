@@ -1,10 +1,8 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
-import { reportCompletion } from '../lib/context.js';
-import { handleToolError } from '../lib/errors.js';
-import { appendUrlStatus, collectUrlMetadata, extractTextContent } from '../lib/response.js';
-import { executeToolStream, extractUsage } from '../lib/streaming.js';
+import { appendUrlStatus, collectUrlMetadata } from '../lib/response.js';
+import { handleToolExecution } from '../lib/streaming.js';
 import { createToolTaskHandlers, READONLY_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
 import { AnalyzeUrlInputSchema } from '../schemas/inputs.js';
 import { AnalyzeUrlOutputSchema } from '../schemas/outputs.js';
@@ -35,8 +33,12 @@ async function analyzeUrlWork(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Analyze URL';
-  try {
-    const { streamResult, result } = await executeToolStream(ctx, 'analyze_url', TOOL_LABEL, () =>
+
+  return await handleToolExecution(
+    ctx,
+    'analyze_url',
+    TOOL_LABEL,
+    () =>
       ai.models.generateContentStream({
         model: MODEL,
         contents: buildPromptWithUrls(urls, question),
@@ -51,33 +53,24 @@ async function analyzeUrlWork(
           ),
         },
       }),
-    );
+    (streamResult, textContent) => {
+      const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
 
-    if (result.isError) return result;
+      const contentPush: CallToolResult['content'] = [];
+      appendUrlStatus(contentPush, urlMetadata);
 
-    const answerText = extractTextContent(result.content) || '';
-    const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
-    appendUrlStatus(result.content, urlMetadata);
-
-    await reportCompletion(
-      ctx,
-      TOOL_LABEL,
-      `${urlMetadata.length} URL${urlMetadata.length === 1 ? '' : 's'} retrieved`,
-    );
-
-    const usage = extractUsage(streamResult.usageMetadata);
-    return {
-      ...result,
-      structuredContent: {
-        answer: answerText,
-        ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
-        ...(urlMetadata.length > 0 ? { urlMetadata } : {}),
-        ...(usage ? { usage } : {}),
-      },
-    };
-  } catch (err) {
-    return await handleToolError(ctx, 'analyze_url', TOOL_LABEL, err);
-  }
+      return {
+        resultMod: (r) => ({
+          content: [...r.content, ...contentPush],
+        }),
+        structuredContent: {
+          answer: textContent || '',
+          ...(urlMetadata.length > 0 ? { urlMetadata } : {}),
+        },
+        reportMessage: `${urlMetadata.length} URL${urlMetadata.length === 1 ? '' : 's'} retrieved`,
+      };
+    },
+  );
 }
 
 export function registerAnalyzeUrlTool(server: McpServer): void {

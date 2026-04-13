@@ -101,7 +101,7 @@ async function uploadCacheParts(
           ctx,
           filesUploaded,
           totalSteps,
-          `${toolLabel}: Uploaded ${fileNameFromPath(filePath)} (${filesUploaded}/${filePaths.length})`,
+          `${toolLabel}: ${fileNameFromPath(filePath)} (${filesUploaded}/${filePaths.length})`,
         );
         return createPartFromUri(uploadedFile.uri, uploadedFile.mimeType);
       }),

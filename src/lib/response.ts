@@ -6,8 +6,16 @@ import type { UrlMetadataEntry } from '../schemas/outputs.js';
 
 import { errorResult, finishReasonError } from './errors.js';
 
-export function pickDefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
-  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as Partial<T>;
+export type PickDefined<T> = {
+  [K in keyof T as undefined extends T[K] ? K : never]?: Exclude<T[K], undefined>;
+} & {
+  [K in keyof T as undefined extends T[K] ? never : K]: T[K];
+};
+
+export function pickDefined<T extends Record<string, unknown>>(obj: T): PickDefined<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined),
+  ) as PickDefined<T>;
 }
 
 export function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlMetadataEntry[] {

@@ -2,14 +2,14 @@ import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprot
 
 import { createPartFromUri } from '@google/genai';
 
-import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
+import { buildGenerateContentConfig } from '../lib/config-utils.js';
 import { sendProgress } from '../lib/context.js';
 import { cleanupErrorLogger, handleToolError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/path-validation.js';
 import { handleToolExecution } from '../lib/streaming.js';
 import { createToolTaskHandlers, READONLY_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
-import { AnalyzeFileInputSchema } from '../schemas/inputs.js';
+import { type AnalyzeFileInput, AnalyzeFileInputSchema } from '../schemas/inputs.js';
 import { AnalyzeFileOutputSchema } from '../schemas/outputs.js';
 
 import { ai, MODEL } from '../client.js';
@@ -20,11 +20,7 @@ const ANALYZE_FILE_SYSTEM_INSTRUCTION =
 
 function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
   return async function analyzeFileWork(
-    {
-      filePath,
-      question,
-      thinkingLevel,
-    }: { filePath: string; question: string; thinkingLevel?: AskThinkingLevel | undefined },
+    { filePath, question, thinkingLevel }: AnalyzeFileInput,
     ctx: ServerContext,
   ): Promise<CallToolResult> {
     const TOOL_LABEL = 'Analyze File';

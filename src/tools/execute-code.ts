@@ -3,11 +3,11 @@ import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprot
 import { Outcome } from '@google/genai';
 import type { Part } from '@google/genai';
 
-import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
+import { buildGenerateContentConfig } from '../lib/config-utils.js';
 import { errorResult } from '../lib/errors.js';
 import { handleToolExecution } from '../lib/streaming.js';
 import { createToolTaskHandlers, MUTABLE_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
-import { ExecuteCodeInputSchema } from '../schemas/inputs.js';
+import { type ExecuteCodeInput, ExecuteCodeInputSchema } from '../schemas/inputs.js';
 import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
 
 import { ai, MODEL } from '../client.js';
@@ -107,11 +107,7 @@ function summarizeExecutionParts(parts: readonly Part[]): ExecutionSummary {
 }
 
 async function executeCodeWork(
-  {
-    task,
-    language,
-    thinkingLevel,
-  }: { task: string; language?: string | undefined; thinkingLevel?: AskThinkingLevel | undefined },
+  { task, language, thinkingLevel }: ExecuteCodeInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Execute Code';

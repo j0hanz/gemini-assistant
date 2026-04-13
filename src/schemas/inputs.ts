@@ -7,6 +7,7 @@ export const ExecuteCodeInputSchema = z.object({
   language: z.string().optional().describe('Preferred language (Python is sandbox default)'),
   thinkingLevel: z.enum(THINKING_LEVELS).optional().describe('Thinking depth for reasoning.'),
 });
+export type ExecuteCodeInput = z.infer<typeof ExecuteCodeInputSchema>;
 
 export const SearchInputSchema = z.object({
   query: z.string().min(1).describe('Question or topic to research'),
@@ -18,6 +19,7 @@ export const SearchInputSchema = z.object({
     .describe('URLs to deeply analyze alongside search results (max 20). Enables URL Context.'),
   thinkingLevel: z.enum(THINKING_LEVELS).optional().describe('Thinking depth for reasoning.'),
 });
+export type SearchInput = z.infer<typeof SearchInputSchema>;
 
 export const AnalyzeFileInputSchema = z.object({
   filePath: z.string().trim().min(1).describe('Absolute path to the file'),
@@ -27,6 +29,7 @@ export const AnalyzeFileInputSchema = z.object({
     .optional()
     .describe("Thinking depth for analysis. Use 'LOW' for fast, 'HIGH' for deep reasoning."),
 });
+export type AnalyzeFileInput = z.infer<typeof AnalyzeFileInputSchema>;
 
 export const AnalyzeUrlInputSchema = z.object({
   urls: z
@@ -38,6 +41,7 @@ export const AnalyzeUrlInputSchema = z.object({
   systemInstruction: z.string().optional().describe('Custom system instruction for analysis'),
   thinkingLevel: z.enum(THINKING_LEVELS).optional().describe('Thinking depth for analysis.'),
 });
+export type AnalyzeUrlInput = z.infer<typeof AnalyzeUrlInputSchema>;
 
 export const CreateCacheInputSchema = z
   .object({
@@ -63,3 +67,4 @@ export const CreateCacheInputSchema = z
   .describe(
     'Creates a Gemini API cache. Combined content (files + instructions) MUST exceed ~32,000 tokens.',
   );
+export type CreateCacheInput = z.infer<typeof CreateCacheInputSchema>;

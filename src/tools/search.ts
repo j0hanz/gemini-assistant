@@ -1,6 +1,6 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
+import { buildGenerateContentConfig } from '../lib/config-utils.js';
 import {
   appendSources,
   appendUrlStatus,
@@ -11,7 +11,7 @@ import {
 } from '../lib/response.js';
 import { handleToolExecution } from '../lib/streaming.js';
 import { createToolTaskHandlers, READONLY_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
-import { SearchInputSchema } from '../schemas/inputs.js';
+import { type SearchInput, SearchInputSchema } from '../schemas/inputs.js';
 import { SearchOutputSchema } from '../schemas/outputs.js';
 
 import { ai, MODEL } from '../client.js';
@@ -35,17 +35,7 @@ function buildSearchReportMessage(sourceCount: number, responseLength: number): 
 }
 
 async function searchWork(
-  {
-    query,
-    systemInstruction,
-    urls,
-    thinkingLevel,
-  }: {
-    query: string;
-    systemInstruction?: string | undefined;
-    urls?: string[] | undefined;
-    thinkingLevel?: AskThinkingLevel | undefined;
-  },
+  { query, systemInstruction, urls, thinkingLevel }: SearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Web Search';

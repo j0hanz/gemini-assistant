@@ -15,7 +15,7 @@ import {
   READONLY_ANNOTATIONS,
   TASK_EXECUTION,
 } from '../lib/task-utils.js';
-import { CreateCacheInputSchema } from '../schemas/inputs.js';
+import { type CreateCacheInput, CreateCacheInputSchema } from '../schemas/inputs.js';
 import {
   CreateCacheOutputSchema,
   DeleteCacheOutputSchema,
@@ -26,13 +26,6 @@ import {
 import { ai, type CacheSummary, completeCacheNames, listCacheSummaries, MODEL } from '../client.js';
 
 type CachePart = ReturnType<typeof createPartFromUri>;
-
-interface CreateCacheArgs {
-  filePaths?: string[] | undefined;
-  systemInstruction?: string | undefined;
-  ttl?: string | undefined;
-  displayName?: string | undefined;
-}
 
 const CACHE_UPLOAD_CHUNK_SIZE = 3;
 
@@ -161,7 +154,7 @@ async function confirmCacheDeletion(ctx: ServerContext, cacheName: string): Prom
 
 function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
   return async function createCacheWork(
-    { filePaths, systemInstruction, ttl, displayName }: CreateCacheArgs,
+    { filePaths, systemInstruction, ttl, displayName }: CreateCacheInput,
     ctx: ServerContext,
   ): Promise<CallToolResult> {
     const TOOL_LABEL = 'Create Cache';

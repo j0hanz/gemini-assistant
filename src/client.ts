@@ -32,7 +32,7 @@ function toCacheSummary(cache: CachedContent): CacheSummary {
     createTime: cache.createTime,
     updateTime: cache.updateTime,
     totalTokenCount: cache.usageMetadata?.totalTokenCount,
-  }) as CacheSummary;
+  });
 }
 
 export async function getCacheSummary(name: string, signal?: AbortSignal): Promise<CacheSummary> {

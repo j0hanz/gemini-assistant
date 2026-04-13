@@ -28,14 +28,14 @@ const sessions = new Map<string, SessionEntry>();
 const evictedSessions = new Set<string>();
 
 let evictionTimer: ReturnType<typeof setInterval> | undefined;
-let changeCallback: (() => void) | undefined;
+let changeCallback: ((taskId?: string) => void) | undefined;
 
-export function onSessionChange(cb: () => void): void {
+export function onSessionChange(cb: (taskId?: string) => void): void {
   changeCallback = cb;
 }
 
-function notifyChange(): void {
-  changeCallback?.();
+function notifyChange(taskId?: string): void {
+  changeCallback?.(taskId);
 }
 
 function now(): number {
@@ -134,19 +134,19 @@ export function isEvicted(id: string): boolean {
   return evictedSessions.has(id);
 }
 
-export function getSession(id: string): Chat | undefined {
+export function getSession(id: string, taskId?: string): Chat | undefined {
   const entry = sessions.get(id);
   if (!entry) return undefined;
   const chat = updateSessionAccess(id, entry);
-  notifyChange();
+  notifyChange(taskId);
   return chat;
 }
 
-export function setSession(id: string, chat: Chat): void {
+export function setSession(id: string, chat: Chat, taskId?: string): void {
   if (sessions.size >= MAX_SESSIONS && !sessions.has(id)) {
     evictOldest();
   }
   storeSession(id, chat);
   startEvictionTimer();
-  notifyChange();
+  notifyChange(taskId);
 }

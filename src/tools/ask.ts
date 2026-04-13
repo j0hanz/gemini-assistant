@@ -209,7 +209,7 @@ async function askExistingSession(
   args: AskArgs & { sessionId: string },
   ctx: ServerContext,
 ): Promise<CallToolResult | undefined> {
-  const chat = getSession(args.sessionId);
+  const chat = getSession(args.sessionId, ctx.task?.id);
   if (!chat) return undefined;
 
   await ctx.mcpReq.log('debug', `Resuming session ${args.sessionId}`);
@@ -229,7 +229,7 @@ async function askNewSession(
   const result = await askWithChat(chat, args, ctx);
 
   if (!result.isError) {
-    setSession(args.sessionId, chat);
+    setSession(args.sessionId, chat, ctx.task?.id);
     appendSessionResource(result, args.sessionId);
   } else {
     await ctx.mcpReq.log('debug', `Session ${args.sessionId} not stored due to stream error`);
@@ -296,7 +296,7 @@ export function registerAskTool(server: McpServer): void {
           .record(z.string(), z.unknown())
           .optional()
           .describe(
-            'JSON Schema for structured output. Gemini returns conforming JSON. Disables thinking.',
+            'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking.',
           ),
       }),
       outputSchema: AskOutputSchema,

@@ -50,4 +50,36 @@ describe('resolveAndValidatePath', () => {
     const result = await resolveAndValidatePath(testPath);
     assert.ok(result.includes('nonexistent-test-file-12345.txt'));
   });
+
+  it('uses rootsFetcher roots when provided', async () => {
+    const testPath = join(process.cwd(), 'package.json');
+    const fetcher = async () => [process.cwd()];
+    const result = await resolveAndValidatePath(testPath, fetcher);
+    assert.ok(result.endsWith('package.json'));
+  });
+
+  it('rejects path outside rootsFetcher roots', async () => {
+    const outsidePath =
+      process.platform === 'win32' ? 'C:\\Windows\\System32\\cmd.exe' : '/etc/passwd';
+    const fetcher = async () => [process.cwd()];
+    await assert.rejects(() => resolveAndValidatePath(outsidePath, fetcher), {
+      message: /outside allowed directories/,
+    });
+  });
+
+  it('falls back to env roots when rootsFetcher returns empty', async () => {
+    const testPath = join(process.cwd(), 'package.json');
+    const fetcher = async () => [] as string[];
+    const result = await resolveAndValidatePath(testPath, fetcher);
+    assert.ok(result.endsWith('package.json'));
+  });
+
+  it('falls back to env roots when rootsFetcher throws', async () => {
+    const testPath = join(process.cwd(), 'package.json');
+    const fetcher = async () => {
+      throw new Error('client does not support roots');
+    };
+    const result = await resolveAndValidatePath(testPath, fetcher);
+    assert.ok(result.endsWith('package.json'));
+  });
 });

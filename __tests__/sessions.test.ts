@@ -139,5 +139,36 @@ describe('sessions', () => {
       setSession(`${prefix}overflow`, mockChat('notify-overflow') as never);
       assert.strictEqual(calls, 1);
     });
+
+    it('forwards taskId from setSession to callback', () => {
+      let receivedTaskId: string | undefined;
+      onSessionChange((taskId) => {
+        receivedTaskId = taskId;
+      });
+
+      setSession('sess-task-set', mockChat('task-set') as never, 'task-123');
+      assert.strictEqual(receivedTaskId, 'task-123');
+    });
+
+    it('forwards taskId from getSession to callback', () => {
+      let receivedTaskId: string | undefined;
+      setSession('sess-task-get', mockChat('task-get') as never);
+      onSessionChange((taskId) => {
+        receivedTaskId = taskId;
+      });
+
+      getSession('sess-task-get', 'task-456');
+      assert.strictEqual(receivedTaskId, 'task-456');
+    });
+
+    it('passes undefined taskId when not provided', () => {
+      let receivedTaskId: string | undefined = 'should-be-cleared';
+      onSessionChange((taskId) => {
+        receivedTaskId = taskId;
+      });
+
+      setSession('sess-no-task', mockChat('no-task') as never);
+      assert.strictEqual(receivedTaskId, undefined);
+    });
   });
 });

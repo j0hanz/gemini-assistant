@@ -2,6 +2,7 @@ import { stat } from 'node:fs/promises';
 
 import { ai } from '../client.js';
 import { getMimeType, MAX_FILE_SIZE } from './file-utils.js';
+import type { RootsFetcher } from './path-validation.js';
 import { resolveAndValidatePath } from './path-validation.js';
 import { withRetry } from './retry.js';
 
@@ -11,8 +12,12 @@ interface UploadedFile {
   mimeType: string;
 }
 
-export async function uploadFile(filePath: string, signal: AbortSignal): Promise<UploadedFile> {
-  const validPath = await resolveAndValidatePath(filePath);
+export async function uploadFile(
+  filePath: string,
+  signal: AbortSignal,
+  rootsFetcher?: RootsFetcher,
+): Promise<UploadedFile> {
+  const validPath = await resolveAndValidatePath(filePath, rootsFetcher);
 
   const fileStat = await stat(validPath);
   if (fileStat.size > MAX_FILE_SIZE) {

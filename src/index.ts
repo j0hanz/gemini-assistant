@@ -64,14 +64,22 @@ registerCacheTools(server);
 registerPrompts(server);
 registerResources(server);
 
-onSessionChange(() => {
+onSessionChange((taskId) => {
+  if (!server.isConnected()) return;
   server.sendResourceListChanged();
-  void server.server.sendResourceUpdated({ uri: 'sessions://list' });
+  void server.server.sendResourceUpdated({
+    uri: 'sessions://list',
+    ...(taskId ? { _meta: { 'io.modelcontextprotocol/related-task': { taskId } } } : {}),
+  });
 });
 
-onCacheChange(() => {
+onCacheChange((taskId) => {
+  if (!server.isConnected()) return;
   server.sendResourceListChanged();
-  void server.server.sendResourceUpdated({ uri: 'caches://list' });
+  void server.server.sendResourceUpdated({
+    uri: 'caches://list',
+    ...(taskId ? { _meta: { 'io.modelcontextprotocol/related-task': { taskId } } } : {}),
+  });
 });
 
 const transportMode = process.env.MCP_TRANSPORT ?? 'stdio';
@@ -115,19 +123,23 @@ process.on('SIGINT', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
 
 process.on('uncaughtException', (err) => {
-  void server.sendLoggingMessage({
-    level: 'emergency',
-    logger: 'gemini-assistant',
-    data: `Uncaught Exception: ${err instanceof Error ? err.message : String(err)}`,
-  });
+  if (server.isConnected()) {
+    void server.sendLoggingMessage({
+      level: 'emergency',
+      logger: 'gemini-assistant',
+      data: `Uncaught Exception: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
-  void server.sendLoggingMessage({
-    level: 'emergency',
-    logger: 'gemini-assistant',
-    data: `Unhandled Rejection: ${reason instanceof Error ? reason.message : String(reason)}`,
-  });
+  if (server.isConnected()) {
+    void server.sendLoggingMessage({
+      level: 'emergency',
+      logger: 'gemini-assistant',
+      data: `Unhandled Rejection: ${reason instanceof Error ? reason.message : String(reason)}`,
+    });
+  }
   process.exit(1);
 });

@@ -1,4 +1,4 @@
-import type { ServerContext } from '@modelcontextprotocol/server';
+import type { ProgressNotification, ServerContext } from '@modelcontextprotocol/server';
 
 export async function sendProgress(
   ctx: ServerContext,
@@ -9,7 +9,7 @@ export async function sendProgress(
   const progressToken = ctx.mcpReq._meta?.progressToken;
   if (progressToken === undefined || ctx.mcpReq.signal.aborted) return;
   try {
-    await ctx.mcpReq.notify({
+    const notification: ProgressNotification = {
       method: 'notifications/progress',
       params: {
         progressToken,
@@ -17,9 +17,18 @@ export async function sendProgress(
         total,
         ...(message ? { message } : {}),
       },
-    });
-  } catch {
-    // Transport may be closing — swallow notification errors
+    };
+    await ctx.mcpReq.notify(notification);
+  } catch (err: unknown) {
+    const aborted = ctx.mcpReq.signal.aborted as boolean;
+    if (!aborted) {
+      const detail = err instanceof Error ? err.message : String(err);
+      try {
+        await ctx.mcpReq.log('debug', `Progress notification failed: ${detail}`);
+      } catch {
+        // Transport fully closed — discard
+      }
+    }
   }
 }
 

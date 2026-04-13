@@ -8,55 +8,67 @@ interface StoredEvent {
   message: JSONRPCMessage;
 }
 
+interface StreamState {
+  events: StoredEvent[];
+  baseOffset: number;
+}
+
+interface EventLocation {
+  streamId: StreamId;
+  absoluteIndex: number;
+}
+
 export class InMemoryEventStore implements EventStore {
-  private _streams = new Map<StreamId, StoredEvent[]>();
-  private _eventToStream = new Map<EventId, StreamId>();
+  private _streams = new Map<StreamId, StreamState>();
+  private _eventToStream = new Map<EventId, EventLocation>();
   private _counter = 0;
 
   storeEvent(streamId: StreamId, message: JSONRPCMessage): Promise<EventId> {
     const eventId: EventId = `e-${++this._counter}`;
 
-    let events = this._streams.get(streamId);
-    if (!events) {
+    let state = this._streams.get(streamId);
+    if (!state) {
       this._evictIfNeeded();
-      events = [];
-      this._streams.set(streamId, events);
+      state = { events: [], baseOffset: 0 };
+      this._streams.set(streamId, state);
     }
 
-    if (events.length >= MAX_EVENTS_PER_STREAM) {
-      const removed = events.shift();
+    if (state.events.length >= MAX_EVENTS_PER_STREAM) {
+      const removed = state.events.shift();
       if (removed) this._eventToStream.delete(removed.eventId);
+      state.baseOffset++;
     }
 
-    events.push({ eventId, message });
-    this._eventToStream.set(eventId, streamId);
+    const absoluteIndex = state.baseOffset + state.events.length;
+    state.events.push({ eventId, message });
+    this._eventToStream.set(eventId, { streamId, absoluteIndex });
 
     return Promise.resolve(eventId);
   }
 
   getStreamIdForEventId(eventId: EventId): Promise<StreamId | undefined> {
-    return Promise.resolve(this._eventToStream.get(eventId));
+    return Promise.resolve(this._eventToStream.get(eventId)?.streamId);
   }
 
   async replayEventsAfter(
     lastEventId: EventId,
     { send }: { send: (eventId: EventId, message: JSONRPCMessage) => Promise<void> },
   ): Promise<StreamId> {
-    const streamId = this._eventToStream.get(lastEventId);
-    if (!streamId) return '';
+    const location = this._eventToStream.get(lastEventId);
+    if (!location) return '';
 
-    const events = this._streams.get(streamId);
-    if (!events) return streamId;
+    const state = this._streams.get(location.streamId);
+    if (!state) return location.streamId;
 
-    const idx = events.findIndex((e) => e.eventId === lastEventId);
-    if (idx === -1) return streamId;
+    const arrayIndex = location.absoluteIndex - state.baseOffset;
+    if (arrayIndex < 0 || arrayIndex >= state.events.length) return location.streamId;
 
-    for (let i = idx + 1; i < events.length; i++) {
-      const event = events[i];
+    for (let i = arrayIndex + 1; i < state.events.length; i++) {
+      const event = state.events[i];
       if (event) await send(event.eventId, event.message);
     }
 
-    return streamId;
+    return location.streamId;
   }
 
   cleanup(): void {
@@ -71,9 +83,9 @@ export class InMemoryEventStore implements EventStore {
     const oldest = this._streams.keys().next();
     if (oldest.done) return;
 
-    const events = this._streams.get(oldest.value);
-    if (events) {
-      for (const e of events) this._eventToStream.delete(e.eventId);
+    const state = this._streams.get(oldest.value);
+    if (state) {
+      for (const e of state.events) this._eventToStream.delete(e.eventId);
     }
     this._streams.delete(oldest.value);
   }

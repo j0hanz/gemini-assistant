@@ -83,6 +83,38 @@ describe('InMemoryEventStore', () => {
     assert.equal(streamId, undefined);
   });
 
+  it('replays correctly after head eviction (offset math)', async () => {
+    const store = new InMemoryEventStore();
+
+    // Store 1002 events — first two evicted, third (e-3) survives
+    const eventIds: string[] = [];
+    for (let i = 0; i < 1002; i++) {
+      eventIds.push(await store.storeEvent('s1', msg(i)));
+    }
+
+    // e-1 and e-2 evicted
+    const first = eventIds[0] ?? '';
+    const second = eventIds[1] ?? '';
+    assert.equal(await store.getStreamIdForEventId(first), undefined);
+    assert.equal(await store.getStreamIdForEventId(second), undefined);
+
+    // e-3 (index 2) still present — replay from it should return e-4 onward
+    const thirdEventId = eventIds[2] ?? '';
+    assert.equal(await store.getStreamIdForEventId(thirdEventId), 's1');
+
+    const replayed: string[] = [];
+    await store.replayEventsAfter(thirdEventId, {
+      send: async (eventId) => {
+        replayed.push(eventId);
+      },
+    });
+
+    // 1002 total - 2 evicted - 1 (the anchor) = 999 events replayed
+    assert.equal(replayed.length, 999);
+    assert.equal(replayed[0], eventIds[3]);
+    assert.equal(replayed[replayed.length - 1], eventIds[1001]);
+  });
+
   it('evicts oldest stream when max streams exceeded', async () => {
     const store = new InMemoryEventStore();
 

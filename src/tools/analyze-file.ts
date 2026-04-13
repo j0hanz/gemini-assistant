@@ -65,7 +65,12 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
     } catch (err) {
       return await handleToolError(ctx, 'analyze_file', TOOL_LABEL, err);
     } finally {
-      await deleteUploadedFiles(uploadedFileName ? [uploadedFileName] : []);
+      await deleteUploadedFiles(uploadedFileName ? [uploadedFileName] : [], (reason) => {
+        void ctx.mcpReq.log(
+          'warning',
+          `File cleanup failed: ${reason instanceof Error ? reason.message : String(reason)}`,
+        );
+      });
     }
   };
 }

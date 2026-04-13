@@ -223,7 +223,12 @@ function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
       const normalizedError = normalizeCreateCacheError(err);
       return await handleToolError(ctx, 'create_cache', TOOL_LABEL, normalizedError);
     } finally {
-      await deleteUploadedFiles(uploadedFileNames);
+      await deleteUploadedFiles(uploadedFileNames, (reason) => {
+        void ctx.mcpReq.log(
+          'warning',
+          `File cleanup failed: ${reason instanceof Error ? reason.message : String(reason)}`,
+        );
+      });
     }
   };
 }

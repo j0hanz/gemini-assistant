@@ -1,7 +1,7 @@
 import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server';
 import { ResourceTemplate } from '@modelcontextprotocol/server';
 
-import { getCacheSummary, listCacheSummaries } from './client.js';
+import { completeCacheNames, getCacheSummary, listCacheSummaries } from './client.js';
 import { getSessionEntry, listSessionEntries } from './sessions.js';
 
 interface ResourceListEntry {
@@ -80,6 +80,12 @@ export function registerResources(server: McpServer): void {
     'session-detail',
     new ResourceTemplate('sessions://{sessionId}', {
       list: () => ({ resources: sessionDetailResources() }),
+      complete: {
+        sessionId: (value) =>
+          listSessionEntries()
+            .map((s) => s.id)
+            .filter((id) => id.startsWith(value)),
+      },
     }),
     {
       title: 'Chat Session Detail',
@@ -126,6 +132,9 @@ export function registerResources(server: McpServer): void {
         } catch {
           return { resources: [] };
         }
+      },
+      complete: {
+        cacheName: (value) => completeCacheNames(value),
       },
     }),
     {

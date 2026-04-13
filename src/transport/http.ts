@@ -1,5 +1,6 @@
 import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import type { EventStore, McpServer } from '@modelcontextprotocol/server';
+import { localhostAllowedHostnames, validateHostHeader } from '@modelcontextprotocol/server';
 
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
@@ -31,7 +32,16 @@ export async function startHttpTransport(
     ...(eventStore ? { eventStore } : {}),
   });
 
+  const allowedHostnames = localhostAllowedHostnames();
+
   const httpServer = createServer((req, res) => {
+    const hostCheck = validateHostHeader(req.headers.host, allowedHostnames);
+    if (!hostCheck.ok) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end(`Forbidden: ${hostCheck.message}`);
+      return;
+    }
+
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
     if (url.pathname === '/mcp') {
       transport.handleRequest(req, res).catch((err: unknown) => {

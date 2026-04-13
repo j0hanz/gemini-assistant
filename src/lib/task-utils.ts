@@ -51,6 +51,7 @@ export function runToolAsTask(
   store: RequestTaskStore,
   task: Task,
   work: Promise<CallToolResult>,
+  onStoreError?: (taskId: string, err: unknown) => void,
 ): void {
   work
     .then(async (result) => {
@@ -65,8 +66,8 @@ export function runToolAsTask(
           ],
           isError: true,
         });
-      } catch {
-        console.error(`Failed to store error result for task ${task.taskId}`);
+      } catch (storeErr) {
+        onStoreError?.(task.taskId, storeErr);
       }
     });
 }
@@ -80,7 +81,12 @@ export function createToolTaskHandlers<TArgs>(work: TaskWork<TArgs>): ToolTaskHa
     createTask: async (args, ctx) => {
       const taskContext = requireTaskContext(ctx);
       const task = await taskContext.store.createTask({ ttl: taskTtl(taskContext.requestedTtl) });
-      runToolAsTask(taskContext.store, task, work(args, ctx));
+      runToolAsTask(taskContext.store, task, work(args, ctx), (taskId, err) => {
+        void ctx.mcpReq.log(
+          'error',
+          `Failed to store error result for task ${taskId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
       return { task } as CreateTaskResult;
     },
     getTask: async (_args, ctx) => {

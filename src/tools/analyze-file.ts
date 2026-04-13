@@ -1,10 +1,4 @@
-import type {
-  CallToolResult,
-  CreateTaskResult,
-  GetTaskResult,
-  McpServer,
-  ServerContext,
-} from '@modelcontextprotocol/server';
+import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { createPartFromUri } from '@google/genai';
 
@@ -13,7 +7,7 @@ import { logAndReturnError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { extractTextContent } from '../lib/response.js';
 import { executeToolStream } from '../lib/streaming.js';
-import { runToolAsTask, taskTtl } from '../lib/task-utils.js';
+import { createToolTaskHandlers } from '../lib/task-utils.js';
 import { AnalyzeFileInputSchema } from '../schemas/inputs.js';
 
 import { ai, MODEL } from '../client.js';
@@ -79,16 +73,6 @@ export function registerAnalyzeFileTool(server: McpServer): void {
       },
       execution: { taskSupport: 'optional' },
     },
-    {
-      createTask: async ({ filePath, question }, ctx) => {
-        const task = await ctx.task.store.createTask({ ttl: taskTtl(ctx.task.requestedTtl) });
-        runToolAsTask(ctx.task.store, task, analyzeFileWork({ filePath, question }, ctx));
-        return { task } as CreateTaskResult;
-      },
-      getTask: async (_args, ctx) =>
-        ({ task: await ctx.task.store.getTask(ctx.task.id) }) as unknown as GetTaskResult,
-      getTaskResult: async (_args, ctx) =>
-        (await ctx.task.store.getTaskResult(ctx.task.id)) as CallToolResult,
-    },
+    createToolTaskHandlers(analyzeFileWork),
   );
 }

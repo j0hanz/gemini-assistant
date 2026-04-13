@@ -1,10 +1,4 @@
-import type {
-  CallToolResult,
-  CreateTaskResult,
-  GetTaskResult,
-  McpServer,
-  ServerContext,
-} from '@modelcontextprotocol/server';
+import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 import { completable } from '@modelcontextprotocol/server';
 
 import { createPartFromUri } from '@google/genai';
@@ -14,12 +8,12 @@ import { reportCompletion, reportFailure, sendProgress } from '../lib/context.js
 import { logAndReturnError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { withRetry } from '../lib/retry.js';
-import { runToolAsTask, taskTtl } from '../lib/task-utils.js';
+import { createToolTaskHandlers } from '../lib/task-utils.js';
 import { CreateCacheInputSchema } from '../schemas/inputs.js';
 
-import { ai, MODEL } from '../client.js';
+import { ai, type CacheSummary, listCacheNames, listCacheSummaries, MODEL } from '../client.js';
 
-function formatCacheListMarkdown(caches: Record<string, unknown>[]): string {
+function formatCacheListMarkdown(caches: CacheSummary[]): string {
   if (caches.length === 0) return 'No active caches found.';
   const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v : fallback);
   return (
@@ -36,15 +30,31 @@ function formatCacheListMarkdown(caches: Record<string, unknown>[]): string {
   );
 }
 
+async function completeCacheNames(prefix?: string): Promise<string[]> {
+  try {
+    return await listCacheNames(prefix);
+  } catch {
+    return [];
+  }
+}
+
+function toCreateCacheError(err: unknown): unknown {
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.includes('too few tokens') || message.includes('minimum')) {
+    return new Error(`content is below the ~32,000 token minimum. ${message}`);
+  }
+  return err;
+}
+
 async function createCacheWork(
   {
     filePaths,
     systemInstruction,
     ttl,
   }: {
-    filePaths: string[] | undefined;
-    systemInstruction: string | undefined;
-    ttl: string | undefined;
+    filePaths?: string[] | undefined;
+    systemInstruction?: string | undefined;
+    ttl?: string | undefined;
   },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -118,17 +128,9 @@ async function createCacheWork(
       ],
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes('too few tokens') || message.includes('minimum')) {
-      await reportFailure(ctx, TOOL_LABEL, err);
-      return await logAndReturnError(
-        ctx,
-        'create_cache',
-        new Error(`content is below the ~32,000 token minimum. ${message}`),
-      );
-    }
-    await reportFailure(ctx, TOOL_LABEL, err);
-    return await logAndReturnError(ctx, 'create_cache', err);
+    const normalizedError = toCreateCacheError(err);
+    await reportFailure(ctx, TOOL_LABEL, normalizedError);
+    return await logAndReturnError(ctx, 'create_cache', normalizedError);
   } finally {
     await deleteUploadedFiles(uploadedFileNames);
   }
@@ -151,21 +153,7 @@ export function registerCacheTools(server: McpServer): void {
       },
       execution: { taskSupport: 'optional' },
     },
-    {
-      createTask: async ({ filePaths, systemInstruction, ttl }, ctx) => {
-        const task = await ctx.task.store.createTask({ ttl: taskTtl(ctx.task.requestedTtl) });
-        runToolAsTask(
-          ctx.task.store,
-          task,
-          createCacheWork({ filePaths, systemInstruction, ttl }, ctx),
-        );
-        return { task } as CreateTaskResult;
-      },
-      getTask: async (_args, ctx) =>
-        ({ task: await ctx.task.store.getTask(ctx.task.id) }) as unknown as GetTaskResult,
-      getTaskResult: async (_args, ctx) =>
-        (await ctx.task.store.getTaskResult(ctx.task.id)) as CallToolResult,
-    },
+    createToolTaskHandlers(createCacheWork),
   );
 
   server.registerTool(
@@ -183,17 +171,7 @@ export function registerCacheTools(server: McpServer): void {
     },
     async (_args, ctx: ServerContext) => {
       try {
-        const caches: Record<string, unknown>[] = [];
-        const pager = await ai.caches.list();
-        for await (const cached of pager) {
-          if (ctx.mcpReq.signal.aborted) break;
-          caches.push({
-            name: cached.name,
-            displayName: cached.displayName,
-            model: cached.model,
-            expireTime: cached.expireTime,
-          });
-        }
+        const caches = await listCacheSummaries(ctx.mcpReq.signal);
         return {
           content: [{ type: 'text', text: formatCacheListMarkdown(caches) }],
         };
@@ -214,18 +192,7 @@ export function registerCacheTools(server: McpServer): void {
             .string()
             .min(1)
             .describe('The cache resource name to delete (e.g., "cachedContents/...")'),
-          async (value) => {
-            const names: string[] = [];
-            try {
-              const pager = await ai.caches.list();
-              for await (const cached of pager) {
-                if (cached.name?.startsWith(value)) names.push(cached.name);
-              }
-            } catch {
-              // Cache listing may fail — return empty completions
-            }
-            return names;
-          },
+          completeCacheNames,
         ),
       }),
       annotations: {

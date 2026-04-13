@@ -1,10 +1,4 @@
-import type {
-  CallToolResult,
-  CreateTaskResult,
-  GetTaskResult,
-  McpServer,
-  ServerContext,
-} from '@modelcontextprotocol/server';
+import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 import { completable } from '@modelcontextprotocol/server';
 
 import type { ThinkingLevel } from '@google/genai';
@@ -14,13 +8,30 @@ import { reportCompletion, reportFailure } from '../lib/context.js';
 import { errorResult, logAndReturnError } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
 import { executeToolStream } from '../lib/streaming.js';
-import { runToolAsTask, taskTtl } from '../lib/task-utils.js';
+import { createToolTaskHandlers } from '../lib/task-utils.js';
 import { AskOutputSchema } from '../schemas/outputs.js';
 
-import { ai, MODEL } from '../client.js';
-import { getSession, isEvicted, listSessionEntries, setSession } from '../sessions.js';
+import { ai, listCacheNames, MODEL } from '../client.js';
+import {
+  getSession,
+  getSessionEntry,
+  isEvicted,
+  listSessionEntries,
+  setSession,
+} from '../sessions.js';
 
 const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
+type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+interface AskArgs {
+  message: string;
+  sessionId?: string | undefined;
+  systemInstruction?: string | undefined;
+  thinkingLevel?: AskThinkingLevel | undefined;
+  cacheName?: string | undefined;
+}
+
+const ASK_TOOL_LABEL = 'Ask Gemini';
 
 const DEFAULT_SYSTEM_INSTRUCTION =
   'You are a helpful AI assistant. Provide direct, accurate answers. ' +
@@ -37,139 +48,150 @@ function formatStructuredResult(result: CallToolResult): CallToolResult {
   };
 }
 
-async function askWork(
+function buildThinkingConfig(thinkingLevel?: AskThinkingLevel) {
+  return {
+    includeThoughts: true,
+    ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
+  };
+}
+
+function buildAskConfig(
   {
-    message,
-    sessionId,
     systemInstruction,
     thinkingLevel,
     cacheName,
-  }: {
-    message: string;
-    sessionId: string | undefined;
-    systemInstruction: string | undefined;
-    thinkingLevel: string | undefined;
-    cacheName: string | undefined;
-  },
+  }: Pick<AskArgs, 'systemInstruction' | 'thinkingLevel' | 'cacheName'>,
+  signal?: AbortSignal,
+) {
+  return {
+    ...(cacheName ? { cachedContent: cacheName } : {}),
+    ...(cacheName ? {} : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
+    thinkingConfig: buildThinkingConfig(thinkingLevel),
+    maxOutputTokens: 8192,
+    ...(signal ? { abortSignal: signal } : {}),
+  };
+}
+
+function validateAskRequest({
+  sessionId,
+  systemInstruction,
+  cacheName,
+}: AskArgs): CallToolResult | undefined {
+  if (sessionId && isEvicted(sessionId)) {
+    return errorResult(`ask: Session '${sessionId}' has expired.`);
+  }
+
+  if (sessionId && cacheName && getSessionEntry(sessionId)) {
+    return errorResult(
+      'ask: Cannot apply a cachedContent to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
+    );
+  }
+
+  if (cacheName && systemInstruction) {
+    return errorResult(
+      'ask: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via create_cache instead.',
+    );
+  }
+
+  return undefined;
+}
+
+async function runAskStream(
+  ctx: ServerContext,
+  streamGenerator: () => ReturnType<typeof ai.models.generateContentStream>,
+): Promise<CallToolResult> {
+  const { result } = await executeToolStream(ctx, 'ask', ASK_TOOL_LABEL, streamGenerator);
+  const text = extractTextContent(result.content);
+  await reportCompletion(ctx, ASK_TOOL_LABEL, `responded (${text.length} chars)`);
+  return formatStructuredResult(result);
+}
+
+function appendSessionResource(result: CallToolResult, sessionId: string): void {
+  if (result.isError) return;
+  result.content.push({
+    type: 'resource_link' as const,
+    uri: `sessions://${sessionId}`,
+    name: `Chat Session ${sessionId}`,
+    mimeType: 'application/json',
+  });
+}
+
+async function completeCacheNames(prefix?: string): Promise<string[]> {
+  try {
+    return await listCacheNames(prefix);
+  } catch {
+    return [];
+  }
+}
+
+async function askSingleTurn(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
+  return await runAskStream(ctx, () =>
+    ai.models.generateContentStream({
+      model: MODEL,
+      contents: args.message,
+      config: buildAskConfig(args, ctx.mcpReq.signal),
+    }),
+  );
+}
+
+async function askExistingSession(
+  args: AskArgs & { sessionId: string },
+  ctx: ServerContext,
+): Promise<CallToolResult | undefined> {
+  const chat = getSession(args.sessionId);
+  if (!chat) return undefined;
+
+  await ctx.mcpReq.log('debug', `Resuming session ${args.sessionId}`);
+  return await runAskStream(ctx, () =>
+    chat.sendMessageStream({
+      message: args.message,
+      config: { abortSignal: ctx.mcpReq.signal },
+    }),
+  );
+}
+
+async function askNewSession(
+  args: AskArgs & { sessionId: string },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const TOOL_LABEL = 'Ask Gemini';
+  await ctx.mcpReq.log('debug', `Creating session ${args.sessionId}`);
+  const chat = ai.chats.create({
+    model: MODEL,
+    config: buildAskConfig(args),
+  });
 
+  const result = await runAskStream(ctx, () =>
+    chat.sendMessageStream({
+      message: args.message,
+      config: { abortSignal: ctx.mcpReq.signal },
+    }),
+  );
+
+  if (!result.isError) {
+    setSession(args.sessionId, chat);
+    appendSessionResource(result, args.sessionId);
+  } else {
+    await ctx.mcpReq.log('debug', `Session ${args.sessionId} not stored due to stream error`);
+  }
+
+  return result;
+}
+
+async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
   try {
-    if (sessionId && isEvicted(sessionId)) {
-      return errorResult(`ask: Session '${sessionId}' has expired.`);
+    const validationError = validateAskRequest(args);
+    if (validationError) return validationError;
+
+    if (!args.sessionId) {
+      return await askSingleTurn(args, ctx);
     }
 
-    // Mid-session conflict guard
-    if (sessionId && cacheName) {
-      const existing = getSession(sessionId);
-      if (existing) {
-        return errorResult(
-          'ask: Cannot apply a cachedContent to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
-        );
-      }
-    }
+    const resumed = await askExistingSession(args as AskArgs & { sessionId: string }, ctx);
+    if (resumed) return resumed;
 
-    // Cache + systemInstruction conflict guard
-    if (cacheName && systemInstruction) {
-      return errorResult(
-        'ask: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via create_cache instead.',
-      );
-    }
-
-    const cacheConfig = cacheName ? { cachedContent: cacheName } : undefined;
-
-    // Single-turn: no sessionId
-    if (!sessionId) {
-      const { result } = await executeToolStream(ctx, 'ask', TOOL_LABEL, () =>
-        ai.models.generateContentStream({
-          model: MODEL,
-          contents: message,
-          config: {
-            ...cacheConfig,
-            ...(cacheName
-              ? {}
-              : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
-            thinkingConfig: {
-              includeThoughts: true,
-              ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
-            },
-            maxOutputTokens: 8192,
-            abortSignal: ctx.mcpReq.signal,
-          },
-        }),
-      );
-
-      await reportCompletion(
-        ctx,
-        TOOL_LABEL,
-        `responded (${extractTextContent(result.content).length} chars)`,
-      );
-      return formatStructuredResult(result);
-    }
-
-    // Multi-turn: existing session
-    let chat = getSession(sessionId);
-    if (chat) {
-      await ctx.mcpReq.log('debug', `Resuming session ${sessionId}`);
-
-      const currentChat = chat;
-      const { result } = await executeToolStream(ctx, 'ask', TOOL_LABEL, () =>
-        currentChat.sendMessageStream({
-          message,
-          config: { abortSignal: ctx.mcpReq.signal },
-        }),
-      );
-
-      await reportCompletion(
-        ctx,
-        TOOL_LABEL,
-        `responded (${extractTextContent(result.content).length} chars)`,
-      );
-      return formatStructuredResult(result);
-    }
-
-    // Multi-turn: new session
-    await ctx.mcpReq.log('debug', `Creating session ${sessionId}`);
-    chat = ai.chats.create({
-      model: MODEL,
-      config: {
-        ...cacheConfig,
-        ...(cacheName
-          ? {}
-          : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
-        thinkingConfig: {
-          includeThoughts: true,
-          ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
-        },
-        maxOutputTokens: 8192,
-      },
-    });
-
-    const { result } = await executeToolStream(ctx, 'ask', TOOL_LABEL, () =>
-      chat.sendMessageStream({
-        message,
-        config: { abortSignal: ctx.mcpReq.signal },
-      }),
-    );
-
-    if (!result.isError) {
-      setSession(sessionId, chat);
-      result.content.push({
-        type: 'resource_link' as const,
-        uri: `sessions://${sessionId}`,
-        name: `Chat Session ${sessionId}`,
-        mimeType: 'application/json',
-      });
-    } else {
-      await ctx.mcpReq.log('debug', `Session ${sessionId} not stored due to stream error`);
-    }
-
-    const text = extractTextContent(result.content);
-    await reportCompletion(ctx, TOOL_LABEL, `responded (${text.length} chars)`);
-    return formatStructuredResult(result);
+    return await askNewSession(args as AskArgs & { sessionId: string }, ctx);
   } catch (err) {
-    await reportFailure(ctx, TOOL_LABEL, err);
+    await reportFailure(ctx, ASK_TOOL_LABEL, err);
     return await logAndReturnError(ctx, 'ask', err);
   }
 }
@@ -210,18 +232,7 @@ export function registerAskTool(server: McpServer): void {
             .describe(
               'Cache name from create_cache. Cannot be applied to an existing chat session.',
             ),
-          async (value) => {
-            const names: string[] = [];
-            try {
-              const pager = await ai.caches.list();
-              for await (const cached of pager) {
-                if (cached.name?.startsWith(value ?? '')) names.push(cached.name);
-              }
-            } catch {
-              // Cache listing may fail — return empty completions
-            }
-            return names;
-          },
+          completeCacheNames,
         ),
       }),
       outputSchema: AskOutputSchema,
@@ -233,23 +244,6 @@ export function registerAskTool(server: McpServer): void {
       },
       execution: { taskSupport: 'optional' },
     },
-    {
-      createTask: async (
-        { message, sessionId, systemInstruction, thinkingLevel, cacheName },
-        ctx,
-      ) => {
-        const task = await ctx.task.store.createTask({ ttl: taskTtl(ctx.task.requestedTtl) });
-        runToolAsTask(
-          ctx.task.store,
-          task,
-          askWork({ message, sessionId, systemInstruction, thinkingLevel, cacheName }, ctx),
-        );
-        return { task } as CreateTaskResult;
-      },
-      getTask: async (_args, ctx) =>
-        ({ task: await ctx.task.store.getTask(ctx.task.id) }) as unknown as GetTaskResult,
-      getTaskResult: async (_args, ctx) =>
-        (await ctx.task.store.getTaskResult(ctx.task.id)) as CallToolResult,
-    },
+    createToolTaskHandlers(askWork),
   );
 }

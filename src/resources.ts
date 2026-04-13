@@ -1,8 +1,19 @@
 import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server';
 import { ResourceTemplate } from '@modelcontextprotocol/server';
 
-import { ai } from './client.js';
+import { listCacheSummaries } from './client.js';
 import { getSessionEntry, listSessionEntries } from './sessions.js';
+
+function jsonResource(uri: string, value: unknown): ReadResourceResult {
+  return {
+    contents: [
+      {
+        uri,
+        text: JSON.stringify(value),
+      },
+    ],
+  };
+}
 
 export function registerResources(server: McpServer): void {
   server.registerResource(
@@ -22,14 +33,7 @@ export function registerResources(server: McpServer): void {
       description: 'List of active multi-turn chat session IDs and their last access time.',
       mimeType: 'application/json',
     },
-    (uri): ReadResourceResult => ({
-      contents: [
-        {
-          uri: uri.href,
-          text: JSON.stringify(listSessionEntries()),
-        },
-      ],
-    }),
+    (uri): ReadResourceResult => jsonResource(uri.href, listSessionEntries()),
   );
 
   server.registerResource(
@@ -50,8 +54,7 @@ export function registerResources(server: McpServer): void {
     (uri, { sessionId }): ReadResourceResult => {
       const id = Array.isArray(sessionId) ? sessionId[0] : sessionId;
       const entry = id ? getSessionEntry(id) : undefined;
-      const text = entry ? JSON.stringify(entry) : JSON.stringify({ error: 'Session not found' });
-      return { contents: [{ uri: uri.href, text }] };
+      return jsonResource(uri.href, entry ?? { error: 'Session not found' });
     },
   );
 
@@ -74,35 +77,11 @@ export function registerResources(server: McpServer): void {
     },
     async (uri): Promise<ReadResourceResult> => {
       try {
-        const caches: Record<string, unknown>[] = [];
-        const pager = await ai.caches.list();
-        for await (const cached of pager) {
-          caches.push({
-            name: cached.name,
-            displayName: cached.displayName,
-            model: cached.model,
-            expireTime: cached.expireTime,
-          });
-        }
-        return {
-          contents: [
-            {
-              uri: uri.href,
-              text: JSON.stringify(caches),
-            },
-          ],
-        };
+        return jsonResource(uri.href, await listCacheSummaries());
       } catch (err) {
-        return {
-          contents: [
-            {
-              uri: uri.href,
-              text: JSON.stringify({
-                error: `Failed to list caches: ${err instanceof Error ? err.message : String(err)}`,
-              }),
-            },
-          ],
-        };
+        return jsonResource(uri.href, {
+          error: `Failed to list caches: ${err instanceof Error ? err.message : String(err)}`,
+        });
       }
     },
   );

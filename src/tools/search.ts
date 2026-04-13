@@ -1,10 +1,4 @@
-import type {
-  CallToolResult,
-  CreateTaskResult,
-  GetTaskResult,
-  McpServer,
-  ServerContext,
-} from '@modelcontextprotocol/server';
+import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { ThinkingLevel } from '@google/genai';
 
@@ -12,7 +6,7 @@ import { reportCompletion, reportFailure } from '../lib/context.js';
 import { logAndReturnError } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
 import { executeToolStream } from '../lib/streaming.js';
-import { runToolAsTask, taskTtl } from '../lib/task-utils.js';
+import { createToolTaskHandlers } from '../lib/task-utils.js';
 import { SearchInputSchema } from '../schemas/inputs.js';
 import { SearchOutputSchema } from '../schemas/outputs.js';
 
@@ -23,8 +17,27 @@ const SEARCH_SYSTEM_INSTRUCTION =
   'Base answers strictly on the provided search grounding. ' +
   'Do not speculate beyond what sources confirm. Be concise and factual.';
 
+function collectGroundedSources(
+  groundingMetadata: Awaited<
+    ReturnType<typeof executeToolStream>
+  >['streamResult']['groundingMetadata'],
+): string[] {
+  const sources: string[] = [];
+  if (!groundingMetadata?.groundingChunks) return sources;
+
+  for (const chunk of groundingMetadata.groundingChunks) {
+    const title = chunk.web?.title;
+    const uri = chunk.web?.uri;
+    if (uri) {
+      sources.push(title ? `${title}: ${uri}` : uri);
+    }
+  }
+
+  return sources;
+}
+
 async function searchWork(
-  { query, systemInstruction }: { query: string; systemInstruction: string | undefined },
+  { query, systemInstruction }: { query: string; systemInstruction?: string | undefined },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Web Search';
@@ -48,18 +61,7 @@ async function searchWork(
 
     if (result.isError) return result;
 
-    const metadata = streamResult.groundingMetadata;
-
-    const sources: string[] = [];
-    if (metadata?.groundingChunks) {
-      for (const chunk of metadata.groundingChunks) {
-        const title = chunk.web?.title;
-        const uri = chunk.web?.uri;
-        if (uri) {
-          sources.push(title ? `${title}: ${uri}` : uri);
-        }
-      }
-    }
+    const sources = collectGroundedSources(streamResult.groundingMetadata);
 
     const answerText = extractTextContent(result.content) || '';
 
@@ -103,16 +105,6 @@ export function registerSearchTool(server: McpServer): void {
       },
       execution: { taskSupport: 'optional' },
     },
-    {
-      createTask: async ({ query, systemInstruction }, ctx) => {
-        const task = await ctx.task.store.createTask({ ttl: taskTtl(ctx.task.requestedTtl) });
-        runToolAsTask(ctx.task.store, task, searchWork({ query, systemInstruction }, ctx));
-        return { task } as CreateTaskResult;
-      },
-      getTask: async (_args, ctx) =>
-        ({ task: await ctx.task.store.getTask(ctx.task.id) }) as unknown as GetTaskResult,
-      getTaskResult: async (_args, ctx) =>
-        (await ctx.task.store.getTaskResult(ctx.task.id)) as CallToolResult,
-    },
+    createToolTaskHandlers(searchWork),
   );
 }

@@ -1,17 +1,11 @@
-import type {
-  CallToolResult,
-  CreateTaskResult,
-  GetTaskResult,
-  McpServer,
-  ServerContext,
-} from '@modelcontextprotocol/server';
+import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { Outcome } from '@google/genai';
 
 import { reportCompletion, reportFailure } from '../lib/context.js';
 import { errorResult, logAndReturnError } from '../lib/errors.js';
 import { executeToolStream } from '../lib/streaming.js';
-import { runToolAsTask, taskTtl } from '../lib/task-utils.js';
+import { createToolTaskHandlers } from '../lib/task-utils.js';
 import { ExecuteCodeInputSchema } from '../schemas/inputs.js';
 import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
 
@@ -29,8 +23,24 @@ function formatExecuteCodeMarkdown(code: string, output: string, explanation: st
   return sections.join('\n\n') || 'No output generated.';
 }
 
+function extractFencedCodeBlocks(text: string): { code: string[]; explanation: string } {
+  const fenced = /```[\w]*\n([\s\S]*?)```/g;
+  const code: string[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = fenced.exec(text)) !== null) {
+    const block = match[1];
+    if (block !== undefined) code.push(block.trimEnd());
+  }
+
+  return {
+    code,
+    explanation: text.replace(/```[\w]*\n[\s\S]*?```/g, '').trim(),
+  };
+}
+
 async function executeCodeWork(
-  { task, language }: { task: string; language: string | undefined },
+  { task, language }: { task: string; language?: string | undefined },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Execute Code';
@@ -84,19 +94,11 @@ async function executeCodeWork(
 
     // If no executable code was returned but there is an explanation, attempt to extract code from the explanation (e.g. from a fenced code block).
     if (codeLines.length === 0 && explanationLines.length > 0) {
-      const joined = explanationLines.join('\n');
-      const fenced = /```[\w]*\n([\s\S]*?)```/g;
-      let match: RegExpExecArray | null;
-      const extracted: string[] = [];
-      while ((match = fenced.exec(joined)) !== null) {
-        const block = match[1];
-        if (block !== undefined) extracted.push(block.trimEnd());
-      }
-      if (extracted.length > 0) {
-        codeLines.push(...extracted);
-        const cleaned = joined.replace(/```[\w]*\n[\s\S]*?```/g, '').trim();
+      const extracted = extractFencedCodeBlocks(explanationLines.join('\n'));
+      if (extracted.code.length > 0) {
+        codeLines.push(...extracted.code);
         explanationLines.length = 0;
-        if (cleaned) explanationLines.push(cleaned);
+        if (extracted.explanation) explanationLines.push(extracted.explanation);
       }
     }
 
@@ -144,18 +146,6 @@ export function registerExecuteCodeTool(server: McpServer): void {
       },
       execution: { taskSupport: 'optional' },
     },
-    {
-      createTask: async ({ task, language }, ctx) => {
-        const taskObj = await ctx.task.store.createTask({
-          ttl: taskTtl(ctx.task.requestedTtl),
-        });
-        runToolAsTask(ctx.task.store, taskObj, executeCodeWork({ task, language }, ctx));
-        return { task: taskObj } as CreateTaskResult;
-      },
-      getTask: async (_args, ctx) =>
-        ({ task: await ctx.task.store.getTask(ctx.task.id) }) as unknown as GetTaskResult,
-      getTaskResult: async (_args, ctx) =>
-        (await ctx.task.store.getTaskResult(ctx.task.id)) as CallToolResult,
-    },
+    createToolTaskHandlers(executeCodeWork),
   );
 }

@@ -1,7 +1,9 @@
+import { INVALID_PARAMS, ProtocolError } from '@modelcontextprotocol/server';
+
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { errorResult, geminiErrorResult } from '../../src/lib/errors.js';
+import { errorResult, geminiErrorResult, throwInvalidParams } from '../../src/lib/errors.js';
 
 describe('errorResult', () => {
   it('returns a CallToolResult with isError true', () => {
@@ -80,5 +82,15 @@ describe('geminiErrorResult', () => {
     const result = geminiErrorResult('ask', err);
     assert.strictEqual(result.isError, true);
     assert.strictEqual(result.content[0]?.text, 'ask: cancelled by client');
+  });
+});
+
+describe('throwInvalidParams', () => {
+  it('throws ProtocolError with INVALID_PARAMS code', () => {
+    assert.throws(
+      () => throwInvalidParams('bad input'),
+      (err: unknown) =>
+        err instanceof ProtocolError && err.code === INVALID_PARAMS && err.message === 'bad input',
+    );
   });
 });

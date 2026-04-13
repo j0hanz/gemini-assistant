@@ -5,7 +5,7 @@ import type { ThinkingLevel } from '@google/genai';
 import { z } from 'zod/v4';
 
 import { reportCompletion, reportFailure } from '../lib/context.js';
-import { errorResult, logAndReturnError } from '../lib/errors.js';
+import { errorResult, logAndReturnError, throwInvalidParams } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
 import { executeToolStream } from '../lib/streaming.js';
 import { createToolTaskHandlers } from '../lib/task-utils.js';
@@ -82,13 +82,13 @@ function validateAskRequest({
   }
 
   if (sessionId && cacheName && getSessionEntry(sessionId)) {
-    return errorResult(
+    throwInvalidParams(
       'ask: Cannot apply a cachedContent to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
     );
   }
 
   if (cacheName && systemInstruction) {
-    return errorResult(
+    throwInvalidParams(
       'ask: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via create_cache instead.',
     );
   }

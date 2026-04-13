@@ -1,6 +1,11 @@
 import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
+import { INVALID_PARAMS, ProtocolError } from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
+
+export function throwInvalidParams(message: string): never {
+  throw new ProtocolError(INVALID_PARAMS, message);
+}
 
 export function errorResult(message: string): CallToolResult {
   return {

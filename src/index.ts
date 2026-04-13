@@ -8,6 +8,8 @@ import {
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { InMemoryEventStore } from './lib/event-store.js';
+
 import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
 import { onSessionChange } from './sessions.js';
@@ -17,6 +19,7 @@ import { registerAskTool } from './tools/ask.js';
 import { registerCacheTools } from './tools/cache.js';
 import { registerExecuteCodeTool } from './tools/execute-code.js';
 import { registerSearchTool } from './tools/search.js';
+import type { HttpTransportResult } from './transport/http.js';
 
 const { version } = JSON.parse(
   readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf-8'),
@@ -66,21 +69,33 @@ onSessionChange(() => {
   void server.server.sendResourceUpdated({ uri: 'sessions://list' });
 });
 
-const transport = new StdioServerTransport();
-try {
-  await server.connect(transport);
-  await server.sendLoggingMessage({
-    level: 'info',
-    logger: 'gemini-assistant',
-    data: 'MCP server running on stdio',
-  });
-} catch (err) {
-  console.error('Failed to connect transport:', err);
-  process.exit(1);
+const transportMode = process.env.MCP_TRANSPORT ?? 'stdio';
+let httpResult: HttpTransportResult | undefined;
+let eventStore: InMemoryEventStore | undefined;
+
+if (transportMode === 'http') {
+  const { startHttpTransport } = await import('./transport/http.js');
+  eventStore = new InMemoryEventStore();
+  httpResult = await startHttpTransport(server, eventStore);
+} else {
+  const transport = new StdioServerTransport();
+  try {
+    await server.connect(transport);
+    await server.sendLoggingMessage({
+      level: 'info',
+      logger: 'gemini-assistant',
+      data: 'MCP server running on stdio',
+    });
+  } catch (err) {
+    console.error('Failed to connect transport:', err);
+    process.exit(1);
+  }
 }
 
 async function shutdown(): Promise<void> {
   taskStore.cleanup();
+  eventStore?.cleanup();
+  if (httpResult) await httpResult.close();
   await server.close();
   process.exit(0);
 }

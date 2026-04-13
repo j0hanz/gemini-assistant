@@ -46,6 +46,13 @@ export async function startHttpTransport(
     if (url.pathname === '/mcp') {
       transport.handleRequest(req, res).catch((err: unknown) => {
         console.error('[http] Request error:', err);
+        if (server.isConnected()) {
+          void server.sendLoggingMessage({
+            level: 'error',
+            logger: 'http',
+            data: `Request error: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
         if (!res.headersSent) {
           res.writeHead(500, { 'Content-Type': 'text/plain' });
           res.end('Internal Server Error');

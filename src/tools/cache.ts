@@ -148,6 +148,7 @@ async function confirmCacheDeletion(ctx: ServerContext, cacheName: string): Prom
     return confirmation.action === 'accept' && confirmation.content?.confirm === true;
   } catch {
     // Client does not support elicitation — proceed without confirmation
+    void ctx.mcpReq.log('debug', `Elicitation not supported — proceeding with cache deletion`);
     return true;
   }
 }

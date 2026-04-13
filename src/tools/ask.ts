@@ -10,7 +10,7 @@ import {
   THINKING_LEVELS,
 } from '../lib/config-utils.js';
 import { reportCompletion } from '../lib/context.js';
-import { errorResult, handleToolError, throwInvalidParams } from '../lib/errors.js';
+import { errorResult, handleToolError } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
 import { executeToolStream, extractUsage, type StreamResult } from '../lib/streaming.js';
 import { createToolTaskHandlers, MUTABLE_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
@@ -114,19 +114,19 @@ function validateAskRequest({
   }
 
   if (sessionId && cacheName && hasExistingSession) {
-    throwInvalidParams(
+    return errorResult(
       'ask: Cannot apply a cachedContent to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
     );
   }
 
   if (cacheName && systemInstruction) {
-    throwInvalidParams(
+    return errorResult(
       'ask: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via create_cache instead.',
     );
   }
 
   if (responseSchema && sessionId && hasExistingSession) {
-    throwInvalidParams(
+    return errorResult(
       'ask: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
     );
   }
@@ -274,6 +274,21 @@ export function registerAskTool(server: McpServer): void {
         ),
         responseSchema: z
           .record(z.string(), z.unknown())
+          .refine(
+            (s) =>
+              'type' in s ||
+              'properties' in s ||
+              'anyOf' in s ||
+              'oneOf' in s ||
+              'allOf' in s ||
+              '$ref' in s ||
+              'enum' in s ||
+              'items' in s,
+            {
+              message:
+                'responseSchema must contain at least one JSON Schema keyword (type, properties, anyOf, oneOf, allOf, $ref, enum, or items)',
+            },
+          )
           .optional()
           .describe(
             'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking.',

@@ -16,7 +16,7 @@ import { onSessionChange } from './sessions.js';
 import { registerAnalyzeFileTool } from './tools/analyze-file.js';
 import { registerAnalyzeUrlTool } from './tools/analyze-url.js';
 import { registerAskTool } from './tools/ask.js';
-import { registerCacheTools } from './tools/cache.js';
+import { onCacheChange, registerCacheTools } from './tools/cache.js';
 import { registerExecuteCodeTool } from './tools/execute-code.js';
 import { registerSearchTool } from './tools/search.js';
 import type { HttpTransportResult } from './transport/http.js';
@@ -50,8 +50,8 @@ const server = new McpServer(
       'Tools: ask (chat, multi-turn via sessionId), execute_code (sandboxed code), ' +
       'search (web-grounded answers, optional URL Context), analyze_file (file upload analysis), ' +
       'analyze_url (URL content analysis via URL Context), ' +
-      'create_cache/list_caches/delete_cache (context caching, ≥32k tokens). ' +
-      'Use cacheName with ask to attach cached context.',
+      'create_cache/list_caches/update_cache/delete_cache (context caching, ≥32k tokens). ' +
+      'Use cacheName with ask to attach cached context. Use displayName to auto-replace stale caches.',
   },
 );
 
@@ -67,6 +67,11 @@ registerResources(server);
 onSessionChange(() => {
   server.sendResourceListChanged();
   void server.server.sendResourceUpdated({ uri: 'sessions://list' });
+});
+
+onCacheChange(() => {
+  server.sendResourceListChanged();
+  void server.server.sendResourceUpdated({ uri: 'caches://list' });
 });
 
 const transportMode = process.env.MCP_TRANSPORT ?? 'stdio';

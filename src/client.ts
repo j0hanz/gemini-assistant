@@ -1,3 +1,4 @@
+import type { CachedContent } from '@google/genai';
 import { GoogleGenAI } from '@google/genai';
 
 import { pickDefined } from './lib/response.js';
@@ -16,15 +17,29 @@ export interface CacheSummary {
   displayName?: string;
   model?: string;
   expireTime?: string;
+  createTime?: string;
+  updateTime?: string;
+  totalTokenCount?: number;
 }
 
-function toCacheSummary(cache: CacheSummary): CacheSummary {
+function toCacheSummary(cache: CachedContent): CacheSummary {
   return pickDefined({
     name: cache.name,
     displayName: cache.displayName,
     model: cache.model,
     expireTime: cache.expireTime,
+    createTime: cache.createTime,
+    updateTime: cache.updateTime,
+    totalTokenCount: cache.usageMetadata?.totalTokenCount,
   }) as CacheSummary;
+}
+
+export async function getCacheSummary(name: string, signal?: AbortSignal): Promise<CacheSummary> {
+  const cache = await ai.caches.get({
+    name,
+    ...(signal ? { config: { abortSignal: signal } } : {}),
+  });
+  return toCacheSummary(cache);
 }
 
 export async function listCacheSummaries(signal?: AbortSignal): Promise<CacheSummary[]> {

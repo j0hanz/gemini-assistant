@@ -45,6 +45,12 @@ export const CreateCacheInputSchema = z
       .string()
       .optional()
       .describe('Time-to-live for the cache (e.g., "3600s"). Defaults to 1 hour.'),
+    displayName: z
+      .string()
+      .optional()
+      .describe(
+        'Human-readable label. If a cache with the same displayName exists, it will be replaced.',
+      ),
   })
   // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- LHS is boolean; ?? would not fall through on `false`
   .refine((data) => (data.filePaths && data.filePaths.length > 0) || data.systemInstruction, {

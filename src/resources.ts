@@ -1,7 +1,7 @@
 import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server';
 import { ResourceTemplate } from '@modelcontextprotocol/server';
 
-import { listCacheSummaries } from './client.js';
+import { getCacheSummary, listCacheSummaries } from './client.js';
 import { getSessionEntry, listSessionEntries } from './sessions.js';
 
 interface ResourceListEntry {
@@ -107,5 +107,43 @@ export function registerResources(server: McpServer): void {
         error: `Failed to list caches: ${err instanceof Error ? err.message : String(err)}`,
       }),
     ),
+  );
+
+  server.registerResource(
+    'cache-detail',
+    new ResourceTemplate('caches://{cacheName}', {
+      list: async () => {
+        try {
+          const caches = await listCacheSummaries();
+          return {
+            resources: caches
+              .filter((c): c is typeof c & { name: string } => typeof c.name === 'string')
+              .map((c) => ({
+                uri: `caches://${encodeURIComponent(c.name)}`,
+                name: c.displayName ?? c.name,
+              })),
+          };
+        } catch {
+          return { resources: [] };
+        }
+      },
+    }),
+    {
+      title: 'Cache Detail',
+      description: 'Full detail for a single Gemini context cache including token count.',
+      mimeType: 'application/json',
+    },
+    async (uri, { cacheName }) => {
+      const name = normalizeTemplateParam(cacheName);
+      if (!name) return jsonResource(uri.href, { error: 'Cache name required' });
+      const decoded = decodeURIComponent(name);
+      try {
+        return jsonResource(uri.href, await getCacheSummary(decoded));
+      } catch (err) {
+        return jsonResource(uri.href, {
+          error: `Failed to get cache: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    },
   );
 }

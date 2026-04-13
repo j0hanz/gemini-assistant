@@ -18,9 +18,20 @@ import { CreateCacheInputSchema } from '../schemas/inputs.js';
 
 import { ai, type CacheSummary, completeCacheNames, listCacheSummaries, MODEL } from '../client.js';
 
+let changeCallback: (() => void) | undefined;
+
+export function onCacheChange(cb: () => void): void {
+  changeCallback = cb;
+}
+
+function notifyCacheChange(): void {
+  changeCallback?.();
+}
+
 function formatCacheListMarkdown(caches: CacheSummary[]): string {
   if (caches.length === 0) return 'No active caches found.';
   const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v : fallback);
+  const num = (v: unknown): string => (typeof v === 'number' ? String(v) : 'N/A');
   return (
     `**Active Caches (${String(caches.length)})**\n\n` +
     caches
@@ -29,6 +40,7 @@ function formatCacheListMarkdown(caches: CacheSummary[]): string {
           `${String(i + 1)}. **${str(c.displayName, 'Untitled')}**\n` +
           `   - Name: \`${str(c.name, 'N/A')}\`\n` +
           `   - Model: ${str(c.model, 'N/A')}\n` +
+          `   - Tokens: ${num(c.totalTokenCount)}\n` +
           `   - Expires: ${str(c.expireTime, 'N/A')}`,
       )
       .join('\n')
@@ -47,15 +59,34 @@ function toCreateCacheError(err: unknown): unknown {
   return err;
 }
 
+async function cleanupOldCaches(
+  displayName: string,
+  keepName: string,
+  signal: AbortSignal,
+): Promise<void> {
+  try {
+    const existing = await listCacheSummaries(signal);
+    const stale = existing.filter(
+      (c): c is CacheSummary & { name: string } =>
+        typeof c.name === 'string' && c.displayName === displayName && c.name !== keepName,
+    );
+    await Promise.allSettled(stale.map((c) => ai.caches.delete({ name: c.name })));
+  } catch {
+    // Best-effort cleanup — failures are non-fatal
+  }
+}
+
 async function createCacheWork(
   {
     filePaths,
     systemInstruction,
     ttl,
+    displayName,
   }: {
     filePaths?: string[] | undefined;
     systemInstruction?: string | undefined;
     ttl?: string | undefined;
+    displayName?: string | undefined;
   },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -100,12 +131,20 @@ async function createCacheWork(
           config: {
             ...(parts.length > 0 ? { contents: [{ role: 'user' as const, parts }] } : {}),
             ...(systemInstruction ? { systemInstruction } : {}),
+            ...(displayName ? { displayName } : {}),
             ttl: ttl ?? '3600s',
             abortSignal: ctx.mcpReq.signal,
           },
         }),
       { signal: ctx.mcpReq.signal },
     );
+
+    // Replace older caches with the same displayName (create-then-cleanup)
+    if (displayName && cache.name) {
+      await cleanupOldCaches(displayName, cache.name, ctx.mcpReq.signal);
+    }
+
+    notifyCacheChange();
 
     const cacheName = cache.name ?? 'N/A';
     const shortName = truncateName(cacheName);
@@ -217,12 +256,52 @@ export function registerCacheTools(server: McpServer): void {
         }
 
         await ai.caches.delete({ name: cacheName });
+        notifyCacheChange();
         await ctx.mcpReq.log('info', `Deleted cache: ${cacheName}`);
         return {
           content: [{ type: 'text', text: `Cache '${cacheName}' deleted.` }],
         };
       } catch (err) {
         return await logAndReturnError(ctx, 'delete_cache', err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'update_cache',
+    {
+      title: 'Update Cache',
+      description: 'Updates the TTL of an existing Gemini context cache to extend its lifetime.',
+      inputSchema: z.object({
+        cacheName: completable(
+          z
+            .string()
+            .min(1)
+            .describe('The cache resource name to update (e.g., "cachedContents/...")'),
+          completeCacheNames,
+        ),
+        ttl: z.string().min(1).describe('New time-to-live from now (e.g., "7200s" for 2 hours)'),
+      }),
+      annotations: MUTABLE_ANNOTATIONS,
+    },
+    async ({ cacheName, ttl }, ctx: ServerContext) => {
+      try {
+        const updated = await ai.caches.update({ name: cacheName, config: { ttl } });
+        notifyCacheChange();
+        await ctx.mcpReq.log('info', `Updated cache TTL: ${cacheName}`);
+        return {
+          content: [
+            {
+              type: 'text',
+              text:
+                `**Cache Updated**\n\n` +
+                `- **Name:** ${updated.name ?? cacheName}\n` +
+                `- **Expires:** ${updated.expireTime ?? 'N/A'}`,
+            },
+          ],
+        };
+      } catch (err) {
+        return await logAndReturnError(ctx, 'update_cache', err);
       }
     },
   );

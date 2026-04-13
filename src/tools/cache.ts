@@ -19,6 +19,23 @@ import { CreateCacheInputSchema } from '../schemas/inputs.js';
 
 import { ai, MODEL } from '../client.js';
 
+function formatCacheListMarkdown(caches: Record<string, unknown>[]): string {
+  if (caches.length === 0) return 'No active caches found.';
+  const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v : fallback);
+  return (
+    `**Active Caches (${String(caches.length)})**\n\n` +
+    caches
+      .map(
+        (c, i) =>
+          `${String(i + 1)}. **${str(c.displayName, 'Untitled')}**\n` +
+          `   - Name: \`${str(c.name, 'N/A')}\`\n` +
+          `   - Model: ${str(c.model, 'N/A')}\n` +
+          `   - Expires: ${str(c.expireTime, 'N/A')}`,
+      )
+      .join('\n')
+  );
+}
+
 async function createCacheWork(
   {
     filePaths,
@@ -85,12 +102,12 @@ async function createCacheWork(
       content: [
         {
           type: 'text' as const,
-          text: JSON.stringify({
-            name: cache.name,
-            displayName: cache.displayName,
-            model: cache.model,
-            expireTime: cache.expireTime,
-          }),
+          text:
+            `**Cache Created**\n\n` +
+            `- **Name:** ${cache.name ?? 'N/A'}\n` +
+            `- **Display Name:** ${cache.displayName ?? 'N/A'}\n` +
+            `- **Model:** ${cache.model ?? 'N/A'}\n` +
+            `- **Expires:** ${cache.expireTime ?? 'N/A'}`,
         },
         {
           type: 'resource_link' as const,
@@ -178,7 +195,7 @@ export function registerCacheTools(server: McpServer): void {
           });
         }
         return {
-          content: [{ type: 'text', text: JSON.stringify(caches, null, 2) }],
+          content: [{ type: 'text', text: formatCacheListMarkdown(caches) }],
         };
       } catch (err) {
         return await logAndReturnError(ctx, 'list_caches', err);

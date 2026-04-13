@@ -21,6 +21,14 @@ const EXECUTE_CODE_SYSTEM_INSTRUCTION =
   'Generate clean, working code that solves the task. Include brief comments for non-obvious logic. ' +
   'Handle edge cases. Provide a concise explanation of the approach after execution.';
 
+function formatExecuteCodeMarkdown(code: string, output: string, explanation: string): string {
+  const sections: string[] = [];
+  if (code) sections.push(`### Code\n\n\`\`\`\n${code}\n\`\`\``);
+  if (output) sections.push(`### Output\n\n\`\`\`\n${output}\n\`\`\``);
+  if (explanation) sections.push(`### Explanation\n\n${explanation}`);
+  return sections.join('\n\n') || 'No output generated.';
+}
+
 async function executeCodeWork(
   { task, language }: { task: string; language: string | undefined },
   ctx: ServerContext,
@@ -100,7 +108,7 @@ async function executeCodeWork(
       await reportCompletion(ctx, TOOL_LABEL, 'execution failed');
       const structured = { code, output, explanation };
       return {
-        content: [{ type: 'text', text: JSON.stringify(structured) }],
+        content: [{ type: 'text', text: formatExecuteCodeMarkdown(code, output, explanation) }],
         structuredContent: structured,
         isError: true,
       };
@@ -110,7 +118,7 @@ async function executeCodeWork(
 
     await reportCompletion(ctx, TOOL_LABEL, 'completed');
     return {
-      content: [{ type: 'text', text: JSON.stringify(structured) }],
+      content: [{ type: 'text', text: formatExecuteCodeMarkdown(code, output, explanation) }],
       structuredContent: structured,
     };
   } catch (err) {

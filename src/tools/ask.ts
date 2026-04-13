@@ -32,10 +32,7 @@ function formatStructuredResult(result: CallToolResult): CallToolResult {
   const structured = { answer: text };
   return {
     ...result,
-    content: [
-      { type: 'text', text: JSON.stringify(structured) },
-      ...result.content.filter((c) => c.type !== 'text'),
-    ],
+    content: [{ type: 'text', text }, ...result.content.filter((c) => c.type !== 'text')],
     structuredContent: structured,
   };
 }

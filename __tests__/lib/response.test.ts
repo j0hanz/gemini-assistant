@@ -4,7 +4,13 @@ import { describe, it } from 'node:test';
 import { FinishReason } from '@google/genai';
 import type { GenerateContentResponse } from '@google/genai';
 
-import { extractTextOrError } from '../../src/lib/response.js';
+import {
+  appendSources,
+  appendUrlStatus,
+  collectGroundedSources,
+  extractTextOrError,
+  formatCountLabel,
+} from '../../src/lib/response.js';
 
 function makeResponse(overrides: Partial<GenerateContentResponse> = {}): GenerateContentResponse {
   return {
@@ -132,5 +138,61 @@ describe('extractTextOrError', () => {
   it('includes tool name in error messages', () => {
     const result = extractTextOrError(makeResponse({ candidates: undefined }), 'my_tool');
     assert.match(result.content[0]?.text ?? '', /my_tool/);
+  });
+});
+
+describe('collectGroundedSources', () => {
+  it('collects titled and untitled grounded sources', () => {
+    const sources = collectGroundedSources({
+      groundingChunks: [
+        { web: { title: 'Example', uri: 'https://example.com' } },
+        { web: { uri: 'https://example.org' } },
+        { web: { title: 'Missing URI' } },
+      ],
+    } as never);
+
+    assert.deepStrictEqual(sources, ['Example: https://example.com', 'https://example.org']);
+  });
+
+  it('returns an empty list when grounding metadata is missing', () => {
+    assert.deepStrictEqual(collectGroundedSources(undefined), []);
+  });
+});
+
+describe('appendSources', () => {
+  it('appends a sources section when entries exist', () => {
+    const content: { type: string; text?: string }[] = [];
+    appendSources(content as never, ['Example: https://example.com']);
+
+    assert.strictEqual(content.length, 1);
+    assert.match(content[0]?.text ?? '', /Sources:/);
+    assert.match(content[0]?.text ?? '', /Example: https:\/\/example.com/);
+  });
+
+  it('does nothing when no sources exist', () => {
+    const content: { type: string; text?: string }[] = [];
+    appendSources(content as never, []);
+    assert.strictEqual(content.length, 0);
+  });
+});
+
+describe('appendUrlStatus', () => {
+  it('formats URL retrieval status as bullet lines', () => {
+    const content: { type: string; text?: string }[] = [];
+    appendUrlStatus(content as never, [
+      { url: 'https://example.com', status: 'URL_RETRIEVAL_STATUS_SUCCESS' },
+    ]);
+
+    assert.strictEqual(content.length, 1);
+    assert.match(content[0]?.text ?? '', /URL Retrieval Status:/);
+    assert.match(content[0]?.text ?? '', /https:\/\/example.com: URL_RETRIEVAL_STATUS_SUCCESS/);
+  });
+});
+
+describe('formatCountLabel', () => {
+  it('formats singular and plural labels', () => {
+    assert.strictEqual(formatCountLabel(1, 'source'), '1 source');
+    assert.strictEqual(formatCountLabel(2, 'source'), '2 sources');
+    assert.strictEqual(formatCountLabel(0, 'URL'), '0 URLs');
   });
 });

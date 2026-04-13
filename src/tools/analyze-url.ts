@@ -1,7 +1,12 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
-import { appendUrlStatus, collectUrlMetadata } from '../lib/response.js';
+import {
+  appendUrlStatus,
+  collectUrlMetadata,
+  formatCountLabel,
+  pickDefined,
+} from '../lib/response.js';
 import { handleToolExecution } from '../lib/streaming.js';
 import { createToolTaskHandlers, READONLY_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
 import { AnalyzeUrlInputSchema } from '../schemas/inputs.js';
@@ -16,6 +21,10 @@ const ANALYZE_URL_SYSTEM_INSTRUCTION =
 function buildPromptWithUrls(urls: string[], question: string): string {
   const urlList = urls.join('\n');
   return `Analyze the following URLs:\n${urlList}\n\n${question}`;
+}
+
+function buildAnalyzeUrlReportMessage(urlCount: number): string {
+  return `${formatCountLabel(urlCount, 'URL')} retrieved`;
 }
 
 async function analyzeUrlWork(
@@ -56,18 +65,18 @@ async function analyzeUrlWork(
     (streamResult, textContent) => {
       const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
 
-      const contentPush: CallToolResult['content'] = [];
-      appendUrlStatus(contentPush, urlMetadata);
+      const contentAdditions: CallToolResult['content'] = [];
+      appendUrlStatus(contentAdditions, urlMetadata);
 
       return {
         resultMod: (r) => ({
-          content: [...r.content, ...contentPush],
+          content: [...r.content, ...contentAdditions],
         }),
-        structuredContent: {
-          answer: textContent || '',
-          ...(urlMetadata.length > 0 ? { urlMetadata } : {}),
-        },
-        reportMessage: `${urlMetadata.length} URL${urlMetadata.length === 1 ? '' : 's'} retrieved`,
+        structuredContent: pickDefined({
+          answer: textContent,
+          urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
+        }),
+        reportMessage: buildAnalyzeUrlReportMessage(urlMetadata.length),
       };
     },
   );

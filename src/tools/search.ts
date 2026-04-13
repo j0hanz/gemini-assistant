@@ -1,8 +1,15 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { AskThinkingLevel, buildGenerateContentConfig } from '../lib/config-utils.js';
-import { appendUrlStatus, collectUrlMetadata } from '../lib/response.js';
-import { executeToolStream, handleToolExecution } from '../lib/streaming.js';
+import {
+  appendSources,
+  appendUrlStatus,
+  collectGroundedSources,
+  collectUrlMetadata,
+  formatCountLabel,
+  pickDefined,
+} from '../lib/response.js';
+import { handleToolExecution } from '../lib/streaming.js';
 import { createToolTaskHandlers, READONLY_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
 import { SearchInputSchema } from '../schemas/inputs.js';
 import { SearchOutputSchema } from '../schemas/outputs.js';
@@ -13,23 +20,18 @@ const SEARCH_SYSTEM_INSTRUCTION =
   'Synthesize search results into a direct, factual answer. ' +
   'Base answers strictly on the provided search grounding. Be concise.';
 
-function collectGroundedSources(
-  groundingMetadata: Awaited<
-    ReturnType<typeof executeToolStream>
-  >['streamResult']['groundingMetadata'],
-): string[] {
-  const sources: string[] = [];
-  if (!groundingMetadata?.groundingChunks) return sources;
-
-  for (const chunk of groundingMetadata.groundingChunks) {
-    const title = chunk.web?.title;
-    const uri = chunk.web?.uri;
-    if (uri) {
-      sources.push(title ? `${title}: ${uri}` : uri);
-    }
+function buildSearchContents(query: string, urls?: readonly string[]): string {
+  if (!urls || urls.length === 0) {
+    return query;
   }
 
-  return sources;
+  return `${query}\n\nAlso analyze content from:\n${urls.join('\n')}`;
+}
+
+function buildSearchReportMessage(sourceCount: number, responseLength: number): string {
+  return sourceCount > 0
+    ? `${formatCountLabel(sourceCount, 'source')} found`
+    : `responded (${responseLength} chars)`;
 }
 
 async function searchWork(
@@ -47,8 +49,7 @@ async function searchWork(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Web Search';
-  const hasUrls = urls && urls.length > 0;
-  const contents = hasUrls ? `${query}\n\nAlso analyze content from:\n${urls.join('\n')}` : query;
+  const hasUrls = (urls?.length ?? 0) > 0;
 
   const tools: Record<string, Record<string, never>>[] = [
     { googleSearch: {} },
@@ -62,7 +63,7 @@ async function searchWork(
     () =>
       ai.models.generateContentStream({
         model: MODEL,
-        contents,
+        contents: buildSearchContents(query, urls),
         config: {
           tools,
           ...buildGenerateContentConfig(
@@ -79,30 +80,20 @@ async function searchWork(
       const sources = collectGroundedSources(streamResult.groundingMetadata);
       const urlMeta = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
 
-      const contentPush: CallToolResult['content'] = [];
-
-      if (sources.length > 0) {
-        contentPush.push({
-          type: 'text',
-          text: `\n\nSources:\n${sources.map((s) => `- ${s}`).join('\n')}`,
-        });
-      }
-
-      appendUrlStatus(contentPush, urlMeta);
+      const contentAdditions: CallToolResult['content'] = [];
+      appendSources(contentAdditions, sources);
+      appendUrlStatus(contentAdditions, urlMeta);
 
       return {
         resultMod: (r) => ({
-          content: [...r.content, ...contentPush],
+          content: [...r.content, ...contentAdditions],
         }),
-        structuredContent: {
-          answer: textContent || '',
+        structuredContent: pickDefined({
+          answer: textContent,
           sources,
-          ...(urlMeta.length > 0 ? { urlMetadata: urlMeta } : {}),
-        },
-        reportMessage:
-          sources.length > 0
-            ? `${sources.length} source${sources.length === 1 ? '' : 's'} found`
-            : `responded (${textContent.length} chars)`,
+          urlMetadata: urlMeta.length > 0 ? urlMeta : undefined,
+        }),
+        reportMessage: buildSearchReportMessage(sources.length, textContent.length),
       };
     },
   );

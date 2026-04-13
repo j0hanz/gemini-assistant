@@ -1,6 +1,6 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 
-import type { GenerateContentResponse, UrlMetadata } from '@google/genai';
+import type { GenerateContentResponse, GroundingMetadata, UrlMetadata } from '@google/genai';
 
 import type { UrlMetadataEntry } from '../schemas/outputs.js';
 
@@ -24,13 +24,54 @@ export function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlM
   return entries;
 }
 
+export function collectGroundedSources(groundingMetadata: GroundingMetadata | undefined): string[] {
+  if (!groundingMetadata?.groundingChunks) return [];
+
+  const sources: string[] = [];
+  for (const chunk of groundingMetadata.groundingChunks) {
+    const uri = chunk.web?.uri;
+    if (!uri) continue;
+
+    const title = chunk.web?.title;
+    sources.push(title ? `${title}: ${uri}` : uri);
+  }
+
+  return sources;
+}
+
+function appendBulletListSection(
+  content: CallToolResult['content'],
+  heading: string,
+  entries: readonly string[],
+): void {
+  if (entries.length === 0) return;
+
+  content.push({
+    type: 'text',
+    text: `\n\n${heading}:\n${entries.map((entry) => `- ${entry}`).join('\n')}`,
+  });
+}
+
+export function appendSources(
+  content: CallToolResult['content'],
+  sources: readonly string[],
+): void {
+  appendBulletListSection(content, 'Sources', sources);
+}
+
+export function formatCountLabel(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 export function appendUrlStatus(
   content: CallToolResult['content'],
   urlMetadata: UrlMetadataEntry[],
 ): void {
-  if (urlMetadata.length === 0) return;
-  const statusSummary = urlMetadata.map((m) => `- ${m.url}: ${m.status}`).join('\n');
-  content.push({ type: 'text', text: `\n\nURL Retrieval Status:\n${statusSummary}` });
+  appendBulletListSection(
+    content,
+    'URL Retrieval Status',
+    urlMetadata.map((meta) => `${meta.url}: ${meta.status}`),
+  );
 }
 
 /**

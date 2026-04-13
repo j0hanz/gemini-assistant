@@ -98,12 +98,7 @@ async function createCacheWork(
 
     if (filePaths) {
       await ctx.mcpReq.log('info', `Caching ${filePaths.length}`);
-      await sendProgress(
-        ctx,
-        0,
-        totalSteps,
-        `${TOOL_LABEL}: Preparing ${filePaths.length}`,
-      );
+      await sendProgress(ctx, 0, totalSteps, `${TOOL_LABEL}: Preparing ${filePaths.length}`);
       let filesUploaded = 0;
       const CHUNK_SIZE = 3;
       for (let i = 0; i < filePaths.length; i += CHUNK_SIZE) {

@@ -8,6 +8,7 @@ import type { GenerateContentResponse, Part } from '@google/genai';
 
 import {
   consumeStreamWithProgress,
+  extractUsage,
   type StreamResult,
   validateStreamResult,
 } from '../../src/lib/streaming.js';
@@ -158,6 +159,25 @@ describe('consumeStreamWithProgress', () => {
     assert.deepStrictEqual(result.groundingMetadata, metadata);
   });
 
+  it('captures usageMetadata from chunks', async () => {
+    const { ctx } = makeMockContext();
+    const usage = {
+      promptTokenCount: 10,
+      candidatesTokenCount: 5,
+      totalTokenCount: 15,
+    };
+    const chunk = makeChunk([{ text: 'result' }], FinishReason.STOP);
+    chunk.usageMetadata = usage as GenerateContentResponse['usageMetadata'];
+
+    const stream = fakeStream([chunk]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.strictEqual(result.usageMetadata?.promptTokenCount, 10);
+    assert.strictEqual(result.usageMetadata?.candidatesTokenCount, 5);
+    assert.strictEqual(result.usageMetadata?.totalTokenCount, 15);
+  });
+
   it('stops consuming when signal is aborted', async () => {
     const controller = new AbortController();
     const ctx = {
@@ -244,5 +264,34 @@ describe('validateStreamResult', () => {
       'my_tool',
     );
     assert.match(result.content[0]?.text ?? '', /my_tool/);
+  });
+});
+
+describe('extractUsage', () => {
+  it('returns undefined for undefined input', () => {
+    assert.strictEqual(extractUsage(undefined), undefined);
+  });
+
+  it('extracts token counts from usage metadata', () => {
+    const meta = {
+      promptTokenCount: 100,
+      candidatesTokenCount: 50,
+      thoughtsTokenCount: 20,
+      totalTokenCount: 170,
+    };
+    const result = extractUsage(meta as Parameters<typeof extractUsage>[0]);
+    assert.deepStrictEqual(result, {
+      promptTokenCount: 100,
+      candidatesTokenCount: 50,
+      thoughtsTokenCount: 20,
+      totalTokenCount: 170,
+    });
+  });
+
+  it('omits undefined fields', () => {
+    const meta = { promptTokenCount: 42 };
+    const result = extractUsage(meta as Parameters<typeof extractUsage>[0]);
+    assert.strictEqual(result?.promptTokenCount, 42);
+    assert.strictEqual('candidatesTokenCount' in (result ?? {}), false);
   });
 });

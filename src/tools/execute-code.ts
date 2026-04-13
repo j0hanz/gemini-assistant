@@ -4,7 +4,7 @@ import { Outcome } from '@google/genai';
 
 import { reportCompletion, reportFailure } from '../lib/context.js';
 import { errorResult, logAndReturnError } from '../lib/errors.js';
-import { executeToolStream } from '../lib/streaming.js';
+import { executeToolStream, extractUsage } from '../lib/streaming.js';
 import { createToolTaskHandlers } from '../lib/task-utils.js';
 import { ExecuteCodeInputSchema } from '../schemas/inputs.js';
 import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
@@ -108,7 +108,8 @@ async function executeCodeWork(
 
     if (executionFailed) {
       await reportCompletion(ctx, TOOL_LABEL, 'execution failed');
-      const structured = { code, output, explanation };
+      const usage = extractUsage(streamResult.usageMetadata);
+      const structured = { code, output, explanation, ...(usage ? { usage } : {}) };
       return {
         content: [{ type: 'text', text: formatExecuteCodeMarkdown(code, output, explanation) }],
         structuredContent: structured,
@@ -116,7 +117,8 @@ async function executeCodeWork(
       };
     }
 
-    const structured = { code, output, explanation };
+    const usage = extractUsage(streamResult.usageMetadata);
+    const structured = { code, output, explanation, ...(usage ? { usage } : {}) };
 
     await reportCompletion(ctx, TOOL_LABEL, 'completed');
     return {

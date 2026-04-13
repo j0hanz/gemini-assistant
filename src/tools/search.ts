@@ -6,7 +6,7 @@ import { ThinkingLevel } from '@google/genai';
 import { reportCompletion, reportFailure } from '../lib/context.js';
 import { logAndReturnError } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
-import { executeToolStream } from '../lib/streaming.js';
+import { executeToolStream, extractUsage } from '../lib/streaming.js';
 import { createToolTaskHandlers } from '../lib/task-utils.js';
 import { SearchInputSchema } from '../schemas/inputs.js';
 import { SearchOutputSchema } from '../schemas/outputs.js';
@@ -63,7 +63,11 @@ async function searchWork(
     query,
     systemInstruction,
     urls,
-  }: { query: string; systemInstruction?: string | undefined; urls?: string[] | undefined },
+  }: {
+    query: string;
+    systemInstruction?: string | undefined;
+    urls?: string[] | undefined;
+  },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const TOOL_LABEL = 'Web Search';
@@ -121,12 +125,15 @@ async function searchWork(
       `${sources.length} source${sources.length === 1 ? '' : 's'} found`,
     );
 
+    const usage = extractUsage(streamResult.usageMetadata);
+
     return {
       ...result,
       structuredContent: {
         answer: answerText,
         sources,
         ...(urlMeta.length > 0 ? { urlMetadata: urlMeta } : {}),
+        ...(usage ? { usage } : {}),
       },
     };
   } catch (err) {

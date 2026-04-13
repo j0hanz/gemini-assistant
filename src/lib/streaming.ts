@@ -3,6 +3,7 @@ import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server
 import { FinishReason } from '@google/genai';
 import type {
   GenerateContentResponse,
+  GenerateContentResponseUsageMetadata,
   GroundingMetadata,
   Part,
   UrlContextMetadata,
@@ -18,6 +19,7 @@ export interface StreamResult {
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
   urlContextMetadata?: UrlContextMetadata;
+  usageMetadata?: GenerateContentResponseUsageMetadata;
 }
 
 const enum Phase {
@@ -36,6 +38,7 @@ export async function consumeStreamWithProgress(
   let finishReason: FinishReason | undefined;
   let groundingMetadata: GroundingMetadata | undefined;
   let urlContextMetadata: UrlContextMetadata | undefined;
+  let usageMetadata: GenerateContentResponseUsageMetadata | undefined;
   let phase: Phase = Phase.Waiting;
 
   const msg = (m: string): string => (toolLabel ? `${toolLabel}: ${m}` : m);
@@ -58,6 +61,10 @@ export async function consumeStreamWithProgress(
 
     if (candidate.urlContextMetadata) {
       urlContextMetadata = candidate.urlContextMetadata;
+    }
+
+    if (chunk.usageMetadata) {
+      usageMetadata = chunk.usageMetadata;
     }
 
     const chunkParts = candidate.content?.parts ?? [];
@@ -86,6 +93,7 @@ export async function consumeStreamWithProgress(
     ...(finishReason ? { finishReason } : {}),
     ...(groundingMetadata ? { groundingMetadata } : {}),
     ...(urlContextMetadata ? { urlContextMetadata } : {}),
+    ...(usageMetadata ? { usageMetadata } : {}),
   };
 }
 
@@ -95,6 +103,20 @@ export function validateStreamResult(result: StreamResult, toolName: string): Ca
 
   return {
     content: [{ type: 'text', text: result.text }],
+  };
+}
+
+export function extractUsage(meta?: GenerateContentResponseUsageMetadata) {
+  if (!meta) return undefined;
+  return {
+    ...(meta.promptTokenCount !== undefined ? { promptTokenCount: meta.promptTokenCount } : {}),
+    ...(meta.candidatesTokenCount !== undefined
+      ? { candidatesTokenCount: meta.candidatesTokenCount }
+      : {}),
+    ...(meta.thoughtsTokenCount !== undefined
+      ? { thoughtsTokenCount: meta.thoughtsTokenCount }
+      : {}),
+    ...(meta.totalTokenCount !== undefined ? { totalTokenCount: meta.totalTokenCount } : {}),
   };
 }
 

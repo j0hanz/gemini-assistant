@@ -6,9 +6,10 @@ import { reportCompletion, reportFailure, sendProgress } from '../lib/context.js
 import { logAndReturnError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { extractTextContent } from '../lib/response.js';
-import { executeToolStream } from '../lib/streaming.js';
+import { executeToolStream, extractUsage } from '../lib/streaming.js';
 import { createToolTaskHandlers } from '../lib/task-utils.js';
 import { AnalyzeFileInputSchema } from '../schemas/inputs.js';
+import { AnalyzeFileOutputSchema } from '../schemas/outputs.js';
 
 import { ai, MODEL } from '../client.js';
 
@@ -33,7 +34,7 @@ async function analyzeFileWork(
     // Generate content with the file
     await sendProgress(ctx, 1, 3, `${TOOL_LABEL}: Analyzing content`);
 
-    const { result } = await executeToolStream(ctx, 'analyze_file', TOOL_LABEL, () =>
+    const { streamResult, result } = await executeToolStream(ctx, 'analyze_file', TOOL_LABEL, () =>
       ai.models.generateContentStream({
         model: MODEL,
         contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: question }],
@@ -48,7 +49,11 @@ async function analyzeFileWork(
 
     const text = extractTextContent(result.content);
     await reportCompletion(ctx, TOOL_LABEL, `responded (${text.length} chars)`);
-    return result;
+    const usage = extractUsage(streamResult.usageMetadata);
+    return {
+      ...result,
+      structuredContent: { analysis: text, ...(usage ? { usage } : {}) },
+    };
   } catch (err) {
     await reportFailure(ctx, TOOL_LABEL, err);
     return await logAndReturnError(ctx, 'analyze_file', err);
@@ -65,6 +70,7 @@ export function registerAnalyzeFileTool(server: McpServer): void {
       description:
         'Upload a file to Gemini and ask questions about it (PDFs, images, code files, etc.).',
       inputSchema: AnalyzeFileInputSchema,
+      outputSchema: AnalyzeFileOutputSchema,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,

@@ -3,7 +3,7 @@ import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprot
 import { reportCompletion, reportFailure } from '../lib/context.js';
 import { logAndReturnError } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
-import { executeToolStream } from '../lib/streaming.js';
+import { executeToolStream, extractUsage } from '../lib/streaming.js';
 import { createToolTaskHandlers } from '../lib/task-utils.js';
 import { AnalyzeUrlInputSchema } from '../schemas/inputs.js';
 import { AnalyzeUrlOutputSchema } from '../schemas/outputs.js';
@@ -88,11 +88,14 @@ async function analyzeUrlWork(
       `${urlMetadata.length} URL${urlMetadata.length === 1 ? '' : 's'} retrieved`,
     );
 
+    const usage = extractUsage(streamResult.usageMetadata);
+
     return {
       ...result,
       structuredContent: {
         answer: answerText,
         ...(urlMetadata.length > 0 ? { urlMetadata } : {}),
+        ...(usage ? { usage } : {}),
       },
     };
   } catch (err) {

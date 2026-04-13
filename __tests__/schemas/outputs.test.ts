@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  AnalyzeFileOutputSchema,
   AnalyzeUrlOutputSchema,
   ExecuteCodeOutputSchema,
   SearchOutputSchema,
+  UsageMetadataSchema,
 } from '../../src/schemas/outputs.js';
 
 describe('ExecuteCodeOutputSchema', () => {
@@ -123,6 +125,53 @@ describe('AnalyzeUrlOutputSchema', () => {
 
   it('rejects non-string answer', () => {
     const result = AnalyzeUrlOutputSchema.safeParse({ answer: 123 });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('AnalyzeFileOutputSchema', () => {
+  it('accepts valid output', () => {
+    const result = AnalyzeFileOutputSchema.safeParse({ analysis: 'File contains...' });
+    assert.ok(result.success);
+  });
+
+  it('accepts output with usage', () => {
+    const result = AnalyzeFileOutputSchema.safeParse({
+      analysis: 'File analysis',
+      usage: { promptTokenCount: 100, totalTokenCount: 200 },
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects missing analysis', () => {
+    const result = AnalyzeFileOutputSchema.safeParse({});
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('UsageMetadataSchema', () => {
+  it('accepts full usage metadata', () => {
+    const result = UsageMetadataSchema.safeParse({
+      promptTokenCount: 100,
+      candidatesTokenCount: 50,
+      thoughtsTokenCount: 20,
+      totalTokenCount: 170,
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts empty object (all fields optional)', () => {
+    const result = UsageMetadataSchema.safeParse({});
+    assert.ok(result.success);
+  });
+
+  it('accepts partial usage', () => {
+    const result = UsageMetadataSchema.safeParse({ totalTokenCount: 42 });
+    assert.ok(result.success);
+  });
+
+  it('rejects non-number values', () => {
+    const result = UsageMetadataSchema.safeParse({ promptTokenCount: 'many' });
     assert.strictEqual(result.success, false);
   });
 });

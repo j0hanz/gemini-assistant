@@ -7,7 +7,7 @@ import { z } from 'zod/v4';
 import { reportCompletion, reportFailure } from '../lib/context.js';
 import { errorResult, logAndReturnError, throwInvalidParams } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
-import { executeToolStream } from '../lib/streaming.js';
+import { executeToolStream, extractUsage } from '../lib/streaming.js';
 import { createToolTaskHandlers } from '../lib/task-utils.js';
 import { AskOutputSchema } from '../schemas/outputs.js';
 
@@ -29,6 +29,7 @@ interface AskArgs {
   systemInstruction?: string | undefined;
   thinkingLevel?: AskThinkingLevel | undefined;
   cacheName?: string | undefined;
+  responseSchema?: Record<string, unknown> | undefined;
 }
 
 const ASK_TOOL_LABEL = 'Ask Gemini';
@@ -37,10 +38,28 @@ const DEFAULT_SYSTEM_INSTRUCTION =
   'You are a helpful AI assistant. Provide direct, accurate answers. ' +
   'Use Markdown formatting for structure. Be concise.';
 
-function formatStructuredResult(result: CallToolResult): CallToolResult {
+function formatStructuredResult(
+  result: CallToolResult,
+  usageMetadata?: ReturnType<typeof extractUsage>,
+  jsonMode?: boolean,
+): CallToolResult {
   if (result.isError) return result;
   const text = extractTextContent(result.content);
-  const structured = { answer: text };
+
+  let structured: Record<string, unknown>;
+  if (jsonMode) {
+    try {
+      structured = {
+        ...(JSON.parse(text) as Record<string, unknown>),
+        ...(usageMetadata ? { usage: usageMetadata } : {}),
+      };
+    } catch {
+      structured = { answer: text, ...(usageMetadata ? { usage: usageMetadata } : {}) };
+    }
+  } else {
+    structured = { answer: text, ...(usageMetadata ? { usage: usageMetadata } : {}) };
+  }
+
   return {
     ...result,
     content: [{ type: 'text', text }, ...result.content.filter((c) => c.type !== 'text')],
@@ -60,13 +79,17 @@ function buildAskConfig(
     systemInstruction,
     thinkingLevel,
     cacheName,
-  }: Pick<AskArgs, 'systemInstruction' | 'thinkingLevel' | 'cacheName'>,
+    responseSchema,
+  }: Pick<AskArgs, 'systemInstruction' | 'thinkingLevel' | 'cacheName' | 'responseSchema'>,
   signal?: AbortSignal,
 ) {
   return {
     ...(cacheName ? { cachedContent: cacheName } : {}),
     ...(cacheName ? {} : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
-    thinkingConfig: buildThinkingConfig(thinkingLevel),
+    // Structured output (responseSchema) is incompatible with thinking — omit thinkingConfig when JSON mode is active
+    ...(responseSchema
+      ? { responseMimeType: 'application/json', responseSchema }
+      : { thinkingConfig: buildThinkingConfig(thinkingLevel) }),
     maxOutputTokens: 8192,
     ...(signal ? { abortSignal: signal } : {}),
   };
@@ -76,6 +99,7 @@ function validateAskRequest({
   sessionId,
   systemInstruction,
   cacheName,
+  responseSchema,
 }: AskArgs): CallToolResult | undefined {
   if (sessionId && isEvicted(sessionId)) {
     return errorResult(`ask: Session '${sessionId}' has expired.`);
@@ -93,17 +117,29 @@ function validateAskRequest({
     );
   }
 
+  if (responseSchema && sessionId && getSessionEntry(sessionId)) {
+    throwInvalidParams(
+      'ask: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
+    );
+  }
+
   return undefined;
 }
 
 async function runAskStream(
   ctx: ServerContext,
   streamGenerator: () => ReturnType<typeof ai.models.generateContentStream>,
+  jsonMode = false,
 ): Promise<CallToolResult> {
-  const { result } = await executeToolStream(ctx, 'ask', ASK_TOOL_LABEL, streamGenerator);
+  const { streamResult, result } = await executeToolStream(
+    ctx,
+    'ask',
+    ASK_TOOL_LABEL,
+    streamGenerator,
+  );
   const text = extractTextContent(result.content);
   await reportCompletion(ctx, ASK_TOOL_LABEL, `responded (${text.length} chars)`);
-  return formatStructuredResult(result);
+  return formatStructuredResult(result, extractUsage(streamResult.usageMetadata), jsonMode);
 }
 
 function appendSessionResource(result: CallToolResult, sessionId: string): void {
@@ -125,12 +161,15 @@ async function completeCacheNames(prefix?: string): Promise<string[]> {
 }
 
 async function askSingleTurn(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
-  return await runAskStream(ctx, () =>
-    ai.models.generateContentStream({
-      model: MODEL,
-      contents: args.message,
-      config: buildAskConfig(args, ctx.mcpReq.signal),
-    }),
+  return await runAskStream(
+    ctx,
+    () =>
+      ai.models.generateContentStream({
+        model: MODEL,
+        contents: args.message,
+        config: buildAskConfig(args, ctx.mcpReq.signal),
+      }),
+    !!args.responseSchema,
   );
 }
 
@@ -160,11 +199,14 @@ async function askNewSession(
     config: buildAskConfig(args),
   });
 
-  const result = await runAskStream(ctx, () =>
-    chat.sendMessageStream({
-      message: args.message,
-      config: { abortSignal: ctx.mcpReq.signal },
-    }),
+  const result = await runAskStream(
+    ctx,
+    () =>
+      chat.sendMessageStream({
+        message: args.message,
+        config: { abortSignal: ctx.mcpReq.signal },
+      }),
+    !!args.responseSchema,
   );
 
   if (!result.isError) {
@@ -234,6 +276,12 @@ export function registerAskTool(server: McpServer): void {
             ),
           completeCacheNames,
         ),
+        responseSchema: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe(
+            'JSON Schema object for structured output. When set, Gemini returns JSON conforming to this schema. Disables thinking mode.',
+          ),
       }),
       outputSchema: AskOutputSchema,
       annotations: {

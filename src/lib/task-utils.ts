@@ -67,14 +67,30 @@ export function runToolAsTask(
   work
     .then(async (result) => {
       const status = result.isError ? 'failed' : 'completed';
+
+      if (result.isError) {
+        const errorText = result.content.find((c) => c.type === 'text');
+        if (errorText && 'text' in errorText) {
+          try {
+            await store.updateTaskStatus(task.taskId, 'working', errorText.text);
+          } catch {
+            // Ignore if status update fails
+          }
+        }
+      }
+
       await store.storeTaskResult(task.taskId, status, result);
     })
     .catch(async (err: unknown) => {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      try {
+        await store.updateTaskStatus(task.taskId, 'working', errorMessage);
+      } catch {
+        // Ignore
+      }
       try {
         await store.storeTaskResult(task.taskId, 'failed', {
-          content: [
-            { type: 'text' as const, text: err instanceof Error ? err.message : String(err) },
-          ],
+          content: [{ type: 'text' as const, text: errorMessage }],
           isError: true,
         });
       } catch (storeErr) {

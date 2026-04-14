@@ -72,6 +72,19 @@ async function searchWork(
   { query, systemInstruction, urls, thinkingLevel }: SearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
+  if (urls) {
+    for (const url of urls) {
+      try {
+        new URL(url);
+      } catch {
+        return {
+          content: [{ type: 'text', text: `Invalid URL provided: ${url}` }],
+          isError: true,
+        };
+      }
+    }
+  }
+
   await sendProgress(ctx, 0, undefined, `${SEARCH_TOOL_LABEL}: Starting`);
   const tools: Record<string, Record<string, never>>[] = [
     { googleSearch: {} },
@@ -125,6 +138,17 @@ async function analyzeUrlWork(
   { urls, question, systemInstruction, thinkingLevel }: AnalyzeUrlInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
+  for (const url of urls) {
+    try {
+      new URL(url);
+    } catch {
+      return {
+        content: [{ type: 'text', text: `Invalid URL provided: ${url}` }],
+        isError: true,
+      };
+    }
+  }
+
   await sendProgress(ctx, 0, undefined, `${ANALYZE_URL_TOOL_LABEL}: Fetching`);
   return await handleToolExecution(
     ctx,

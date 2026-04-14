@@ -13,7 +13,7 @@ export const SearchInputSchema = z.object({
   query: z.string().min(1).describe('Question or topic to research'),
   systemInstruction: z.string().optional().describe('Custom instructions for result format'),
   urls: z
-    .array(z.url())
+    .array(z.string())
     .max(20)
     .optional()
     .describe('URLs to deeply analyze alongside search results (max 20). Enables URL Context.'),
@@ -47,7 +47,7 @@ export type AnalyzeFileInput = z.infer<typeof AnalyzeFileInputSchema>;
 
 export const AnalyzeUrlInputSchema = z.object({
   urls: z
-    .array(z.url())
+    .array(z.string())
     .min(1)
     .max(20)
     .describe('URLs to analyze (max 20). Must be publicly accessible.'),

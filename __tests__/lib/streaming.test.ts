@@ -314,6 +314,101 @@ describe('consumeStreamWithProgress', () => {
       'text after tools should emit Compiling results',
     );
   });
+
+  it('emits thought headers as progress notifications', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([
+        {
+          text: '**Defining Research Scope**\n\nSome reasoning.\n\n**Analyzing GitHub Trends**\n\nMore thoughts.',
+          thought: true,
+        },
+      ]),
+      makeChunk([{ text: 'final answer' }], FinishReason.STOP),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.strictEqual(result.text, 'final answer');
+    const messages = progressCalls.map((c) => c.message);
+    assert.ok(messages.includes('Thinking'), 'should emit initial Thinking');
+    assert.ok(messages.includes('Defining Research Scope'), 'should emit first thought header');
+    assert.ok(messages.includes('Analyzing GitHub Trends'), 'should emit second thought header');
+  });
+
+  it('emits thought headers split across chunks', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ text: 'Reasoning start\n\n**Ana', thought: true }]),
+      makeChunk([{ text: 'lyzing Trends**\n\nDetails here.', thought: true }]),
+      makeChunk([{ text: 'done' }], FinishReason.STOP),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.strictEqual(result.text, 'done');
+    const messages = progressCalls.map((c) => c.message);
+    // Header should NOT appear after chunk 1 (incomplete)
+    // Header SHOULD appear after chunk 2 (completed)
+    assert.ok(
+      messages.includes('Analyzing Trends'),
+      'should emit header once both delimiters arrive',
+    );
+  });
+
+  it('does not emit duplicate headers for already-scanned text', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ text: '**Step One**\n\nThinking...', thought: true }]),
+      makeChunk([{ text: '\n\n**Step Two**\n\nMore thinking.', thought: true }]),
+      makeChunk([{ text: 'answer' }], FinishReason.STOP),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.strictEqual(result.text, 'answer');
+    const messages = progressCalls.map((c) => c.message);
+    const stepOneCount = messages.filter((m) => m === 'Step One').length;
+    const stepTwoCount = messages.filter((m) => m === 'Step Two').length;
+    assert.strictEqual(stepOneCount, 1, 'Step One should appear exactly once');
+    assert.strictEqual(stepTwoCount, 1, 'Step Two should appear exactly once');
+  });
+
+  it('emits only Thinking when thought text has no bold headers', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ text: 'Just plain reasoning without any headers.', thought: true }]),
+      makeChunk([{ text: 'result' }], FinishReason.STOP),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.strictEqual(result.text, 'result');
+    const messages = progressCalls.map((c) => c.message);
+    assert.ok(messages.includes('Thinking'), 'should still emit Thinking');
+    // No additional thought-header messages beyond the standard phases
+    const thinkingIndex = messages.indexOf('Thinking');
+    const generatingIndex = messages.indexOf('Generating response');
+    // Between Thinking and Generating, there should be no extra messages
+    assert.strictEqual(
+      generatingIndex,
+      thinkingIndex + 1,
+      'no extra messages between Thinking and Generating',
+    );
+  });
+
+  it('emits thought headers with toolLabel prefix', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ text: '**Planning**\n\nDetails.', thought: true }]),
+      makeChunk([{ text: 'answer' }], FinishReason.STOP),
+    ]);
+
+    await consumeStreamWithProgress(stream, ctx, 'Agentic Search');
+
+    const messages = progressCalls.map((c) => c.message);
+    assert.ok(messages.includes('Agentic Search: Planning'), 'should include toolLabel prefix');
+  });
 });
 
 describe('validateStreamResult', () => {

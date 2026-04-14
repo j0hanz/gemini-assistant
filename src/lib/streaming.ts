@@ -31,6 +31,30 @@ const enum Phase {
   Generating = 2,
 }
 
+const THOUGHT_HEADER_PATTERN = /\*\*([^*]+)\*\*/g;
+
+interface ThoughtHeaderState {
+  scanIndex: number;
+  progressStep: number;
+}
+
+async function emitThoughtHeaders(
+  thoughtText: string,
+  state: ThoughtHeaderState,
+  ctx: ServerContext,
+  msg: (m: string) => string,
+): Promise<void> {
+  THOUGHT_HEADER_PATTERN.lastIndex = state.scanIndex;
+  let match: RegExpExecArray | null;
+  while ((match = THOUGHT_HEADER_PATTERN.exec(thoughtText)) !== null) {
+    const header = match[1]?.trim();
+    if (header) {
+      await sendProgress(ctx, ++state.progressStep, undefined, msg(header));
+    }
+    state.scanIndex = THOUGHT_HEADER_PATTERN.lastIndex;
+  }
+}
+
 interface StreamMetadata {
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
@@ -74,6 +98,7 @@ export async function consumeStreamWithProgress(
   const toolsUsed = new Set<string>();
   let hadToolActivity = false;
   let emittedCompiling = false;
+  const thoughtHeaderState: ThoughtHeaderState = { scanIndex: 0, progressStep: 0 };
 
   const msg = (m: string): string => (toolLabel ? `${toolLabel}: ${m}` : m);
 
@@ -128,6 +153,9 @@ export async function consumeStreamWithProgress(
 
         if (partText !== undefined) {
           thoughtText += partText;
+          thoughtHeaderState.progressStep = progressStep;
+          await emitThoughtHeaders(thoughtText, thoughtHeaderState, ctx, msg);
+          progressStep = thoughtHeaderState.progressStep;
         }
 
         continue;

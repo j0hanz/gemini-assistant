@@ -10,7 +10,7 @@ import {
   THINKING_LEVELS,
 } from '../lib/config-utils.js';
 import { reportCompletion, sendProgress } from '../lib/context.js';
-import { errorResult, handleToolError } from '../lib/errors.js';
+import { errorResult } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
 import { executeToolStream, extractUsage, type StreamResult } from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
@@ -222,21 +222,17 @@ async function askNewSession(
 }
 
 async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
-  try {
-    const validationError = validateAskRequest(args);
-    if (validationError) return validationError;
+  const validationError = validateAskRequest(args);
+  if (validationError) return validationError;
 
-    if (!args.sessionId) {
-      return await askSingleTurn(args, ctx);
-    }
-
-    const resumed = await askExistingSession(args as AskArgs & { sessionId: string }, ctx);
-    if (resumed) return resumed;
-
-    return await askNewSession(args as AskArgs & { sessionId: string }, ctx);
-  } catch (err) {
-    return await handleToolError(ctx, 'ask', ASK_TOOL_LABEL, err);
+  if (!args.sessionId) {
+    return await askSingleTurn(args, ctx);
   }
+
+  const resumed = await askExistingSession(args as AskArgs & { sessionId: string }, ctx);
+  if (resumed) return resumed;
+
+  return await askNewSession(args as AskArgs & { sessionId: string }, ctx);
 }
 
 export function registerAskTool(server: McpServer): void {

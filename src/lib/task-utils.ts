@@ -8,6 +8,8 @@ import type {
   Task,
 } from '@modelcontextprotocol/server';
 
+import { withErrorLogging } from './errors.js';
+
 const DEFAULT_TTL = 300_000;
 
 export const READONLY_ANNOTATIONS = {
@@ -135,7 +137,10 @@ export function registerTaskTool<TArgs>(
   config: TaskToolConfig,
   work: TaskWork<TArgs>,
 ): void {
-  const handler = createToolTaskHandlers(work) as TaskToolHandler;
+  const toolLabel = config.title ?? name;
+  const handler = createToolTaskHandlers(
+    withErrorLogging(name, toolLabel, work),
+  ) as TaskToolHandler;
 
   server.experimental.tasks.registerToolTask(
     name,

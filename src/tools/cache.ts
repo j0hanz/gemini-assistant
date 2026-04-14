@@ -5,7 +5,7 @@ import { createPartFromUri } from '@google/genai';
 import { z } from 'zod/v4';
 
 import { reportCompletion, sendProgress } from '../lib/context.js';
-import { cleanupErrorLogger, handleToolError, logAndReturnError } from '../lib/errors.js';
+import { cleanupErrorLogger, withErrorLogging } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/path-validation.js';
 import { withRetry } from '../lib/retry.js';
@@ -236,8 +236,7 @@ function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
         },
       };
     } catch (err) {
-      const normalizedError = normalizeCreateCacheError(err);
-      return await handleToolError(ctx, 'create_cache', TOOL_LABEL, normalizedError);
+      throw normalizeCreateCacheError(err);
     } finally {
       await deleteUploadedFiles(uploadedFileNames, cleanupErrorLogger(ctx));
     }
@@ -271,25 +270,21 @@ export function registerCacheTools(server: McpServer): void {
       outputSchema: ListCachesOutputSchema,
       annotations: READONLY_ANNOTATIONS,
     },
-    async (_args, ctx: ServerContext) => {
-      try {
-        const caches = await listCacheSummaries(ctx.mcpReq.signal);
-        const cacheLinks = caches
-          .filter((c): c is typeof c & { name: string } => typeof c.name === 'string')
-          .map((c) => ({
-            type: 'resource_link' as const,
-            uri: `caches://${encodeURIComponent(c.name)}`,
-            name: c.displayName ?? c.name,
-            mimeType: 'application/json',
-          }));
-        return {
-          content: [{ type: 'text', text: formatCacheListMarkdown(caches) }, ...cacheLinks],
-          structuredContent: { caches, count: caches.length },
-        };
-      } catch (err) {
-        return await logAndReturnError(ctx, 'list_caches', err);
-      }
-    },
+    withErrorLogging('list_caches', 'List Caches', async (_args, ctx: ServerContext) => {
+      const caches = await listCacheSummaries(ctx.mcpReq.signal);
+      const cacheLinks = caches
+        .filter((c): c is typeof c & { name: string } => typeof c.name === 'string')
+        .map((c) => ({
+          type: 'resource_link' as const,
+          uri: `caches://${encodeURIComponent(c.name)}`,
+          name: c.displayName ?? c.name,
+          mimeType: 'application/json',
+        }));
+      return {
+        content: [{ type: 'text', text: formatCacheListMarkdown(caches) }, ...cacheLinks],
+        structuredContent: { caches, count: caches.length },
+      };
+    }),
   );
 
   server.registerTool(
@@ -309,8 +304,10 @@ export function registerCacheTools(server: McpServer): void {
         destructiveHint: true,
       },
     },
-    async ({ cacheName }, ctx: ServerContext) => {
-      try {
+    withErrorLogging(
+      'delete_cache',
+      'Delete Cache',
+      async ({ cacheName }: { cacheName: string }, ctx: ServerContext) => {
         if (!(await confirmCacheDeletion(ctx, cacheName))) {
           return {
             content: [{ type: 'text', text: 'Cache deletion cancelled.' }],
@@ -333,10 +330,8 @@ export function registerCacheTools(server: McpServer): void {
           ],
           structuredContent: { cacheName, deleted: true },
         };
-      } catch (err) {
-        return await logAndReturnError(ctx, 'delete_cache', err);
-      }
-    },
+      },
+    ),
   );
 
   server.registerTool(
@@ -354,8 +349,10 @@ export function registerCacheTools(server: McpServer): void {
       outputSchema: UpdateCacheOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
     },
-    async ({ cacheName, ttl }, ctx: ServerContext) => {
-      try {
+    withErrorLogging(
+      'update_cache',
+      'Update Cache',
+      async ({ cacheName, ttl }: { cacheName: string; ttl: string }, ctx: ServerContext) => {
         const updated = await ai.caches.update({
           name: cacheName,
           config: { ttl, abortSignal: ctx.mcpReq.signal },
@@ -383,9 +380,7 @@ export function registerCacheTools(server: McpServer): void {
             ...(updated.expireTime ? { expireTime: updated.expireTime } : {}),
           },
         };
-      } catch (err) {
-        return await logAndReturnError(ctx, 'update_cache', err);
-      }
-    },
+      },
+    ),
   );
 }

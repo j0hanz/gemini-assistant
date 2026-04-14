@@ -21,6 +21,7 @@ export async function startHttpTransport(
   const port = parseInt(process.env.MCP_HTTP_PORT ?? '', 10) || DEFAULT_PORT;
   const host = process.env.MCP_HTTP_HOST ?? DEFAULT_HOST;
   const corsOrigin = process.env.MCP_CORS_ORIGIN ?? '';
+  const isStateless = process.env.MCP_STATELESS === 'true';
 
   const app = createMcpExpressApp({ host });
 
@@ -40,15 +41,20 @@ export async function startHttpTransport(
     });
   }
 
-  const transport = new NodeStreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-    onsessioninitialized: (sessionId) => {
+  const baseTransportOptions = {
+    enableJsonResponse: isStateless,
+    onsessioninitialized: (sessionId: string) => {
       console.error(`[http] Session initialized: ${sessionId}`);
     },
-    onsessionclosed: (sessionId) => {
+    onsessionclosed: (sessionId: string) => {
       console.error(`[http] Session closed: ${sessionId}`);
     },
     ...(eventStore ? { eventStore } : {}),
+  } as const;
+
+  const transport = new NodeStreamableHTTPServerTransport({
+    ...baseTransportOptions,
+    ...(isStateless ? {} : { sessionIdGenerator: () => randomUUID() }),
   });
 
   app.all('/mcp', async (req, res) => {

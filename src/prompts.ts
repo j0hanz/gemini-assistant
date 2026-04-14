@@ -1,7 +1,16 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { completable } from '@modelcontextprotocol/server';
 
+import { readdir, stat } from 'node:fs/promises';
+import { basename, dirname, join, normalize } from 'node:path';
+
 import { z } from 'zod/v4';
+
+import {
+  buildServerRootsFetcher,
+  getAllowedRoots,
+  type RootsFetcher,
+} from './lib/path-validation.js';
 
 const MAX_PROMPT_TEXT_LENGTH = 100_000;
 const MAX_CONTEXT_TEXT_LENGTH = 10_000;
@@ -80,9 +89,85 @@ function summarizeConstraint(style: SummaryStyle | undefined): string {
 }
 
 const completeLanguage = completeByPrefix(COMMON_LANGUAGES, (value) => value?.toLowerCase() ?? '');
+
+function buildPathAcFetcher(rootsFetcher: RootsFetcher) {
+  return async (value: string | undefined): Promise<string[]> => {
+    try {
+      const allowedRoots = await getAllowedRoots(rootsFetcher);
+      const rawValue = value ?? '';
+
+      if (!rawValue) {
+        return allowedRoots;
+      }
+
+      const normalized = normalize(rawValue);
+      let targetDir = normalized;
+      let targetPrefix = '';
+
+      try {
+        const stats = await stat(normalized);
+        if (stats.isDirectory()) {
+          targetDir = normalized;
+        } else {
+          targetDir = dirname(normalized);
+          targetPrefix = basename(normalized);
+        }
+      } catch {
+        targetDir = dirname(normalized);
+        targetPrefix = basename(normalized);
+      }
+
+      const isAllowed = allowedRoots.some(
+        (r) =>
+          targetDir.toLowerCase().startsWith(r.toLowerCase()) ||
+          r.toLowerCase().startsWith(targetDir.toLowerCase()),
+      );
+
+      if (!isAllowed) {
+        return allowedRoots.filter((r) => r.toLowerCase().startsWith(normalized.toLowerCase()));
+      }
+
+      try {
+        const entries = await readdir(targetDir, { withFileTypes: true });
+        return entries
+          .filter(
+            (e) => !targetPrefix || e.name.toLowerCase().startsWith(targetPrefix.toLowerCase()),
+          )
+          .map((e) => join(targetDir, e.name) + (e.isDirectory() ? '\\' : ''))
+          .slice(0, 50);
+      } catch {
+        return allowedRoots.filter((r) => r.toLowerCase().startsWith(normalized.toLowerCase()));
+      }
+    } catch {
+      return [];
+    }
+  };
+}
+
 const completeSummaryStyle = completeByPrefix(SUMMARY_STYLES);
 
 export function registerPrompts(server: McpServer): void {
+  const rootsFetcher = buildServerRootsFetcher(server);
+
+  server.registerPrompt(
+    'analyze-file',
+    {
+      title: 'Analyze File',
+      description: 'Analyze a specific file with a custom question.',
+      argsSchema: z.object({
+        filePath: completable(
+          promptText('Absolute path to the file to analyze from workspace roots'),
+          buildPathAcFetcher(rootsFetcher),
+        ),
+        question: promptText('Your question or analysis request about the file'),
+      }),
+    },
+    ({ filePath, question }) =>
+      userPromptMessage(
+        `Please analyze this file: ${filePath}\n\nQuestion: ${question}\n\nRead the file context and answer the question.`,
+      ),
+  );
+
   server.registerPrompt(
     'code-review',
     {

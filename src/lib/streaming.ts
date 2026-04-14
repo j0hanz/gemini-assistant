@@ -10,7 +10,7 @@ import type {
 } from '@google/genai';
 
 import { reportCompletion, sendProgress } from './context.js';
-import { finishReasonError, handleToolError } from './errors.js';
+import { finishReasonError } from './errors.js';
 import { extractTextContent, pickDefined } from './response.js';
 import { withRetry } from './retry.js';
 
@@ -302,36 +302,32 @@ export async function handleToolExecution<T extends Record<string, unknown>>(
     reportMessage?: string;
   } = (s, t) => ({ structuredContent: { answer: t } as unknown as T }),
 ): Promise<CallToolResult> {
-  try {
-    const { streamResult, result } = await executeToolStream(
-      ctx,
-      toolName,
-      toolLabel,
-      streamGenerator,
-    );
-    if (result.isError) return result;
+  const { streamResult, result } = await executeToolStream(
+    ctx,
+    toolName,
+    toolLabel,
+    streamGenerator,
+  );
+  if (result.isError) return result;
 
-    const text = extractTextContent(result.content);
-    const built = responseBuilder(streamResult, text);
+  const text = extractTextContent(result.content);
+  const built = responseBuilder(streamResult, text);
 
-    if (built.reportMessage) {
-      await reportCompletion(ctx, toolLabel, built.reportMessage);
-    } else {
-      await reportCompletion(ctx, toolLabel, 'completed');
-    }
-
-    const usage = extractUsage(streamResult.usageMetadata);
-
-    return {
-      ...result,
-      ...(built.resultMod ? built.resultMod(result) : {}),
-      structuredContent: {
-        ...(built.structuredContent ?? {}),
-        ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
-        ...(usage ? { usage } : {}),
-      },
-    };
-  } catch (err) {
-    return await handleToolError(ctx, toolName, toolLabel, err);
+  if (built.reportMessage) {
+    await reportCompletion(ctx, toolLabel, built.reportMessage);
+  } else {
+    await reportCompletion(ctx, toolLabel, 'completed');
   }
+
+  const usage = extractUsage(streamResult.usageMetadata);
+
+  return {
+    ...result,
+    ...(built.resultMod ? built.resultMod(result) : {}),
+    structuredContent: {
+      ...(built.structuredContent ?? {}),
+      ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
+      ...(usage ? { usage } : {}),
+    },
+  };
 }

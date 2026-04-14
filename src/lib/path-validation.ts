@@ -18,7 +18,7 @@ function parseRootUri(uri: string): string | undefined {
   }
 }
 
-async function getAllowedRoots(rootsFetcher?: RootsFetcher): Promise<string[]> {
+export async function getAllowedRoots(rootsFetcher?: RootsFetcher): Promise<string[]> {
   if (!rootsFetcher) return ENV_ROOTS;
   try {
     const clientRoots = await rootsFetcher();

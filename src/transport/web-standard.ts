@@ -45,16 +45,22 @@ export async function startWebStandardTransport(
 ): Promise<WebStandardTransportResult> {
   const port = parseInt(process.env.MCP_HTTP_PORT ?? '', 10) || DEFAULT_PORT;
   const host = process.env.MCP_HTTP_HOST ?? DEFAULT_HOST;
+  const isStateless = process.env.MCP_STATELESS === 'true';
 
-  const transport = new WebStandardStreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-    onsessioninitialized: (sessionId) => {
+  const baseTransportOptions = {
+    enableJsonResponse: isStateless,
+    onsessioninitialized: (sessionId: string) => {
       console.error(`Session initialized: ${sessionId}`);
     },
-    onsessionclosed: (sessionId) => {
+    onsessionclosed: (sessionId: string) => {
       console.error(`Session closed: ${sessionId}`);
     },
     ...(eventStore ? { eventStore } : {}),
+  } as const;
+
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    ...baseTransportOptions,
+    ...(isStateless ? {} : { sessionIdGenerator: () => randomUUID() }),
   });
 
   await server.connect(transport);

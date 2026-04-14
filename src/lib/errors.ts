@@ -89,3 +89,27 @@ export function cleanupErrorLogger(ctx: ServerContext): (reason: unknown) => voi
     void ctx.mcpReq.log('warning', `File cleanup failed: ${formatError(reason)}`);
   };
 }
+
+export function withErrorLogging<TArgs>(
+  toolName: string,
+  toolLabel: string,
+  handler: (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
+): (args: TArgs, ctx: ServerContext) => Promise<CallToolResult> {
+  return async (args: TArgs, ctx: ServerContext) => {
+    try {
+      return await handler(args, ctx);
+    } catch (err) {
+      await reportFailure(ctx, toolLabel, err);
+      await ctx.mcpReq.log('error', `${toolName} failed: ${formatError(err)}`);
+
+      if (isAbortError(err)) {
+        throw new Error(`${toolName}: cancelled by client`, { cause: err });
+      }
+      if (hasHttpStatus(err)) {
+        const hint = STATUS_MESSAGES[err.status] ?? `HTTP ${err.status}`;
+        throw new Error(`${toolName} failed: ${hint} — ${err.message}`, { cause: err });
+      }
+      throw err;
+    }
+  };
+}

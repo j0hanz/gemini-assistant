@@ -8,8 +8,11 @@ import type { GenerateContentResponse, Part } from '@google/genai';
 
 import { resetProgressThrottle } from '../../src/lib/context.js';
 import {
+  advanceProgress,
   consumeStreamWithProgress,
   extractUsage,
+  PROGRESS_CAP,
+  PROGRESS_TOTAL,
   type StreamResult,
   validateStreamResult,
 } from '../../src/lib/streaming.js';
@@ -413,6 +416,46 @@ describe('consumeStreamWithProgress', () => {
 
     const messages = progressCalls.map((c) => c.message);
     assert.ok(messages.includes('Agentic Search: Planning'), 'should include toolLabel prefix');
+  });
+
+  it('sends asymptotic progress with total=100', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ text: 'Hello ' }]),
+      makeChunk([{ text: 'world' }], FinishReason.STOP),
+    ]);
+
+    await consumeStreamWithProgress(stream, ctx);
+
+    // Every progress call should include total=PROGRESS_TOTAL
+    for (const call of progressCalls) {
+      assert.strictEqual(call.total, PROGRESS_TOTAL, `expected total=${PROGRESS_TOTAL}`);
+    }
+
+    // Progress values should be monotonically increasing
+    for (let i = 1; i < progressCalls.length; i++) {
+      const prev = progressCalls[i - 1]?.progress ?? 0;
+      const curr = progressCalls[i]?.progress ?? 0;
+      assert.ok(curr >= prev, `progress should increase: ${prev} -> ${curr}`);
+    }
+
+    // Progress should never exceed PROGRESS_CAP
+    for (const call of progressCalls) {
+      assert.ok(
+        call.progress <= PROGRESS_CAP,
+        `progress ${call.progress} exceeds cap ${PROGRESS_CAP}`,
+      );
+    }
+  });
+
+  it('advanceProgress never exceeds cap', () => {
+    let current = 0;
+    for (let i = 0; i < 50; i++) {
+      current = advanceProgress(current);
+      assert.ok(current <= PROGRESS_CAP, `step ${i}: ${current} > ${PROGRESS_CAP}`);
+    }
+    // After many steps, should be at the cap
+    assert.strictEqual(current, PROGRESS_CAP);
   });
 });
 

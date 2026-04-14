@@ -14,6 +14,14 @@ import { finishReasonError, handleToolError } from './errors.js';
 import { extractTextContent, pickDefined } from './response.js';
 import { withRetry } from './retry.js';
 
+export const PROGRESS_TOTAL = 100;
+export const PROGRESS_STEP_FRACTION = 0.15;
+export const PROGRESS_CAP = 95;
+
+export function advanceProgress(current: number): number {
+  return Math.min(current + (PROGRESS_TOTAL - current) * PROGRESS_STEP_FRACTION, PROGRESS_CAP);
+}
+
 export interface StreamResult {
   text: string;
   thoughtText: string;
@@ -36,7 +44,7 @@ const THOUGHT_FALLBACK_CHUNK_THRESHOLD = 5;
 
 interface ThoughtHeaderState {
   scanIndex: number;
-  progressStep: number;
+  currentProgress: number;
   chunksSinceLastHeader: number;
 }
 
@@ -54,7 +62,8 @@ async function emitThoughtHeaders(
     if (header) {
       foundHeader = true;
       state.chunksSinceLastHeader = 0;
-      await sendProgress(ctx, ++state.progressStep, undefined, msg(header));
+      state.currentProgress = advanceProgress(state.currentProgress);
+      await sendProgress(ctx, Math.floor(state.currentProgress), PROGRESS_TOTAL, msg(header));
     }
     state.scanIndex = THOUGHT_HEADER_PATTERN.lastIndex;
   }
@@ -63,7 +72,13 @@ async function emitThoughtHeaders(
     state.chunksSinceLastHeader++;
     if (state.chunksSinceLastHeader >= THOUGHT_FALLBACK_CHUNK_THRESHOLD) {
       state.chunksSinceLastHeader = 0;
-      await sendProgress(ctx, ++state.progressStep, undefined, msg('Still thinking\u2026'));
+      state.currentProgress = advanceProgress(state.currentProgress);
+      await sendProgress(
+        ctx,
+        Math.floor(state.currentProgress),
+        PROGRESS_TOTAL,
+        msg('Still thinking\u2026'),
+      );
     }
   }
 }
@@ -107,19 +122,20 @@ export async function consumeStreamWithProgress(
   let thoughtText = '';
   const metadata: StreamMetadata = {};
   let phase: Phase = Phase.Waiting;
-  let progressStep = 0;
+  let currentProgress = 0;
   const toolsUsed = new Set<string>();
   let hadToolActivity = false;
   let emittedCompiling = false;
   const thoughtHeaderState: ThoughtHeaderState = {
     scanIndex: 0,
-    progressStep: 0,
+    currentProgress: 0,
     chunksSinceLastHeader: 0,
   };
 
   const msg = (m: string): string => (toolLabel ? `${toolLabel}: ${m}` : m);
 
-  await sendProgress(ctx, ++progressStep, undefined, msg('Evaluating prompt'));
+  currentProgress = advanceProgress(currentProgress);
+  await sendProgress(ctx, Math.floor(currentProgress), PROGRESS_TOTAL, msg('Evaluating prompt'));
 
   for await (const chunk of stream) {
     if (ctx.mcpReq.signal.aborted) break;
@@ -132,7 +148,13 @@ export async function consumeStreamWithProgress(
     if (candidate.groundingMetadata && !toolsUsed.has('googleSearch')) {
       toolsUsed.add('googleSearch');
       hadToolActivity = true;
-      await sendProgress(ctx, ++progressStep, undefined, msg('Searching the web'));
+      currentProgress = advanceProgress(currentProgress);
+      await sendProgress(
+        ctx,
+        Math.floor(currentProgress),
+        PROGRESS_TOTAL,
+        msg('Searching the web'),
+      );
     }
 
     const chunkParts = candidate.content?.parts ?? [];
@@ -142,13 +164,15 @@ export async function consumeStreamWithProgress(
       if (part.executableCode) {
         toolsUsed.add('codeExecution');
         hadToolActivity = true;
-        await sendProgress(ctx, ++progressStep, undefined, msg('Executing code'));
+        currentProgress = advanceProgress(currentProgress);
+        await sendProgress(ctx, Math.floor(currentProgress), PROGRESS_TOTAL, msg('Executing code'));
         continue;
       }
 
       if (part.codeExecutionResult) {
         hadToolActivity = true;
-        await sendProgress(ctx, ++progressStep, undefined, msg('Code executed'));
+        currentProgress = advanceProgress(currentProgress);
+        await sendProgress(ctx, Math.floor(currentProgress), PROGRESS_TOTAL, msg('Code executed'));
         continue;
       }
 
@@ -156,7 +180,13 @@ export async function consumeStreamWithProgress(
         const fnName = part.functionCall.name ?? 'tool';
         toolsUsed.add(fnName);
         hadToolActivity = true;
-        await sendProgress(ctx, ++progressStep, undefined, msg(`Tool: ${fnName}`));
+        currentProgress = advanceProgress(currentProgress);
+        await sendProgress(
+          ctx,
+          Math.floor(currentProgress),
+          PROGRESS_TOTAL,
+          msg(`Tool: ${fnName}`),
+        );
         continue;
       }
 
@@ -165,14 +195,15 @@ export async function consumeStreamWithProgress(
       if (part.thought) {
         if (phase < Phase.Thinking) {
           phase = Phase.Thinking;
-          await sendProgress(ctx, ++progressStep, undefined, msg('Thinking'));
+          currentProgress = advanceProgress(currentProgress);
+          await sendProgress(ctx, Math.floor(currentProgress), PROGRESS_TOTAL, msg('Thinking'));
         }
 
         if (partText !== undefined) {
           thoughtText += partText;
-          thoughtHeaderState.progressStep = progressStep;
+          thoughtHeaderState.currentProgress = currentProgress;
           await emitThoughtHeaders(thoughtText, thoughtHeaderState, ctx, msg);
-          progressStep = thoughtHeaderState.progressStep;
+          currentProgress = thoughtHeaderState.currentProgress;
         }
 
         continue;
@@ -185,10 +216,22 @@ export async function consumeStreamWithProgress(
       if (hadToolActivity && !emittedCompiling) {
         emittedCompiling = true;
         phase = Phase.Generating;
-        await sendProgress(ctx, ++progressStep, undefined, msg('Compiling results'));
+        currentProgress = advanceProgress(currentProgress);
+        await sendProgress(
+          ctx,
+          Math.floor(currentProgress),
+          PROGRESS_TOTAL,
+          msg('Compiling results'),
+        );
       } else if (phase < Phase.Generating) {
         phase = Phase.Generating;
-        await sendProgress(ctx, ++progressStep, undefined, msg('Generating response'));
+        currentProgress = advanceProgress(currentProgress);
+        await sendProgress(
+          ctx,
+          Math.floor(currentProgress),
+          PROGRESS_TOTAL,
+          msg('Generating response'),
+        );
       }
 
       text += partText;

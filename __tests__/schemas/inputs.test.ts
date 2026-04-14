@@ -72,12 +72,12 @@ describe('SearchInputSchema', () => {
     assert.ok(result.success);
   });
 
-  it('rejects invalid urls', () => {
+  it('accepts any string as url (validated at handler level)', () => {
     const result = SearchInputSchema.safeParse({
       query: 'test',
       urls: ['not-a-url'],
     });
-    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.success, true);
   });
 
   it('rejects more than 20 urls', () => {
@@ -239,12 +239,12 @@ describe('AnalyzeUrlInputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
-  it('rejects invalid urls', () => {
+  it('accepts any string as url (validated at handler level)', () => {
     const result = AnalyzeUrlInputSchema.safeParse({
       urls: ['not-a-url'],
       question: 'test',
     });
-    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.success, true);
   });
 
   it('rejects more than 20 urls', () => {

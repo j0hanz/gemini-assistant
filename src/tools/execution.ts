@@ -173,6 +173,7 @@ async function executeCodeWork(
   { task, language, thinkingLevel }: ExecuteCodeInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
+  await sendProgress(ctx, 0, undefined, `${EXECUTE_CODE_TOOL_LABEL}: Preparing sandbox`);
   const prompt = [task, ...(language ? [`Language: ${language}`] : [])].join('\n\n');
 
   return await handleToolExecution(

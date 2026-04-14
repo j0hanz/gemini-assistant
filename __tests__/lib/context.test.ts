@@ -1,9 +1,9 @@
 import type { ServerContext } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { beforeEach, describe, it } from 'node:test';
 
-import { sendProgress } from '../../src/lib/context.js';
+import { resetProgressThrottle, sendProgress } from '../../src/lib/context.js';
 
 function makeMockContext(overrides: {
   progressToken?: string | number;
@@ -36,6 +36,10 @@ function makeMockContext(overrides: {
 }
 
 describe('sendProgress', () => {
+  beforeEach(() => {
+    resetProgressThrottle();
+  });
+
   it('is a no-op without progressToken', async () => {
     const ctx = makeMockContext({});
     // Should not throw

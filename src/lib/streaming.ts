@@ -32,10 +32,12 @@ const enum Phase {
 }
 
 const THOUGHT_HEADER_PATTERN = /\*\*([^*]+)\*\*/g;
+const THOUGHT_FALLBACK_CHUNK_THRESHOLD = 5;
 
 interface ThoughtHeaderState {
   scanIndex: number;
   progressStep: number;
+  chunksSinceLastHeader: number;
 }
 
 async function emitThoughtHeaders(
@@ -46,12 +48,23 @@ async function emitThoughtHeaders(
 ): Promise<void> {
   THOUGHT_HEADER_PATTERN.lastIndex = state.scanIndex;
   let match: RegExpExecArray | null;
+  let foundHeader = false;
   while ((match = THOUGHT_HEADER_PATTERN.exec(thoughtText)) !== null) {
     const header = match[1]?.trim();
     if (header) {
+      foundHeader = true;
+      state.chunksSinceLastHeader = 0;
       await sendProgress(ctx, ++state.progressStep, undefined, msg(header));
     }
     state.scanIndex = THOUGHT_HEADER_PATTERN.lastIndex;
+  }
+
+  if (!foundHeader) {
+    state.chunksSinceLastHeader++;
+    if (state.chunksSinceLastHeader >= THOUGHT_FALLBACK_CHUNK_THRESHOLD) {
+      state.chunksSinceLastHeader = 0;
+      await sendProgress(ctx, ++state.progressStep, undefined, msg('Still thinking\u2026'));
+    }
   }
 }
 
@@ -98,7 +111,11 @@ export async function consumeStreamWithProgress(
   const toolsUsed = new Set<string>();
   let hadToolActivity = false;
   let emittedCompiling = false;
-  const thoughtHeaderState: ThoughtHeaderState = { scanIndex: 0, progressStep: 0 };
+  const thoughtHeaderState: ThoughtHeaderState = {
+    scanIndex: 0,
+    progressStep: 0,
+    chunksSinceLastHeader: 0,
+  };
 
   const msg = (m: string): string => (toolLabel ? `${toolLabel}: ${m}` : m);
 
@@ -212,7 +229,17 @@ export async function executeToolStream(
   toolLabel: string,
   streamGenerator: () => Promise<AsyncGenerator<GenerateContentResponse>>,
 ): Promise<{ streamResult: StreamResult; result: CallToolResult }> {
-  const stream = await withRetry(streamGenerator, { signal: ctx.mcpReq.signal });
+  const stream = await withRetry(streamGenerator, {
+    signal: ctx.mcpReq.signal,
+    onRetry: (attempt, max, delayMs) => {
+      void sendProgress(
+        ctx,
+        0,
+        undefined,
+        `${toolLabel}: Retrying (${attempt}/${max}, ~${Math.round(delayMs / 1000)}s)`,
+      );
+    },
+  });
   const streamResult = await consumeStreamWithProgress(stream, ctx, toolLabel);
   const result = validateStreamResult(streamResult, toolName);
   return { streamResult, result };
@@ -247,7 +274,7 @@ export async function handleToolExecution<T extends Record<string, unknown>>(
     if (built.reportMessage) {
       await reportCompletion(ctx, toolLabel, built.reportMessage);
     } else {
-      await reportCompletion(ctx, toolLabel, `responded (${text.length} chars)`);
+      await reportCompletion(ctx, toolLabel, 'completed');
     }
 
     const usage = extractUsage(streamResult.usageMetadata);

@@ -1,11 +1,12 @@
 import type { ServerContext } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { beforeEach, describe, it } from 'node:test';
 
 import { FinishReason, Outcome } from '@google/genai';
 import type { GenerateContentResponse, Part } from '@google/genai';
 
+import { resetProgressThrottle } from '../../src/lib/context.js';
 import {
   consumeStreamWithProgress,
   extractUsage,
@@ -72,6 +73,10 @@ function makeMockContext(overrides?: { aborted?: boolean }): {
 }
 
 describe('consumeStreamWithProgress', () => {
+  beforeEach(() => {
+    resetProgressThrottle();
+  });
+
   it('reports progress phases for text-only stream', async () => {
     const { ctx, progressCalls } = makeMockContext();
     const stream = fakeStream([

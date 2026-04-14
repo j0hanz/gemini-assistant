@@ -9,7 +9,7 @@ import {
   buildGenerateContentConfig,
   THINKING_LEVELS,
 } from '../lib/config-utils.js';
-import { reportCompletion } from '../lib/context.js';
+import { reportCompletion, sendProgress } from '../lib/context.js';
 import { errorResult, handleToolError } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
 import { executeToolStream, extractUsage, type StreamResult } from '../lib/streaming.js';
@@ -139,14 +139,16 @@ async function runAskStream(
   streamGenerator: () => ReturnType<typeof ai.models.generateContentStream>,
   jsonMode = false,
 ): Promise<CallToolResult> {
+  await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Preparing`);
   const { streamResult, result } = await executeToolStream(
     ctx,
     'ask',
     ASK_TOOL_LABEL,
     streamGenerator,
   );
-  const text = extractTextContent(result.content);
-  await reportCompletion(ctx, ASK_TOOL_LABEL, `responded (${text.length} chars)`);
+  const hasThoughts = streamResult.thoughtText.length > 0;
+  const detail = hasThoughts ? 'completed with reasoning' : 'completed';
+  await reportCompletion(ctx, ASK_TOOL_LABEL, detail);
   return formatStructuredResult(result, streamResult, jsonMode);
 }
 
@@ -193,6 +195,7 @@ async function askExistingSession(
   if (!chat) return undefined;
 
   await ctx.mcpReq.log('debug', `Resuming session ${args.sessionId}`);
+  await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Resuming session`);
   return await askWithChat(chat, args, ctx);
 }
 

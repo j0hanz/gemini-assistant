@@ -1,6 +1,7 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { buildGenerateContentConfig } from '../lib/config-utils.js';
+import { sendProgress } from '../lib/context.js';
 import {
   appendSources,
   appendUrlStatus,
@@ -63,16 +64,15 @@ function buildPromptWithUrls(urls: string[], question: string): string {
   return `Analyze the following URLs:\n${urls.join('\n')}\n\n${question}`;
 }
 
-function buildSourceReportMessage(sourceCount: number, responseLength: number): string {
-  return sourceCount > 0
-    ? `${formatCountLabel(sourceCount, 'source')} found`
-    : `responded (${responseLength} chars)`;
+function buildSourceReportMessage(sourceCount: number): string {
+  return sourceCount > 0 ? `${formatCountLabel(sourceCount, 'source')} found` : 'completed';
 }
 
 async function searchWork(
   { query, systemInstruction, urls, thinkingLevel }: SearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
+  await sendProgress(ctx, 0, undefined, `${SEARCH_TOOL_LABEL}: Starting`);
   const tools: Record<string, Record<string, never>>[] = [
     { googleSearch: {} },
     ...((urls?.length ?? 0) > 0 ? [{ urlContext: {} }] : []),
@@ -115,7 +115,7 @@ async function searchWork(
           sources,
           urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
         }),
-        reportMessage: buildSourceReportMessage(sources.length, textContent.length),
+        reportMessage: buildSourceReportMessage(sources.length),
       };
     },
   );
@@ -125,6 +125,7 @@ async function analyzeUrlWork(
   { urls, question, systemInstruction, thinkingLevel }: AnalyzeUrlInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
+  await sendProgress(ctx, 0, undefined, `${ANALYZE_URL_TOOL_LABEL}: Fetching`);
   return await handleToolExecution(
     ctx,
     'analyze_url',
@@ -168,6 +169,7 @@ async function agenticSearchWork(
   { topic, searchDepth, thinkingLevel }: AgenticSearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
+  await sendProgress(ctx, 0, undefined, `${AGENTIC_SEARCH_TOOL_LABEL}: Starting deep research`);
   const depthInstruction =
     searchDepth <= 2
       ? 'Do a focused search covering 2-3 key aspects.'
@@ -213,7 +215,7 @@ async function agenticSearchWork(
           sources,
           toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
         }),
-        reportMessage: buildSourceReportMessage(sources.length, textContent.length),
+        reportMessage: buildSourceReportMessage(sources.length),
       };
     },
   );

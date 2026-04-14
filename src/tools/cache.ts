@@ -180,7 +180,17 @@ function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
               abortSignal: ctx.mcpReq.signal,
             },
           }),
-        { signal: ctx.mcpReq.signal },
+        {
+          signal: ctx.mcpReq.signal,
+          onRetry: (attempt, max, delayMs) => {
+            void sendProgress(
+              ctx,
+              totalSteps - 1,
+              totalSteps,
+              `${TOOL_LABEL}: Retrying cache creation (${attempt}/${max}, ~${Math.round(delayMs / 1000)}s)`,
+            );
+          },
+        },
       );
 
       // Replace older caches with the same displayName (create-then-cleanup)

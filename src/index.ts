@@ -14,6 +14,7 @@ import { InMemoryEventStore } from './lib/event-store.js';
 import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
 import { onSessionChange } from './sessions.js';
+import { registerAgenticSearchTool } from './tools/agentic-search.js';
 import { registerAnalyzeFileTool } from './tools/analyze-file.js';
 import { registerAnalyzeUrlTool } from './tools/analyze-url.js';
 import { registerAskTool } from './tools/ask.js';
@@ -50,8 +51,9 @@ const server = new McpServer(
     },
     instructions:
       'Tools: ask (chat, multi-turn via sessionId), execute_code (sandboxed code), ' +
-      'search (web-grounded answers, optional URL Context), analyze_file (file upload), ' +
-      'analyze_url (URL content analysis), ' +
+      'search (web-grounded answers, optional URL Context), ' +
+      'agentic_search (deep multi-step research with progress notifications), ' +
+      'analyze_file (file upload), analyze_url (URL content analysis), ' +
       'create_cache/list_caches/update_cache/delete_cache (context caching, ≥32k tokens). ' +
       'Use cacheName with ask to attach cached context. displayName auto-replaces stale caches.',
   },
@@ -60,6 +62,7 @@ const server = new McpServer(
 registerAskTool(server);
 registerExecuteCodeTool(server);
 registerSearchTool(server);
+registerAgenticSearchTool(server);
 registerAnalyzeFileTool(server);
 registerAnalyzeUrlTool(server);
 registerCacheTools(server);

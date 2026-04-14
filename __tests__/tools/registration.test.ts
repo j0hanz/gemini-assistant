@@ -16,6 +16,7 @@ const { registerExecuteCodeTool } = await import('../../src/tools/execute-code.j
 const { registerAnalyzeFileTool } = await import('../../src/tools/analyze-file.js');
 const { registerAnalyzeUrlTool } = await import('../../src/tools/analyze-url.js');
 const { registerCacheTools } = await import('../../src/tools/cache.js');
+const { registerAgenticSearchTool } = await import('../../src/tools/agentic-search.js');
 const { registerResources } = await import('../../src/resources.js');
 
 function createServer(): McpServer {
@@ -70,12 +71,18 @@ describe('tool registration', () => {
     assert.doesNotThrow(() => registerResources(server));
   });
 
+  it('registers agentic_search tool without error', () => {
+    const server = createServer();
+    assert.doesNotThrow(() => registerAgenticSearchTool(server));
+  });
+
   it('registers all tools on the same server', () => {
     const server = createServer();
     assert.doesNotThrow(() => {
       registerAskTool(server);
       registerExecuteCodeTool(server);
       registerSearchTool(server);
+      registerAgenticSearchTool(server);
       registerAnalyzeFileTool(server);
       registerAnalyzeUrlTool(server);
       registerCacheTools(server);

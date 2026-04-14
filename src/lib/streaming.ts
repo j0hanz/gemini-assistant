@@ -18,6 +18,7 @@ export interface StreamResult {
   text: string;
   thoughtText: string;
   parts: Part[];
+  toolsUsed: string[];
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
   urlContextMetadata?: UrlContextMetadata;
@@ -69,10 +70,14 @@ export async function consumeStreamWithProgress(
   let thoughtText = '';
   const metadata: StreamMetadata = {};
   let phase: Phase = Phase.Waiting;
+  let progressStep = 0;
+  const toolsUsed = new Set<string>();
+  let hadToolActivity = false;
+  let emittedCompiling = false;
 
   const msg = (m: string): string => (toolLabel ? `${toolLabel}: ${m}` : m);
 
-  await sendProgress(ctx, 1, undefined, msg('Evaluating prompt'));
+  await sendProgress(ctx, ++progressStep, undefined, msg('Evaluating prompt'));
 
   for await (const chunk of stream) {
     if (ctx.mcpReq.signal.aborted) break;
@@ -82,16 +87,43 @@ export async function consumeStreamWithProgress(
 
     updateStreamMetadata(chunk, candidate, metadata);
 
+    if (candidate.groundingMetadata && !toolsUsed.has('googleSearch')) {
+      toolsUsed.add('googleSearch');
+      hadToolActivity = true;
+      await sendProgress(ctx, ++progressStep, undefined, msg('Searching the web'));
+    }
+
     const chunkParts = candidate.content?.parts ?? [];
     for (const part of chunkParts) {
       parts.push(part);
+
+      if (part.executableCode) {
+        toolsUsed.add('codeExecution');
+        hadToolActivity = true;
+        await sendProgress(ctx, ++progressStep, undefined, msg('Executing code'));
+        continue;
+      }
+
+      if (part.codeExecutionResult) {
+        hadToolActivity = true;
+        await sendProgress(ctx, ++progressStep, undefined, msg('Code executed'));
+        continue;
+      }
+
+      if (part.functionCall) {
+        const fnName = part.functionCall.name ?? 'tool';
+        toolsUsed.add(fnName);
+        hadToolActivity = true;
+        await sendProgress(ctx, ++progressStep, undefined, msg(`Tool: ${fnName}`));
+        continue;
+      }
 
       const partText = part.text;
 
       if (part.thought) {
         if (phase < Phase.Thinking) {
           phase = Phase.Thinking;
-          await sendProgress(ctx, 2, undefined, msg('Thinking'));
+          await sendProgress(ctx, ++progressStep, undefined, msg('Thinking'));
         }
 
         if (partText !== undefined) {
@@ -105,9 +137,13 @@ export async function consumeStreamWithProgress(
         continue;
       }
 
-      if (phase < Phase.Generating) {
+      if (hadToolActivity && !emittedCompiling) {
+        emittedCompiling = true;
         phase = Phase.Generating;
-        await sendProgress(ctx, 3, undefined, msg('Generating response'));
+        await sendProgress(ctx, ++progressStep, undefined, msg('Compiling results'));
+      } else if (phase < Phase.Generating) {
+        phase = Phase.Generating;
+        await sendProgress(ctx, ++progressStep, undefined, msg('Generating response'));
       }
 
       text += partText;
@@ -118,6 +154,7 @@ export async function consumeStreamWithProgress(
     text,
     thoughtText,
     parts,
+    toolsUsed: [...toolsUsed],
     ...pickDefined({ ...metadata }),
   };
 }

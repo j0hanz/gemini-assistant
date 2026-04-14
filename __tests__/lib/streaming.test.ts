@@ -3,7 +3,7 @@ import type { ServerContext } from '@modelcontextprotocol/server';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { FinishReason } from '@google/genai';
+import { FinishReason, Outcome } from '@google/genai';
 import type { GenerateContentResponse, Part } from '@google/genai';
 
 import {
@@ -216,6 +216,103 @@ describe('consumeStreamWithProgress', () => {
     const result = await consumeStreamWithProgress(abortingStream(), ctx);
 
     assert.strictEqual(result.text, 'first');
+  });
+
+  it('returns empty toolsUsed for text-only stream', async () => {
+    const { ctx } = makeMockContext();
+    const stream = fakeStream([makeChunk([{ text: 'Hello' }], FinishReason.STOP)]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.deepStrictEqual(result.toolsUsed, []);
+  });
+
+  it('detects code execution parts and reports progress', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ executableCode: { code: 'print(1+1)' } }]),
+      makeChunk([{ codeExecutionResult: { output: '2', outcome: Outcome.OUTCOME_OK } }]),
+      makeChunk([{ text: 'The answer is 2' }], FinishReason.STOP),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.ok(result.toolsUsed.includes('codeExecution'));
+    const messages = progressCalls.map((c) => c.message);
+    assert.ok(messages.includes('Executing code'));
+    assert.ok(messages.includes('Code executed'));
+    assert.ok(messages.includes('Compiling results'), 'should emit Compiling results after tools');
+    assert.ok(
+      !messages.includes('Generating response'),
+      'should not emit Generating response after tools',
+    );
+  });
+
+  it('detects grounding metadata and reports search tool', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const chunk = makeChunk([{ text: 'search result' }], FinishReason.STOP);
+    const candidates = chunk.candidates ?? [];
+    const firstCandidate = candidates[0];
+    if (firstCandidate) {
+      firstCandidate.groundingMetadata = {
+        groundingChunks: [{ web: { title: 'Test', uri: 'https://example.com' } }],
+      };
+    }
+    const stream = fakeStream([chunk]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.ok(result.toolsUsed.includes('googleSearch'));
+    const messages = progressCalls.map((c) => c.message);
+    assert.ok(messages.includes('Searching the web'));
+    assert.ok(
+      messages.includes('Compiling results'),
+      'text after search should emit Compiling results',
+    );
+  });
+
+  it('detects function calls and reports tool name', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ functionCall: { name: 'customTool', args: {} } }]),
+      makeChunk([{ text: 'result' }], FinishReason.STOP),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.ok(result.toolsUsed.includes('customTool'));
+    const messages = progressCalls.map((c) => c.message);
+    assert.ok(messages.includes('Tool: customTool'));
+  });
+
+  it('tracks multiple tool types in toolsUsed', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const searchChunk = makeChunk([{ text: 'found data' }]);
+    const candidates = searchChunk.candidates ?? [];
+    const firstCandidate = candidates[0];
+    if (firstCandidate) {
+      firstCandidate.groundingMetadata = {
+        groundingChunks: [{ web: { title: 'Test', uri: 'https://example.com' } }],
+      };
+    }
+    const stream = fakeStream([
+      searchChunk,
+      makeChunk([{ executableCode: { code: 'x=1' } }]),
+      makeChunk([{ codeExecutionResult: { output: '1', outcome: Outcome.OUTCOME_OK } }]),
+      makeChunk([{ text: 'final' }], FinishReason.STOP),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.ok(result.toolsUsed.includes('googleSearch'));
+    assert.ok(result.toolsUsed.includes('codeExecution'));
+    assert.strictEqual(result.toolsUsed.length, 2);
+
+    const messages = progressCalls.map((c) => c.message);
+    assert.ok(
+      messages.includes('Compiling results'),
+      'text after tools should emit Compiling results',
+    );
   });
 });
 

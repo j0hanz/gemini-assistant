@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  AgenticSearchOutputSchema,
   AnalyzeFileOutputSchema,
   AnalyzeUrlOutputSchema,
   AskOutputSchema,
@@ -296,6 +297,49 @@ describe('UpdateCacheOutputSchema', () => {
 
   it('rejects missing cacheName', () => {
     const result = UpdateCacheOutputSchema.safeParse({ expireTime: '2026-04-14T00:00:00Z' });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('AgenticSearchOutputSchema', () => {
+  it('accepts valid output', () => {
+    const result = AgenticSearchOutputSchema.safeParse({
+      report: '# Report\n\nFindings here.',
+      sources: ['https://example.com/source1', 'https://example.com/source2'],
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts with optional thoughts and usage', () => {
+    const result = AgenticSearchOutputSchema.safeParse({
+      report: 'Report content',
+      sources: [],
+      thoughts: 'Thinking about the approach...',
+      usage: { totalTokenCount: 5000 },
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts with optional toolsUsed', () => {
+    const result = AgenticSearchOutputSchema.safeParse({
+      report: 'Report content',
+      sources: [],
+      toolsUsed: ['googleSearch', 'codeExecution'],
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects missing report', () => {
+    const result = AgenticSearchOutputSchema.safeParse({
+      sources: [],
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects missing sources', () => {
+    const result = AgenticSearchOutputSchema.safeParse({
+      report: 'Report',
+    });
     assert.strictEqual(result.success, false);
   });
 });

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  AgenticSearchInputSchema,
   AnalyzeFileInputSchema,
   AnalyzeUrlInputSchema,
   CreateCacheInputSchema,
@@ -83,6 +84,51 @@ describe('SearchInputSchema', () => {
     const urls = Array.from({ length: 21 }, (_, i) => `https://example.com/${i}`);
     const result = SearchInputSchema.safeParse({ query: 'test', urls });
     assert.strictEqual(result.success, false);
+  });
+});
+
+describe('AgenticSearchInputSchema', () => {
+  it('accepts valid input with topic only', () => {
+    const result = AgenticSearchInputSchema.safeParse({ topic: 'AI market trends' });
+    assert.ok(result.success);
+  });
+
+  it('accepts with searchDepth', () => {
+    const result = AgenticSearchInputSchema.safeParse({ topic: 'test', searchDepth: 5 });
+    assert.ok(result.success);
+  });
+
+  it('defaults searchDepth to 3', () => {
+    const result = AgenticSearchInputSchema.safeParse({ topic: 'test' });
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.searchDepth, 3);
+    }
+  });
+
+  it('rejects searchDepth > 5', () => {
+    const result = AgenticSearchInputSchema.safeParse({ topic: 'test', searchDepth: 6 });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects searchDepth < 1', () => {
+    const result = AgenticSearchInputSchema.safeParse({ topic: 'test', searchDepth: 0 });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects missing topic', () => {
+    const result = AgenticSearchInputSchema.safeParse({});
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects empty topic', () => {
+    const result = AgenticSearchInputSchema.safeParse({ topic: '' });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('accepts with thinkingLevel', () => {
+    const result = AgenticSearchInputSchema.safeParse({ topic: 'test', thinkingLevel: 'HIGH' });
+    assert.ok(result.success);
   });
 });
 

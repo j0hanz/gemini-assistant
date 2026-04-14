@@ -50,6 +50,17 @@ export const AnalyzeFileOutputSchema = z.object({
   usage: UsageMetadataSchema.optional().describe('Token usage'),
 });
 
+export const AgenticSearchOutputSchema = z.object({
+  report: z.string().describe('Compiled markdown research report'),
+  sources: z.array(z.string()).describe('Aggregated source URLs'),
+  toolsUsed: z
+    .array(z.string())
+    .optional()
+    .describe('Tools invoked during research (e.g. googleSearch, codeExecution)'),
+  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
+  usage: UsageMetadataSchema.optional().describe('Token usage from final synthesis'),
+});
+
 const CacheSummarySchema = z.object({
   name: z.string().optional().describe('Cache resource name'),
   displayName: z.string().optional().describe('Human-readable label'),

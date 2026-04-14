@@ -21,6 +21,20 @@ export const SearchInputSchema = z.object({
 });
 export type SearchInput = z.infer<typeof SearchInputSchema>;
 
+export const AgenticSearchInputSchema = z.object({
+  topic: z.string().min(1).describe('Topic or question for deep multi-step research'),
+  searchDepth: z
+    .number()
+    .int()
+    .min(1)
+    .max(5)
+    .optional()
+    .default(3)
+    .describe('Depth of search (1-5, default 3)'),
+  thinkingLevel: z.enum(THINKING_LEVELS).optional().describe('Thinking depth for reasoning.'),
+});
+export type AgenticSearchInput = z.infer<typeof AgenticSearchInputSchema>;
+
 export const AnalyzeFileInputSchema = z.object({
   filePath: z.string().trim().min(1).describe('Absolute path to the file'),
   question: z.string().min(1).describe('What to analyze or ask about the file'),

@@ -1,5 +1,12 @@
-import type { CallToolResult, RequestTaskStore, Task } from '@modelcontextprotocol/server';
-import type { CreateTaskResult, GetTaskResult, ServerContext } from '@modelcontextprotocol/server';
+import type {
+  CallToolResult,
+  CreateTaskResult,
+  GetTaskResult,
+  McpServer,
+  RequestTaskStore,
+  ServerContext,
+  Task,
+} from '@modelcontextprotocol/server';
 
 const DEFAULT_TTL = 300_000;
 
@@ -26,6 +33,10 @@ interface ToolTaskHandlers<TArgs> {
   getTask: (_args: TArgs, ctx: ServerContext) => Promise<GetTaskResult>;
   getTaskResult: (_args: TArgs, ctx: ServerContext) => Promise<CallToolResult>;
 }
+
+type RegisterToolTask = McpServer['experimental']['tasks']['registerToolTask'];
+type TaskToolConfig = Omit<Parameters<RegisterToolTask>[1], 'execution'>;
+type TaskToolHandler = Parameters<RegisterToolTask>[2];
 
 function requireTaskContext(ctx: ServerContext) {
   const taskContext = ctx.task;
@@ -100,4 +111,22 @@ export function createToolTaskHandlers<TArgs>(work: TaskWork<TArgs>): ToolTaskHa
       return (await taskContext.store.getTaskResult(requireTaskId(ctx))) as CallToolResult;
     },
   };
+}
+
+export function registerTaskTool<TArgs>(
+  server: McpServer,
+  name: string,
+  config: TaskToolConfig,
+  work: TaskWork<TArgs>,
+): void {
+  const handler = createToolTaskHandlers(work) as TaskToolHandler;
+
+  server.experimental.tasks.registerToolTask(
+    name,
+    {
+      ...config,
+      execution: TASK_EXECUTION,
+    } as Parameters<RegisterToolTask>[1],
+    handler,
+  );
 }

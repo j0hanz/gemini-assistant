@@ -1,16 +1,31 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import { Outcome } from '@google/genai';
+import { createPartFromUri, Outcome } from '@google/genai';
 import type { Part } from '@google/genai';
 
 import { buildGenerateContentConfig } from '../lib/config-utils.js';
-import { errorResult } from '../lib/errors.js';
+import { sendProgress } from '../lib/context.js';
+import { cleanupErrorLogger, errorResult, handleToolError } from '../lib/errors.js';
+import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
+import { buildServerRootsFetcher, type RootsFetcher } from '../lib/path-validation.js';
 import { handleToolExecution } from '../lib/streaming.js';
-import { createToolTaskHandlers, MUTABLE_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
-import { type ExecuteCodeInput, ExecuteCodeInputSchema } from '../schemas/inputs.js';
-import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
+import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import {
+  type AnalyzeFileInput,
+  AnalyzeFileInputSchema,
+  type ExecuteCodeInput,
+  ExecuteCodeInputSchema,
+} from '../schemas/inputs.js';
+import { AnalyzeFileOutputSchema, ExecuteCodeOutputSchema } from '../schemas/outputs.js';
 
 import { ai, MODEL } from '../client.js';
+
+const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
+const EXECUTE_CODE_TOOL_LABEL = 'Execute Code';
+
+const ANALYZE_FILE_SYSTEM_INSTRUCTION =
+  'Structure findings with headings. Reference specific sections, lines, or elements. ' +
+  'Base analysis strictly on the file content.';
 
 const EXECUTE_CODE_SYSTEM_INSTRUCTION =
   'Generate clean, working code. Include brief comments for non-obvious logic. ' +
@@ -106,17 +121,64 @@ function summarizeExecutionParts(parts: readonly Part[]): ExecutionSummary {
   };
 }
 
+function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
+  return async function analyzeFileWork(
+    { filePath, question, thinkingLevel }: AnalyzeFileInput,
+    ctx: ServerContext,
+  ): Promise<CallToolResult> {
+    let uploadedFileName: string | undefined;
+
+    try {
+      await sendProgress(ctx, 0, 3, `${ANALYZE_FILE_TOOL_LABEL}: Uploading to Gemini`);
+      const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
+      uploadedFileName = uploaded.name;
+
+      await ctx.mcpReq.log('info', `Analyzing ${filePath} (${uploaded.mimeType})`);
+      await sendProgress(ctx, 1, 3, `${ANALYZE_FILE_TOOL_LABEL}: Analyzing content`);
+
+      return await handleToolExecution(
+        ctx,
+        'analyze_file',
+        ANALYZE_FILE_TOOL_LABEL,
+        () =>
+          ai.models.generateContentStream({
+            model: MODEL,
+            contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: question }],
+            config: buildGenerateContentConfig(
+              {
+                systemInstruction: ANALYZE_FILE_SYSTEM_INSTRUCTION,
+                thinkingLevel: thinkingLevel ?? 'LOW',
+              },
+              ctx.mcpReq.signal,
+            ),
+          }),
+        (_streamResult, textContent) => ({
+          structuredContent: {
+            analysis: textContent || '',
+          },
+        }),
+      );
+    } catch (err) {
+      return await handleToolError(ctx, 'analyze_file', ANALYZE_FILE_TOOL_LABEL, err);
+    } finally {
+      await deleteUploadedFiles(
+        uploadedFileName ? [uploadedFileName] : [],
+        cleanupErrorLogger(ctx),
+      );
+    }
+  };
+}
+
 async function executeCodeWork(
   { task, language, thinkingLevel }: ExecuteCodeInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const TOOL_LABEL = 'Execute Code';
   const prompt = [task, ...(language ? [`Language: ${language}`] : [])].join('\n\n');
 
   return await handleToolExecution(
     ctx,
     'execute_code',
-    TOOL_LABEL,
+    EXECUTE_CODE_TOOL_LABEL,
     () =>
       ai.models.generateContentStream({
         model: MODEL,
@@ -133,14 +195,13 @@ async function executeCodeWork(
         },
       }),
     (streamResult) => {
-      const { parts } = streamResult;
-      if (parts.length === 0) {
+      if (streamResult.parts.length === 0) {
         return {
           resultMod: () => errorResult('execute_code: prompt blocked by safety filter (unknown)'),
         };
       }
 
-      const summary = summarizeExecutionParts(parts);
+      const summary = summarizeExecutionParts(streamResult.parts);
 
       return {
         resultMod: () => ({
@@ -163,18 +224,34 @@ async function executeCodeWork(
   );
 }
 
+export function registerAnalyzeFileTool(server: McpServer): void {
+  registerTaskTool(
+    server,
+    'analyze_file',
+    {
+      title: ANALYZE_FILE_TOOL_LABEL,
+      description:
+        'Upload a file to Gemini and ask questions about it (PDFs, images, code files, etc.).',
+      inputSchema: AnalyzeFileInputSchema,
+      outputSchema: AnalyzeFileOutputSchema,
+      annotations: READONLY_ANNOTATIONS,
+    },
+    createAnalyzeFileWork(buildServerRootsFetcher(server)),
+  );
+}
+
 export function registerExecuteCodeTool(server: McpServer): void {
-  server.experimental.tasks.registerToolTask(
+  registerTaskTool(
+    server,
     'execute_code',
     {
-      title: 'Execute Code',
+      title: EXECUTE_CODE_TOOL_LABEL,
       description:
         'Generate and execute code in a Gemini sandbox. Returns code, output, and explanation.',
       inputSchema: ExecuteCodeInputSchema,
       outputSchema: ExecuteCodeOutputSchema,
       annotations: { ...MUTABLE_ANNOTATIONS, openWorldHint: false },
-      execution: TASK_EXECUTION,
     },
-    createToolTaskHandlers(executeCodeWork),
+    executeCodeWork,
   );
 }

@@ -9,12 +9,7 @@ import { cleanupErrorLogger, handleToolError, logAndReturnError } from '../lib/e
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/path-validation.js';
 import { withRetry } from '../lib/retry.js';
-import {
-  createToolTaskHandlers,
-  MUTABLE_ANNOTATIONS,
-  READONLY_ANNOTATIONS,
-  TASK_EXECUTION,
-} from '../lib/task-utils.js';
+import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { type CreateCacheInput, CreateCacheInputSchema } from '../schemas/inputs.js';
 import {
   CreateCacheOutputSchema,
@@ -242,7 +237,8 @@ function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
 export function registerCacheTools(server: McpServer): void {
   const rootsFetcher = buildServerRootsFetcher(server);
 
-  server.experimental.tasks.registerToolTask(
+  registerTaskTool(
+    server,
     'create_cache',
     {
       title: 'Create Cache',
@@ -252,9 +248,8 @@ export function registerCacheTools(server: McpServer): void {
       inputSchema: CreateCacheInputSchema,
       outputSchema: CreateCacheOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
-      execution: TASK_EXECUTION,
     },
-    createToolTaskHandlers(buildCreateCacheWork(rootsFetcher)),
+    buildCreateCacheWork(rootsFetcher),
   );
 
   server.registerTool(

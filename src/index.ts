@@ -14,13 +14,14 @@ import { InMemoryEventStore } from './lib/event-store.js';
 import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
 import { onSessionChange } from './sessions.js';
-import { registerAgenticSearchTool } from './tools/agentic-search.js';
-import { registerAnalyzeFileTool } from './tools/analyze-file.js';
-import { registerAnalyzeUrlTool } from './tools/analyze-url.js';
 import { registerAskTool } from './tools/ask.js';
 import { onCacheChange, registerCacheTools } from './tools/cache.js';
-import { registerExecuteCodeTool } from './tools/execute-code.js';
-import { registerSearchTool } from './tools/search.js';
+import { registerAnalyzeFileTool, registerExecuteCodeTool } from './tools/execution.js';
+import {
+  registerAgenticSearchTool,
+  registerAnalyzeUrlTool,
+  registerSearchTool,
+} from './tools/research.js';
 import type { HttpTransportResult } from './transport/http.js';
 
 const { version } = JSON.parse(

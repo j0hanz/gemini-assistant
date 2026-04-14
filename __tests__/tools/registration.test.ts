@@ -11,12 +11,11 @@ import { describe, it } from 'node:test';
 process.env.API_KEY ??= 'test-key-for-registration';
 
 const { registerAskTool } = await import('../../src/tools/ask.js');
-const { registerSearchTool } = await import('../../src/tools/search.js');
-const { registerExecuteCodeTool } = await import('../../src/tools/execute-code.js');
-const { registerAnalyzeFileTool } = await import('../../src/tools/analyze-file.js');
-const { registerAnalyzeUrlTool } = await import('../../src/tools/analyze-url.js');
 const { registerCacheTools } = await import('../../src/tools/cache.js');
-const { registerAgenticSearchTool } = await import('../../src/tools/agentic-search.js');
+const { registerAnalyzeFileTool, registerExecuteCodeTool } =
+  await import('../../src/tools/execution.js');
+const { registerAgenticSearchTool, registerAnalyzeUrlTool, registerSearchTool } =
+  await import('../../src/tools/research.js');
 const { registerResources } = await import('../../src/resources.js');
 
 function createServer(): McpServer {

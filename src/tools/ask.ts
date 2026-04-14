@@ -13,7 +13,7 @@ import { reportCompletion } from '../lib/context.js';
 import { errorResult, handleToolError } from '../lib/errors.js';
 import { extractTextContent } from '../lib/response.js';
 import { executeToolStream, extractUsage, type StreamResult } from '../lib/streaming.js';
-import { createToolTaskHandlers, MUTABLE_ANNOTATIONS, TASK_EXECUTION } from '../lib/task-utils.js';
+import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { AskOutputSchema } from '../schemas/outputs.js';
 
 import { ai, completeCacheNames, MODEL } from '../client.js';
@@ -237,7 +237,8 @@ async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResul
 }
 
 export function registerAskTool(server: McpServer): void {
-  server.experimental.tasks.registerToolTask(
+  registerTaskTool(
+    server,
     'ask',
     {
       title: 'Ask Gemini',
@@ -296,8 +297,7 @@ export function registerAskTool(server: McpServer): void {
       }),
       outputSchema: AskOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
-      execution: TASK_EXECUTION,
     },
-    createToolTaskHandlers(askWork),
+    askWork,
   );
 }

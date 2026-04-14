@@ -174,7 +174,7 @@ async function executeCodeWork(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   await sendProgress(ctx, 0, undefined, `${EXECUTE_CODE_TOOL_LABEL}: Preparing sandbox`);
-  await ctx.mcpReq.log('info', `Executing code${language ? ` (${language})` : ''}`);
+  await ctx.mcpReq.log('info', `Executing code${language ? ` [${language}]` : ''}`);
   const prompt = [task, ...(language ? [`Language: ${language}`] : [])].join('\n\n');
 
   return await handleToolExecution(
@@ -199,7 +199,7 @@ async function executeCodeWork(
     (streamResult) => {
       if (streamResult.parts.length === 0) {
         return {
-          resultMod: () => errorResult('execute_code: prompt blocked by safety filter (unknown)'),
+          resultMod: () => errorResult('prompt blocked by safety filter (unknown)'),
         };
       }
 

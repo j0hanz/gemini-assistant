@@ -1,0 +1,160 @@
+import assert from 'node:assert/strict';
+import { afterEach, describe, it } from 'node:test';
+
+import {
+  parseAllowedHosts,
+  resolveAllowedHosts,
+  validateHostHeader,
+} from '../../src/lib/host-validation.js';
+
+const ENV_KEY = 'MCP_ALLOWED_HOSTS';
+const savedEnv = process.env[ENV_KEY];
+
+function clearEnv(): void {
+  if (savedEnv === undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete process.env[ENV_KEY];
+  } else {
+    process.env[ENV_KEY] = savedEnv;
+  }
+}
+
+function setEnv(value: string | undefined): void {
+  if (value === undefined) {
+    clearEnv();
+  } else {
+    process.env[ENV_KEY] = value;
+  }
+}
+
+describe('parseAllowedHosts', () => {
+  afterEach(() => {
+    clearEnv();
+  });
+
+  it('returns undefined when env is not set', () => {
+    setEnv(undefined);
+    assert.equal(parseAllowedHosts(), undefined);
+  });
+
+  it('returns undefined for empty string', () => {
+    setEnv('');
+    assert.equal(parseAllowedHosts(), undefined);
+  });
+
+  it('returns undefined for whitespace-only string', () => {
+    setEnv('  ,  , ');
+    assert.equal(parseAllowedHosts(), undefined);
+  });
+
+  it('parses comma-separated hostnames', () => {
+    setEnv('localhost, myapp.local, [::1]');
+    assert.deepEqual(parseAllowedHosts(), ['localhost', 'myapp.local', '[::1]']);
+  });
+
+  it('trims whitespace from entries', () => {
+    setEnv('  host1 , host2  ');
+    assert.deepEqual(parseAllowedHosts(), ['host1', 'host2']);
+  });
+
+  it('handles single hostname', () => {
+    setEnv('myserver');
+    assert.deepEqual(parseAllowedHosts(), ['myserver']);
+  });
+});
+
+describe('resolveAllowedHosts', () => {
+  afterEach(() => {
+    clearEnv();
+  });
+
+  it('returns explicit env hosts for localhost bind', () => {
+    setEnv('custom.local');
+    assert.deepEqual(resolveAllowedHosts('127.0.0.1'), ['custom.local']);
+  });
+
+  it('returns explicit env hosts for broad bind', () => {
+    setEnv('myapp.example.com');
+    assert.deepEqual(resolveAllowedHosts('0.0.0.0'), ['myapp.example.com']);
+  });
+
+  it('auto-resolves localhost hosts for 127.0.0.1 bind', () => {
+    assert.deepEqual(resolveAllowedHosts('127.0.0.1'), ['localhost', '127.0.0.1', '[::1]']);
+  });
+
+  it('auto-resolves localhost hosts for localhost bind', () => {
+    assert.deepEqual(resolveAllowedHosts('localhost'), ['localhost', '127.0.0.1', '[::1]']);
+  });
+
+  it('auto-resolves localhost hosts for ::1 bind', () => {
+    assert.deepEqual(resolveAllowedHosts('::1'), ['localhost', '127.0.0.1', '[::1]']);
+  });
+
+  it('returns undefined for 0.0.0.0 without env', () => {
+    assert.equal(resolveAllowedHosts('0.0.0.0'), undefined);
+  });
+
+  it('returns undefined for :: without env', () => {
+    assert.equal(resolveAllowedHosts('::'), undefined);
+  });
+
+  it('returns undefined for empty string without env', () => {
+    assert.equal(resolveAllowedHosts(''), undefined);
+  });
+});
+
+describe('validateHostHeader', () => {
+  const ALLOWED = ['localhost', '127.0.0.1', '[::1]'];
+
+  it('accepts matching hostname', () => {
+    assert.equal(validateHostHeader('localhost', ALLOWED), true);
+  });
+
+  it('accepts hostname with port', () => {
+    assert.equal(validateHostHeader('localhost:3000', ALLOWED), true);
+  });
+
+  it('rejects unknown hostname', () => {
+    assert.equal(validateHostHeader('evil.example.com', ALLOWED), false);
+  });
+
+  it('rejects unknown hostname with port', () => {
+    assert.equal(validateHostHeader('evil.example.com:3000', ALLOWED), false);
+  });
+
+  it('rejects null header', () => {
+    assert.equal(validateHostHeader(null, ALLOWED), false);
+  });
+
+  it('rejects empty header', () => {
+    assert.equal(validateHostHeader('', ALLOWED), false);
+  });
+
+  it('is case-insensitive', () => {
+    assert.equal(validateHostHeader('LOCALHOST', ALLOWED), true);
+    assert.equal(validateHostHeader('LocalHost:8080', ALLOWED), true);
+  });
+
+  it('handles IPv4 with port', () => {
+    assert.equal(validateHostHeader('127.0.0.1:3000', ALLOWED), true);
+  });
+
+  it('handles IPv6 with brackets', () => {
+    assert.equal(validateHostHeader('[::1]', ALLOWED), true);
+  });
+
+  it('handles IPv6 with brackets and port', () => {
+    assert.equal(validateHostHeader('[::1]:3000', ALLOWED), true);
+  });
+
+  it('rejects IPv6 without brackets when allowlist uses brackets', () => {
+    assert.equal(validateHostHeader('::1', ALLOWED), false);
+  });
+
+  it('works with custom allowlist', () => {
+    const custom = ['myapp.local', 'api.internal'];
+    assert.equal(validateHostHeader('myapp.local:8080', custom), true);
+    assert.equal(validateHostHeader('api.internal', custom), true);
+    assert.equal(validateHostHeader('other.host', custom), false);
+  });
+});

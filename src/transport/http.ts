@@ -2,11 +2,16 @@ import { createMcpExpressApp } from '@modelcontextprotocol/express';
 import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import type { EventStore, McpServer } from '@modelcontextprotocol/server';
 
-import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 
-const DEFAULT_PORT = 3000;
-const DEFAULT_HOST = '127.0.0.1';
+import { parseAllowedHosts } from '../lib/host-validation.js';
+
+import {
+  buildBaseTransportOptions,
+  logListening,
+  resolveTransportConfig,
+  warnIfUnprotected,
+} from './shared.js';
 
 export interface HttpTransportResult {
   httpServer: Server;
@@ -18,12 +23,14 @@ export async function startHttpTransport(
   server: McpServer,
   eventStore?: EventStore,
 ): Promise<HttpTransportResult> {
-  const port = parseInt(process.env.MCP_HTTP_PORT ?? '', 10) || DEFAULT_PORT;
-  const host = process.env.MCP_HTTP_HOST ?? DEFAULT_HOST;
-  const corsOrigin = process.env.MCP_CORS_ORIGIN ?? '';
-  const isStateless = process.env.MCP_STATELESS === 'true';
+  const { port, host, corsOrigin, isStateless } = resolveTransportConfig();
+  const allowedHosts = parseAllowedHosts();
+  warnIfUnprotected(host, !!allowedHosts);
 
-  const app = createMcpExpressApp({ host });
+  const app = createMcpExpressApp({
+    host,
+    ...(allowedHosts ? { allowedHosts } : {}),
+  });
 
   if (corsOrigin) {
     app.use((_req, res, next) => {
@@ -41,32 +48,21 @@ export async function startHttpTransport(
     });
   }
 
-  const baseTransportOptions = {
-    enableJsonResponse: isStateless,
-    onsessioninitialized: (sessionId: string) => {
-      console.error(`[http] Session initialized: ${sessionId}`);
-    },
-    onsessionclosed: (sessionId: string) => {
-      console.error(`[http] Session closed: ${sessionId}`);
-    },
-    ...(eventStore ? { eventStore } : {}),
-  } as const;
-
-  const transport = new NodeStreamableHTTPServerTransport({
-    ...baseTransportOptions,
-    ...(isStateless ? {} : { sessionIdGenerator: () => randomUUID() }),
-  });
+  const transport = new NodeStreamableHTTPServerTransport(
+    buildBaseTransportOptions(isStateless, eventStore),
+  );
 
   app.all('/mcp', async (req, res) => {
     try {
       await transport.handleRequest(req, res, req.body);
     } catch (err: unknown) {
-      console.error('[http] Request error:', err);
+      const detail = err instanceof Error ? err.message : String(err);
+      console.error(`request failed: ${detail}`);
       if (server.isConnected()) {
         void server.sendLoggingMessage({
           level: 'error',
           logger: 'http',
-          data: `Request error: ${err instanceof Error ? err.message : String(err)}`,
+          data: detail,
         });
       }
       if (!res.headersSent) {
@@ -83,7 +79,7 @@ export async function startHttpTransport(
 
   const httpServer = await new Promise<Server>((resolve) => {
     const srv = app.listen(port, host, () => {
-      console.error(`[http] MCP server listening on http://${host}:${port}/mcp`);
+      logListening(host, port);
       resolve(srv);
     });
   });

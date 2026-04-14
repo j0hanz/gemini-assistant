@@ -1,10 +1,14 @@
 import type { EventStore, McpServer } from '@modelcontextprotocol/server';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server';
 
-import { randomUUID } from 'node:crypto';
+import { resolveAllowedHosts, validateHostHeader } from '../lib/host-validation.js';
 
-const DEFAULT_PORT = 3000;
-const DEFAULT_HOST = '127.0.0.1';
+import {
+  buildBaseTransportOptions,
+  logListening,
+  resolveTransportConfig,
+  warnIfUnprotected,
+} from './shared.js';
 
 interface BunRuntime {
   serve: (opts: {
@@ -43,29 +47,22 @@ export async function startWebStandardTransport(
   server: McpServer,
   eventStore?: EventStore,
 ): Promise<WebStandardTransportResult> {
-  const port = parseInt(process.env.MCP_HTTP_PORT ?? '', 10) || DEFAULT_PORT;
-  const host = process.env.MCP_HTTP_HOST ?? DEFAULT_HOST;
-  const isStateless = process.env.MCP_STATELESS === 'true';
+  const { port, host, isStateless } = resolveTransportConfig();
 
-  const baseTransportOptions = {
-    enableJsonResponse: isStateless,
-    onsessioninitialized: (sessionId: string) => {
-      console.error(`Session initialized: ${sessionId}`);
-    },
-    onsessionclosed: (sessionId: string) => {
-      console.error(`Session closed: ${sessionId}`);
-    },
-    ...(eventStore ? { eventStore } : {}),
-  } as const;
-
-  const transport = new WebStandardStreamableHTTPServerTransport({
-    ...baseTransportOptions,
-    ...(isStateless ? {} : { sessionIdGenerator: () => randomUUID() }),
-  });
+  const transport = new WebStandardStreamableHTTPServerTransport(
+    buildBaseTransportOptions(isStateless, eventStore),
+  );
 
   await server.connect(transport);
 
+  const allowedHosts = resolveAllowedHosts(host);
+  warnIfUnprotected(host, !!allowedHosts);
+
   const handler = async (req: Request): Promise<Response> => {
+    if (allowedHosts && !validateHostHeader(req.headers.get('host'), allowedHosts)) {
+      return new Response('Forbidden', { status: 403 });
+    }
+
     const url = new URL(req.url);
     if (url.pathname === '/mcp') {
       return transport.handleRequest(req);
@@ -77,14 +74,13 @@ export async function startWebStandardTransport(
   const runtimes = globalThis as unknown as RuntimeGlobals;
   if (runtimes.Bun) {
     runtimes.Bun.serve({ fetch: handler, port, hostname: host });
-    console.error(`MCP server listening on http://${host}:${port}/mcp (Bun)`);
+    logListening(host, port, 'Bun');
   } else if (runtimes.Deno) {
     runtimes.Deno.serve(handler, { port, hostname: host });
-    console.error(`MCP server listening on http://${host}:${port}/mcp (Deno)`);
+    logListening(host, port, 'Deno');
   } else {
     console.error(
-      'No compatible runtime detected (Bun/Deno). ' +
-        'Use the exported handler with your serving layer.',
+      'no auto-serve runtime detected (Bun/Deno) — wire the exported handler manually.',
     );
   }
 

@@ -156,7 +156,7 @@ async function askWithChat(chat: Chat, args: AskArgs, ctx: ServerContext): Promi
     () =>
       chat.sendMessageStream({
         message: args.message,
-        config: { abortSignal: ctx.mcpReq.signal },
+        config: buildGenerateContentConfig(args, ctx.mcpReq.signal),
       }),
     Boolean(args.responseSchema),
   );

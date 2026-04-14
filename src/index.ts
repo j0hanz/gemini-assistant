@@ -23,6 +23,7 @@ import {
   registerSearchTool,
 } from './tools/research.js';
 import type { HttpTransportResult } from './transport/http.js';
+import type { WebStandardTransportResult } from './transport/web-standard.js';
 
 const { version } = JSON.parse(
   readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf-8'),
@@ -88,12 +89,17 @@ onCacheChange((taskId) => {
 
 const transportMode = process.env.MCP_TRANSPORT ?? 'stdio';
 let httpResult: HttpTransportResult | undefined;
+let webStandardResult: WebStandardTransportResult | undefined;
 let eventStore: InMemoryEventStore | undefined;
 
 if (transportMode === 'http') {
   const { startHttpTransport } = await import('./transport/http.js');
   eventStore = new InMemoryEventStore();
   httpResult = await startHttpTransport(server, eventStore);
+} else if (transportMode === 'web-standard') {
+  const { startWebStandardTransport } = await import('./transport/web-standard.js');
+  eventStore = new InMemoryEventStore();
+  webStandardResult = await startWebStandardTransport(server, eventStore);
 } else {
   const transport = new StdioServerTransport();
   try {
@@ -116,6 +122,7 @@ async function shutdown(): Promise<void> {
     taskStore.cleanup();
     eventStore?.cleanup();
     if (httpResult) await httpResult.close();
+    if (webStandardResult) await webStandardResult.close();
     await server.close();
   } finally {
     clearTimeout(forceExit);

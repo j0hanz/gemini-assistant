@@ -174,6 +174,7 @@ async function executeCodeWork(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   await sendProgress(ctx, 0, undefined, `${EXECUTE_CODE_TOOL_LABEL}: Preparing sandbox`);
+  await ctx.mcpReq.log('info', `Executing code${language ? ` (${language})` : ''}`);
   const prompt = [task, ...(language ? [`Language: ${language}`] : [])].join('\n\n');
 
   return await handleToolExecution(

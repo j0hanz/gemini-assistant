@@ -86,6 +86,7 @@ async function searchWork(
   }
 
   await sendProgress(ctx, 0, undefined, `${SEARCH_TOOL_LABEL}: Starting`);
+  await ctx.mcpReq.log('info', `Search: ${query}`);
   const tools: Record<string, Record<string, never>>[] = [
     { googleSearch: {} },
     ...((urls?.length ?? 0) > 0 ? [{ urlContext: {} }] : []),
@@ -150,6 +151,7 @@ async function analyzeUrlWork(
   }
 
   await sendProgress(ctx, 0, undefined, `${ANALYZE_URL_TOOL_LABEL}: Fetching`);
+  await ctx.mcpReq.log('info', `Analyzing ${String(urls.length)} URL(s)`);
   return await handleToolExecution(
     ctx,
     'analyze_url',
@@ -194,6 +196,7 @@ async function agenticSearchWork(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   await sendProgress(ctx, 0, undefined, `${AGENTIC_SEARCH_TOOL_LABEL}: Starting deep research`);
+  await ctx.mcpReq.log('info', `Agentic search: ${topic}`);
   const depthInstruction =
     searchDepth <= 2
       ? 'Do a focused search covering 2-3 key aspects.'

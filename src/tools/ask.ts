@@ -11,17 +11,17 @@ import {
 } from '../lib/config-utils.js';
 import { reportCompletion, sendProgress } from '../lib/context.js';
 import { errorResult } from '../lib/errors.js';
-import { extractTextContent } from '../lib/response.js';
+import { createResourceLink, extractTextContent } from '../lib/response.js';
 import { executeToolStream, extractUsage, type StreamResult } from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { AskOutputSchema } from '../schemas/outputs.js';
 
 import { ai, completeCacheNames, MODEL } from '../client.js';
 import {
+  completeSessionIds,
   getSession,
   getSessionEntry,
   isEvicted,
-  listSessionEntries,
   setSession,
 } from '../sessions.js';
 
@@ -152,37 +152,29 @@ async function runAskStream(
   return formatStructuredResult(result, streamResult, jsonMode);
 }
 
-async function askWithChat(chat: Chat, args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
-  return await runAskStream(
-    ctx,
-    () =>
-      chat.sendMessageStream({
-        message: args.message,
-        config: buildGenerateContentConfig(args, ctx.mcpReq.signal),
-      }),
-    Boolean(args.responseSchema),
-  );
-}
-
 function appendSessionResource(result: CallToolResult, sessionId: string): void {
   if (result.isError) return;
-  result.content.push({
-    type: 'resource_link' as const,
-    uri: `sessions://${sessionId}`,
-    name: `Chat Session ${sessionId}`,
-    mimeType: 'application/json',
-  });
+  result.content.push(createResourceLink(`sessions://${sessionId}`, `Chat Session ${sessionId}`));
 }
 
-async function askSingleTurn(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
+async function askWithoutSession(
+  args: AskArgs,
+  ctx: ServerContext,
+  chat?: Chat,
+): Promise<CallToolResult> {
   return await runAskStream(
     ctx,
     () =>
-      ai.models.generateContentStream({
-        model: MODEL,
-        contents: args.message,
-        config: buildGenerateContentConfig(args, ctx.mcpReq.signal),
-      }),
+      chat
+        ? chat.sendMessageStream({
+            message: args.message,
+            config: buildGenerateContentConfig(args, ctx.mcpReq.signal),
+          })
+        : ai.models.generateContentStream({
+            model: MODEL,
+            contents: args.message,
+            config: buildGenerateContentConfig(args, ctx.mcpReq.signal),
+          }),
     !!args.responseSchema,
   );
 }
@@ -196,7 +188,7 @@ async function askExistingSession(
 
   await ctx.mcpReq.log('debug', `Resuming session ${args.sessionId}`);
   await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Resuming session`);
-  return await askWithChat(chat, args, ctx);
+  return await askWithoutSession(args, ctx, chat);
 }
 
 async function askNewSession(
@@ -209,7 +201,7 @@ async function askNewSession(
     config: buildGenerateContentConfig(args),
   });
 
-  const result = await askWithChat(chat, args, ctx);
+  const result = await askWithoutSession(args, ctx, chat);
 
   if (!result.isError) {
     setSession(args.sessionId, chat, ctx.task?.id);
@@ -226,7 +218,7 @@ async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResul
   if (validationError) return validationError;
 
   if (!args.sessionId) {
-    return await askSingleTurn(args, ctx);
+    return await askWithoutSession(args, ctx);
   }
 
   const resumed = await askExistingSession(args as AskArgs & { sessionId: string }, ctx);
@@ -250,10 +242,7 @@ export function registerAskTool(server: McpServer): void {
             .max(256)
             .optional()
             .describe('Session ID for multi-turn chat. Omit for single-turn.'),
-          (value) =>
-            listSessionEntries()
-              .map((s) => s.id)
-              .filter((id) => id.startsWith(value ?? '')),
+          completeSessionIds,
         ),
         systemInstruction: z
           .string()

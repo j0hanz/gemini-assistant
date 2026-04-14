@@ -8,6 +8,7 @@ import { reportCompletion, sendProgress } from '../lib/context.js';
 import { cleanupErrorLogger, withErrorLogging } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/path-validation.js';
+import { createResourceLink } from '../lib/response.js';
 import { withRetry } from '../lib/retry.js';
 import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { type CreateCacheInput, CreateCacheInputSchema } from '../schemas/inputs.js';
@@ -23,6 +24,7 @@ import { ai, type CacheSummary, completeCacheNames, listCacheSummaries, MODEL } 
 type CachePart = ReturnType<typeof createPartFromUri>;
 
 const CACHE_UPLOAD_CHUNK_SIZE = 3;
+const CACHE_NAME_DESCRIPTION = 'Cache resource name to %s (e.g., "cachedContents/...")';
 
 let changeCallback: ((taskId?: string) => void) | undefined;
 
@@ -55,6 +57,30 @@ function formatCacheListMarkdown(caches: CacheSummary[]): string {
 
 function truncateName(name: string, maxLen = 10): string {
   return name.length > maxLen ? `${name.slice(0, maxLen)}…` : name;
+}
+
+function createCacheNameSchema(action: 'delete' | 'update') {
+  return completable(
+    z.string().min(1).describe(CACHE_NAME_DESCRIPTION.replace('%s', action)),
+    completeCacheNames,
+  );
+}
+
+function cacheResourceLink(cacheName: string, displayName?: string) {
+  return createResourceLink(
+    `caches://${encodeURIComponent(cacheName)}`,
+    displayName ?? `Cache ${truncateName(cacheName)}`,
+  );
+}
+
+function cacheListResourceLink() {
+  return createResourceLink('caches://list', 'Active Caches');
+}
+
+function cacheSummaryResourceLinks(caches: CacheSummary[]) {
+  return caches
+    .filter((cache): cache is CacheSummary & { name: string } => typeof cache.name === 'string')
+    .map((cache) => cacheResourceLink(cache.name, cache.displayName ?? cache.name));
 }
 
 function normalizeCreateCacheError(err: unknown): unknown {
@@ -215,18 +241,8 @@ function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
               `- **Model:** ${cache.model ?? 'N/A'}\n` +
               `- **Expires:** ${cache.expireTime ?? 'N/A'}`,
           },
-          {
-            type: 'resource_link' as const,
-            uri: `caches://${encodeURIComponent(cacheName)}`,
-            name: cache.displayName ?? cacheName,
-            mimeType: 'application/json',
-          },
-          {
-            type: 'resource_link' as const,
-            uri: 'caches://list',
-            name: 'Active Caches',
-            mimeType: 'application/json',
-          },
+          cacheResourceLink(cacheName, cache.displayName ?? cacheName),
+          cacheListResourceLink(),
         ],
         structuredContent: {
           name: cacheName,
@@ -272,14 +288,7 @@ export function registerCacheTools(server: McpServer): void {
     },
     withErrorLogging('list_caches', 'List Caches', async (_args, ctx: ServerContext) => {
       const caches = await listCacheSummaries(ctx.mcpReq.signal);
-      const cacheLinks = caches
-        .filter((c): c is typeof c & { name: string } => typeof c.name === 'string')
-        .map((c) => ({
-          type: 'resource_link' as const,
-          uri: `caches://${encodeURIComponent(c.name)}`,
-          name: c.displayName ?? c.name,
-          mimeType: 'application/json',
-        }));
+      const cacheLinks = cacheSummaryResourceLinks(caches);
       return {
         content: [{ type: 'text', text: formatCacheListMarkdown(caches) }, ...cacheLinks],
         structuredContent: { caches, count: caches.length },
@@ -293,10 +302,7 @@ export function registerCacheTools(server: McpServer): void {
       title: 'Delete Cache',
       description: 'Delete a Gemini context cache by resource name.',
       inputSchema: z.object({
-        cacheName: completable(
-          z.string().min(1).describe('Cache resource name to delete (e.g., "cachedContents/...")'),
-          completeCacheNames,
-        ),
+        cacheName: createCacheNameSchema('delete'),
       }),
       outputSchema: DeleteCacheOutputSchema,
       annotations: {
@@ -321,12 +327,7 @@ export function registerCacheTools(server: McpServer): void {
         return {
           content: [
             { type: 'text', text: `Cache '${cacheName}' deleted.` },
-            {
-              type: 'resource_link' as const,
-              uri: 'caches://list',
-              name: 'Active Caches',
-              mimeType: 'application/json',
-            },
+            cacheListResourceLink(),
           ],
           structuredContent: { cacheName, deleted: true },
         };
@@ -340,10 +341,7 @@ export function registerCacheTools(server: McpServer): void {
       title: 'Update Cache',
       description: 'Update the TTL of an existing Gemini context cache.',
       inputSchema: z.object({
-        cacheName: completable(
-          z.string().min(1).describe('Cache resource name to update (e.g., "cachedContents/...")'),
-          completeCacheNames,
-        ),
+        cacheName: createCacheNameSchema('update'),
         ttl: z.string().min(1).describe('New TTL from now (e.g., "7200s" for 2 hours)'),
       }),
       outputSchema: UpdateCacheOutputSchema,
@@ -368,12 +366,7 @@ export function registerCacheTools(server: McpServer): void {
                 `- **Name:** ${updated.name ?? cacheName}\n` +
                 `- **Expires:** ${updated.expireTime ?? 'N/A'}`,
             },
-            {
-              type: 'resource_link' as const,
-              uri: `caches://${encodeURIComponent(cacheName)}`,
-              name: `Cache ${truncateName(cacheName)}`,
-              mimeType: 'application/json',
-            },
+            cacheResourceLink(cacheName),
           ],
           structuredContent: {
             cacheName,

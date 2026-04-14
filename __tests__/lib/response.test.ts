@@ -8,6 +8,7 @@ import {
   appendSources,
   appendUrlStatus,
   collectGroundedSources,
+  createResourceLink,
   extractTextOrError,
   formatCountLabel,
 } from '../../src/lib/response.js';
@@ -186,6 +187,26 @@ describe('appendUrlStatus', () => {
     assert.strictEqual(content.length, 1);
     assert.match(content[0]?.text ?? '', /URL Retrieval Status:/);
     assert.match(content[0]?.text ?? '', /https:\/\/example.com: URL_RETRIEVAL_STATUS_SUCCESS/);
+  });
+});
+
+describe('createResourceLink', () => {
+  it('creates a JSON resource link with the default mime type', () => {
+    assert.deepStrictEqual(createResourceLink('sessions://abc', 'Chat Session abc'), {
+      type: 'resource_link',
+      uri: 'sessions://abc',
+      name: 'Chat Session abc',
+      mimeType: 'application/json',
+    });
+  });
+
+  it('allows overriding the mime type', () => {
+    assert.deepStrictEqual(createResourceLink('custom://resource', 'Custom', 'text/plain'), {
+      type: 'resource_link',
+      uri: 'custom://resource',
+      name: 'Custom',
+      mimeType: 'text/plain',
+    });
   });
 });
 

@@ -82,6 +82,19 @@ export function appendUrlStatus(
   );
 }
 
+export function createResourceLink(
+  uri: string,
+  name: string,
+  mimeType = 'application/json',
+): Extract<CallToolResult['content'][number], { type: 'resource_link' }> {
+  return {
+    type: 'resource_link',
+    uri,
+    name,
+    mimeType,
+  };
+}
+
 /**
  * Extracts text from a Gemini response, returning an errorResult if the
  * response was blocked, empty, or truncated by safety/recitation filters.

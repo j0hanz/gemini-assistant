@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 // Sessions module uses module-level state. We import fresh each test via dynamic import.
 // Since ESM caches modules, we test the exported API directly.
 import {
+  completeSessionIds,
   getSession,
   isEvicted,
   listSessionEntries,
@@ -65,6 +66,20 @@ describe('sessions', () => {
       const entry = entries.find((e) => e.id === 'sess-list-test');
       assert.ok(entry);
       assert.strictEqual(typeof entry.lastAccess, 'number');
+    });
+  });
+
+  describe('completeSessionIds', () => {
+    it('filters active session ids by prefix', () => {
+      setSession('sess-complete-alpha', mockChat('alpha') as never);
+      setSession('sess-complete-beta', mockChat('beta') as never);
+
+      assert.deepStrictEqual(completeSessionIds('sess-complete-a'), ['sess-complete-alpha']);
+    });
+
+    it('returns all active session ids when prefix is omitted', () => {
+      setSession('sess-complete-all', mockChat('all') as never);
+      assert.ok(completeSessionIds().includes('sess-complete-all'));
     });
   });
 

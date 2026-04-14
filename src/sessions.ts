@@ -119,6 +119,12 @@ export function listSessionEntries(): SessionSummary[] {
   return Array.from(sessions, ([id, entry]) => toSessionSummary(id, entry));
 }
 
+export function completeSessionIds(prefix?: string): string[] {
+  return listSessionEntries()
+    .map((session) => session.id)
+    .filter((id) => id.startsWith(prefix ?? ''));
+}
+
 export function getSessionEntry(id: string): SessionSummary | undefined {
   const entry = sessions.get(id);
   if (!entry) return undefined;

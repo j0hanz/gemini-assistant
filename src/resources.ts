@@ -4,7 +4,7 @@ import { ResourceTemplate } from '@modelcontextprotocol/server';
 import { formatError } from './lib/errors.js';
 
 import { completeCacheNames, getCacheSummary, listCacheSummaries } from './client.js';
-import { getSessionEntry, listSessionEntries } from './sessions.js';
+import { completeSessionIds, getSessionEntry, listSessionEntries } from './sessions.js';
 
 interface ResourceListEntry {
   uri: string;
@@ -66,6 +66,17 @@ function sessionDetailResources(): ResourceListEntry[] {
   }));
 }
 
+function cacheDetailResources(
+  caches: Awaited<ReturnType<typeof listCacheSummaries>>,
+): ResourceListEntry[] {
+  return caches
+    .filter((cache): cache is typeof cache & { name: string } => typeof cache.name === 'string')
+    .map((cache) => ({
+      uri: `caches://${encodeURIComponent(cache.name)}`,
+      name: cache.displayName ?? cache.name,
+    }));
+}
+
 export function registerResources(server: McpServer): void {
   server.registerResource(
     'sessions',
@@ -83,10 +94,7 @@ export function registerResources(server: McpServer): void {
     new ResourceTemplate('sessions://{sessionId}', {
       list: () => ({ resources: sessionDetailResources() }),
       complete: {
-        sessionId: (value) =>
-          listSessionEntries()
-            .map((s) => s.id)
-            .filter((id) => id.startsWith(value)),
+        sessionId: completeSessionIds,
       },
     }),
     {
@@ -122,21 +130,13 @@ export function registerResources(server: McpServer): void {
     new ResourceTemplate('caches://{cacheName}', {
       list: async () => {
         try {
-          const caches = await listCacheSummaries();
-          return {
-            resources: caches
-              .filter((c): c is typeof c & { name: string } => typeof c.name === 'string')
-              .map((c) => ({
-                uri: `caches://${encodeURIComponent(c.name)}`,
-                name: c.displayName ?? c.name,
-              })),
-          };
+          return { resources: cacheDetailResources(await listCacheSummaries()) };
         } catch {
           return { resources: [] };
         }
       },
       complete: {
-        cacheName: (value) => completeCacheNames(value),
+        cacheName: completeCacheNames,
       },
     }),
     {

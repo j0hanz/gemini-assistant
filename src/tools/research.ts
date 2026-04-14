@@ -10,7 +10,7 @@ import {
   formatCountLabel,
   pickDefined,
 } from '../lib/response.js';
-import { handleToolExecution } from '../lib/streaming.js';
+import { handleToolExecution, type StreamResult } from '../lib/streaming.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import {
   type AgenticSearchInput,
@@ -68,21 +68,69 @@ function buildSourceReportMessage(sourceCount: number): string {
   return sourceCount > 0 ? `${formatCountLabel(sourceCount, 'source')} found` : 'completed';
 }
 
+function validateUrls(urls: readonly string[] | undefined): CallToolResult | undefined {
+  if (!urls) return undefined;
+
+  for (const url of urls) {
+    try {
+      new URL(url);
+    } catch {
+      return {
+        content: [{ type: 'text', text: `Invalid URL provided: ${url}` }],
+        isError: true,
+      };
+    }
+  }
+
+  return undefined;
+}
+
+function buildSearchResult(streamResult: StreamResult, textContent: string) {
+  const sources = collectGroundedSources(streamResult.groundingMetadata);
+  const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
+  const contentAdditions: CallToolResult['content'] = [];
+
+  appendSources(contentAdditions, sources);
+  appendUrlStatus(contentAdditions, urlMetadata);
+
+  return {
+    resultMod: (result: CallToolResult) => ({
+      content: [...result.content, ...contentAdditions],
+    }),
+    structuredContent: pickDefined({
+      answer: textContent,
+      sources,
+      urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
+    }),
+    reportMessage: buildSourceReportMessage(sources.length),
+  };
+}
+
+function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) {
+  const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
+  const contentAdditions: CallToolResult['content'] = [];
+
+  appendUrlStatus(contentAdditions, urlMetadata);
+
+  return {
+    resultMod: (result: CallToolResult) => ({
+      content: [...result.content, ...contentAdditions],
+    }),
+    structuredContent: pickDefined({
+      answer: textContent,
+      urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
+    }),
+    reportMessage: `${formatCountLabel(urlMetadata.length, 'URL')} retrieved`,
+  };
+}
+
 async function searchWork(
   { query, systemInstruction, urls, thinkingLevel }: SearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  if (urls) {
-    for (const url of urls) {
-      try {
-        new URL(url);
-      } catch {
-        return {
-          content: [{ type: 'text', text: `Invalid URL provided: ${url}` }],
-          isError: true,
-        };
-      }
-    }
+  const invalidUrlResult = validateUrls(urls);
+  if (invalidUrlResult) {
+    return invalidUrlResult;
   }
 
   await sendProgress(ctx, 0, undefined, `${SEARCH_TOOL_LABEL}: Starting`);
@@ -112,26 +160,7 @@ async function searchWork(
           maxOutputTokens: 4096,
         },
       }),
-    (streamResult, textContent) => {
-      const sources = collectGroundedSources(streamResult.groundingMetadata);
-      const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
-      const contentAdditions: CallToolResult['content'] = [];
-
-      appendSources(contentAdditions, sources);
-      appendUrlStatus(contentAdditions, urlMetadata);
-
-      return {
-        resultMod: (result) => ({
-          content: [...result.content, ...contentAdditions],
-        }),
-        structuredContent: pickDefined({
-          answer: textContent,
-          sources,
-          urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
-        }),
-        reportMessage: buildSourceReportMessage(sources.length),
-      };
-    },
+    buildSearchResult,
   );
 }
 
@@ -139,15 +168,9 @@ async function analyzeUrlWork(
   { urls, question, systemInstruction, thinkingLevel }: AnalyzeUrlInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  for (const url of urls) {
-    try {
-      new URL(url);
-    } catch {
-      return {
-        content: [{ type: 'text', text: `Invalid URL provided: ${url}` }],
-        isError: true,
-      };
-    }
+  const invalidUrlResult = validateUrls(urls);
+  if (invalidUrlResult) {
+    return invalidUrlResult;
   }
 
   await sendProgress(ctx, 0, undefined, `${ANALYZE_URL_TOOL_LABEL}: Fetching`);
@@ -171,23 +194,7 @@ async function analyzeUrlWork(
           ),
         },
       }),
-    (streamResult, textContent) => {
-      const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
-      const contentAdditions: CallToolResult['content'] = [];
-
-      appendUrlStatus(contentAdditions, urlMetadata);
-
-      return {
-        resultMod: (result) => ({
-          content: [...result.content, ...contentAdditions],
-        }),
-        structuredContent: pickDefined({
-          answer: textContent,
-          urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
-        }),
-        reportMessage: `${formatCountLabel(urlMetadata.length, 'URL')} retrieved`,
-      };
-    },
+    buildAnalyzeUrlResult,
   );
 }
 
@@ -232,10 +239,7 @@ async function agenticSearchWork(
       topic += `\n\nAdditional related keywords/guidance: ${sampledText}`;
     }
   } catch (error) {
-    await ctx.mcpReq.log(
-      'info',
-      `requestSampling encountered an issue (maybe client does not support it): ${String(error)}`,
-    );
+    await ctx.mcpReq.log('info', `requestSampling encountered an issue: ${String(error)}`);
   }
 
   const depthInstruction =

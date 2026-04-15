@@ -13,8 +13,8 @@ export type UsageMetadata = z.infer<typeof UsageMetadataSchema>;
 
 const FunctionCallEntrySchema = z.strictObject({
   name: z.string().describe('Function/tool name'),
-  args: z.record(z.string(), z.unknown()).optional().describe('Function call arguments'),
-  id: z.string().optional().describe('Function call identifier when present'),
+  args: z.record(z.string(), z.unknown()).describe('Function call arguments').optional(),
+  id: z.string().describe('Function call identifier when present').optional(),
 });
 
 const ToolEventKindSchema = z.enum([
@@ -29,21 +29,21 @@ const ToolEventKindSchema = z.enum([
 
 const ToolEventSchema = z.strictObject({
   kind: ToolEventKindSchema.describe('Normalized Gemini tool/function event type'),
-  name: z.string().optional().describe('Function name when available'),
-  toolType: z.string().optional().describe('Built-in tool type when available'),
-  id: z.string().optional().describe('Stable Gemini call identifier when available'),
+  name: z.string().describe('Function name when available').optional(),
+  toolType: z.string().describe('Built-in tool type when available').optional(),
+  id: z.string().describe('Stable Gemini call identifier when available').optional(),
   thoughtSignature: z
     .string()
     .optional()
     .describe('Thought signature returned by Gemini for the part'),
-  args: z.record(z.string(), z.unknown()).optional().describe('Tool or function arguments'),
+  args: z.record(z.string(), z.unknown()).describe('Tool or function arguments').optional(),
   response: z
     .record(z.string(), z.unknown())
     .optional()
     .describe('Tool or function response payload'),
-  code: z.string().optional().describe('Executable code payload'),
-  output: z.string().optional().describe('Code execution output'),
-  outcome: z.string().optional().describe('Code execution outcome'),
+  code: z.string().describe('Executable code payload').optional(),
+  output: z.string().describe('Code execution output').optional(),
+  outcome: z.string().describe('Code execution outcome').optional(),
   text: z
     .string()
     .optional()
@@ -51,8 +51,8 @@ const ToolEventSchema = z.strictObject({
 });
 
 const baseOutputFields = {
-  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
-  usage: UsageMetadataSchema.optional().describe('Token usage'),
+  thoughts: z.string().describe('Internal model reasoning/thinking process').optional(),
+  usage: UsageMetadataSchema.describe('Token usage').optional(),
   functionCalls: z
     .array(FunctionCallEntrySchema)
     .optional()
@@ -65,7 +65,7 @@ const baseOutputFields = {
 
 export const AskOutputSchema = z.strictObject({
   answer: z.string().describe('Generated response'),
-  data: z.unknown().optional().describe('Parsed structured response when JSON mode is used'),
+  data: z.unknown().describe('Parsed structured response when JSON mode is used').optional(),
   schemaWarnings: z
     .array(z.string())
     .optional()
@@ -93,7 +93,7 @@ const UrlMetadataEntrySchema = z.strictObject({
 export type UrlMetadataEntry = z.infer<typeof UrlMetadataEntrySchema>;
 
 const SourceDetailSchema = z.strictObject({
-  title: z.string().optional().describe('Source title when Gemini provides one'),
+  title: z.string().describe('Source title when Gemini provides one').optional(),
   url: PublicHttpUrlSchema.describe('Source URL'),
 });
 
@@ -106,13 +106,13 @@ export const SearchOutputSchema = z.strictObject({
     .array(SourceDetailSchema)
     .optional()
     .describe('Structured grounded source entries for client consumption'),
-  urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
+  urlMetadata: z.array(UrlMetadataEntrySchema).describe('URL retrieval status').optional(),
   ...baseOutputFields,
 });
 
 export const AnalyzeUrlOutputSchema = z.strictObject({
   answer: z.string().describe('URL content analysis'),
-  urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('Retrieval status per URL'),
+  urlMetadata: z.array(UrlMetadataEntrySchema).describe('Retrieval status per URL').optional(),
   ...baseOutputFields,
 });
 
@@ -161,14 +161,14 @@ export const AnalyzePrOutputSchema = z.strictObject({
     .optional()
     .describe('Relative diff paths omitted from Gemini review because of the review budget'),
   empty: z.boolean().describe('Whether there were any local changes to review'),
-  truncated: z.boolean().optional().describe('Whether the diff was truncated due to size'),
+  truncated: z.boolean().describe('Whether the diff was truncated due to size').optional(),
   ...baseOutputFields,
 });
 
 const CacheSummarySchema = z.strictObject({
   name: cacheName('Cache resource name').optional(),
-  displayName: z.string().optional().describe('Human-readable label'),
-  model: z.string().optional().describe('Model used'),
+  displayName: z.string().describe('Human-readable label').optional(),
+  model: z.string().describe('Model used').optional(),
   expireTime: timestamp('Expiration timestamp').optional(),
   createTime: timestamp('Creation timestamp').optional(),
   updateTime: timestamp('Last update timestamp').optional(),
@@ -177,8 +177,8 @@ const CacheSummarySchema = z.strictObject({
 
 export const CreateCacheOutputSchema = z.strictObject({
   name: cacheName('Cache resource name'),
-  displayName: z.string().optional().describe('Human-readable label'),
-  model: z.string().optional().describe('Model used'),
+  displayName: z.string().describe('Human-readable label').optional(),
+  model: z.string().describe('Model used').optional(),
   expireTime: timestamp('Expiration timestamp').optional(),
 });
 
@@ -212,6 +212,6 @@ export const CompareFilesOutputSchema = z.strictObject({
 export const GenerateDiagramOutputSchema = z.strictObject({
   diagram: z.string().describe('Generated diagram markup (Mermaid or PlantUML)'),
   diagramType: z.enum(['mermaid', 'plantuml']).describe('Diagram format used'),
-  explanation: z.string().optional().describe('Brief explanation of the diagram structure'),
+  explanation: z.string().describe('Brief explanation of the diagram structure').optional(),
   ...baseOutputFields,
 });

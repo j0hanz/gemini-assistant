@@ -149,7 +149,7 @@ export const CodeReviewPromptSchema = z.strictObject({
 export const SummarizePromptSchema = z.strictObject({
   text: promptText('The text to summarize'),
   style: completable(
-    z.enum(SUMMARY_STYLES).optional().describe('Summary style'),
+    z.enum(SUMMARY_STYLES).describe('Summary style').optional(),
     completeSummaryStyle,
   ),
 });

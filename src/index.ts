@@ -12,9 +12,9 @@ import { formatError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 
 import { registerPrompts, registerResources } from './server-content.js';
-import { onSessionChange } from './sessions.js';
+import { onSessionChange, type SessionChangeEvent } from './sessions.js';
 import { registerAskTool } from './tools/ask.js';
-import { onCacheChange, registerCacheTools } from './tools/cache.js';
+import { type CacheChangeEvent, onCacheChange, registerCacheTools } from './tools/cache.js';
 import { registerCompareFilesTool } from './tools/compare.js';
 import { registerGenerateDiagramTool } from './tools/diagram.js';
 import { registerAnalyzeFileTool, registerExecuteCodeTool } from './tools/execution.js';
@@ -109,22 +109,22 @@ function createEventStore(): InMemoryEventStore {
   return eventStore;
 }
 
-function sendResourceChanged(uri: string, taskId?: string): void {
+function sendResourceChanged(listUri: string, detailUris: readonly string[] = []): void {
   for (const server of activeServers) {
     if (!server.isConnected()) continue;
     server.sendResourceListChanged();
-    void server.server.sendResourceUpdated({
-      uri,
-      ...(taskId ? { _meta: { 'io.modelcontextprotocol/related-task': { taskId } } } : {}),
-    });
+    void server.server.sendResourceUpdated({ uri: listUri });
+    for (const uri of detailUris) {
+      void server.server.sendResourceUpdated({ uri });
+    }
   }
 }
 
-onSessionChange((taskId) => {
-  sendResourceChanged('sessions://list', taskId);
+onSessionChange(({ detailUris }: SessionChangeEvent) => {
+  sendResourceChanged('sessions://list', detailUris);
 });
-onCacheChange((taskId) => {
-  sendResourceChanged('caches://list', taskId);
+onCacheChange(({ detailUris }: CacheChangeEvent) => {
+  sendResourceChanged('caches://list', detailUris);
 });
 
 const transportMode = process.env.MCP_TRANSPORT ?? 'stdio';

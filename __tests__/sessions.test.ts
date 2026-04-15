@@ -155,35 +155,35 @@ describe('sessions', () => {
       assert.strictEqual(calls, 1);
     });
 
-    it('forwards taskId from setSession to callback', () => {
-      let receivedTaskId: string | undefined;
-      onSessionChange((taskId) => {
-        receivedTaskId = taskId;
+    it('includes the changed session detail URI on setSession', () => {
+      let detailUris: string[] = [];
+      onSessionChange((event) => {
+        detailUris = event.detailUris;
       });
 
       setSession('sess-task-set', mockChat('task-set') as never, 'task-123');
-      assert.strictEqual(receivedTaskId, 'task-123');
+      assert.ok(detailUris.includes('sessions://sess-task-set'));
     });
 
-    it('forwards taskId from getSession to callback', () => {
-      let receivedTaskId: string | undefined;
+    it('includes the changed session detail URI on getSession', () => {
+      let detailUris: string[] = [];
       setSession('sess-task-get', mockChat('task-get') as never);
-      onSessionChange((taskId) => {
-        receivedTaskId = taskId;
+      onSessionChange((event) => {
+        detailUris = event.detailUris;
       });
 
       getSession('sess-task-get', 'task-456');
-      assert.strictEqual(receivedTaskId, 'task-456');
+      assert.deepStrictEqual(detailUris, ['sessions://sess-task-get']);
     });
 
-    it('passes undefined taskId when not provided', () => {
-      let receivedTaskId: string | undefined = 'should-be-cleared';
-      onSessionChange((taskId) => {
-        receivedTaskId = taskId;
+    it('provides detail URIs even without a taskId', () => {
+      let detailUris: string[] = [];
+      onSessionChange((event) => {
+        detailUris = event.detailUris;
       });
 
       setSession('sess-no-task', mockChat('no-task') as never);
-      assert.strictEqual(receivedTaskId, undefined);
+      assert.ok(detailUris.includes('sessions://sess-no-task'));
     });
   });
 

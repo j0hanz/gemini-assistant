@@ -36,14 +36,20 @@ type CachePart = ReturnType<typeof createPartFromUri>;
 const CACHE_UPLOAD_CHUNK_SIZE = 3;
 const CACHE_NAME_DESCRIPTION = 'Cache resource name to %s (e.g., "cachedContents/...")';
 
-let changeCallback: ((taskId?: string) => void) | undefined;
+export interface CacheChangeEvent {
+  detailUris: string[];
+}
 
-export function onCacheChange(cb: (taskId?: string) => void): void {
+let changeCallback: ((event: CacheChangeEvent) => void) | undefined;
+
+export function onCacheChange(cb: (event: CacheChangeEvent) => void): void {
   changeCallback = cb;
 }
 
-function notifyCacheChange(taskId?: string): void {
-  changeCallback?.(taskId);
+function notifyCacheChange(cacheNames: string[] = []): void {
+  changeCallback?.({
+    detailUris: cacheNames.map((cacheName) => `caches://${encodeURIComponent(cacheName)}`),
+  });
 }
 
 function formatCacheListMarkdown(caches: CacheSummary[]): string {
@@ -240,7 +246,11 @@ function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
         await cleanupOldCaches(displayName, cache.name, ctx.mcpReq.signal);
       }
 
-      notifyCacheChange(ctx.task?.id);
+      if (cache.name) {
+        notifyCacheChange([cache.name]);
+      } else {
+        notifyCacheChange();
+      }
 
       const cacheName = cache.name ?? 'N/A';
       const shortName = truncateName(cacheName);
@@ -312,7 +322,8 @@ export function registerCacheTools(server: McpServer): void {
     }),
   );
 
-  server.registerTool(
+  registerTaskTool(
+    server,
     'delete_cache',
     {
       title: 'Delete Cache',
@@ -330,51 +341,42 @@ export function registerCacheTools(server: McpServer): void {
         destructiveHint: true,
       },
     },
-    withErrorLogging(
-      'delete_cache',
-      'Delete Cache',
-      async (
-        { cacheName, confirm }: { cacheName: string; confirm?: boolean | undefined },
-        ctx: ServerContext,
-      ) => {
-        const confirmation = await confirmCacheDeletion(ctx, cacheName);
-        if (confirmation === 'declined') {
-          return {
-            content: [{ type: 'text', text: 'Cache deletion cancelled.' }],
-            structuredContent: { cacheName, deleted: false },
-          };
-        }
+    async ({ cacheName, confirm }: { cacheName: string; confirm?: boolean | undefined }, ctx) => {
+      const confirmation = await confirmCacheDeletion(ctx, cacheName);
+      if (confirmation === 'declined') {
+        return {
+          content: [{ type: 'text', text: 'Cache deletion cancelled.' }],
+          structuredContent: { cacheName, deleted: false },
+        };
+      }
 
-        if (confirmation === 'unsupported' && confirm !== true) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: 'Interactive confirmation is unavailable. Re-run delete_cache with confirm=true to delete the cache.',
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        await getAI().caches.delete({
-          name: cacheName,
-          config: { abortSignal: ctx.mcpReq.signal },
-        });
-        notifyCacheChange(ctx.task?.id);
-        await ctx.mcpReq.log('info', `Deleted cache: ${cacheName}`);
+      if (confirmation === 'unsupported' && confirm !== true) {
         return {
           content: [
-            { type: 'text', text: `Cache '${cacheName}' deleted.` },
-            cacheListResourceLink(),
+            {
+              type: 'text',
+              text: 'Interactive confirmation is unavailable. Re-run delete_cache with confirm=true to delete the cache.',
+            },
           ],
-          structuredContent: { cacheName, deleted: true },
+          isError: true,
         };
-      },
-    ),
+      }
+
+      await getAI().caches.delete({
+        name: cacheName,
+        config: { abortSignal: ctx.mcpReq.signal },
+      });
+      notifyCacheChange([cacheName]);
+      await ctx.mcpReq.log('info', `Deleted cache: ${cacheName}`);
+      return {
+        content: [{ type: 'text', text: `Cache '${cacheName}' deleted.` }, cacheListResourceLink()],
+        structuredContent: { cacheName, deleted: true },
+      };
+    },
   );
 
-  server.registerTool(
+  registerTaskTool(
+    server,
     'update_cache',
     {
       title: 'Update Cache',
@@ -386,33 +388,29 @@ export function registerCacheTools(server: McpServer): void {
       outputSchema: UpdateCacheOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
     },
-    withErrorLogging(
-      'update_cache',
-      'Update Cache',
-      async ({ cacheName, ttl }: { cacheName: string; ttl: string }, ctx: ServerContext) => {
-        const updated = await getAI().caches.update({
-          name: cacheName,
-          config: { ttl, abortSignal: ctx.mcpReq.signal },
-        });
-        notifyCacheChange(ctx.task?.id);
-        await ctx.mcpReq.log('info', `Updated cache TTL: ${cacheName}`);
-        return {
-          content: [
-            {
-              type: 'text',
-              text:
-                `**Cache Updated**\n\n` +
-                `- **Name:** ${updated.name ?? cacheName}\n` +
-                `- **Expires:** ${updated.expireTime ?? 'N/A'}`,
-            },
-            cacheResourceLink(cacheName),
-          ],
-          structuredContent: {
-            cacheName,
-            ...(updated.expireTime ? { expireTime: updated.expireTime } : {}),
+    async ({ cacheName, ttl }: { cacheName: string; ttl: string }, ctx: ServerContext) => {
+      const updated = await getAI().caches.update({
+        name: cacheName,
+        config: { ttl, abortSignal: ctx.mcpReq.signal },
+      });
+      notifyCacheChange([cacheName]);
+      await ctx.mcpReq.log('info', `Updated cache TTL: ${cacheName}`);
+      return {
+        content: [
+          {
+            type: 'text',
+            text:
+              `**Cache Updated**\n\n` +
+              `- **Name:** ${updated.name ?? cacheName}\n` +
+              `- **Expires:** ${updated.expireTime ?? 'N/A'}`,
           },
-        };
-      },
-    ),
+          cacheResourceLink(cacheName),
+        ],
+        structuredContent: {
+          cacheName,
+          ...(updated.expireTime ? { expireTime: updated.expireTime } : {}),
+        },
+      };
+    },
   );
 }

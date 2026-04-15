@@ -19,18 +19,28 @@ interface SessionSummary {
   lastAccess: number;
 }
 
+export interface SessionChangeEvent {
+  detailUris: string[];
+}
+
 const sessions = new Map<string, SessionEntry>();
 const evictedSessions = new Set<string>();
 
 let evictionTimer: ReturnType<typeof setInterval> | undefined;
-let changeCallback: ((taskId?: string) => void) | undefined;
+let changeCallback: ((event: SessionChangeEvent) => void) | undefined;
 
-export function onSessionChange(cb: (taskId?: string) => void): void {
+export function onSessionChange(cb: (event: SessionChangeEvent) => void): void {
   changeCallback = cb;
 }
 
-function notifyChange(taskId?: string): void {
-  changeCallback?.(taskId);
+function sessionDetailUri(id: string): string {
+  return `sessions://${id}`;
+}
+
+function notifyChange(sessionIds: string[] = []): void {
+  changeCallback?.({
+    detailUris: sessionIds.map((id) => sessionDetailUri(id)),
+  });
 }
 
 function now(): number {
@@ -81,18 +91,18 @@ function trimEvictedSessions(): void {
   }
 }
 
-function evictExpiredSessions(): boolean {
+function evictExpiredSessions(): string[] {
   const currentTime = now();
-  let evicted = false;
+  const evictedIds: string[] = [];
 
   for (const [id, entry] of sessions) {
     if (currentTime - entry.lastAccess > SESSION_TTL_MS) {
       removeSession(id, true);
-      evicted = true;
+      evictedIds.push(id);
     }
   }
 
-  return evicted;
+  return evictedIds;
 }
 
 function hasExpired(entry: SessionEntry): boolean {
@@ -102,7 +112,8 @@ function hasExpired(entry: SessionEntry): boolean {
 function startEvictionTimer(): void {
   if (evictionTimer) return;
   evictionTimer = setInterval(() => {
-    if (evictExpiredSessions()) notifyChange();
+    const evictedIds = evictExpiredSessions();
+    if (evictedIds.length > 0) notifyChange(evictedIds);
   }, EVICTION_SWEEP_INTERVAL_MS);
   evictionTimer.unref();
 }
@@ -112,11 +123,12 @@ function oldestSessionId(): string | undefined {
   return oldest.done ? undefined : oldest.value;
 }
 
-function evictOldest(): void {
+function evictOldest(): string | undefined {
   const oldestId = oldestSessionId();
   if (oldestId) {
     removeSession(oldestId, true);
   }
+  return oldestId;
 }
 
 export function listSessionEntries(): SessionSummary[] {
@@ -144,19 +156,23 @@ export function getSession(id: string, taskId?: string): Chat | undefined {
   if (!entry) return undefined;
   if (hasExpired(entry)) {
     removeSession(id, true);
-    notifyChange(taskId);
+    void taskId;
+    notifyChange([id]);
     return undefined;
   }
   const chat = updateSessionAccess(id, entry);
-  notifyChange(taskId);
+  void taskId;
+  notifyChange([id]);
   return chat;
 }
 
 export function setSession(id: string, chat: Chat, taskId?: string): void {
+  let evictedId: string | undefined;
   if (sessions.size >= MAX_SESSIONS && !sessions.has(id)) {
-    evictOldest();
+    evictedId = evictOldest();
   }
   storeSession(id, chat);
   startEvictionTimer();
-  notifyChange(taskId);
+  void taskId;
+  notifyChange(evictedId ? [evictedId, id] : [id]);
 }

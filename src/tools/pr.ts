@@ -22,7 +22,9 @@ const GIT_MAX_BUFFER = 10 * 1024 * 1024;
 const MAX_DIFF_CHARS = 500_000;
 const MAX_UNTRACKED_FILE_BYTES = 1024 * 1024;
 const EMPTY_DIFF_STATS: DiffStats = { files: 0, additions: 0, deletions: 0 };
+const DIFF_HEADER_PATTERN = /^diff --git (?:"a\/(.+?)"|a\/(.+?)) (?:"b\/(.+?)"|b\/(.+?))$/;
 const UTF8_DECODER = new TextDecoder('utf-8');
+const UTF8_FATAL_DECODER = new TextDecoder('utf-8', { fatal: true });
 
 const NOISY_EXCLUDE_PATHSPECS = [
   ':!package-lock.json',
@@ -87,6 +89,12 @@ interface DiffUnit {
   text: string;
 }
 
+interface GitDiffArgsOptions {
+  againstHead?: boolean;
+  nameOnly?: boolean;
+  staged?: boolean;
+}
+
 export function matchesNoisyPath(filePath: string): boolean {
   const normalized = filePath.replaceAll('\\', '/');
   const basename = normalized.split('/').pop()?.toLowerCase() ?? '';
@@ -101,6 +109,19 @@ export function matchesNoisyPath(filePath: string): boolean {
   );
 }
 
+function isAdditionLine(line: string): boolean {
+  return line.startsWith('+') && !line.startsWith('+++');
+}
+
+function isDeletionLine(line: string): boolean {
+  return line.startsWith('-') && !line.startsWith('---');
+}
+
+function parseDiffPath(diffHeader: string): string {
+  const match = DIFF_HEADER_PATTERN.exec(diffHeader);
+  return match ? (match[3] ?? match[4] ?? diffHeader) : diffHeader;
+}
+
 export function computeDiffStats(diff: string): DiffStats {
   const files = new Set<string>();
   let additions = 0;
@@ -108,15 +129,14 @@ export function computeDiffStats(diff: string): DiffStats {
 
   for (const line of diff.split('\n')) {
     if (line.startsWith('diff --git ')) {
-      const match = /^diff --git (?:"a\/(.+?)"|a\/(.+?)) (?:"b\/(.+?)"|b\/(.+?))$/.exec(line);
-      files.add(match ? (match[3] ?? match[4] ?? line) : line);
+      files.add(parseDiffPath(line));
       continue;
     }
-    if (line.startsWith('+') && !line.startsWith('+++')) {
+    if (isAdditionLine(line)) {
       additions++;
       continue;
     }
-    if (line.startsWith('-') && !line.startsWith('---')) {
+    if (isDeletionLine(line)) {
       deletions++;
     }
   }
@@ -124,26 +144,27 @@ export function computeDiffStats(diff: string): DiffStats {
   return { files: files.size, additions, deletions };
 }
 
-export function buildGitDiffArgs(staged: boolean): string[] {
-  const args = ['diff', '--no-color', '--no-ext-diff'];
-  if (staged) args.push('--cached');
-  args.push('--', ...NOISY_EXCLUDE_PATHSPECS);
-  return args;
+function buildGitArgs({
+  againstHead = false,
+  nameOnly = false,
+  staged = false,
+}: GitDiffArgsOptions): string[] {
+  return [
+    'diff',
+    ...(nameOnly ? ['--name-only'] : ['--no-color', '--no-ext-diff']),
+    ...(staged ? ['--cached'] : []),
+    ...(againstHead ? ['HEAD'] : []),
+    '--',
+    ...NOISY_EXCLUDE_PATHSPECS,
+  ];
 }
 
-function buildGitHeadDiffArgs(): string[] {
-  return ['diff', '--no-color', '--no-ext-diff', 'HEAD', '--', ...NOISY_EXCLUDE_PATHSPECS];
+export function buildGitDiffArgs(staged: boolean): string[] {
+  return buildGitArgs({ staged });
 }
 
 function buildGitNameOnlyArgs(staged: boolean): string[] {
-  const args = ['diff', '--name-only'];
-  if (staged) args.push('--cached');
-  args.push('--', ...NOISY_EXCLUDE_PATHSPECS);
-  return args;
-}
-
-function buildGitHeadNameOnlyArgs(): string[] {
-  return ['diff', '--name-only', 'HEAD', '--', ...NOISY_EXCLUDE_PATHSPECS];
+  return buildGitArgs({ nameOnly: true, staged });
 }
 
 function parseGitPathList(stdout: string): string[] {
@@ -211,8 +232,8 @@ async function buildTrackedSnapshot(
 ): Promise<{ diff: string; paths: string[] }> {
   if (await hasHeadCommit(gitRoot, signal)) {
     const [diff, paths] = await Promise.all([
-      runGit(gitRoot, buildGitHeadDiffArgs(), signal),
-      runGit(gitRoot, buildGitHeadNameOnlyArgs(), signal),
+      runGit(gitRoot, buildGitArgs({ againstHead: true }), signal),
+      runGit(gitRoot, buildGitArgs({ againstHead: true, nameOnly: true }), signal),
     ]);
     return {
       diff,
@@ -235,7 +256,7 @@ async function listUntrackedPaths(gitRoot: string, signal?: AbortSignal): Promis
 function isBinaryContent(buffer: Buffer): boolean {
   if (buffer.includes(0)) return true;
   try {
-    new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+    UTF8_FATAL_DECODER.decode(buffer);
     return false;
   } catch {
     return true;
@@ -303,8 +324,8 @@ function computeUnitStats(text: string): Pick<DiffUnit, 'additions' | 'deletions
   let deletions = 0;
 
   for (const line of text.split('\n')) {
-    if (line.startsWith('+') && !line.startsWith('+++')) additions++;
-    if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+    if (isAdditionLine(line)) additions++;
+    if (isDeletionLine(line)) deletions++;
   }
 
   return { additions, deletions };
@@ -319,10 +340,8 @@ export function splitDiffUnits(diff: string): DiffUnit[] {
     .filter(Boolean)
     .map((text) => {
       const header = text.split('\n', 1)[0] ?? text;
-      const match = /^diff --git (?:"a\/(.+?)"|a\/(.+?)) (?:"b\/(.+?)"|b\/(.+?))$/.exec(header);
-      const path = match ? (match[3] ?? match[4] ?? header) : header;
       return {
-        path,
+        path: parseDiffPath(header),
         text,
         ...computeUnitStats(text),
       };
@@ -383,6 +402,11 @@ function formatAnalyzePrError(err: unknown): string {
   return nodeErr.message;
 }
 
+function appendPromptSection(parts: string[], title: string, entries: string[]): void {
+  if (entries.length === 0) return;
+  parts.push('', title, ...entries.map((entry) => `- ${entry}`));
+}
+
 export function buildAnalysisPrompt(
   diff: string,
   stats: DiffStats,
@@ -400,39 +424,18 @@ export function buildAnalysisPrompt(
     '',
     'Reviewed Paths:',
     ...reviewedPaths.map((filePath) => `- ${filePath}`),
-    ...(includedUntracked.length > 0
-      ? [
-          '',
-          'Included Untracked Text Files:',
-          ...includedUntracked.map((filePath) => `- ${filePath}`),
-        ]
-      : []),
-    ...(skippedBinaryPaths.length > 0
-      ? [
-          '',
-          'Skipped Binary Untracked Files:',
-          ...skippedBinaryPaths.map((filePath) => `- ${filePath}`),
-        ]
-      : []),
-    ...(skippedLargePaths.length > 0
-      ? [
-          '',
-          `Skipped Large Untracked Files (> ${String(MAX_UNTRACKED_FILE_BYTES)} bytes):`,
-          ...skippedLargePaths.map((filePath) => `- ${filePath}`),
-        ]
-      : []),
-    ...(omittedPaths.length > 0
-      ? [
-          '',
-          'Omitted From Gemini Review Budget:',
-          ...omittedPaths.map((filePath) => `- ${filePath}`),
-        ]
-      : []),
-    '',
-    '```diff',
-    diff,
-    '```',
   ];
+
+  appendPromptSection(parts, 'Included Untracked Text Files:', includedUntracked);
+  appendPromptSection(parts, 'Skipped Binary Untracked Files:', skippedBinaryPaths);
+  appendPromptSection(
+    parts,
+    `Skipped Large Untracked Files (> ${String(MAX_UNTRACKED_FILE_BYTES)} bytes):`,
+    skippedLargePaths,
+  );
+  appendPromptSection(parts, 'Omitted From Gemini Review Budget:', omittedPaths);
+  parts.push('', '```diff', diff, '```');
+
   return parts.join('\n');
 }
 
@@ -490,17 +493,14 @@ function buildStructuredContent(
 }
 
 function buildNoChangesAnalysis(snapshot: LocalDiffSnapshot): string {
-  const skippedNotes: string[] = [];
-
-  if (snapshot.skippedBinaryPaths.length > 0) {
-    skippedNotes.push(`binary untracked files: ${snapshot.skippedBinaryPaths.join(', ')}`);
-  }
-
-  if (snapshot.skippedLargePaths.length > 0) {
-    skippedNotes.push(
-      `large untracked files over ${String(MAX_UNTRACKED_FILE_BYTES)} bytes: ${snapshot.skippedLargePaths.join(', ')}`,
-    );
-  }
+  const skippedNotes = [
+    snapshot.skippedBinaryPaths.length > 0
+      ? `binary untracked files: ${snapshot.skippedBinaryPaths.join(', ')}`
+      : '',
+    snapshot.skippedLargePaths.length > 0
+      ? `large untracked files over ${String(MAX_UNTRACKED_FILE_BYTES)} bytes: ${snapshot.skippedLargePaths.join(', ')}`
+      : '',
+  ].filter(Boolean);
 
   return skippedNotes.length > 0
     ? `No reviewable local text changes to review. Skipped ${skippedNotes.join('; ')}.`

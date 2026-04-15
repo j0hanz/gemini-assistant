@@ -37,35 +37,31 @@ const ANALYZE_URL_TOOL_LABEL = 'Analyze URL';
 const AGENTIC_SEARCH_TOOL_LABEL = 'Agentic Search';
 
 const SEARCH_SYSTEM_INSTRUCTION =
-  'Synthesize search results into a direct, factual answer. ' +
-  'Base answers strictly on the provided search grounding. Be concise.';
+  'Answer directly from grounded search results. Be concise. Do not add unsupported claims.';
 
 const ANALYZE_URL_SYSTEM_INSTRUCTION =
-  'Structure findings with headings. Reference specific sections or data from the retrieved pages. ' +
-  'Base analysis strictly on retrieved content.';
+  'Answer from retrieved URL content only. Cite relevant sections, fields, or quotes. Use headings when useful.';
 
 const AGENT_SYSTEM_INSTRUCTION =
-  'You are a deep research agent. Given a topic, conduct thorough multi-faceted research.\n\n' +
+  'Research the topic with Google Search and Code Execution.\n\n' +
   'Process:\n' +
-  '1. Break the topic into distinct sub-questions.\n' +
-  '2. Use Google Search to investigate each sub-question.\n' +
-  '3. Use Code Execution to analyze data, compute comparisons, build tables, or verify calculations.\n' +
-  '4. Synthesize all findings into a comprehensive, well-structured markdown report.\n' +
-  '5. Use headings, bullet points, and tables where appropriate.\n' +
-  '6. Be factual — only report what search results confirm.\n' +
-  '7. Include specific data points, numbers, and dates when available.\n\n' +
-  'IMPORTANT: Actively use code execution for any data-heavy analysis, ranking, sorting, or comparison tasks.';
+  '1. Break the topic into sub-questions.\n' +
+  '2. Search multiple angles.\n' +
+  '3. Use Code Execution for calculations, comparisons, rankings, and tables when useful.\n' +
+  '4. Synthesize a grounded Markdown report.\n' +
+  '5. Include concrete numbers and dates when available.\n' +
+  '6. Do not state unsupported claims.';
 
 function buildSearchContents(query: string, urls?: readonly string[]): string {
   if (!urls || urls.length === 0) {
     return query;
   }
 
-  return `${query}\n\nAlso analyze content from:\n${urls.join('\n')}`;
+  return `${query}\n\nUse these URLs too:\n${urls.join('\n')}`;
 }
 
 function buildPromptWithUrls(urls: string[], question: string): string {
-  return `Analyze the following URLs:\n${urls.join('\n')}\n\n${question}`;
+  return `URLs:\n${urls.join('\n')}\n\nTask: ${question}`;
 }
 
 function buildSourceReportMessage(sourceCount: number): string {
@@ -276,9 +272,9 @@ async function agenticSearchWork(
       getAI().models.generateContentStream({
         model: MODEL,
         contents:
-          `Research this topic comprehensively: ${enrichedTopic}\n\n` +
-          `${depthInstruction}\n` +
-          'Search for multiple different aspects and compile a detailed report.',
+          `Topic: ${enrichedTopic}\n\n` +
+          `Depth: ${depthInstruction}\n\n` +
+          'Task: Research multiple aspects and produce a grounded report.',
         config: buildGenerateContentConfig(
           {
             systemInstruction: AGENT_SYSTEM_INSTRUCTION,

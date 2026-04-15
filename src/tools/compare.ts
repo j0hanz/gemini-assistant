@@ -17,15 +17,12 @@ import { getAI, MODEL } from '../client.js';
 const TOOL_LABEL = 'Compare Files';
 
 const SYSTEM_INSTRUCTION =
-  'You are a code and document comparison expert. ' +
-  'Compare the two provided files thoroughly.\n\n' +
-  'Structure your response with these markdown sections:\n' +
-  '## Summary\nBrief overview of the key differences.\n\n' +
-  '## Similarities\nShared patterns, structures, or content.\n\n' +
-  '## Differences\nDetailed breakdown of what differs, with specific references.\n\n' +
-  '## Impact\nPractical implications of the differences (breaking changes, behavior shifts, etc.).\n\n' +
-  'Reference quoted snippets, function/class names, section names, or structural anchors from each file. ' +
-  'Do not invent exact line numbers unless the uploaded content explicitly exposes them.';
+  'Compare the two provided files. Base claims on the files. ' +
+  'Cite symbols, section names, or short quotes. Do not invent line numbers.\n\n' +
+  'Output:\n' +
+  '## Summary\n' +
+  '## Differences\n' +
+  '## Impact';
 
 function createCompareFileWork(rootsFetcher: RootsFetcher) {
   return async function compareFileWork(
@@ -46,9 +43,7 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
       await ctx.mcpReq.log('info', `Comparing: ${filePathA} vs ${filePathB}`);
       await sendProgress(ctx, 2, 4, `${TOOL_LABEL}: Analyzing differences`);
 
-      const prompt = question
-        ? `Compare these two files with focus on: ${question}`
-        : 'Compare these two files thoroughly.';
+      const prompt = question ? `Focus: ${question}` : 'Task: Compare the two files.';
 
       const tools: ToolListUnion = [...(googleSearch ? [{ googleSearch: {} }] : [])];
 

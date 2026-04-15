@@ -24,8 +24,7 @@ export function parseIntEnv(name: string, fallback: number): number {
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
-const DEFAULT_SYSTEM_INSTRUCTION =
-  'Provide direct, accurate answers. Use Markdown for structure. Be concise.';
+const DEFAULT_SYSTEM_INSTRUCTION = 'Be direct, accurate, and concise. Use Markdown when useful.';
 
 export interface ConfigBuilderOptions {
   systemInstruction?: string | undefined;

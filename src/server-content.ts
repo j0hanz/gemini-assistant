@@ -263,25 +263,25 @@ export function buildAnalyzeFilePrompt(
   args: z.infer<ReturnType<typeof createAnalyzeFilePromptSchema>>,
 ) {
   return userPromptMessage(
-    `Please analyze this file: ${args.filePath}\n\nQuestion: ${args.question}\n\nRead the file context and answer the question.`,
+    `File: ${args.filePath}\nQuestion: ${args.question}\nAnswer from the file only.`,
   );
 }
 
 export function buildCodeReviewPrompt(args: z.infer<typeof CodeReviewPromptSchema>) {
   return userPromptMessage(
-    `Review this${args.language ? ` ${args.language}` : ''} code.\n\n${fencedCodeBlock(args.code, args.language)}\n\nStructure: 1) Bugs 2) Best practices 3) Improvements. Focus on actionable findings only.`,
+    `Review this${args.language ? ` ${args.language}` : ''} code.\n\n${fencedCodeBlock(args.code, args.language)}\n\nOutput:\n1. Bugs\n2. Improvements\nKeep it actionable.`,
   );
 }
 
 export function buildSummarizePrompt(args: z.infer<typeof SummarizePromptSchema>) {
   return userPromptMessage(
-    `Summarize this text${args.style ? ` (${args.style})` : ''}:\n\n${args.text}\n\nReturn only the summary.${summarizeConstraint(args.style)}`,
+    `Summarize${args.style ? ` (${args.style})` : ''}:\n\n${args.text}\n\nReturn only the summary.${summarizeConstraint(args.style)}`,
   );
 }
 
 export function buildExplainErrorPrompt(args: z.infer<typeof ExplainErrorPromptSchema>) {
   return userPromptMessage(
-    `Explain this error${args.context ? ` (context: ${args.context})` : ''}:\n\n${args.error}\n\nStructure: 1) Root cause 2) Fix 3) Prevention.`,
+    `${args.context ? `Context: ${args.context}\n\n` : ''}Error:\n${args.error}\n\nOutput:\n1. Cause\n2. Fix\n3. Prevention`,
   );
 }
 
@@ -290,7 +290,7 @@ export function buildGettingStartedPrompt() {
     [
       'Help a first-time user understand gemini-assistant and what to try first.',
       renderWorkflowSection('getting-started'),
-      'Keep the guidance practical. Name the first tool or prompt to try, what result shape to expect, and which discovery resource to inspect next.',
+      'Be practical. Say what to try first, what it returns, and what resource to inspect next.',
     ].join('\n\n'),
   );
 }
@@ -301,7 +301,7 @@ export function buildDeepResearchPrompt(args: z.infer<typeof DeepResearchPromptS
       `Research topic: ${args.topic}`,
       ...(args.deliverable ? [`Requested deliverable: ${args.deliverable}`] : []),
       renderWorkflowSection('deep-research'),
-      'Explain how to use the recommended tools and resources for this research job, and state what kind of grounded result the user should expect.',
+      'Explain the recommended path and the grounded result the user should expect.',
     ].join('\n\n'),
   );
 }
@@ -312,7 +312,7 @@ export function buildProjectMemoryPrompt(args: z.infer<typeof ProjectMemoryPromp
       ...(args.project ? [`Project: ${args.project}`] : []),
       ...(args.currentTask ? [`Current task: ${args.currentTask}`] : []),
       renderWorkflowSection('project-memory'),
-      'Explain when to keep work in a live session versus a reusable cache, and mention how the transcript resource helps inspect an active conversation.',
+      'Explain when to use a live session vs a cache. Mention transcript inspection.',
     ].join('\n\n'),
   );
 }
@@ -322,7 +322,7 @@ export function buildDiffReviewPrompt(args: z.infer<typeof DiffReviewPromptSchem
     [
       ...(args.focus ? [`Review focus: ${args.focus}`] : []),
       renderWorkflowSection('diff-review'),
-      'Explain how to review local changes with the recommended tools, including when to escalate from repo-wide review to targeted file comparison or error diagnosis.',
+      'Explain when to use repo review, file compare, or error diagnosis.',
     ].join('\n\n'),
   );
 }

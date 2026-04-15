@@ -37,16 +37,14 @@ const NOISY_EXCLUDE_PATHSPECS = [
 ];
 
 const SYSTEM_INSTRUCTION =
-  'Senior code reviewer. Input: unified git diff.\n\n' +
-  'Produce a structured PR review in Markdown.\n\n' +
-  '## Summary\n2-3 sentences: what changed and why.\n' +
-  '## Impact\nAffected modules, APIs, and downstream dependencies.\n' +
-  '## Risks\nBugs, regressions, security issues, edge cases. Flag severity (low/medium/high).\n' +
-  '## Suggestions\nActionable fixes. Reference file paths and line ranges from the diff.\n\n' +
-  'Constraints:\n' +
-  '- Only analyze code logic and behavior changes. Ignore formatting and whitespace.\n' +
-  '- Cite specific files and hunks. Never invent content not in the diff.\n' +
-  '- If the diff is clean, say so briefly — do not pad the review.';
+  'Review the unified diff for behavior changes, regressions, and risk. Ignore formatting-only changes. ' +
+  'Cite file paths and hunk context from the diff. Do not invent content or line numbers. ' +
+  'If the diff is clean, say so briefly.\n\n' +
+  'Output:\n' +
+  '## Findings\n' +
+  'List issues by severity with file references.\n' +
+  '## Fixes\n' +
+  'Give concise next steps.';
 
 export interface DiffStats {
   files: number;

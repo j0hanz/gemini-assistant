@@ -23,12 +23,10 @@ const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
 const EXECUTE_CODE_TOOL_LABEL = 'Execute Code';
 
 const ANALYZE_FILE_SYSTEM_INSTRUCTION =
-  'Structure findings with headings. Reference specific sections, lines, or elements. ' +
-  'Base analysis strictly on the file content.';
+  'Answer from the file only. Cite relevant sections, lines, or elements. Use headings when useful.';
 
 const EXECUTE_CODE_SYSTEM_INSTRUCTION =
-  'Generate clean, working code. Include brief comments for non-obvious logic. ' +
-  'Handle edge cases. Provide a concise explanation after execution.';
+  'Write working code. Comment only non-obvious logic. Handle likely edge cases. Briefly explain the result after execution.';
 
 interface ExecutionSummary {
   code: string;

@@ -15,14 +15,12 @@ import { getAI, MODEL } from '../client.js';
 const TOOL_LABEL = 'Explain Error';
 
 const SYSTEM_INSTRUCTION =
-  'You are an expert debugger. Given an error (stack trace, log output, or error message), ' +
-  'diagnose the root cause and provide a fix.\n\n' +
-  'Structure your response with these markdown sections:\n' +
-  '## Root Cause\nWhat specifically caused the error.\n\n' +
-  '## Explanation\nDetailed explanation of why the error occurred and the underlying mechanism.\n\n' +
-  '## Suggested Fix\nConcrete, actionable steps or code changes to resolve the error.\n\n' +
-  'Be precise. Reference specific lines, symbols, or patterns from the provided context. ' +
-  'If the language is specified, tailor advice to its idioms and ecosystem.';
+  'Debug the provided error. Base conclusions on the provided context and grounded tool results. ' +
+  'Reference relevant symbols, files, lines, or snippets. If a language is given, use its norms.\n\n' +
+  'Output:\n' +
+  '## Cause\n' +
+  '## Fix\n' +
+  '## Notes';
 
 function buildPrompt(
   error: string,
@@ -30,19 +28,21 @@ function buildPrompt(
   language?: string,
   urls?: readonly string[],
 ): string {
-  const sections: string[] = [`### Error\n\n\`\`\`\n${error}\n\`\`\``];
+  const sections: string[] = [`## Error\n\n\`\`\`\n${error}\n\`\`\``];
 
   if (codeContext) {
-    sections.push(`### Code Context\n\n\`\`\`${language ?? ''}\n${codeContext}\n\`\`\``);
+    sections.push(`## Code\n\n\`\`\`${language ?? ''}\n${codeContext}\n\`\`\``);
   }
 
   if (language) {
-    sections.push(`### Language\n\n${language}`);
+    sections.push(`## Language\n\n${language}`);
   }
 
   if (urls && urls.length > 0) {
-    sections.push(`### Reference URLs\n\n${urls.join('\n')}`);
+    sections.push(`## URLs\n\n${urls.join('\n')}`);
   }
+
+  sections.push('## Task\n\nDiagnose the error and propose the most likely fix.');
 
   return sections.join('\n\n');
 }

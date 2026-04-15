@@ -68,10 +68,6 @@ function optionalPromptText(description: string) {
   return optionalText(description, MAX_PROMPT_TEXT_LENGTH);
 }
 
-function contextText(description: string) {
-  return optionalText(description, MAX_CONTEXT_TEXT_LENGTH);
-}
-
 function completeByPrefix<T extends string>(
   values: readonly T[],
   transform: (value: string | undefined) => string = (value) => value ?? '',
@@ -142,7 +138,12 @@ export function createAnalyzeFilePromptSchema(rootsFetcher: RootsFetcher) {
 }
 
 export const CodeReviewPromptSchema = z.strictObject({
-  code: promptText('The code to review'),
+  code: z
+    .string()
+    .min(1)
+    .max(MAX_PROMPT_TEXT_LENGTH)
+    .refine((val) => val.trim().length > 0, { error: 'Code must not be blank' })
+    .describe('The code to review'),
   language: completable(optionalPromptText('Programming language of the code'), completeLanguage),
 });
 
@@ -155,8 +156,19 @@ export const SummarizePromptSchema = z.strictObject({
 });
 
 export const ExplainErrorPromptSchema = z.strictObject({
-  error: promptText('The error message or stack trace'),
-  context: contextText('Additional context about what was being done'),
+  error: z
+    .string()
+    .min(1)
+    .max(MAX_PROMPT_TEXT_LENGTH)
+    .refine((val) => val.trim().length > 0, { error: 'Error must not be blank' })
+    .describe('The error message or stack trace'),
+  context: z
+    .string()
+    .min(1)
+    .max(MAX_CONTEXT_TEXT_LENGTH)
+    .refine((val) => val.trim().length > 0, { error: 'Context must not be blank' })
+    .optional()
+    .describe('Additional context about what was being done'),
 });
 
 export const GettingStartedPromptSchema = z.strictObject({});

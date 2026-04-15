@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
@@ -16,6 +17,8 @@ import {
   SearchInputSchema,
   UpdateCacheInputSchema,
 } from '../../src/schemas/inputs.js';
+
+const absolutePath = (...segments: string[]) => join(process.cwd(), ...segments);
 
 describe('AskInputSchema', () => {
   it('accepts valid minimal input', () => {
@@ -172,7 +175,7 @@ describe('AgenticSearchInputSchema', () => {
 describe('AnalyzeFileInputSchema', () => {
   it('accepts valid input', () => {
     const result = AnalyzeFileInputSchema.safeParse({
-      filePath: '/path/to/file.pdf',
+      filePath: absolutePath('fixtures', 'file.pdf'),
       question: 'Summarize this document',
     });
     assert.ok(result.success);
@@ -188,8 +191,16 @@ describe('AnalyzeFileInputSchema', () => {
 
   it('rejects empty question', () => {
     const result = AnalyzeFileInputSchema.safeParse({
-      filePath: '/path/to/file.pdf',
+      filePath: absolutePath('fixtures', 'file.pdf'),
       question: '',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects relative filePath', () => {
+    const result = AnalyzeFileInputSchema.safeParse({
+      filePath: 'relative/file.pdf',
+      question: 'Summarize this document',
     });
     assert.strictEqual(result.success, false);
   });
@@ -204,7 +215,7 @@ describe('AnalyzeFileInputSchema', () => {
 describe('CreateCacheInputSchema', () => {
   it('accepts with filePaths', () => {
     const result = CreateCacheInputSchema.safeParse({
-      filePaths: ['/path/to/big-file.pdf'],
+      filePaths: [absolutePath('fixtures', 'big-file.pdf')],
     });
     assert.ok(result.success);
   });
@@ -218,7 +229,7 @@ describe('CreateCacheInputSchema', () => {
 
   it('accepts with both filePaths and systemInstruction', () => {
     const result = CreateCacheInputSchema.safeParse({
-      filePaths: ['/a.pdf'],
+      filePaths: [absolutePath('fixtures', 'a.pdf')],
       systemInstruction: 'Analyze these.',
       ttl: '7200s',
     });
@@ -236,8 +247,23 @@ describe('CreateCacheInputSchema', () => {
   });
 
   it('rejects filePaths exceeding 50 entries', () => {
-    const paths = Array.from({ length: 51 }, (_, i) => `/file${i}.txt`);
+    const paths = Array.from({ length: 51 }, (_, i) => absolutePath(`file${i}.txt`));
     const result = CreateCacheInputSchema.safeParse({ filePaths: paths });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects relative filePaths', () => {
+    const result = CreateCacheInputSchema.safeParse({
+      filePaths: ['relative/file.txt'],
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects malformed ttl values', () => {
+    const result = CreateCacheInputSchema.safeParse({
+      systemInstruction: 'Cache this',
+      ttl: '2 hours',
+    });
     assert.strictEqual(result.success, false);
   });
 });
@@ -270,6 +296,14 @@ describe('UpdateCacheInputSchema', () => {
     const result = UpdateCacheInputSchema.safeParse({
       cacheName: 'cachedContents/abc123',
       ttl: '',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects malformed ttl', () => {
+    const result = UpdateCacheInputSchema.safeParse({
+      cacheName: 'cachedContents/abc123',
+      ttl: 'ten minutes',
     });
     assert.strictEqual(result.success, false);
   });
@@ -433,16 +467,16 @@ describe('ExplainErrorInputSchema', () => {
 describe('CompareFilesInputSchema', () => {
   it('accepts valid minimal input', () => {
     const result = CompareFilesInputSchema.safeParse({
-      filePathA: '/path/to/a.ts',
-      filePathB: '/path/to/b.ts',
+      filePathA: absolutePath('src', 'a.ts'),
+      filePathB: absolutePath('src', 'b.ts'),
     });
     assert.ok(result.success);
   });
 
   it('accepts with question', () => {
     const result = CompareFilesInputSchema.safeParse({
-      filePathA: '/a.ts',
-      filePathB: '/b.ts',
+      filePathA: absolutePath('a.ts'),
+      filePathB: absolutePath('b.ts'),
       question: 'security differences',
     });
     assert.ok(result.success);
@@ -450,8 +484,8 @@ describe('CompareFilesInputSchema', () => {
 
   it('accepts with googleSearch', () => {
     const result = CompareFilesInputSchema.safeParse({
-      filePathA: '/a.ts',
-      filePathB: '/b.ts',
+      filePathA: absolutePath('a.ts'),
+      filePathB: absolutePath('b.ts'),
       googleSearch: true,
     });
     assert.ok(result.success);
@@ -459,8 +493,8 @@ describe('CompareFilesInputSchema', () => {
 
   it('accepts with cacheName', () => {
     const result = CompareFilesInputSchema.safeParse({
-      filePathA: '/a.ts',
-      filePathB: '/b.ts',
+      filePathA: absolutePath('a.ts'),
+      filePathB: absolutePath('b.ts'),
       cacheName: 'cachedContents/abc',
     });
     assert.ok(result.success);
@@ -472,12 +506,20 @@ describe('CompareFilesInputSchema', () => {
   });
 
   it('rejects missing filePathB', () => {
-    const result = CompareFilesInputSchema.safeParse({ filePathA: '/a.ts' });
+    const result = CompareFilesInputSchema.safeParse({ filePathA: absolutePath('a.ts') });
     assert.strictEqual(result.success, false);
   });
 
   it('rejects empty filePathA', () => {
     const result = CompareFilesInputSchema.safeParse({ filePathA: '', filePathB: '/b.ts' });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects relative file paths', () => {
+    const result = CompareFilesInputSchema.safeParse({
+      filePathA: 'a.ts',
+      filePathB: absolutePath('b.ts'),
+    });
     assert.strictEqual(result.success, false);
   });
 });
@@ -499,7 +541,7 @@ describe('GenerateDiagramInputSchema', () => {
   it('accepts with sourceFilePath', () => {
     const result = GenerateDiagramInputSchema.safeParse({
       description: 'class diagram',
-      sourceFilePath: '/src/index.ts',
+      sourceFilePath: absolutePath('src', 'index.ts'),
     });
     assert.ok(result.success);
   });
@@ -507,7 +549,7 @@ describe('GenerateDiagramInputSchema', () => {
   it('accepts with sourceFilePaths', () => {
     const result = GenerateDiagramInputSchema.safeParse({
       description: 'architecture',
-      sourceFilePaths: ['/src/a.ts', '/src/b.ts'],
+      sourceFilePaths: [absolutePath('src', 'a.ts'), absolutePath('src', 'b.ts')],
     });
     assert.ok(result.success);
   });
@@ -515,14 +557,14 @@ describe('GenerateDiagramInputSchema', () => {
   it('rejects both sourceFilePath and sourceFilePaths', () => {
     const result = GenerateDiagramInputSchema.safeParse({
       description: 'test',
-      sourceFilePath: '/a.ts',
-      sourceFilePaths: ['/b.ts'],
+      sourceFilePath: absolutePath('a.ts'),
+      sourceFilePaths: [absolutePath('b.ts')],
     });
     assert.strictEqual(result.success, false);
   });
 
   it('rejects more than 10 sourceFilePaths', () => {
-    const paths = Array.from({ length: 11 }, (_, i) => `/file${i}.ts`);
+    const paths = Array.from({ length: 11 }, (_, i) => absolutePath(`file${i}.ts`));
     const result = GenerateDiagramInputSchema.safeParse({
       description: 'test',
       sourceFilePaths: paths,
@@ -552,6 +594,14 @@ describe('GenerateDiagramInputSchema', () => {
       cacheName: 'cachedContents/xyz',
     });
     assert.ok(result.success);
+  });
+
+  it('rejects relative source file paths', () => {
+    const result = GenerateDiagramInputSchema.safeParse({
+      description: 'test',
+      sourceFilePath: 'src/index.ts',
+    });
+    assert.strictEqual(result.success, false);
   });
 
   it('rejects empty description', () => {

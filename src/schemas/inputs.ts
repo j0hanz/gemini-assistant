@@ -4,6 +4,7 @@ import { z } from 'zod/v4';
 
 import { completeCacheNames, THINKING_LEVELS } from '../client.js';
 import { completeSessionIds } from '../sessions.js';
+import { absolutePath, requiredText, ttlSeconds } from './shared.js';
 
 const thinkingLevelField = z
   .enum(THINKING_LEVELS)
@@ -11,7 +12,7 @@ const thinkingLevelField = z
   .describe('Thinking depth for reasoning.');
 
 export const AskInputSchema = z.object({
-  message: z.string().min(1).max(100_000).describe('User message or prompt'),
+  message: requiredText('User message or prompt', 100_000),
   sessionId: completable(
     z
       .string()
@@ -22,6 +23,8 @@ export const AskInputSchema = z.object({
   ),
   systemInstruction: z
     .string()
+    .trim()
+    .min(1)
     .optional()
     .describe('System prompt (used on session creation or single-turn)'),
   thinkingLevel: z
@@ -77,17 +80,27 @@ export const AskInputSchema = z.object({
 export type AskInput = z.infer<typeof AskInputSchema>;
 
 export const ExecuteCodeInputSchema = z.object({
-  task: z.string().min(1).describe('Code task to perform'),
-  language: z.string().optional().describe('Preferred language (Python is sandbox default)'),
+  task: requiredText('Code task to perform'),
+  language: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe('Preferred language (Python is sandbox default)'),
   thinkingLevel: thinkingLevelField,
 });
 export type ExecuteCodeInput = z.infer<typeof ExecuteCodeInputSchema>;
 
 export const SearchInputSchema = z.object({
-  query: z.string().min(1).describe('Question or topic to research'),
-  systemInstruction: z.string().optional().describe('Custom instructions for result format'),
+  query: requiredText('Question or topic to research'),
+  systemInstruction: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe('Custom instructions for result format'),
   urls: z
-    .array(z.string())
+    .array(z.string().trim().min(1))
     .max(20)
     .optional()
     .describe('URLs to deeply analyze alongside search results (max 20). Enables URL Context.'),
@@ -96,7 +109,7 @@ export const SearchInputSchema = z.object({
 export type SearchInput = z.infer<typeof SearchInputSchema>;
 
 export const AgenticSearchInputSchema = z.object({
-  topic: z.string().min(1).describe('Topic or question for deep multi-step research'),
+  topic: requiredText('Topic or question for deep multi-step research'),
   searchDepth: z
     .number()
     .int()
@@ -110,8 +123,8 @@ export const AgenticSearchInputSchema = z.object({
 export type AgenticSearchInput = z.infer<typeof AgenticSearchInputSchema>;
 
 export const AnalyzeFileInputSchema = z.object({
-  filePath: z.string().trim().min(1).describe('Absolute path to the file'),
-  question: z.string().min(1).describe('What to analyze or ask about the file'),
+  filePath: absolutePath('Absolute path to the file'),
+  question: requiredText('What to analyze or ask about the file'),
   thinkingLevel: thinkingLevelField,
   mediaResolution: z
     .enum(['MEDIA_RESOLUTION_LOW', 'MEDIA_RESOLUTION_MEDIUM', 'MEDIA_RESOLUTION_HIGH'])
@@ -122,12 +135,17 @@ export type AnalyzeFileInput = z.infer<typeof AnalyzeFileInputSchema>;
 
 export const AnalyzeUrlInputSchema = z.object({
   urls: z
-    .array(z.string())
+    .array(z.string().trim().min(1))
     .min(1)
     .max(20)
     .describe('URLs to analyze (max 20). Must be publicly accessible.'),
-  question: z.string().min(1).describe('What to analyze or ask about the URL content'),
-  systemInstruction: z.string().optional().describe('Custom system instruction for analysis'),
+  question: requiredText('What to analyze or ask about the URL content'),
+  systemInstruction: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe('Custom system instruction for analysis'),
   thinkingLevel: thinkingLevelField,
 });
 export type AnalyzeUrlInput = z.infer<typeof AnalyzeUrlInputSchema>;
@@ -140,10 +158,12 @@ export const AnalyzePrInputSchema = z
       .describe('Return diff content and stats without Gemini analysis.'),
     cacheName: z
       .string()
+      .trim()
+      .min(1)
       .optional()
       .describe('Cache resource name to provide project context during review.'),
     thinkingLevel: thinkingLevelField,
-    language: z.string().optional().describe('Primary language for review context'),
+    language: z.string().trim().min(1).optional().describe('Primary language for review context'),
   })
   .strict();
 export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
@@ -151,17 +171,21 @@ export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
 export const CreateCacheInputSchema = z
   .object({
     filePaths: z
-      .array(z.string().min(1))
+      .array(absolutePath('Absolute path to a file to cache'))
       .max(50)
       .optional()
       .describe('Absolute paths to files to cache'),
-    systemInstruction: z.string().optional().describe('System instruction to cache with the files'),
-    ttl: z
+    systemInstruction: z
       .string()
+      .trim()
+      .min(1)
       .optional()
-      .describe('Time-to-live for the cache (e.g., "3600s"). Defaults to 1 hour.'),
+      .describe('System instruction to cache with the files'),
+    ttl: ttlSeconds('Time-to-live for the cache (e.g., "3600s"). Defaults to 1 hour.').optional(),
     displayName: z
       .string()
+      .trim()
+      .min(1)
       .optional()
       .describe('Human-readable label. Existing cache with same displayName is auto-replaced.'),
   })
@@ -176,7 +200,11 @@ export type CreateCacheInput = z.infer<typeof CreateCacheInputSchema>;
 
 function createCacheNameSchema(action: 'delete' | 'update') {
   return completable(
-    z.string().min(1).describe(`Cache resource name to ${action} (e.g., "cachedContents/...")`),
+    z
+      .string()
+      .trim()
+      .min(1)
+      .describe(`Cache resource name to ${action} (e.g., "cachedContents/...")`),
     completeCacheNames,
   );
 }
@@ -192,39 +220,50 @@ export type DeleteCacheInput = z.infer<typeof DeleteCacheInputSchema>;
 
 export const UpdateCacheInputSchema = z.object({
   cacheName: createCacheNameSchema('update'),
-  ttl: z.string().min(1).describe('New TTL from now (e.g., "7200s" for 2 hours)'),
+  ttl: ttlSeconds('New TTL from now (e.g., "7200s" for 2 hours)'),
 });
 export type UpdateCacheInput = z.infer<typeof UpdateCacheInputSchema>;
 
 export const ExplainErrorInputSchema = z.object({
-  error: z.string().min(1).describe('Error message, stack trace, or log output to diagnose'),
+  error: requiredText('Error message, stack trace, or log output to diagnose'),
   codeContext: z
     .string()
+    .trim()
+    .min(1)
     .optional()
     .describe('Relevant source code surrounding the error for deeper analysis'),
-  language: z.string().optional().describe('Programming language (e.g., "typescript", "python")'),
+  language: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe('Programming language (e.g., "typescript", "python")'),
   thinkingLevel: thinkingLevelField,
   googleSearch: z
     .boolean()
     .optional()
     .describe('Enable Google Search to look up error messages in docs, issues, and forums.'),
   urls: z
-    .array(z.string())
+    .array(z.string().trim().min(1))
     .max(20)
     .optional()
     .describe('URLs for additional context (docs, issues). Enables URL Context (max 20).'),
   cacheName: z
     .string()
+    .trim()
+    .min(1)
     .optional()
     .describe('Cache resource name to provide project context during diagnosis.'),
 });
 export type ExplainErrorInput = z.infer<typeof ExplainErrorInputSchema>;
 
 export const CompareFilesInputSchema = z.object({
-  filePathA: z.string().trim().min(1).describe('Absolute path to the first file'),
-  filePathB: z.string().trim().min(1).describe('Absolute path to the second file'),
+  filePathA: absolutePath('Absolute path to the first file'),
+  filePathB: absolutePath('Absolute path to the second file'),
   question: z
     .string()
+    .trim()
+    .min(1)
     .optional()
     .describe('Specific comparison focus (e.g., "security differences", "API changes")'),
   thinkingLevel: thinkingLevelField,
@@ -234,6 +273,8 @@ export const CompareFilesInputSchema = z.object({
     .describe('Enable Google Search for best practices or migration context.'),
   cacheName: z
     .string()
+    .trim()
+    .min(1)
     .optional()
     .describe('Cache resource name to provide project context during comparison.'),
 });
@@ -241,19 +282,17 @@ export type CompareFilesInput = z.infer<typeof CompareFilesInputSchema>;
 
 export const GenerateDiagramInputSchema = z
   .object({
-    description: z.string().min(1).describe('What to diagram: architecture, flow, sequence, etc.'),
+    description: requiredText('What to diagram: architecture, flow, sequence, etc.'),
     diagramType: z
       .enum(['mermaid', 'plantuml'])
       .optional()
       .default('mermaid')
       .describe('Diagram syntax format (default: mermaid)'),
-    sourceFilePath: z
-      .string()
-      .trim()
-      .optional()
-      .describe('Absolute path to a single source file to derive the diagram from'),
+    sourceFilePath: absolutePath(
+      'Absolute path to a single source file to derive the diagram from',
+    ).optional(),
     sourceFilePaths: z
-      .array(z.string().trim().min(1))
+      .array(absolutePath('Absolute path to a source file for diagram generation'))
       .min(1)
       .max(10)
       .optional()
@@ -265,6 +304,8 @@ export const GenerateDiagramInputSchema = z
       .describe('Enable Google Search for diagram patterns or syntax reference.'),
     cacheName: z
       .string()
+      .trim()
+      .min(1)
       .optional()
       .describe('Cache resource name to provide project context for diagram generation.'),
     validateSyntax: z

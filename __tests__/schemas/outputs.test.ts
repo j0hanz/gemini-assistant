@@ -100,6 +100,19 @@ describe('AnalyzePrOutputSchema', () => {
     });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects negative diff stats', () => {
+    const result = AnalyzePrOutputSchema.safeParse({
+      analysis: 'Review text',
+      stats: { files: -1, additions: 10, deletions: 5 },
+      reviewedPaths: ['src/index.ts'],
+      includedUntracked: [],
+      skippedBinaryPaths: [],
+      skippedLargePaths: [],
+      empty: false,
+    });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('ExecuteCodeOutputSchema', () => {
@@ -268,6 +281,11 @@ describe('UsageMetadataSchema', () => {
     const result = UsageMetadataSchema.safeParse({ promptTokenCount: 'many' });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects negative token counts', () => {
+    const result = UsageMetadataSchema.safeParse({ totalTokenCount: -1 });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('CreateCacheOutputSchema', () => {
@@ -316,6 +334,11 @@ describe('ListCachesOutputSchema', () => {
 
   it('rejects missing count', () => {
     const result = ListCachesOutputSchema.safeParse({ caches: [] });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects negative count', () => {
+    const result = ListCachesOutputSchema.safeParse({ caches: [], count: -1 });
     assert.strictEqual(result.success, false);
   });
 });

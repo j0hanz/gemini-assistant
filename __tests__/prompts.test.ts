@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
@@ -20,7 +21,9 @@ import {
   SUMMARY_STYLES,
 } from '../src/prompts.js';
 
-const promptDefinitions = createPromptDefinitions(async () => ['C:\\workspace']);
+const workspaceRoot = process.cwd();
+const absolutePath = (...segments: string[]) => join(workspaceRoot, ...segments);
+const promptDefinitions = createPromptDefinitions(async () => [workspaceRoot]);
 
 describe('prompt definitions', () => {
   it('exports the full public prompt surface', () => {
@@ -32,11 +35,11 @@ describe('prompt definitions', () => {
 });
 
 describe('analyze-file prompt', () => {
-  const schema = createAnalyzeFilePromptSchema(async () => ['C:\\workspace']);
+  const schema = createAnalyzeFilePromptSchema(async () => [workspaceRoot]);
 
   it('accepts valid analyze-file input', () => {
     const result = schema.safeParse({
-      filePath: 'C:\\workspace\\src\\index.ts',
+      filePath: absolutePath('src', 'index.ts'),
       question: 'What does this file do?',
     });
     assert.ok(result.success);
@@ -44,6 +47,14 @@ describe('analyze-file prompt', () => {
 
   it('rejects missing filePath', () => {
     const result = schema.safeParse({ question: 'Missing path' });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects relative filePath', () => {
+    const result = schema.safeParse({
+      filePath: 'src/index.ts',
+      question: 'What does this file do?',
+    });
     assert.strictEqual(result.success, false);
   });
 });
@@ -61,6 +72,11 @@ describe('code-review prompt', () => {
 
   it('rejects code exceeding max length', () => {
     const result = CodeReviewPromptSchema.safeParse({ code: 'x'.repeat(100_001) });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects blank code', () => {
+    const result = CodeReviewPromptSchema.safeParse({ code: '   ' });
     assert.strictEqual(result.success, false);
   });
 
@@ -87,6 +103,11 @@ describe('summarize prompt', () => {
     const result = SummarizePromptSchema.safeParse({ text: 'Content', style: 'verbose' });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects blank text', () => {
+    const result = SummarizePromptSchema.safeParse({ text: '   ' });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('explain-error prompt', () => {
@@ -101,6 +122,13 @@ describe('explain-error prompt', () => {
     const result = ExplainErrorPromptSchema.safeParse({
       error: 'some error',
       context: 'x'.repeat(10_001),
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects blank error input', () => {
+    const result = ExplainErrorPromptSchema.safeParse({
+      error: '   ',
     });
     assert.strictEqual(result.success, false);
   });
@@ -129,6 +157,11 @@ describe('workflow prompts', () => {
     assert.match(text, /agentic_search/);
     assert.match(text, /search/);
     assert.match(text, /workflows:\/\/list/);
+  });
+
+  it('rejects blank deep-research topic', () => {
+    const result = DeepResearchPromptSchema.safeParse({ topic: '   ' });
+    assert.strictEqual(result.success, false);
   });
 
   it('accepts optional project-memory fields and references transcript inspection', () => {

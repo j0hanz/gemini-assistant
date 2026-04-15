@@ -12,6 +12,7 @@ import {
   isPathWithinRoot,
   type RootsFetcher,
 } from './lib/validation.js';
+import { absolutePath, optionalText, requiredText } from './schemas/shared.js';
 
 import { findWorkflowEntry } from './catalog.js';
 
@@ -60,15 +61,15 @@ interface PromptDefinition {
 }
 
 function promptText(description: string) {
-  return z.string().max(MAX_PROMPT_TEXT_LENGTH).describe(description);
+  return requiredText(description, MAX_PROMPT_TEXT_LENGTH);
 }
 
 function optionalPromptText(description: string) {
-  return promptText(description).optional();
+  return optionalText(description, MAX_PROMPT_TEXT_LENGTH);
 }
 
 function contextText(description: string) {
-  return z.string().max(MAX_CONTEXT_TEXT_LENGTH).optional().describe(description);
+  return optionalText(description, MAX_CONTEXT_TEXT_LENGTH);
 }
 
 function completeByPrefix<T extends string>(
@@ -133,7 +134,7 @@ const completeSummaryStyle = completeByPrefix(SUMMARY_STYLES);
 export function createAnalyzeFilePromptSchema(rootsFetcher: RootsFetcher) {
   return z.object({
     filePath: completable(
-      promptText('Absolute path to the file to analyze from workspace roots'),
+      absolutePath('Absolute path to the file to analyze from workspace roots'),
       buildPathAcFetcher(rootsFetcher),
     ),
     question: promptText('Your question or analysis request about the file'),

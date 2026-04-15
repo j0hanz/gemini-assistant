@@ -1,10 +1,12 @@
 import { z } from 'zod/v4';
 
+import { nonNegativeInt } from './shared.js';
+
 export const UsageMetadataSchema = z.object({
-  promptTokenCount: z.number().optional().describe('Tokens in the prompt'),
-  candidatesTokenCount: z.number().optional().describe('Tokens in the response'),
-  thoughtsTokenCount: z.number().optional().describe('Tokens used for thinking'),
-  totalTokenCount: z.number().optional().describe('Total tokens for the request'),
+  promptTokenCount: nonNegativeInt('Tokens in the prompt').optional(),
+  candidatesTokenCount: nonNegativeInt('Tokens in the response').optional(),
+  thoughtsTokenCount: nonNegativeInt('Tokens used for thinking').optional(),
+  totalTokenCount: nonNegativeInt('Total tokens for the request').optional(),
 });
 
 const FunctionCallEntrySchema = z.object({
@@ -92,9 +94,9 @@ export const AnalyzePrOutputSchema = z.object({
   analysis: z.string().describe('Comprehensive PR review'),
   stats: z
     .object({
-      files: z.number().describe('Files changed'),
-      additions: z.number().describe('Lines added'),
-      deletions: z.number().describe('Lines deleted'),
+      files: nonNegativeInt('Files changed'),
+      additions: nonNegativeInt('Lines added'),
+      deletions: nonNegativeInt('Lines deleted'),
     })
     .describe('Diff statistics'),
   reviewedPaths: z.array(z.string()).describe('Relative file paths included in the review'),
@@ -125,7 +127,7 @@ const CacheSummarySchema = z.object({
   expireTime: z.string().optional().describe('Expiration timestamp'),
   createTime: z.string().optional().describe('Creation timestamp'),
   updateTime: z.string().optional().describe('Last update timestamp'),
-  totalTokenCount: z.number().optional().describe('Total cached tokens'),
+  totalTokenCount: nonNegativeInt('Total cached tokens').optional(),
 });
 
 export const CreateCacheOutputSchema = z.object({
@@ -137,7 +139,7 @@ export const CreateCacheOutputSchema = z.object({
 
 export const ListCachesOutputSchema = z.object({
   caches: z.array(CacheSummarySchema).describe('Active caches'),
-  count: z.number().describe('Number of active caches'),
+  count: nonNegativeInt('Number of active caches'),
 });
 
 export const DeleteCacheOutputSchema = z.object({

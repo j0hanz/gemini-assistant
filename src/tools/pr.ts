@@ -48,14 +48,7 @@ interface DiffStats {
   deletions: number;
 }
 
-// Single-slot diff storage — always overwritten on each tool call
-let currentDiff: string | undefined;
-
-export function getCurrentDiff(): string | undefined {
-  return currentDiff;
-}
-
-function computeDiffStats(diff: string): DiffStats {
+export function computeDiffStats(diff: string): DiffStats {
   let files = 0;
   let additions = 0;
   let deletions = 0;
@@ -69,11 +62,17 @@ function computeDiffStats(diff: string): DiffStats {
   return { files, additions, deletions };
 }
 
-function buildGitDiffArgs(mode: DiffMode): string[] {
+export function buildGitDiffArgs(mode: DiffMode, base?: string, paths?: string[]): string[] {
   // '--' separates flags from pathspecs to prevent flag injection
   const args = ['diff', '--no-color', '--no-ext-diff'];
   if (mode === 'staged') args.push('--cached');
-  args.push('--', ...NOISY_EXCLUDE_PATHSPECS);
+  if (base) args.push(base);
+  // User-specified paths override default exclusions
+  if (paths && paths.length > 0) {
+    args.push('--', ...paths);
+  } else {
+    args.push('--', ...NOISY_EXCLUDE_PATHSPECS);
+  }
   return args;
 }
 
@@ -86,9 +85,14 @@ async function findGitRoot(signal?: AbortSignal): Promise<string> {
   return stdout.trim();
 }
 
-async function generateDiff(mode: DiffMode, signal?: AbortSignal): Promise<string> {
+async function generateDiff(
+  mode: DiffMode,
+  signal?: AbortSignal,
+  base?: string,
+  paths?: string[],
+): Promise<string> {
   const gitRoot = await findGitRoot(signal);
-  const { stdout } = await execFileAsync('git', buildGitDiffArgs(mode), {
+  const { stdout } = await execFileAsync('git', buildGitDiffArgs(mode, base, paths), {
     cwd: gitRoot,
     encoding: 'utf8',
     maxBuffer: GIT_MAX_BUFFER,
@@ -98,7 +102,7 @@ async function generateDiff(mode: DiffMode, signal?: AbortSignal): Promise<strin
   return stdout;
 }
 
-function truncateDiff(diff: string): { diff: string; truncated: boolean } {
+export function truncateDiff(diff: string): { diff: string; truncated: boolean } {
   if (diff.length <= MAX_DIFF_CHARS) return { diff, truncated: false };
   return {
     diff: diff.slice(0, MAX_DIFF_CHARS) + '\n\n[... diff truncated due to size ...]',
@@ -110,7 +114,10 @@ function describeModeHint(mode: DiffMode): string {
   return mode === 'staged' ? 'staged with git add' : 'modified but not yet staged';
 }
 
-function formatGitError(err: unknown): string {
+export function formatGitError(err: unknown): string {
+  if (!(err instanceof Error)) {
+    return `Failed to run git: ${String(err)}. Ensure git is installed.`;
+  }
   const gitErr = err as Error & { code?: number | string; stderr?: string };
   if (typeof gitErr.code === 'number') {
     const stderr = gitErr.stderr?.trim() ?? 'unknown error';
@@ -119,7 +126,7 @@ function formatGitError(err: unknown): string {
   return `Failed to run git: ${gitErr.message}. Ensure git is installed.`;
 }
 
-function buildAnalysisPrompt(
+export function buildAnalysisPrompt(
   diff: string,
   mode: DiffMode,
   stats: DiffStats,
@@ -137,16 +144,26 @@ function buildAnalysisPrompt(
   return parts.join('\n');
 }
 
+/** Validates a git ref to prevent flag injection. */
+const SAFE_GIT_REF = /^[\w/.\-~^@{}]+$/;
+
 async function analyzePrWork(
-  { mode, thinkingLevel, language }: AnalyzePrInput,
+  { mode, thinkingLevel, language, base, paths, dryRun, cacheName }: AnalyzePrInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
+  // Validate base ref if provided
+  if (base && !SAFE_GIT_REF.test(base)) {
+    return errorResult(
+      `${TOOL_LABEL}: Invalid base ref "${base}". Only alphanumeric, /, ., -, ~, ^, @, {} are allowed.`,
+    );
+  }
+
   // Step 1: Generate diff
   await sendProgress(ctx, 0, 3, `${TOOL_LABEL}: Generating ${mode} diff`);
 
   let rawDiff: string;
   try {
-    rawDiff = await generateDiff(mode, ctx.mcpReq.signal);
+    rawDiff = await generateDiff(mode, ctx.mcpReq.signal, base, paths);
   } catch (err) {
     return errorResult(`${TOOL_LABEL}: ${formatGitError(err)}`);
   }
@@ -156,9 +173,6 @@ async function analyzePrWork(
       `No ${mode} changes found. Ensure you have changes that are ${describeModeHint(mode)}.`,
     );
   }
-
-  // Overwrite stored diff — single slot, always replaced
-  currentDiff = rawDiff;
 
   const stats = computeDiffStats(rawDiff);
   const { diff, truncated } = truncateDiff(rawDiff);
@@ -170,6 +184,19 @@ async function analyzePrWork(
     `${TOOL_LABEL}: ${String(stats.files)} files (+${String(stats.additions)}, -${String(stats.deletions)})`,
   );
 
+  // Dry-run mode: return diff + stats without Gemini analysis
+  if (dryRun) {
+    return {
+      content: [{ type: 'text' as const, text: diff }],
+      structuredContent: {
+        analysis: diff,
+        stats,
+        mode,
+        ...(truncated ? { truncated } : {}),
+      },
+    };
+  }
+
   // Step 2: Analyze with Gemini
   await sendProgress(ctx, 2, 3, `${TOOL_LABEL}: Analyzing changes`);
   await ctx.mcpReq.log(
@@ -179,6 +206,10 @@ async function analyzePrWork(
 
   const prompt = buildAnalysisPrompt(diff, mode, stats, language);
 
+  // When cacheName is set, Gemini ignores systemInstruction — prepend it to the prompt
+  const effectiveSystemInstruction = cacheName ? undefined : SYSTEM_INSTRUCTION;
+  const effectivePrompt = cacheName ? `${SYSTEM_INSTRUCTION}\n\n${prompt}` : prompt;
+
   return await handleToolExecution(
     ctx,
     'analyze_pr',
@@ -186,11 +217,12 @@ async function analyzePrWork(
     () =>
       getAI().models.generateContentStream({
         model: MODEL,
-        contents: prompt,
+        contents: effectivePrompt,
         config: buildGenerateContentConfig(
           {
-            systemInstruction: SYSTEM_INSTRUCTION,
+            systemInstruction: effectiveSystemInstruction,
             thinkingLevel: thinkingLevel ?? 'HIGH',
+            cacheName,
           },
           ctx.mcpReq.signal,
         ),
@@ -200,6 +232,7 @@ async function analyzePrWork(
         analysis: textContent || '',
         stats,
         mode,
+        ...(truncated ? { truncated } : {}),
       },
       reportMessage: `${String(stats.files)} files reviewed (+${String(stats.additions)}, -${String(stats.deletions)})`,
     }),
@@ -213,9 +246,10 @@ export function registerAnalyzePrTool(server: McpServer): void {
     {
       title: TOOL_LABEL,
       description:
-        'Generate a git diff and analyze it with Gemini in one step. ' +
-        'Always overwrites the previous diff. ' +
-        'Use "unstaged" for working-tree changes, "staged" for indexed changes.',
+        'Analyze local git diff with Gemini. ' +
+        'Supports unstaged, staged, and branch comparison (via base ref). ' +
+        'Use dryRun to preview the diff without AI analysis. ' +
+        'Use cacheName to provide project context during review.',
       inputSchema: AnalyzePrInputSchema,
       outputSchema: AnalyzePrOutputSchema,
       annotations: READONLY_ANNOTATIONS,

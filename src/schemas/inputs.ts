@@ -68,6 +68,22 @@ export const AnalyzePrInputSchema = z.object({
     .enum(['unstaged', 'staged'])
     .default('unstaged')
     .describe('"unstaged": working-tree changes. "staged": changes added with git add.'),
+  base: z
+    .string()
+    .optional()
+    .describe(
+      'Base ref for comparison (e.g., "origin/main", "HEAD~3"). Omit for working-tree diff.',
+    ),
+  paths: z
+    .array(z.string())
+    .max(20)
+    .optional()
+    .describe('File paths or directories to include. Overrides default lock/minified exclusions.'),
+  dryRun: z.boolean().optional().describe('Return diff content and stats without Gemini analysis.'),
+  cacheName: z
+    .string()
+    .optional()
+    .describe('Cache resource name to provide project context during review.'),
   thinkingLevel: thinkingLevelField,
   language: z.string().optional().describe('Primary language for review context'),
 });

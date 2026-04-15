@@ -70,6 +70,7 @@ export const AnalyzePrOutputSchema = z.object({
     })
     .describe('Diff statistics'),
   mode: z.string().describe('Diff mode used'),
+  truncated: z.boolean().optional().describe('Whether the diff was truncated due to size'),
   ...baseOutputFields,
 });
 

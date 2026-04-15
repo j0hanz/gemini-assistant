@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
 import {
+  isPathWithinRoot,
   parseAllowedHosts,
   resolveAllowedHosts,
   resolveAndValidatePath,
@@ -228,6 +229,15 @@ describe('resolveAndValidatePath', () => {
     });
   });
 
+  it('rejects sibling paths that share the same string prefix as the allowed root', async () => {
+    const fetcher = async () => [process.cwd()];
+    const siblingPath = join(`${process.cwd()}-backup`, 'secret.txt');
+
+    await assert.rejects(() => resolveAndValidatePath(siblingPath, fetcher), {
+      message: /outside allowed directories/,
+    });
+  });
+
   it('falls back to env roots when rootsFetcher returns empty', async () => {
     const testPath = join(process.cwd(), 'package.json');
     const fetcher = async () => [] as string[];
@@ -242,5 +252,22 @@ describe('resolveAndValidatePath', () => {
     };
     const result = await resolveAndValidatePath(testPath, fetcher);
     assert.ok(result.endsWith('package.json'));
+  });
+});
+
+describe('isPathWithinRoot', () => {
+  it('accepts exact root matches', () => {
+    assert.equal(isPathWithinRoot(process.cwd(), process.cwd()), true);
+  });
+
+  it('accepts descendants under the allowed root', () => {
+    assert.equal(isPathWithinRoot(join(process.cwd(), 'src', 'index.ts'), process.cwd()), true);
+  });
+
+  it('rejects sibling paths with a matching string prefix', () => {
+    assert.equal(
+      isPathWithinRoot(join(`${process.cwd()}-backup`, 'index.ts'), process.cwd()),
+      false,
+    );
   });
 });

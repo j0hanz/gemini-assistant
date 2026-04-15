@@ -1,7 +1,7 @@
 import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
 
 import { realpath } from 'node:fs/promises';
-import { isAbsolute, normalize, resolve } from 'node:path';
+import { isAbsolute, normalize, parse, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // ── Host Validation ───────────────────────────────────────────────────
@@ -77,6 +77,23 @@ function parseRootUri(uri: string): string | undefined {
   }
 }
 
+function normalizePathForComparison(filePath: string): string {
+  const resolved = resolve(normalize(filePath));
+  const root = parse(resolved).root;
+  const trimmed = resolved.length > root.length ? resolved.replace(/[\\/]+$/, '') : resolved;
+  return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed;
+}
+
+export function isPathWithinRoot(filePath: string, rootPath: string): boolean {
+  const candidate = normalizePathForComparison(filePath);
+  const root = normalizePathForComparison(rootPath);
+
+  if (candidate === root) return true;
+
+  const rel = relative(root, candidate);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
 export async function getAllowedRoots(rootsFetcher?: RootsFetcher): Promise<string[]> {
   if (!rootsFetcher) return ENV_ROOTS;
   try {
@@ -121,9 +138,7 @@ export async function resolveAndValidatePath(
 
   const allowedRoots = await getAllowedRoots(rootsFetcher);
 
-  const isUnderAllowedRoot = allowedRoots.some((root) =>
-    resolved.toLowerCase().startsWith(root.toLowerCase()),
-  );
+  const isUnderAllowedRoot = allowedRoots.some((root) => isPathWithinRoot(resolved, root));
 
   if (!isUnderAllowedRoot) {
     throw new Error(

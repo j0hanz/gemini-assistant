@@ -69,6 +69,7 @@ describe('AnalyzePrOutputSchema', () => {
       reviewedPaths: ['src/index.ts'],
       includedUntracked: ['src/new-file.ts'],
       skippedBinaryPaths: ['assets/logo.png'],
+      skippedLargePaths: ['fixtures/big.json'],
       empty: false,
     });
     assert.ok(result.success);
@@ -81,6 +82,7 @@ describe('AnalyzePrOutputSchema', () => {
       reviewedPaths: [],
       includedUntracked: [],
       skippedBinaryPaths: [],
+      skippedLargePaths: [],
       empty: true,
     });
     assert.ok(result.success);
@@ -92,6 +94,7 @@ describe('AnalyzePrOutputSchema', () => {
       stats: { files: 1, additions: 10, deletions: 5 },
       includedUntracked: [],
       skippedBinaryPaths: [],
+      skippedLargePaths: [],
       empty: false,
     });
     assert.strictEqual(result.success, false);

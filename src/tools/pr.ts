@@ -58,13 +58,14 @@ interface LocalDiffSnapshot {
   reviewedPaths: string[];
   includedUntracked: string[];
   skippedBinaryPaths: string[];
+  skippedLargePaths: string[];
   empty: boolean;
 }
 
 interface UntrackedPatchResult {
   patch?: string;
   path: string;
-  binary: boolean;
+  skipReason?: 'binary' | 'too_large';
 }
 
 type AnalyzePrStructuredContent = Record<string, unknown> & {
@@ -73,6 +74,7 @@ type AnalyzePrStructuredContent = Record<string, unknown> & {
   reviewedPaths: string[];
   includedUntracked: string[];
   skippedBinaryPaths: string[];
+  skippedLargePaths: string[];
   empty: boolean;
   truncated?: boolean;
 };
@@ -268,19 +270,22 @@ async function buildUntrackedPatch(
   const absolutePath = join(gitRoot, relativePath);
   const fileStats = await stat(absolutePath).catch(() => null);
 
-  if (!fileStats || !fileStats.isFile() || fileStats.size > MAX_UNTRACKED_FILE_BYTES) {
-    return { path: relativePath, binary: false };
+  if (!fileStats?.isFile()) {
+    return { path: relativePath };
+  }
+
+  if (fileStats.size > MAX_UNTRACKED_FILE_BYTES) {
+    return { path: relativePath, skipReason: 'too_large' };
   }
 
   const fileBuffer = await readFile(absolutePath);
   if (isBinaryContent(fileBuffer)) {
-    return { path: relativePath, binary: true };
+    return { path: relativePath, skipReason: 'binary' };
   }
 
   const fileContent = UTF8_DECODER.decode(fileBuffer);
   return {
     path: relativePath,
-    binary: false,
     patch: buildUntrackedFilePatch(relativePath, fileContent, (fileStats.mode & 0o111) !== 0),
   };
 }
@@ -320,6 +325,7 @@ export function buildAnalysisPrompt(
   reviewedPaths: string[],
   includedUntracked: string[],
   skippedBinaryPaths: string[],
+  skippedLargePaths: string[],
   language?: string,
 ): string {
   const parts = [
@@ -343,6 +349,13 @@ export function buildAnalysisPrompt(
           ...skippedBinaryPaths.map((filePath) => `- ${filePath}`),
         ]
       : []),
+    ...(skippedLargePaths.length > 0
+      ? [
+          '',
+          `Skipped Large Untracked Files (> ${String(MAX_UNTRACKED_FILE_BYTES)} bytes):`,
+          ...skippedLargePaths.map((filePath) => `- ${filePath}`),
+        ]
+      : []),
     '',
     '```diff',
     diff,
@@ -354,15 +367,21 @@ export function buildAnalysisPrompt(
 function summarizeUntrackedResults(untrackedResults: UntrackedPatchResult[]): {
   includedUntracked: string[];
   skippedBinaryPaths: string[];
+  skippedLargePaths: string[];
   untrackedPatches: string[];
 } {
   const includedUntracked: string[] = [];
   const skippedBinaryPaths: string[] = [];
+  const skippedLargePaths: string[] = [];
   const untrackedPatches: string[] = [];
 
   for (const result of untrackedResults) {
-    if (result.binary) {
+    if (result.skipReason === 'binary') {
       skippedBinaryPaths.push(result.path);
+      continue;
+    }
+    if (result.skipReason === 'too_large') {
+      skippedLargePaths.push(result.path);
       continue;
     }
     if (!result.patch?.trim()) {
@@ -374,8 +393,9 @@ function summarizeUntrackedResults(untrackedResults: UntrackedPatchResult[]): {
 
   includedUntracked.sort();
   skippedBinaryPaths.sort();
+  skippedLargePaths.sort();
 
-  return { includedUntracked, skippedBinaryPaths, untrackedPatches };
+  return { includedUntracked, skippedBinaryPaths, skippedLargePaths, untrackedPatches };
 }
 
 function buildStructuredContent(
@@ -389,14 +409,27 @@ function buildStructuredContent(
     reviewedPaths: snapshot.reviewedPaths,
     includedUntracked: snapshot.includedUntracked,
     skippedBinaryPaths: snapshot.skippedBinaryPaths,
+    skippedLargePaths: snapshot.skippedLargePaths,
     empty: snapshot.empty,
     ...(truncated ? { truncated } : {}),
   };
 }
 
 function buildNoChangesAnalysis(snapshot: LocalDiffSnapshot): string {
-  return snapshot.skippedBinaryPaths.length > 0
-    ? `No reviewable local text changes to review. Skipped binary untracked files: ${snapshot.skippedBinaryPaths.join(', ')}.`
+  const skippedNotes: string[] = [];
+
+  if (snapshot.skippedBinaryPaths.length > 0) {
+    skippedNotes.push(`binary untracked files: ${snapshot.skippedBinaryPaths.join(', ')}`);
+  }
+
+  if (snapshot.skippedLargePaths.length > 0) {
+    skippedNotes.push(
+      `large untracked files over ${String(MAX_UNTRACKED_FILE_BYTES)} bytes: ${snapshot.skippedLargePaths.join(', ')}`,
+    );
+  }
+
+  return skippedNotes.length > 0
+    ? `No reviewable local text changes to review. Skipped ${skippedNotes.join('; ')}.`
     : 'No local changes to review.';
 }
 
@@ -436,7 +469,7 @@ async function buildLocalDiffSnapshot(signal?: AbortSignal): Promise<LocalDiffSn
     untrackedResults.push(await buildUntrackedPatch(gitRoot, relativePath));
   }
 
-  const { includedUntracked, skippedBinaryPaths, untrackedPatches } =
+  const { includedUntracked, skippedBinaryPaths, skippedLargePaths, untrackedPatches } =
     summarizeUntrackedResults(untrackedResults);
 
   const reviewedPaths = [...new Set([...trackedSnapshot.paths, ...includedUntracked])].sort();
@@ -449,6 +482,7 @@ async function buildLocalDiffSnapshot(signal?: AbortSignal): Promise<LocalDiffSn
     reviewedPaths,
     includedUntracked,
     skippedBinaryPaths,
+    skippedLargePaths,
     empty,
   };
 }
@@ -503,6 +537,7 @@ async function analyzePrWork(
     snapshot.reviewedPaths,
     snapshot.includedUntracked,
     snapshot.skippedBinaryPaths,
+    snapshot.skippedLargePaths,
     language,
   );
 

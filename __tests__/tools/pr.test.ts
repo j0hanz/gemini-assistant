@@ -128,7 +128,7 @@ describe('buildAnalysisPrompt', () => {
   const reviewedPaths = ['src/a.ts', 'src/b.ts'];
 
   it('builds prompt without language', () => {
-    const prompt = buildAnalysisPrompt('diff content', stats, reviewedPaths, [], []);
+    const prompt = buildAnalysisPrompt('diff content', stats, reviewedPaths, [], [], []);
     assert.ok(prompt.includes('## Local Diff Snapshot'));
     assert.ok(prompt.includes('Files: 2 | +10 -5'));
     assert.ok(prompt.includes('Reviewed Paths:'));
@@ -145,6 +145,7 @@ describe('buildAnalysisPrompt', () => {
       reviewedPaths,
       ['src/new-file.ts'],
       ['assets/logo.png'],
+      ['fixtures/big.json'],
       'TypeScript',
     );
     assert.ok(prompt.includes('Language: TypeScript'));
@@ -152,6 +153,8 @@ describe('buildAnalysisPrompt', () => {
     assert.ok(prompt.includes('- src/new-file.ts'));
     assert.ok(prompt.includes('Skipped Binary Untracked Files:'));
     assert.ok(prompt.includes('- assets/logo.png'));
+    assert.ok(prompt.includes('Skipped Large Untracked Files (> 1048576 bytes):'));
+    assert.ok(prompt.includes('- fixtures/big.json'));
   });
 });
 

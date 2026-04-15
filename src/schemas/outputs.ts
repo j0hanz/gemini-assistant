@@ -89,6 +89,11 @@ export const AnalyzePrOutputSchema = z.object({
   skippedBinaryPaths: z
     .array(z.string())
     .describe('Relative untracked binary files skipped from the generated diff'),
+  skippedLargePaths: z
+    .array(z.string())
+    .describe(
+      'Relative untracked files skipped because they exceeded the synthesized diff size limit',
+    ),
   empty: z.boolean().describe('Whether there were any local changes to review'),
   truncated: z.boolean().optional().describe('Whether the diff was truncated due to size'),
   ...baseOutputFields,

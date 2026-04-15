@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   AgenticSearchOutputSchema,
   AnalyzeFileOutputSchema,
+  AnalyzePrOutputSchema,
   AnalyzeUrlOutputSchema,
   AskOutputSchema,
   CreateCacheOutputSchema,
@@ -32,6 +33,59 @@ describe('AskOutputSchema', () => {
 
   it('rejects a missing answer field', () => {
     const result = AskOutputSchema.safeParse({ data: { status: 'ok' } });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('accepts schemaWarnings array', () => {
+    const result = AskOutputSchema.safeParse({
+      answer: 'test',
+      schemaWarnings: ['Failed to parse JSON from model response'],
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts output without schemaWarnings', () => {
+    const result = AskOutputSchema.safeParse({ answer: 'test', data: { x: 1 } });
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.schemaWarnings, undefined);
+    }
+  });
+
+  it('rejects non-array schemaWarnings', () => {
+    const result = AskOutputSchema.safeParse({
+      answer: 'test',
+      schemaWarnings: 'not an array',
+    });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('AnalyzePrOutputSchema', () => {
+  it('accepts valid mode enum values', () => {
+    const result = AnalyzePrOutputSchema.safeParse({
+      analysis: 'Review text',
+      stats: { files: 1, additions: 10, deletions: 5 },
+      mode: 'unstaged',
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts staged mode', () => {
+    const result = AnalyzePrOutputSchema.safeParse({
+      analysis: 'Review text',
+      stats: { files: 2, additions: 20, deletions: 10 },
+      mode: 'staged',
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects invalid mode value', () => {
+    const result = AnalyzePrOutputSchema.safeParse({
+      analysis: 'Review text',
+      stats: { files: 1, additions: 10, deletions: 5 },
+      mode: 'invalid',
+    });
     assert.strictEqual(result.success, false);
   });
 });

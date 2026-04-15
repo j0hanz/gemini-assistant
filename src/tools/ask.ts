@@ -1,6 +1,7 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 import { completable } from '@modelcontextprotocol/server';
 
+import { Validator } from '@cfworker/json-schema';
 import type { Chat } from '@google/genai';
 import { z } from 'zod/v4';
 
@@ -39,6 +40,88 @@ interface AskArgs {
 
 const ASK_TOOL_LABEL = 'Ask Gemini';
 const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
+const THINKING_SUPPRESSED_WARNING =
+  'thinkingLevel was ignored because responseSchema activates JSON mode (mutually exclusive)';
+
+// ── Structured Output Validation ──────────────────────────────────────
+
+const GEMINI_SUPPORTED_KEYWORDS = new Set([
+  // structural
+  'type',
+  'properties',
+  'required',
+  'additionalProperties',
+  'enum',
+  'format',
+  'minimum',
+  'maximum',
+  'items',
+  'prefixItems',
+  'minItems',
+  'maxItems',
+  // descriptive
+  'title',
+  'description',
+  // composition
+  'anyOf',
+  'oneOf',
+  'allOf',
+  '$ref',
+  // meta
+  '$schema',
+  '$id',
+]);
+
+function collectUnsupportedKeywords(
+  schema: Record<string, unknown>,
+  found = new Set<string>(),
+): string[] {
+  for (const key of Object.keys(schema)) {
+    if (!GEMINI_SUPPORTED_KEYWORDS.has(key)) {
+      found.add(key);
+    }
+  }
+
+  // Recurse into nested schemas
+  const nested = schema.properties;
+  if (nested && typeof nested === 'object') {
+    for (const value of Object.values(nested as Record<string, unknown>)) {
+      if (value && typeof value === 'object') {
+        collectUnsupportedKeywords(value as Record<string, unknown>, found);
+      }
+    }
+  }
+
+  for (const compositionKey of ['anyOf', 'oneOf', 'allOf', 'items', 'prefixItems'] as const) {
+    const val = schema[compositionKey];
+    if (Array.isArray(val)) {
+      for (const item of val) {
+        if (item && typeof item === 'object') {
+          collectUnsupportedKeywords(item as Record<string, unknown>, found);
+        }
+      }
+    } else if (val && typeof val === 'object') {
+      collectUnsupportedKeywords(val as Record<string, unknown>, found);
+    }
+  }
+
+  if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
+    collectUnsupportedKeywords(schema.additionalProperties as Record<string, unknown>, found);
+  }
+
+  return [...found];
+}
+
+function validateJsonAgainstSchema(data: unknown, schema: Record<string, unknown>): string[] {
+  try {
+    const validator = new Validator(schema, '2020-12', false);
+    const result = validator.validate(data);
+    if (result.valid) return [];
+    return result.errors.map((e) => `${e.instanceLocation}: ${e.error}`);
+  } catch {
+    return ['Schema validation could not be performed'];
+  }
+}
 
 function tryParseJsonResponse(text: string): unknown {
   const candidates = [text.trim()];
@@ -64,9 +147,11 @@ function buildAskStructuredContent(
   text: string,
   streamResult: Pick<StreamResult, 'thoughtText' | 'usageMetadata' | 'functionCalls'>,
   jsonMode?: boolean,
+  responseSchema?: Record<string, unknown>,
 ): {
   answer: string;
   data?: unknown;
+  schemaWarnings?: string[];
   thoughts?: string;
   usage?: ReturnType<typeof extractUsage>;
   functionCalls?: FunctionCallEntry[];
@@ -75,9 +160,18 @@ function buildAskStructuredContent(
   const answer = parsedData === undefined ? text : JSON.stringify(parsedData, null, 2);
   const usage = extractUsage(streamResult.usageMetadata);
 
+  const warnings: string[] = [];
+  if (jsonMode && parsedData === undefined) {
+    warnings.push('Failed to parse JSON from model response');
+  }
+  if (parsedData !== undefined && responseSchema) {
+    warnings.push(...validateJsonAgainstSchema(parsedData, responseSchema));
+  }
+
   return {
     answer,
     ...(parsedData !== undefined ? { data: parsedData } : {}),
+    ...(warnings.length > 0 ? { schemaWarnings: warnings } : {}),
     ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
     ...(usage ? { usage } : {}),
     ...(streamResult.functionCalls.length > 0 ? { functionCalls: streamResult.functionCalls } : {}),
@@ -88,13 +182,22 @@ function formatStructuredResult(
   result: CallToolResult,
   streamResult: Pick<StreamResult, 'thoughtText' | 'usageMetadata' | 'functionCalls'>,
   jsonMode?: boolean,
+  responseSchema?: Record<string, unknown>,
+  thinkingSuppressed?: boolean,
 ): CallToolResult {
   if (result.isError) return result;
   const structured = buildAskStructuredContent(
     extractTextContent(result.content),
     streamResult,
     jsonMode,
+    responseSchema,
   );
+
+  if (thinkingSuppressed) {
+    const warnings = structured.schemaWarnings ?? [];
+    warnings.push(THINKING_SUPPRESSED_WARNING);
+    structured.schemaWarnings = warnings;
+  }
 
   return {
     ...result,
@@ -152,13 +255,20 @@ async function runAskStream(
   streamGenerator: () => ReturnType<ReturnType<typeof getAI>['models']['generateContentStream']>,
   jsonMode = false,
   thinkingSuppressed = false,
+  responseSchema?: Record<string, unknown>,
 ): Promise<CallToolResult> {
   await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Preparing`);
   if (thinkingSuppressed) {
-    await ctx.mcpReq.log(
-      'debug',
-      'ask: thinkingLevel ignored because responseSchema activates JSON mode (mutually exclusive)',
-    );
+    await ctx.mcpReq.log('debug', `ask: ${THINKING_SUPPRESSED_WARNING}`);
+  }
+  if (responseSchema) {
+    const unsupported = collectUnsupportedKeywords(responseSchema);
+    if (unsupported.length > 0) {
+      await ctx.mcpReq.log(
+        'warning',
+        `ask: responseSchema contains keywords unsupported by Gemini: ${unsupported.join(', ')}`,
+      );
+    }
   }
   const { streamResult, result } = await executeToolStream(
     ctx,
@@ -169,7 +279,7 @@ async function runAskStream(
   const hasThoughts = streamResult.thoughtText.length > 0;
   const detail = hasThoughts ? 'completed with reasoning' : 'completed';
   await reportCompletion(ctx, ASK_TOOL_LABEL, detail);
-  return formatStructuredResult(result, streamResult, jsonMode);
+  return formatStructuredResult(result, streamResult, jsonMode, responseSchema, thinkingSuppressed);
 }
 
 function appendSessionResource(result: CallToolResult, sessionId: string): void {
@@ -199,6 +309,7 @@ async function askWithoutSession(
           }),
     !!args.responseSchema,
     thinkingSuppressed,
+    args.responseSchema,
   );
 }
 
@@ -304,7 +415,7 @@ export function registerAskTool(server: McpServer): void {
           )
           .optional()
           .describe(
-            'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking.',
+            'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking. Gemini 2.0 models may require a propertyOrdering array.',
           ),
         temperature: z
           .number()

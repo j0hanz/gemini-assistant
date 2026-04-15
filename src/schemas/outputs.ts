@@ -24,6 +24,10 @@ const baseOutputFields = {
 export const AskOutputSchema = z.object({
   answer: z.string().describe('Generated response'),
   data: z.unknown().optional().describe('Parsed structured response when JSON mode is used'),
+  schemaWarnings: z
+    .array(z.string())
+    .optional()
+    .describe('Warnings from structured output validation (parse failures, schema mismatches)'),
   ...baseOutputFields,
 });
 
@@ -78,7 +82,7 @@ export const AnalyzePrOutputSchema = z.object({
       deletions: z.number().describe('Lines deleted'),
     })
     .describe('Diff statistics'),
-  mode: z.string().describe('Diff mode used'),
+  mode: z.enum(['unstaged', 'staged']).describe('Diff mode used'),
   truncated: z.boolean().optional().describe('Whether the diff was truncated due to size'),
   ...baseOutputFields,
 });

@@ -324,6 +324,52 @@ describe('consumeStreamWithProgress', () => {
     );
   });
 
+  it('handles mixed Gemini-style chunk sequences while preserving metadata', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const researchChunk = makeChunk([{ text: '**Planning**\n\nInvestigating.', thought: true }]);
+    const candidates = researchChunk.candidates ?? [];
+    const firstCandidate = candidates[0];
+    if (firstCandidate) {
+      firstCandidate.groundingMetadata = {
+        groundingChunks: [{ web: { title: 'Docs', uri: 'https://example.com/docs' } }],
+      };
+    }
+
+    const finalChunk = makeChunk([{ text: 'final answer' }], FinishReason.STOP);
+    finalChunk.usageMetadata = {
+      promptTokenCount: 12,
+      candidatesTokenCount: 7,
+      totalTokenCount: 19,
+    } as GenerateContentResponse['usageMetadata'];
+
+    const stream = fakeStream([
+      researchChunk,
+      makeChunk([{ functionCall: { name: 'fetchRepo', args: { repo: 'acme/app' } } }]),
+      makeChunk([{ executableCode: { code: 'print(2 + 2)' } }]),
+      makeChunk([{ codeExecutionResult: { output: '4', outcome: Outcome.OUTCOME_OK } }]),
+      finalChunk,
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.strictEqual(result.text, 'final answer');
+    assert.strictEqual(result.thoughtText, '**Planning**\n\nInvestigating.');
+    assert.strictEqual(result.finishReason, FinishReason.STOP);
+    assert.strictEqual(result.usageMetadata?.totalTokenCount, 19);
+    assert.ok(result.toolsUsed.includes('googleSearch'));
+    assert.ok(result.toolsUsed.includes('fetchRepo'));
+    assert.ok(result.toolsUsed.includes('codeExecution'));
+    assert.deepStrictEqual(result.functionCalls, [{ name: 'fetchRepo', args: { repo: 'acme/app' } }]);
+
+    const messages = progressCalls.map((c) => c.message);
+    assert.ok(messages.includes('Searching the web'));
+    assert.ok(messages.includes('Planning'));
+    assert.ok(messages.includes('Tool: fetchRepo'));
+    assert.ok(messages.includes('Executing code'));
+    assert.ok(messages.includes('Code executed'));
+    assert.ok(messages.includes('Compiling results'));
+  });
+
   it('emits thought headers as progress notifications', async () => {
     const { ctx, progressCalls } = makeMockContext();
     const stream = fakeStream([
@@ -404,6 +450,25 @@ describe('consumeStreamWithProgress', () => {
       thinkingIndex + 1,
       'no extra messages between Thinking and Generating',
     );
+  });
+
+  it('emits fallback thinking progress after several headerless thought chunks', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ text: 'one', thought: true }]),
+      makeChunk([{ text: ' two', thought: true }]),
+      makeChunk([{ text: ' three', thought: true }]),
+      makeChunk([{ text: ' four', thought: true }]),
+      makeChunk([{ text: ' five', thought: true }]),
+      makeChunk([{ text: 'answer' }], FinishReason.STOP),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.strictEqual(result.text, 'answer');
+    assert.match(result.thoughtText, /one two three four five/);
+    const messages = progressCalls.map((c) => c.message);
+    assert.ok(messages.includes('Still thinking…'));
   });
 
   it('emits thought headers with toolLabel prefix', async () => {

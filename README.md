@@ -114,8 +114,14 @@ MCP_TRANSPORT=http npx tsx src/index.ts
 
 Web-standard transport:
 
+- Auto-serves only when the process is running under Bun or Deno.
+- In Node, `startWebStandardTransport()` returns a `handler` but does not start a listener, so `MCP_TRANSPORT=web-standard npx tsx src/index.ts` is not a runnable server entrypoint.
+- If you are running from Node, use `stdio` or `http` unless you are importing the transport and wiring the handler yourself.
+
+Bun example:
+
 ```bash
-MCP_TRANSPORT=web-standard npx tsx src/index.ts
+MCP_TRANSPORT=web-standard bun run src/index.ts
 ```
 
 ## MCP Client Setup

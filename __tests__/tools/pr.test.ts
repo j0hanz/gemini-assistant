@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 // Set dummy API key so client.ts doesn't exit
 process.env.API_KEY ??= 'test-key-for-pr';
 
 const {
+  buildLocalDiffSnapshot,
   budgetDiffUnits,
   buildAnalysisPrompt,
   buildGitDiffArgs,
@@ -12,8 +17,21 @@ const {
   computeDiffStats,
   formatGitError,
   matchesNoisyPath,
+  scoreDiffUnitRisk,
   splitDiffUnits,
 } = await import('../../src/tools/pr.js');
+
+function runGit(cwd: string, args: string[]) {
+  execFileSync('git', args, { cwd, stdio: 'pipe' });
+}
+
+async function createTempRepo(): Promise<string> {
+  const repoRoot = await mkdtemp(join(tmpdir(), 'gemini-assistant-pr-'));
+  runGit(repoRoot, ['init']);
+  runGit(repoRoot, ['config', 'user.name', 'Test User']);
+  runGit(repoRoot, ['config', 'user.email', 'test@example.com']);
+  return repoRoot;
+}
 
 describe('computeDiffStats', () => {
   it('returns zeros for an empty string', () => {
@@ -153,25 +171,87 @@ describe('budgetDiffUnits', () => {
     assert.deepStrictEqual(result.omittedPaths, ['src/small.ts']);
   });
 
-  it('keeps the highest-signal file first by change size', () => {
+  it('prefers high-risk source files over larger low-signal assets', () => {
     const diff = [
-      'diff --git a/src/small.ts b/src/small.ts',
-      '--- a/src/small.ts',
-      '+++ b/src/small.ts',
-      '+one',
-      'diff --git a/src/large.ts b/src/large.ts',
-      '--- a/src/large.ts',
-      '+++ b/src/large.ts',
+      'diff --git a/public/banner.png b/public/banner.png',
+      '--- a/public/banner.png',
+      '+++ b/public/banner.png',
       '+one',
       '+two',
       '+three',
       '+four',
+      'diff --git a/src/auth/session.ts b/src/auth/session.ts',
+      '--- a/src/auth/session.ts',
+      '+++ b/src/auth/session.ts',
+      '+token',
     ].join('\n');
     const result = budgetDiffUnits(splitDiffUnits(diff), 120);
 
-    assert.match(result.diff, /src\/large\.ts/);
-    assert.doesNotMatch(result.diff, /src\/small\.ts/);
-    assert.deepStrictEqual(result.omittedPaths, ['src/small.ts']);
+    assert.match(result.diff, /src\/auth\/session\.ts/);
+    assert.doesNotMatch(result.diff, /public\/banner\.png/);
+    assert.deepStrictEqual(result.omittedPaths, ['public/banner.png']);
+  });
+
+  it('gives config and routing changes higher risk scores than tests', () => {
+    const configUnit = splitDiffUnits(
+      ['diff --git a/tsconfig.json b/tsconfig.json', '--- a/tsconfig.json', '+++ b/tsconfig.json', '+{}'].join(
+        '\n',
+      ),
+    )[0];
+    const testUnit = splitDiffUnits(
+      [
+        'diff --git a/tests/app.test.ts b/tests/app.test.ts',
+        '--- a/tests/app.test.ts',
+        '+++ b/tests/app.test.ts',
+        '+expect(true).toBe(true)',
+      ].join('\n'),
+    )[0];
+
+    assert.ok(configUnit);
+    assert.ok(testUnit);
+    assert.ok(scoreDiffUnitRisk(configUnit) > scoreDiffUnitRisk(testUnit));
+  });
+});
+
+describe('buildLocalDiffSnapshot', () => {
+  it('captures staged, unstaged, untracked, binary, large, and noisy paths from a temp repo', async () => {
+    const repoRoot = await createTempRepo();
+
+    try {
+      await mkdir(join(repoRoot, 'src'), { recursive: true });
+      await mkdir(join(repoRoot, 'assets'), { recursive: true });
+      await mkdir(join(repoRoot, 'dist'), { recursive: true });
+      await writeFile(join(repoRoot, 'src', 'staged.ts'), 'export const staged = 1;\n');
+      await writeFile(join(repoRoot, 'src', 'unstaged.ts'), 'export const unstaged = 1;\n');
+      runGit(repoRoot, ['add', '.']);
+      runGit(repoRoot, ['commit', '-m', 'initial']);
+
+      await writeFile(join(repoRoot, 'src', 'staged.ts'), 'export const staged = 2;\n');
+      runGit(repoRoot, ['add', 'src/staged.ts']);
+      await writeFile(join(repoRoot, 'src', 'unstaged.ts'), 'export const unstaged = 2;\n');
+      await writeFile(join(repoRoot, 'src', 'new-file.ts'), 'export const created = true;\n');
+      await writeFile(join(repoRoot, 'assets', 'logo.png'), Buffer.from([0, 1, 2, 3]));
+      await writeFile(join(repoRoot, 'fixtures-large.json'), 'x'.repeat(1_100_000));
+      await writeFile(join(repoRoot, 'dist', 'bundle.min.js'), 'console.log("skip");\n');
+
+      const snapshot = await buildLocalDiffSnapshot(repoRoot);
+
+      assert.strictEqual(snapshot.empty, false);
+      assert.ok(snapshot.reviewedPaths.includes('src/staged.ts'));
+      assert.ok(snapshot.reviewedPaths.includes('src/unstaged.ts'));
+      assert.ok(snapshot.reviewedPaths.includes('src/new-file.ts'));
+      assert.ok(snapshot.includedUntracked.includes('src/new-file.ts'));
+      assert.ok(snapshot.skippedBinaryPaths.includes('assets/logo.png'));
+      assert.ok(snapshot.skippedLargePaths.includes('fixtures-large.json'));
+      assert.ok(!snapshot.reviewedPaths.includes('dist/bundle.min.js'));
+      assert.match(snapshot.diff, /src\/staged\.ts/);
+      assert.match(snapshot.diff, /src\/unstaged\.ts/);
+      assert.match(snapshot.diff, /src\/new-file\.ts/);
+      assert.doesNotMatch(snapshot.diff, /bundle\.min\.js/);
+      assert.ok(snapshot.stats.files >= 3);
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
   });
 });
 

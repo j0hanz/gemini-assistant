@@ -39,6 +39,15 @@ describe('documentation and package metadata', () => {
     }
   });
 
+  it('keeps web-standard runtime guidance aligned with transport behavior', () => {
+    assert.match(readme, /Auto-serves only when the process is running under Bun or Deno\./);
+    assert.match(readme, /returns a `handler` but does not start a listener/);
+    assert.doesNotMatch(
+      readme,
+      /```bash\s*MCP_TRANSPORT=web-standard npx tsx src\/index\.ts\s*```/s,
+    );
+  });
+
   it('keeps package metadata aligned with distribution and discovery vocabulary', () => {
     assert.match(packageJson.description ?? '', /workflow/i);
     assert.match(packageJson.description ?? '', /MCP/i);

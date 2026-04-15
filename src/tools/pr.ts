@@ -25,6 +25,94 @@ const EMPTY_DIFF_STATS: DiffStats = { files: 0, additions: 0, deletions: 0 };
 const DIFF_HEADER_PATTERN = /^diff --git (?:"a\/(.+?)"|a\/(.+?)) (?:"b\/(.+?)"|b\/(.+?))$/;
 const UTF8_DECODER = new TextDecoder('utf-8');
 const UTF8_FATAL_DECODER = new TextDecoder('utf-8', { fatal: true });
+const SOURCE_FILE_EXTENSIONS = new Set([
+  '.c',
+  '.cc',
+  '.cpp',
+  '.cs',
+  '.go',
+  '.java',
+  '.js',
+  '.jsx',
+  '.kt',
+  '.mjs',
+  '.php',
+  '.py',
+  '.rb',
+  '.rs',
+  '.sh',
+  '.sql',
+  '.swift',
+  '.ts',
+  '.tsx',
+]);
+const ASSET_FILE_EXTENSIONS = new Set([
+  '.avif',
+  '.bmp',
+  '.gif',
+  '.ico',
+  '.jpeg',
+  '.jpg',
+  '.mp3',
+  '.mp4',
+  '.pdf',
+  '.png',
+  '.svg',
+  '.tif',
+  '.tiff',
+  '.wav',
+  '.webm',
+  '.webp',
+]);
+const HIGH_RISK_SEGMENTS = new Set([
+  'api',
+  'apis',
+  'auth',
+  'config',
+  'configs',
+  'data',
+  'database',
+  'db',
+  'middleware',
+  'migrations',
+  'route',
+  'routes',
+  'router',
+  'routers',
+  'schema',
+  'schemas',
+  'server',
+  'services',
+  'store',
+  'stores',
+]);
+const HIGH_RISK_BASENAMES = [
+  'dockerfile',
+  'eslint.config.',
+  'package.json',
+  'tsconfig',
+  'vite.config.',
+  'webpack.config.',
+];
+const LOW_SIGNAL_SEGMENTS = new Set([
+  '__snapshots__',
+  '__tests__',
+  'assets',
+  'coverage',
+  'dist',
+  'docs',
+  'example',
+  'examples',
+  'fixture',
+  'fixtures',
+  'node_modules',
+  'public',
+  'snapshot',
+  'snapshots',
+  'test',
+  'tests',
+  'vendor',
+]);
 
 const NOISY_EXCLUDE_PATHSPECS = [
   ':!package-lock.json',
@@ -127,6 +215,14 @@ function parseDiffPath(diffHeader: string): string {
   return match ? (match[3] ?? match[4] ?? diffHeader) : diffHeader;
 }
 
+function normalizePath(filePath: string): string {
+  return filePath.replaceAll('\\', '/').toLowerCase();
+}
+
+function splitPathSegments(filePath: string): string[] {
+  return normalizePath(filePath).split('/').filter(Boolean);
+}
+
 export function computeDiffStats(diff: string): DiffStats {
   const files = new Set<string>();
   let additions = 0;
@@ -189,7 +285,22 @@ function uniqueSortedPaths(paths: Iterable<string>): string[] {
 }
 
 async function findGitRoot(signal?: AbortSignal): Promise<string> {
+  const cwd = process.cwd();
   const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+    cwd,
+    encoding: 'utf8',
+    timeout: GIT_TIMEOUT_MS,
+    ...(signal ? { signal } : {}),
+  });
+  return stdout.trim();
+}
+
+async function findGitRootFromDirectory(
+  workingDirectory: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+    cwd: workingDirectory,
     encoding: 'utf8',
     timeout: GIT_TIMEOUT_MS,
     ...(signal ? { signal } : {}),
@@ -370,12 +481,39 @@ export function splitDiffUnits(diff: string): DiffUnit[] {
     });
 }
 
+export function scoreDiffUnitRisk(unit: DiffUnit): number {
+  const normalizedPath = normalizePath(unit.path);
+  const segments = splitPathSegments(unit.path);
+  const basename = segments.at(-1) ?? normalizedPath;
+  const extension = basename.includes('.') ? `.${basename.split('.').pop() ?? ''}` : '';
+  const changeSize = unit.additions + unit.deletions;
+  let score = 0;
+
+  if (matchesNoisyPath(unit.path)) score -= 120;
+  if (segments.some((segment) => LOW_SIGNAL_SEGMENTS.has(segment))) score -= 35;
+  if (ASSET_FILE_EXTENSIONS.has(extension)) score -= 25;
+  if (SOURCE_FILE_EXTENSIONS.has(extension)) score += 25;
+  if (segments.some((segment) => HIGH_RISK_SEGMENTS.has(segment))) score += 30;
+  if (
+    HIGH_RISK_BASENAMES.some(
+      (needle) => basename === needle || basename.startsWith(needle) || basename.includes(needle),
+    )
+  ) {
+    score += 35;
+  }
+  if (normalizedPath.includes('.github/workflows/')) score += 25;
+  if (normalizedPath.includes('/build/') || normalizedPath.includes('/scripts/')) score += 15;
+  if (normalizedPath.includes('/src/')) score += 10;
+
+  return score * 1_000 + changeSize;
+}
+
 export function budgetDiffUnits(
   units: DiffUnit[],
   maxChars = MAX_DIFF_CHARS,
 ): { diff: string; omittedPaths: string[]; truncated: boolean } {
   const orderedUnits = [...units].sort((a, b) => {
-    const scoreDelta = b.additions + b.deletions - (a.additions + a.deletions);
+    const scoreDelta = scoreDiffUnitRisk(b) - scoreDiffUnitRisk(a);
     return scoreDelta !== 0 ? scoreDelta : a.path.localeCompare(b.path);
   });
 
@@ -605,8 +743,14 @@ function buildModelPrompt(
   };
 }
 
-async function buildLocalDiffSnapshot(signal?: AbortSignal): Promise<LocalDiffSnapshot> {
-  const gitRoot = await findGitRoot(signal);
+export async function buildLocalDiffSnapshot(
+  workingDirectory = process.cwd(),
+  signal?: AbortSignal,
+): Promise<LocalDiffSnapshot> {
+  const gitRoot =
+    workingDirectory === process.cwd()
+      ? await findGitRoot(signal)
+      : await findGitRootFromDirectory(workingDirectory, signal);
   const [trackedSnapshot, untrackedPaths] = await Promise.all([
     buildTrackedSnapshot(gitRoot, signal),
     listUntrackedPaths(gitRoot, signal),
@@ -638,7 +782,7 @@ async function analyzePrWork(
 
   let snapshot: LocalDiffSnapshot;
   try {
-    snapshot = await buildLocalDiffSnapshot(ctx.mcpReq.signal);
+    snapshot = await buildLocalDiffSnapshot(process.cwd(), ctx.mcpReq.signal);
   } catch (err) {
     return buildAnalyzePrErrorResult(err);
   }

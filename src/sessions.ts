@@ -1,5 +1,8 @@
 import type { Chat } from '@google/genai';
 
+import type { ToolProfile } from './lib/orchestration.js';
+import type { FunctionCallEntry, ToolEvent } from './lib/streaming.js';
+
 import { getSessionLimits } from './config.js';
 
 const { ttlMs: SESSION_TTL_MS, maxSessions: MAX_SESSIONS } = getSessionLimits();
@@ -15,8 +18,24 @@ interface TranscriptEntry {
   taskId?: string;
 }
 
+export interface SessionEventEntry {
+  request: {
+    message: string;
+    toolProfile?: ToolProfile;
+    urls?: string[];
+  };
+  response: {
+    functionCalls?: FunctionCallEntry[];
+    text: string;
+    toolEvents?: ToolEvent[];
+  };
+  timestamp: number;
+  taskId?: string;
+}
+
 interface SessionEntry {
   chat: Chat;
+  events: SessionEventEntry[];
   lastAccess: number;
   transcript: TranscriptEntry[];
 }
@@ -28,6 +47,7 @@ interface SessionSummary {
 
 export interface SessionChangeEvent {
   detailUris: string[];
+  eventUris: string[];
   transcriptUris: string[];
 }
 
@@ -49,9 +69,14 @@ function sessionTranscriptUri(id: string): string {
   return `sessions://${id}/transcript`;
 }
 
+function sessionEventsUri(id: string): string {
+  return `sessions://${id}/events`;
+}
+
 function notifyChange(sessionIds: string[] = []): void {
   changeCallback?.({
     detailUris: sessionIds.map((id) => sessionDetailUri(id)),
+    eventUris: sessionIds.map((id) => sessionEventsUri(id)),
     transcriptUris: sessionIds.map((id) => sessionTranscriptUri(id)),
   });
 }
@@ -90,7 +115,7 @@ function updateSessionAccess(id: string, entry: SessionEntry): Chat {
 
 function storeSession(id: string, chat: Chat): void {
   evictedSessions.delete(id);
-  setSessionEntry(id, { chat, lastAccess: now(), transcript: [] });
+  setSessionEntry(id, { chat, events: [], lastAccess: now(), transcript: [] });
 }
 
 function trimEvictedSessions(): void {
@@ -169,10 +194,58 @@ export function listSessionTranscriptEntries(id: string): TranscriptEntry[] | un
   return entry.transcript.map((item) => ({ ...item }));
 }
 
+export function listSessionEventEntries(id: string): SessionEventEntry[] | undefined {
+  const entry = getActiveSessionEntry(id);
+  if (!entry) return undefined;
+  return entry.events.map((item) => ({
+    ...item,
+    request: {
+      ...item.request,
+      ...(item.request.urls ? { urls: [...item.request.urls] } : {}),
+    },
+    response: {
+      ...item.response,
+      ...(item.response.functionCalls
+        ? {
+            functionCalls: item.response.functionCalls.map((functionCall) => ({ ...functionCall })),
+          }
+        : {}),
+      ...(item.response.toolEvents
+        ? { toolEvents: item.response.toolEvents.map((toolEvent) => ({ ...toolEvent })) }
+        : {}),
+    },
+  }));
+}
+
 export function appendSessionTranscript(id: string, item: TranscriptEntry): boolean {
   const entry = getActiveSessionEntry(id);
   if (!entry) return false;
   entry.transcript.push({ ...item });
+  notifyChange([id]);
+  return true;
+}
+
+export function appendSessionEvent(id: string, item: SessionEventEntry): boolean {
+  const entry = getActiveSessionEntry(id);
+  if (!entry) return false;
+  entry.events.push({
+    ...item,
+    request: {
+      ...item.request,
+      ...(item.request.urls ? { urls: [...item.request.urls] } : {}),
+    },
+    response: {
+      ...item.response,
+      ...(item.response.functionCalls
+        ? {
+            functionCalls: item.response.functionCalls.map((functionCall) => ({ ...functionCall })),
+          }
+        : {}),
+      ...(item.response.toolEvents
+        ? { toolEvents: item.response.toolEvents.map((toolEvent) => ({ ...toolEvent })) }
+        : {}),
+    },
+  });
   notifyChange([id]);
   return true;
 }

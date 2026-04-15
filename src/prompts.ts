@@ -226,7 +226,7 @@ export function buildProjectMemoryPrompt(args: z.infer<typeof ProjectMemoryPromp
       ...(args.project ? [`Project: ${args.project}`] : []),
       ...(args.currentTask ? [`Current task: ${args.currentTask}`] : []),
       renderWorkflowSection('project-memory'),
-      'Explain when to use a session vs a cache. Mention transcript inspection.',
+      'Explain when to use a session vs a cache. Mention transcript and event inspection.',
     ].join('\n\n'),
   );
 }

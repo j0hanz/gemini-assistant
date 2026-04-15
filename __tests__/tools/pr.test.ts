@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -194,9 +194,12 @@ describe('budgetDiffUnits', () => {
 
   it('gives config and routing changes higher risk scores than tests', () => {
     const configUnit = splitDiffUnits(
-      ['diff --git a/tsconfig.json b/tsconfig.json', '--- a/tsconfig.json', '+++ b/tsconfig.json', '+{}'].join(
-        '\n',
-      ),
+      [
+        'diff --git a/tsconfig.json b/tsconfig.json',
+        '--- a/tsconfig.json',
+        '+++ b/tsconfig.json',
+        '+{}',
+      ].join('\n'),
     )[0];
     const testUnit = splitDiffUnits(
       [

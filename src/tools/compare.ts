@@ -1,10 +1,10 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { createPartFromUri } from '@google/genai';
-import type { ToolListUnion } from '@google/genai';
 
 import { cleanupErrorLogger, handleToolError, sendProgress } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
+import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { handleToolExecution } from '../lib/streaming.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
@@ -45,8 +45,6 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
 
       const prompt = question ? `Focus: ${question}` : 'Task: Compare the two files.';
 
-      const tools: ToolListUnion = [...(googleSearch ? [{ googleSearch: {} }] : [])];
-
       const effectiveSystemInstruction = cacheName ? undefined : SYSTEM_INSTRUCTION;
       const effectivePrompt = cacheName ? `${SYSTEM_INSTRUCTION}\n\n${prompt}` : prompt;
 
@@ -69,7 +67,9 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
                 systemInstruction: effectiveSystemInstruction,
                 thinkingLevel: thinkingLevel ?? 'MEDIUM',
                 cacheName,
-                ...(tools.length > 0 ? { tools } : {}),
+                ...buildOrchestrationConfig({
+                  toolProfile: googleSearch ? 'search' : 'none',
+                }),
               },
               ctx.mcpReq.signal,
             ),

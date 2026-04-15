@@ -9,7 +9,7 @@ First-run MCP flow:
 1. Read `tools://list` for the full discovery catalog of tools, prompts, and resources.
 2. Read `workflows://list` and start with `getting-started`.
 3. Use the `getting-started` prompt or call `ask` directly for the first task.
-4. If you create a multi-turn chat, inspect `sessions://list`, `sessions://{sessionId}`, and `sessions://{sessionId}/transcript`.
+4. If you create a multi-turn chat, inspect `sessions://list`, `sessions://{sessionId}`, `sessions://{sessionId}/transcript`, and `sessions://{sessionId}/events`.
 
 Key workflow prompts:
 
@@ -22,6 +22,7 @@ Key workflow prompts:
 ## Common Jobs
 
 - Quick Gemini chat or structured JSON output: `ask`
+- Advanced built-in tool orchestration in chat: `ask` with `toolProfile`
 - Grounded web answer: `search`
 - Multi-step research with sources: `agentic_search` or `deep-research`
 - Analyze one local file: `analyze_file` or `analyze-file`
@@ -32,7 +33,9 @@ Key workflow prompts:
 
 ## Sessions Versus Caches
 
-Use sessions when the context is conversational and should evolve turn by turn. Sessions are created by `ask` with a `sessionId`, listed in `sessions://list`, and inspectable through `sessions://{sessionId}` and `sessions://{sessionId}/transcript`.
+Use sessions when the context is conversational and should evolve turn by turn. Sessions are created by `ask` with a `sessionId`, listed in `sessions://list`, and inspectable through `sessions://{sessionId}`, `sessions://{sessionId}/transcript`, and `sessions://{sessionId}/events`.
+
+If `ask` uses Gemini built-in tools, `sessions://{sessionId}/events` exposes normalized tool/function activity for that live session. Tool-combination state is in-memory only and disappears when the session expires or is evicted.
 
 Use caches when the same large context should be reused across multiple asks or across different sessions. Cache state is exposed through `caches://list` and `caches://{cacheName}`.
 
@@ -41,6 +44,7 @@ The practical split:
 - Session: live working memory for one thread
 - Cache: reusable reference context for many calls
 - Transcript resource: read-only visibility into the live session history
+- Events resource: read-only visibility into Gemini tool/function activity for the live session
 
 ## Discovery Resources
 
@@ -51,6 +55,7 @@ Public resources:
 - `sessions://list`
 - `sessions://{sessionId}`
 - `sessions://{sessionId}/transcript`
+- `sessions://{sessionId}/events`
 - `caches://list`
 - `caches://{cacheName}`
 
@@ -84,6 +89,12 @@ Useful optional variables:
 - `ALLOWED_FILE_ROOTS`: optional comma-separated absolute roots allowed for file tools
 - `SESSION_TTL_MS`: session idle TTL in milliseconds, default `1800000`
 - `MAX_SESSIONS`: max in-memory chat sessions before LRU eviction, default `50`
+
+Gemini tool-combination notes:
+
+- Built-in tool combination remains a Gemini 3 preview feature.
+- This server preserves tool/function event history in session memory only.
+- `ask.toolProfile` supports `none`, `search`, `url`, `search_url`, `code`, and `search_code`.
 
 ## Run
 

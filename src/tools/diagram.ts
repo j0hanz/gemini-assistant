@@ -1,10 +1,11 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { createPartFromUri } from '@google/genai';
-import type { Part, ToolListUnion } from '@google/genai';
+import type { Part } from '@google/genai';
 
 import { cleanupErrorLogger, handleToolError, sendProgress } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
+import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { handleToolExecution } from '../lib/streaming.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
@@ -80,13 +81,6 @@ async function uploadDiagramSourceFiles(
   return contentParts;
 }
 
-function buildDiagramTools(googleSearch?: boolean, validateSyntax?: boolean): ToolListUnion {
-  return [
-    ...(googleSearch ? [{ googleSearch: {} }] : []),
-    ...(validateSyntax ? [{ codeExecution: {} }] : []),
-  ];
-}
-
 function buildDiagramPrompt(
   contentParts: Part[],
   diagramType: string,
@@ -146,7 +140,6 @@ function createDiagramWork(rootsFetcher: RootsFetcher) {
       );
       await ctx.mcpReq.log('info', `Generating ${diagramType} diagram`);
 
-      const tools = buildDiagramTools(googleSearch, validateSyntax);
       const systemInstruction = buildSystemInstruction(diagramType, validateSyntax);
       const { effectiveSystemInstruction, prompt } = buildDiagramPrompt(
         contentParts,
@@ -169,7 +162,16 @@ function createDiagramWork(rootsFetcher: RootsFetcher) {
                 systemInstruction: effectiveSystemInstruction,
                 thinkingLevel: thinkingLevel ?? 'LOW',
                 cacheName,
-                ...(tools.length > 0 ? { tools } : {}),
+                ...buildOrchestrationConfig({
+                  toolProfile:
+                    googleSearch && validateSyntax
+                      ? 'search_code'
+                      : googleSearch
+                        ? 'search'
+                        : validateSyntax
+                          ? 'code'
+                          : 'none',
+                }),
               },
               ctx.mcpReq.signal,
             ),

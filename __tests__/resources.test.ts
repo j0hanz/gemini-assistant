@@ -3,13 +3,17 @@ import { describe, it } from 'node:test';
 
 import { listDiscoveryEntries, listWorkflowEntries } from '../src/catalog.js';
 import {
+  getSessionEventsResourceData,
   getSessionTranscriptResourceData,
+  readSessionEventsResource,
   readSessionTranscriptResource,
   readToolsListResource,
   readWorkflowsListResource,
 } from '../src/resources.js';
 import {
+  appendSessionEvent,
   appendSessionTranscript,
+  listSessionEventEntries,
   listSessionTranscriptEntries,
   setSession,
 } from '../src/sessions.js';
@@ -63,6 +67,35 @@ describe('session transcript resource', () => {
 
   it('returns a stable error payload for a missing session transcript', () => {
     assert.deepStrictEqual(getSessionTranscriptResourceData('missing-session'), {
+      error: 'Session not found',
+    });
+  });
+});
+
+describe('session events resource', () => {
+  it('reads event entries for an active session', () => {
+    setSession('sess-resource-events', mockChat('resource-events'));
+    appendSessionEvent('sess-resource-events', {
+      request: { message: 'Hello', toolProfile: 'search' },
+      response: {
+        text: 'Hi there',
+        toolEvents: [{ kind: 'tool_call', id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
+      },
+      timestamp: 1,
+    });
+
+    const result = readSessionEventsResource(
+      'sessions://sess-resource-events/events',
+      'sess-resource-events',
+    );
+    assert.deepStrictEqual(
+      parseResourceText(result),
+      listSessionEventEntries('sess-resource-events'),
+    );
+  });
+
+  it('returns a stable error payload for a missing session events resource', () => {
+    assert.deepStrictEqual(getSessionEventsResourceData('missing-session'), {
       error: 'Session not found',
     });
   });

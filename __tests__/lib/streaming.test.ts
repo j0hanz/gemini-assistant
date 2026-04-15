@@ -290,8 +290,80 @@ describe('consumeStreamWithProgress', () => {
     const result = await consumeStreamWithProgress(stream, ctx);
 
     assert.ok(result.toolsUsed.includes('customTool'));
+    assert.deepStrictEqual(result.toolEvents, [
+      { kind: 'function_call', name: 'customTool', args: {} },
+    ]);
     const messages = progressCalls.map((c) => c.message);
     assert.ok(messages.includes('Tool: customTool'));
+  });
+
+  it('captures tool call and tool response parts with ids and signatures', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk(
+        [
+          {
+            toolCall: {
+              toolType: 'GOOGLE_SEARCH_WEB',
+              args: { queries: ['latest release'] },
+              id: 'tool-1',
+            },
+            thoughtSignature: 'sig-tool-call',
+          },
+          {
+            toolResponse: {
+              toolType: 'GOOGLE_SEARCH_WEB',
+              response: { search_suggestions: ['latest release notes'] },
+              id: 'tool-1',
+            },
+            thoughtSignature: 'sig-tool-response',
+          },
+          { text: 'answer' },
+        ],
+        FinishReason.STOP,
+      ),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.ok(result.toolsUsed.includes('googleSearch'));
+    assert.deepStrictEqual(result.toolEvents.slice(0, 2), [
+      {
+        kind: 'tool_call',
+        args: { queries: ['latest release'] },
+        id: 'tool-1',
+        thoughtSignature: 'sig-tool-call',
+        toolType: 'GOOGLE_SEARCH_WEB',
+      },
+      {
+        kind: 'tool_response',
+        id: 'tool-1',
+        response: { search_suggestions: ['latest release notes'] },
+        thoughtSignature: 'sig-tool-response',
+        toolType: 'GOOGLE_SEARCH_WEB',
+      },
+    ]);
+
+    const messages = progressCalls.map((c) => c.message);
+    assert.ok(messages.includes('Built-in tool: googleSearch'));
+    assert.ok(messages.includes('Built-in result: googleSearch'));
+  });
+
+  it('captures signature-only parts even when they have no text', async () => {
+    const { ctx } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ text: 'partial answer' }]),
+      makeChunk([{ text: '', thoughtSignature: 'sig-final' }], FinishReason.STOP),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.strictEqual(result.text, 'partial answer');
+    assert.deepStrictEqual(result.toolEvents.at(-1), {
+      kind: 'part',
+      text: '',
+      thoughtSignature: 'sig-final',
+    });
   });
 
   it('tracks multiple tool types in toolsUsed', async () => {
@@ -359,7 +431,12 @@ describe('consumeStreamWithProgress', () => {
     assert.ok(result.toolsUsed.includes('googleSearch'));
     assert.ok(result.toolsUsed.includes('fetchRepo'));
     assert.ok(result.toolsUsed.includes('codeExecution'));
-    assert.deepStrictEqual(result.functionCalls, [{ name: 'fetchRepo', args: { repo: 'acme/app' } }]);
+    assert.deepStrictEqual(result.functionCalls, [
+      { name: 'fetchRepo', args: { repo: 'acme/app' } },
+    ]);
+    assert.ok(result.toolEvents.some((event) => event.kind === 'function_call'));
+    assert.ok(result.toolEvents.some((event) => event.kind === 'executable_code'));
+    assert.ok(result.toolEvents.some((event) => event.kind === 'code_execution_result'));
 
     const messages = progressCalls.map((c) => c.message);
     assert.ok(messages.includes('Searching the web'));

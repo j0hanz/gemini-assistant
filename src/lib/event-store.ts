@@ -14,6 +14,7 @@ interface StreamState {
   events: StoredEvent[];
   baseOffset: number;
   lastActivity: number;
+  lastActivityOrder: number;
 }
 
 interface EventLocation {
@@ -24,6 +25,7 @@ interface EventLocation {
 export class InMemoryEventStore implements EventStore {
   private _streams = new Map<StreamId, StreamState>();
   private _eventToStream = new Map<EventId, EventLocation>();
+  private _activityCounter = 0;
   private _counter = 0;
   private _sweepTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -33,11 +35,17 @@ export class InMemoryEventStore implements EventStore {
     let state = this._streams.get(streamId);
     if (!state) {
       this._evictIfNeeded();
-      state = { events: [], baseOffset: 0, lastActivity: Date.now() };
+      state = {
+        events: [],
+        baseOffset: 0,
+        lastActivity: Date.now(),
+        lastActivityOrder: ++this._activityCounter,
+      };
       this._streams.set(streamId, state);
     }
 
     state.lastActivity = Date.now();
+    state.lastActivityOrder = ++this._activityCounter;
 
     if (state.events.length >= MAX_EVENTS_PER_STREAM) {
       const removed = state.events.shift();
@@ -84,6 +92,7 @@ export class InMemoryEventStore implements EventStore {
     }
     this._streams.clear();
     this._eventToStream.clear();
+    this._activityCounter = 0;
     this._counter = 0;
   }
 
@@ -109,11 +118,11 @@ export class InMemoryEventStore implements EventStore {
     if (this._streams.size < MAX_STREAMS) return;
 
     let oldestStreamId: StreamId | undefined;
-    let oldestActivity = Number.POSITIVE_INFINITY;
+    let oldestActivityOrder = Number.POSITIVE_INFINITY;
 
     for (const [streamId, state] of this._streams) {
-      if (state.lastActivity < oldestActivity) {
-        oldestActivity = state.lastActivity;
+      if (state.lastActivityOrder < oldestActivityOrder) {
+        oldestActivityOrder = state.lastActivityOrder;
         oldestStreamId = streamId;
       }
     }

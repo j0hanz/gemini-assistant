@@ -37,6 +37,8 @@ describe('AskInputSchema', () => {
       temperature: 0.2,
       seed: 42,
       googleSearch: true,
+      toolProfile: 'search_url',
+      urls: ['https://example.com/docs'],
     });
     assert.ok(result.success);
   });
@@ -45,6 +47,14 @@ describe('AskInputSchema', () => {
     const result = AskInputSchema.safeParse({
       message: 'test',
       responseSchema: { foo: 'bar' },
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('requires urls for url-capable tool profiles', () => {
+    const result = AskInputSchema.safeParse({
+      message: 'analyze these pages',
+      toolProfile: 'url',
     });
     assert.strictEqual(result.success, false);
   });

@@ -9,6 +9,7 @@ import {
   completeSessionIds,
   getSessionEntry,
   listSessionEntries,
+  listSessionEventEntries,
   listSessionTranscriptEntries,
 } from './sessions.js';
 
@@ -16,6 +17,7 @@ export const PUBLIC_RESOURCE_URIS = [
   'sessions://list',
   'sessions://{sessionId}',
   'sessions://{sessionId}/transcript',
+  'sessions://{sessionId}/events',
   'caches://list',
   'caches://{cacheName}',
   'tools://list',
@@ -34,6 +36,10 @@ type SessionTranscriptResourceData =
       timestamp: number;
       taskId?: string;
     }[]
+  | { error: 'Session not found' };
+
+type SessionEventsResourceData =
+  | Awaited<ReturnType<typeof listSessionEventEntries>>
   | { error: 'Session not found' };
 
 const SESSION_LIST_RESOURCE: ResourceListEntry = {
@@ -112,6 +118,13 @@ function sessionTranscriptResources(): ResourceListEntry[] {
   }));
 }
 
+function sessionEventResources(): ResourceListEntry[] {
+  return listSessionEntries().map((session) => ({
+    uri: `sessions://${session.id}/events`,
+    name: `Events ${session.id}`,
+  }));
+}
+
 function cacheDetailResources(
   caches: Awaited<ReturnType<typeof listCacheSummaries>>,
 ): ResourceListEntry[] {
@@ -146,6 +159,17 @@ export function getSessionTranscriptResourceData(
   return transcript ?? ({ error: 'Session not found' } as const);
 }
 
+export function getSessionEventsResourceData(
+  sessionId: string | undefined,
+): SessionEventsResourceData {
+  if (!sessionId) {
+    return { error: 'Session not found' } as const;
+  }
+
+  const events = listSessionEventEntries(sessionId);
+  return events ?? ({ error: 'Session not found' } as const);
+}
+
 export function readSessionTranscriptResource(
   uri: URL | string,
   sessionId: string | string[] | undefined,
@@ -153,6 +177,16 @@ export function readSessionTranscriptResource(
   return jsonResource(
     toResourceUri(uri),
     getSessionTranscriptResourceData(normalizeTemplateParam(sessionId)),
+  );
+}
+
+export function readSessionEventsResource(
+  uri: URL | string,
+  sessionId: string | string[] | undefined,
+): ReadResourceResult {
+  return jsonResource(
+    toResourceUri(uri),
+    getSessionEventsResourceData(normalizeTemplateParam(sessionId)),
   );
 }
 
@@ -202,6 +236,22 @@ function registerSessionResources(server: McpServer): void {
       mimeType: 'application/json',
     },
     (uri, { sessionId }): ReadResourceResult => readSessionTranscriptResource(uri, sessionId),
+  );
+
+  server.registerResource(
+    'session-events',
+    new ResourceTemplate('sessions://{sessionId}/events', {
+      list: () => ({ resources: sessionEventResources() }),
+      complete: {
+        sessionId: completeSessionIds,
+      },
+    }),
+    {
+      title: 'Chat Session Events',
+      description: 'Structured Gemini tool and function events for a single active chat session.',
+      mimeType: 'application/json',
+    },
+    (uri, { sessionId }): ReadResourceResult => readSessionEventsResource(uri, sessionId),
   );
 }
 

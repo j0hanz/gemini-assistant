@@ -12,6 +12,40 @@ export const UsageMetadataSchema = z.object({
 const FunctionCallEntrySchema = z.object({
   name: z.string().describe('Function/tool name'),
   args: z.record(z.string(), z.unknown()).optional().describe('Function call arguments'),
+  id: z.string().optional().describe('Function call identifier when present'),
+});
+
+const ToolEventKindSchema = z.enum([
+  'part',
+  'tool_call',
+  'tool_response',
+  'function_call',
+  'function_response',
+  'executable_code',
+  'code_execution_result',
+]);
+
+const ToolEventSchema = z.object({
+  kind: ToolEventKindSchema.describe('Normalized Gemini tool/function event type'),
+  name: z.string().optional().describe('Function name when available'),
+  toolType: z.string().optional().describe('Built-in tool type when available'),
+  id: z.string().optional().describe('Stable Gemini call identifier when available'),
+  thoughtSignature: z
+    .string()
+    .optional()
+    .describe('Thought signature returned by Gemini for the part'),
+  args: z.record(z.string(), z.unknown()).optional().describe('Tool or function arguments'),
+  response: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe('Tool or function response payload'),
+  code: z.string().optional().describe('Executable code payload'),
+  output: z.string().optional().describe('Code execution output'),
+  outcome: z.string().optional().describe('Code execution outcome'),
+  text: z
+    .string()
+    .optional()
+    .describe('Part text when a signature-bearing part has no tool payload'),
 });
 
 const baseOutputFields = {
@@ -21,6 +55,10 @@ const baseOutputFields = {
     .array(FunctionCallEntrySchema)
     .optional()
     .describe('Server-side function calls made during generation'),
+  toolEvents: z
+    .array(ToolEventSchema)
+    .optional()
+    .describe('Normalized Gemini tool/function event stream captured during generation'),
 };
 
 export const AskOutputSchema = z.object({

@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  appendSessionEvent,
   appendSessionTranscript,
   completeSessionIds,
   getSession,
   getSessionEntry,
   isEvicted,
   listSessionEntries,
+  listSessionEventEntries,
   listSessionTranscriptEntries,
   onSessionChange,
   setSession,
@@ -80,10 +82,12 @@ describe('sessions', () => {
 
     it('notifies when transcript entries are appended', () => {
       let detailUris: string[] = [];
+      let eventUris: string[] = [];
       let transcriptUris: string[] = [];
       setSession('sess-transcript-notify', mockChat('transcript-notify') as never);
       onSessionChange((event) => {
         detailUris = event.detailUris;
+        eventUris = event.eventUris;
         transcriptUris = event.transcriptUris;
       });
 
@@ -94,7 +98,55 @@ describe('sessions', () => {
       });
 
       assert.deepStrictEqual(detailUris, ['sessions://sess-transcript-notify']);
+      assert.deepStrictEqual(eventUris, ['sessions://sess-transcript-notify/events']);
       assert.deepStrictEqual(transcriptUris, ['sessions://sess-transcript-notify/transcript']);
+    });
+  });
+
+  describe('events', () => {
+    it('appends and reads session event entries', () => {
+      setSession('sess-events-append', mockChat('events') as never);
+      appendSessionEvent('sess-events-append', {
+        request: { message: 'Hello', toolProfile: 'search', urls: ['https://example.com'] },
+        response: {
+          text: 'Hi',
+          functionCalls: [{ name: 'lookupWeather', id: 'call-1', args: { city: 'Stockholm' } }],
+          toolEvents: [{ kind: 'tool_call', id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
+        },
+        timestamp: 1,
+      });
+
+      assert.deepStrictEqual(listSessionEventEntries('sess-events-append'), [
+        {
+          request: {
+            message: 'Hello',
+            toolProfile: 'search',
+            urls: ['https://example.com'],
+          },
+          response: {
+            text: 'Hi',
+            functionCalls: [{ name: 'lookupWeather', id: 'call-1', args: { city: 'Stockholm' } }],
+            toolEvents: [{ kind: 'tool_call', id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
+          },
+          timestamp: 1,
+        },
+      ]);
+    });
+
+    it('notifies when session event entries are appended', () => {
+      let eventUris: string[] = [];
+      setSession('sess-events-notify', mockChat('events-notify') as never);
+      onSessionChange((event) => {
+        eventUris = event.eventUris;
+      });
+
+      appendSessionEvent('sess-events-notify', {
+        request: { message: 'inspect events' },
+        response: { text: 'done' },
+        timestamp: 1,
+      });
+
+      assert.deepStrictEqual(eventUris, ['sessions://sess-events-notify/events']);
     });
   });
 
@@ -223,28 +275,34 @@ describe('sessions', () => {
 
     it('includes detail and transcript URIs on setSession', () => {
       let detailUris: string[] = [];
+      let eventUris: string[] = [];
       let transcriptUris: string[] = [];
       onSessionChange((event) => {
         detailUris = event.detailUris;
+        eventUris = event.eventUris;
         transcriptUris = event.transcriptUris;
       });
 
       setSession('sess-task-set', mockChat('task-set') as never);
       assert.ok(detailUris.includes('sessions://sess-task-set'));
+      assert.ok(eventUris.includes('sessions://sess-task-set/events'));
       assert.ok(transcriptUris.includes('sessions://sess-task-set/transcript'));
     });
 
     it('includes detail and transcript URIs on getSession', () => {
       let detailUris: string[] = [];
+      let eventUris: string[] = [];
       let transcriptUris: string[] = [];
       setSession('sess-task-get', mockChat('task-get') as never);
       onSessionChange((event) => {
         detailUris = event.detailUris;
+        eventUris = event.eventUris;
         transcriptUris = event.transcriptUris;
       });
 
       getSession('sess-task-get');
       assert.deepStrictEqual(detailUris, ['sessions://sess-task-get']);
+      assert.deepStrictEqual(eventUris, ['sessions://sess-task-get/events']);
       assert.deepStrictEqual(transcriptUris, ['sessions://sess-task-get/transcript']);
     });
   });

@@ -1,8 +1,7 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import type { ToolListUnion } from '@google/genai';
-
 import { sendProgress } from '../lib/errors.js';
+import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { handleToolExecution } from '../lib/streaming.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { validateUrls } from '../lib/validation.js';
@@ -59,10 +58,16 @@ async function explainErrorWork(
 
   const prompt = buildPrompt(error, codeContext, language, urls);
 
-  const tools: ToolListUnion = [
-    ...(googleSearch ? [{ googleSearch: {} }] : []),
-    ...((urls?.length ?? 0) > 0 ? [{ urlContext: {} }] : []),
-  ];
+  const orchestration = buildOrchestrationConfig({
+    toolProfile:
+      googleSearch && (urls?.length ?? 0) > 0
+        ? 'search_url'
+        : googleSearch
+          ? 'search'
+          : (urls?.length ?? 0) > 0
+            ? 'url'
+            : 'none',
+  });
 
   const effectiveSystemInstruction = cacheName ? undefined : SYSTEM_INSTRUCTION;
   const effectivePrompt = cacheName ? `${SYSTEM_INSTRUCTION}\n\n${prompt}` : prompt;
@@ -80,7 +85,7 @@ async function explainErrorWork(
             systemInstruction: effectiveSystemInstruction,
             thinkingLevel: thinkingLevel ?? 'MEDIUM',
             cacheName,
-            ...(tools.length > 0 ? { tools } : {}),
+            ...orchestration,
           },
           ctx.mcpReq.signal,
         ),

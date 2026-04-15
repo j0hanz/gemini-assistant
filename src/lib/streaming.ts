@@ -28,8 +28,30 @@ export function advanceProgress(current: number): number {
 }
 
 export interface FunctionCallEntry {
+  id?: string;
   name: string;
   args?: Record<string, unknown>;
+}
+
+export interface ToolEvent {
+  kind:
+    | 'part'
+    | 'tool_call'
+    | 'tool_response'
+    | 'function_call'
+    | 'function_response'
+    | 'executable_code'
+    | 'code_execution_result';
+  args?: Record<string, unknown>;
+  code?: string;
+  id?: string;
+  name?: string;
+  outcome?: string;
+  output?: string;
+  response?: Record<string, unknown>;
+  text?: string;
+  thoughtSignature?: string;
+  toolType?: string;
 }
 
 export interface StreamResult {
@@ -38,6 +60,7 @@ export interface StreamResult {
   parts: Part[];
   toolsUsed: string[];
   functionCalls: FunctionCallEntry[];
+  toolEvents: ToolEvent[];
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
   urlContextMetadata?: UrlContextMetadata;
@@ -69,6 +92,7 @@ interface StreamProcessingState extends StreamMetadata {
   text: string;
   thoughtHeaderState: ThoughtHeaderState;
   thoughtText: string;
+  toolEvents: ToolEvent[];
   toolsUsed: Set<string>;
 }
 
@@ -153,6 +177,7 @@ function createStreamProcessingState(): StreamProcessingState {
       chunksSinceLastHeader: 0,
     },
     thoughtText: '',
+    toolEvents: [],
     toolsUsed: new Set<string>(),
   };
 }
@@ -181,6 +206,26 @@ async function recordToolActivity(
   await advanceAndSendProgress(ctx, state, msg, progressMessage);
 }
 
+function normalizeToolName(toolType: string | undefined): string | undefined {
+  switch (toolType) {
+    case 'GOOGLE_SEARCH':
+    case 'GOOGLE_SEARCH_WEB':
+      return 'googleSearch';
+    case 'URL_CONTEXT':
+      return 'urlContext';
+    case 'FILE_SEARCH':
+      return 'fileSearch';
+    case 'GOOGLE_MAPS':
+      return 'googleMaps';
+    default:
+      return toolType?.trim() ? toolType : undefined;
+  }
+}
+
+function appendToolEvent(state: StreamProcessingState, event: ToolEvent): void {
+  state.toolEvents.push(event);
+}
+
 async function maybeReportSearchProgress(
   ctx: ServerContext,
   candidate: NonNullable<GenerateContentResponse['candidates']>[number],
@@ -189,6 +234,17 @@ async function maybeReportSearchProgress(
 ): Promise<void> {
   if (candidate.groundingMetadata && !state.toolsUsed.has('googleSearch')) {
     await recordToolActivity(ctx, state, msg, 'Searching the web', 'googleSearch');
+  }
+}
+
+async function maybeReportUrlContextProgress(
+  ctx: ServerContext,
+  candidate: NonNullable<GenerateContentResponse['candidates']>[number],
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+): Promise<void> {
+  if (candidate.urlContextMetadata && !state.toolsUsed.has('urlContext')) {
+    await recordToolActivity(ctx, state, msg, 'Retrieving URL context', 'urlContext');
   }
 }
 
@@ -242,10 +298,74 @@ async function handleFunctionCallPart(
 
   const fnName = functionCall.name ?? 'tool';
   state.functionCalls.push({
+    ...(functionCall.id ? { id: functionCall.id } : {}),
     name: fnName,
     ...(functionCall.args ? { args: functionCall.args } : {}),
   });
+  appendToolEvent(state, {
+    kind: 'function_call',
+    ...(functionCall.args ? { args: functionCall.args } : {}),
+    ...(functionCall.id ? { id: functionCall.id } : {}),
+    name: fnName,
+    ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+  });
   await recordToolActivity(ctx, state, msg, `Tool: ${fnName}`, fnName);
+}
+
+async function handleToolCallPart(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  part: Part,
+): Promise<void> {
+  const toolCall = part.toolCall;
+  if (!toolCall) {
+    return;
+  }
+
+  const normalizedToolName = normalizeToolName(toolCall.toolType);
+  appendToolEvent(state, {
+    kind: 'tool_call',
+    ...(toolCall.args ? { args: toolCall.args } : {}),
+    ...(toolCall.id ? { id: toolCall.id } : {}),
+    ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+    ...(toolCall.toolType ? { toolType: toolCall.toolType } : {}),
+  });
+  await recordToolActivity(
+    ctx,
+    state,
+    msg,
+    `Built-in tool: ${normalizedToolName ?? toolCall.toolType ?? 'unknown'}`,
+    normalizedToolName,
+  );
+}
+
+async function handleToolResponsePart(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  part: Part,
+): Promise<void> {
+  const toolResponse = part.toolResponse;
+  if (!toolResponse) {
+    return;
+  }
+
+  const normalizedToolName = normalizeToolName(toolResponse.toolType);
+  appendToolEvent(state, {
+    kind: 'tool_response',
+    ...(toolResponse.id ? { id: toolResponse.id } : {}),
+    ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+    ...(toolResponse.response ? { response: toolResponse.response } : {}),
+    ...(toolResponse.toolType ? { toolType: toolResponse.toolType } : {}),
+  });
+  await recordToolActivity(
+    ctx,
+    state,
+    msg,
+    `Built-in result: ${normalizedToolName ?? toolResponse.toolType ?? 'unknown'}`,
+    normalizedToolName,
+  );
 }
 
 async function handleThoughtPart(
@@ -275,12 +395,35 @@ async function handleStreamPart(
   state.parts.push(part);
 
   if (part.executableCode) {
+    appendToolEvent(state, {
+      kind: 'executable_code',
+      ...(part.executableCode.code ? { code: part.executableCode.code } : {}),
+      ...(part.executableCode.id ? { id: part.executableCode.id } : {}),
+      ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+    });
     await recordToolActivity(ctx, state, msg, 'Executing code', 'codeExecution');
     return;
   }
 
   if (part.codeExecutionResult) {
+    appendToolEvent(state, {
+      kind: 'code_execution_result',
+      ...(part.codeExecutionResult.id ? { id: part.codeExecutionResult.id } : {}),
+      ...(part.codeExecutionResult.outcome ? { outcome: part.codeExecutionResult.outcome } : {}),
+      ...(part.codeExecutionResult.output ? { output: part.codeExecutionResult.output } : {}),
+      ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+    });
     await recordToolActivity(ctx, state, msg, 'Code executed');
+    return;
+  }
+
+  if (part.toolCall) {
+    await handleToolCallPart(ctx, state, msg, part);
+    return;
+  }
+
+  if (part.toolResponse) {
+    await handleToolResponsePart(ctx, state, msg, part);
     return;
   }
 
@@ -289,10 +432,32 @@ async function handleStreamPart(
     return;
   }
 
+  if (part.functionResponse) {
+    appendToolEvent(state, {
+      kind: 'function_response',
+      ...(part.functionResponse.id ? { id: part.functionResponse.id } : {}),
+      ...(part.functionResponse.name ? { name: part.functionResponse.name } : {}),
+      ...(part.functionResponse.response ? { response: part.functionResponse.response } : {}),
+      ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+    });
+    return;
+  }
+
   const partText = part.text;
   if (part.thought) {
     await handleThoughtPart(ctx, state, msg, partText);
     return;
+  }
+
+  if (part.thoughtSignature && (partText === undefined || partText.length === 0)) {
+    appendToolEvent(state, {
+      kind: 'part',
+      ...(partText !== undefined ? { text: partText } : {}),
+      thoughtSignature: part.thoughtSignature,
+    });
+    if (partText === undefined) {
+      return;
+    }
   }
 
   if (partText === undefined) {
@@ -310,6 +475,7 @@ function finalizeStreamResult(state: StreamProcessingState): StreamResult {
     parts: state.parts,
     toolsUsed: [...state.toolsUsed],
     functionCalls: state.functionCalls,
+    toolEvents: state.toolEvents,
     ...pickDefined({
       finishReason: state.finishReason,
       groundingMetadata: state.groundingMetadata,
@@ -337,6 +503,7 @@ export async function consumeStreamWithProgress(
 
     updateStreamMetadata(chunk, candidate, state);
     await maybeReportSearchProgress(ctx, candidate, state, msg);
+    await maybeReportUrlContextProgress(ctx, candidate, state, msg);
 
     for (const part of candidate.content?.parts ?? []) {
       await handleStreamPart(ctx, state, msg, part);
@@ -435,6 +602,7 @@ export async function handleToolExecution<T extends Record<string, unknown>>(
     ...finalResult,
     structuredContent: {
       ...(built.structuredContent ?? {}),
+      ...(streamResult.toolEvents.length > 0 ? { toolEvents: streamResult.toolEvents } : {}),
       ...(EXPOSE_THOUGHTS && streamResult.thoughtText
         ? { thoughts: streamResult.thoughtText }
         : {}),

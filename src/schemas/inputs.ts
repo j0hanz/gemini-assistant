@@ -2,6 +2,8 @@ import { completable } from '@modelcontextprotocol/server';
 
 import { z } from 'zod/v4';
 
+import { TOOL_PROFILES } from '../lib/orchestration.js';
+
 import { completeCacheNames, THINKING_LEVELS } from '../client.js';
 import { completeSessionIds } from '../sessions.js';
 import { GeminiResponseSchema } from './json-schema.js';
@@ -12,53 +14,78 @@ const thinkingLevelField = z
   .optional()
   .describe('Thinking depth for reasoning.');
 
-export const AskInputSchema = z.object({
-  message: requiredText('User message or prompt', 100_000),
-  sessionId: completable(
-    z
-      .string()
-      .max(256)
-      .optional()
-      .describe('Session ID for multi-turn chat. Omit for single-turn.'),
-    completeSessionIds,
-  ),
-  systemInstruction: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe('System prompt (used on session creation or single-turn)'),
-  thinkingLevel: z
-    .enum(THINKING_LEVELS)
-    .optional()
-    .describe('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
-  cacheName: completable(
-    cacheName(
-      'Cache name from create_cache. Cannot be applied to an existing chat session.',
-    ).optional(),
-    completeCacheNames,
-  ),
-  responseSchema: GeminiResponseSchema.optional().describe(
-    'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking. Gemini 2.0 models may require a propertyOrdering array.',
-  ),
-  temperature: z
-    .number()
-    .min(0)
-    .max(2)
-    .optional()
-    .describe(
-      'Controls randomness (0.0=deterministic, 2.0=most creative). Model default if omitted.',
+export const AskInputSchema = z
+  .object({
+    message: requiredText('User message or prompt', 100_000),
+    sessionId: completable(
+      z
+        .string()
+        .max(256)
+        .optional()
+        .describe('Session ID for multi-turn chat. Omit for single-turn.'),
+      completeSessionIds,
     ),
-  seed: z
-    .number()
-    .int()
-    .optional()
-    .describe('Fixed seed for reproducible outputs. Model default if omitted.'),
-  googleSearch: z
-    .boolean()
-    .optional()
-    .describe('Enable Google Search grounding. Model can use web results for up-to-date answers.'),
-});
+    systemInstruction: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe('System prompt (used on session creation or single-turn)'),
+    thinkingLevel: z
+      .enum(THINKING_LEVELS)
+      .optional()
+      .describe('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
+    cacheName: completable(
+      cacheName(
+        'Cache name from create_cache. Cannot be applied to an existing chat session.',
+      ).optional(),
+      completeCacheNames,
+    ),
+    responseSchema: GeminiResponseSchema.optional().describe(
+      'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking. Gemini 2.0 models may require a propertyOrdering array.',
+    ),
+    temperature: z
+      .number()
+      .min(0)
+      .max(2)
+      .optional()
+      .describe(
+        'Controls randomness (0.0=deterministic, 2.0=most creative). Model default if omitted.',
+      ),
+    seed: z
+      .number()
+      .int()
+      .optional()
+      .describe('Fixed seed for reproducible outputs. Model default if omitted.'),
+    googleSearch: z
+      .boolean()
+      .optional()
+      .describe('Backward-compatible alias for toolProfile=search.'),
+    toolProfile: z
+      .enum(TOOL_PROFILES)
+      .optional()
+      .describe(
+        'Optional advanced built-in tool preset: none, search, url, search_url, code, or search_code.',
+      ),
+    urls: z
+      .array(publicHttpUrl('Public URL to analyze with URL Context'))
+      .max(20)
+      .optional()
+      .describe('URLs for URL Context when using toolProfile=url or search_url (max 20).'),
+  })
+  .superRefine((data, ctx) => {
+    if (
+      (data.toolProfile === 'url' || data.toolProfile === 'search_url') &&
+      (data.urls?.length ?? 0) === 0
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'urls are required when toolProfile is url or search_url.',
+        path: ['urls'],
+        input: data.urls,
+      });
+    }
+  });
 export type AskInput = z.infer<typeof AskInputSchema>;
 
 export const ExecuteCodeInputSchema = z.object({

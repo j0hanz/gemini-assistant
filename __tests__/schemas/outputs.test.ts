@@ -44,6 +44,21 @@ describe('AskOutputSchema', () => {
     assert.ok(result.success);
   });
 
+  it('accepts normalized tool events', () => {
+    const result = AskOutputSchema.safeParse({
+      answer: 'test',
+      toolEvents: [
+        {
+          kind: 'tool_call',
+          id: 'abc123',
+          toolType: 'GOOGLE_SEARCH_WEB',
+          thoughtSignature: 'sig-1',
+        },
+      ],
+    });
+    assert.ok(result.success);
+  });
+
   it('accepts output without schemaWarnings', () => {
     const result = AskOutputSchema.safeParse({ answer: 'test', data: { x: 1 } });
     assert.ok(result.success);

@@ -140,6 +140,7 @@ describe('tool registration', () => {
         'sessions://list',
         'sessions://{sessionId}',
         'sessions://{sessionId}/transcript',
+        'sessions://{sessionId}/events',
         'caches://list',
         'caches://{cacheName}',
         'tools://list',

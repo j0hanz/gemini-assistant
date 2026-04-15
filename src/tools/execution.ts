@@ -5,6 +5,7 @@ import type { Part } from '@google/genai';
 
 import { cleanupErrorLogger, errorResult, handleToolError, sendProgress } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
+import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { handleToolExecution } from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
@@ -187,7 +188,7 @@ async function executeCodeWork(
           {
             systemInstruction: EXECUTE_CODE_SYSTEM_INSTRUCTION,
             thinkingLevel: thinkingLevel ?? 'LOW',
-            tools: [{ codeExecution: {} }],
+            ...buildOrchestrationConfig({ toolProfile: 'code' }),
           },
           ctx.mcpReq.signal,
         ),

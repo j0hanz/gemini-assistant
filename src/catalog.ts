@@ -103,11 +103,14 @@ const DISCOVERY_ENTRIES = [
       'temperature?',
       'seed?',
       'googleSearch?',
+      'toolProfile?',
+      'urls?',
     ],
     returns:
       'Answer text, optional structured data, usage metadata, and a session resource link for new chats.',
     related: [
       { kind: 'resource', name: 'sessions://list' },
+      { kind: 'resource', name: 'sessions://{sessionId}/events' },
       { kind: 'resource', name: 'sessions://{sessionId}/transcript' },
       { kind: 'prompt', name: 'getting-started' },
     ],
@@ -429,6 +432,22 @@ const DISCOVERY_ENTRIES = [
     ],
   },
   {
+    name: 'sessions://{sessionId}/events',
+    kind: 'resource',
+    title: 'Session Events Resource',
+    bestFor: 'Inspecting tool/function activity for one active chat session.',
+    whenToUse:
+      'Use when you want to inspect Gemini tool usage, function calls, and related event metadata for a live session.',
+    inputs: ['sessionId'],
+    returns:
+      'JSON event entries containing request metadata and normalized Gemini tool/function events.',
+    related: [
+      { kind: 'resource', name: 'sessions://{sessionId}' },
+      { kind: 'resource', name: 'sessions://{sessionId}/transcript' },
+      { kind: 'tool', name: 'ask' },
+    ],
+  },
+  {
     name: 'sessions://list',
     kind: 'resource',
     title: 'Session List Resource',
@@ -496,11 +515,17 @@ const WORKFLOWS = [
       'Create or inspect caches when the same large context should be reused.',
       'Use ask with a sessionId for the active conversation thread.',
       'Inspect sessions://{sessionId}/transcript when you need to verify live session history.',
+      'Inspect sessions://{sessionId}/events when you need Gemini tool/function activity for the session.',
       'Use caches://list to manage reusable project context over time.',
     ],
     recommendedTools: ['create_cache', 'list_caches', 'update_cache', 'ask'],
     recommendedPrompts: ['project-memory', 'getting-started'],
-    relatedResources: ['caches://list', 'sessions://list', 'sessions://{sessionId}/transcript'],
+    relatedResources: [
+      'caches://list',
+      'sessions://list',
+      'sessions://{sessionId}/transcript',
+      'sessions://{sessionId}/events',
+    ],
   },
   {
     name: 'deep-research',

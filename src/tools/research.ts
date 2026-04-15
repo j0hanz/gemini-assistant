@@ -1,8 +1,7 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import { FunctionCallingConfigMode } from '@google/genai';
-
 import { sendProgress } from '../lib/errors.js';
+import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import {
   appendSources,
   appendUrlStatus,
@@ -198,7 +197,9 @@ async function searchWork(
 
   await sendProgress(ctx, 0, undefined, `${SEARCH_TOOL_LABEL}: Starting`);
   await ctx.mcpReq.log('info', `Search: ${query}`);
-  const tools = [{ googleSearch: {} }, ...((urls?.length ?? 0) > 0 ? [{ urlContext: {} }] : [])];
+  const { functionCallingMode, toolConfig, tools } = buildOrchestrationConfig({
+    toolProfile: (urls?.length ?? 0) > 0 ? 'search_url' : 'search',
+  });
 
   return await handleToolExecution(
     ctx,
@@ -212,8 +213,9 @@ async function searchWork(
           {
             systemInstruction: systemInstruction ?? SEARCH_SYSTEM_INSTRUCTION,
             thinkingLevel: thinkingLevel ?? 'LOW',
+            functionCallingMode,
+            toolConfig,
             tools,
-            functionCallingMode: FunctionCallingConfigMode.ANY,
           },
           ctx.mcpReq.signal,
         ),
@@ -245,7 +247,7 @@ async function analyzeUrlWork(
           {
             systemInstruction: systemInstruction ?? ANALYZE_URL_SYSTEM_INSTRUCTION,
             thinkingLevel: thinkingLevel ?? 'LOW',
-            tools: [{ urlContext: {} }],
+            ...buildOrchestrationConfig({ toolProfile: 'url' }),
           },
           ctx.mcpReq.signal,
         ),
@@ -278,8 +280,10 @@ async function agenticSearchWork(
           {
             systemInstruction: AGENT_SYSTEM_INSTRUCTION,
             thinkingLevel: thinkingLevel ?? 'MEDIUM',
-            tools: [{ googleSearch: {} }, { codeExecution: {} }],
-            toolConfig: { includeServerSideToolInvocations: true },
+            ...buildOrchestrationConfig({
+              includeServerSideToolInvocations: true,
+              toolProfile: 'search_code',
+            }),
           },
           ctx.mcpReq.signal,
         ),

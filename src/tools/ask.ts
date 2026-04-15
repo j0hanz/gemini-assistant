@@ -4,14 +4,17 @@ import { Validator } from '@cfworker/json-schema';
 import type { Chat } from '@google/genai';
 
 import { errorResult, reportCompletion, sendProgress } from '../lib/errors.js';
+import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
 import { createResourceLink, extractTextContent } from '../lib/response.js';
 import {
   executeToolStream,
   extractUsage,
   type FunctionCallEntry,
   type StreamResult,
+  type ToolEvent,
 } from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { validateUrls } from '../lib/validation.js';
 import { type AskInput, AskInputSchema } from '../schemas/inputs.js';
 import {
   type GeminiResponseSchema,
@@ -22,6 +25,7 @@ import { AskOutputSchema } from '../schemas/outputs.js';
 import { buildGenerateContentConfig, EXPOSE_THOUGHTS } from '../client.js';
 import { getAI, MODEL } from '../client.js';
 import {
+  appendSessionEvent,
   appendSessionTranscript,
   getSession,
   getSessionEntry,
@@ -32,14 +36,26 @@ import {
 type AskArgs = AskInput;
 
 interface AskDependencies {
+  appendSessionEvent: typeof appendSessionEvent;
   appendSessionTranscript: typeof appendSessionTranscript;
   createChat: (args: AskArgs) => Chat;
   getSession: typeof getSession;
   getSessionEntry: typeof getSessionEntry;
   isEvicted: typeof isEvicted;
   now: () => number;
-  runWithoutSession: (args: AskArgs, ctx: ServerContext, chat?: Chat) => Promise<CallToolResult>;
+  runWithoutSession: (
+    args: AskArgs,
+    ctx: ServerContext,
+    chat?: Chat,
+  ) => Promise<AskExecutionResult>;
   setSession: typeof setSession;
+}
+
+interface AskExecutionResult {
+  result: CallToolResult;
+  streamResult: StreamResult;
+  toolProfile: ToolProfile;
+  urls?: string[];
 }
 
 const ASK_TOOL_LABEL = 'Ask Gemini';
@@ -152,7 +168,10 @@ function buildAskWarnings(
 
 function buildAskStructuredContent(
   text: string,
-  streamResult: Pick<StreamResult, 'thoughtText' | 'usageMetadata' | 'functionCalls'>,
+  streamResult: Pick<
+    StreamResult,
+    'functionCalls' | 'thoughtText' | 'toolEvents' | 'usageMetadata'
+  >,
   jsonMode?: boolean,
   responseSchema?: GeminiResponseSchema,
 ): {
@@ -160,6 +179,7 @@ function buildAskStructuredContent(
   data?: unknown;
   schemaWarnings?: string[];
   thoughts?: string;
+  toolEvents?: ToolEvent[];
   usage?: ReturnType<typeof extractUsage>;
   functionCalls?: FunctionCallEntry[];
 } {
@@ -173,6 +193,7 @@ function buildAskStructuredContent(
     ...(parsedData !== undefined ? { data: parsedData } : {}),
     ...(warnings.length > 0 ? { schemaWarnings: warnings } : {}),
     ...(EXPOSE_THOUGHTS && streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
+    ...(streamResult.toolEvents.length > 0 ? { toolEvents: streamResult.toolEvents } : {}),
     ...(usage ? { usage } : {}),
     ...(streamResult.functionCalls.length > 0 ? { functionCalls: streamResult.functionCalls } : {}),
   };
@@ -180,7 +201,10 @@ function buildAskStructuredContent(
 
 function formatStructuredResult(
   result: CallToolResult,
-  streamResult: Pick<StreamResult, 'thoughtText' | 'usageMetadata' | 'functionCalls'>,
+  streamResult: Pick<
+    StreamResult,
+    'functionCalls' | 'thoughtText' | 'toolEvents' | 'usageMetadata'
+  >,
   jsonMode?: boolean,
   responseSchema?: GeminiResponseSchema,
   thinkingSuppressed?: boolean,
@@ -214,9 +238,14 @@ function validateAskConflict(condition: boolean, message: string): CallToolResul
 }
 
 function validateAskRequest(
-  { sessionId, systemInstruction, cacheName, responseSchema, temperature, seed }: AskArgs,
+  { cacheName, responseSchema, seed, sessionId, systemInstruction, temperature, urls }: AskArgs,
   deps: Pick<AskDependencies, 'getSessionEntry' | 'isEvicted'>,
 ): CallToolResult | undefined {
+  const invalidUrlResult = validateUrls(urls);
+  if (invalidUrlResult) {
+    return invalidUrlResult;
+  }
+
   const hasExistingSession = sessionId ? deps.getSessionEntry(sessionId) !== undefined : false;
   return (
     validateAskConflict(
@@ -242,13 +271,39 @@ function validateAskRequest(
   );
 }
 
+function buildAskPrompt(message: string, urls?: readonly string[]): string {
+  if (!urls || urls.length === 0) {
+    return message;
+  }
+
+  return `${message}\n\nUse these URLs too:\n${urls.join('\n')}`;
+}
+
+function resolveAskTooling(args: AskArgs) {
+  const orchestration = buildOrchestrationConfig({
+    googleSearch: args.googleSearch,
+    toolProfile: args.toolProfile,
+    urls: args.urls,
+  });
+  const { toolProfile, ...toolConfig } = orchestration;
+
+  return {
+    prompt: buildAskPrompt(args.message, orchestration.usesUrlContext ? args.urls : undefined),
+    toolProfile,
+    urls: orchestration.usesUrlContext ? [...(args.urls ?? [])] : undefined,
+    ...toolConfig,
+  };
+}
+
 async function runAskStream(
   ctx: ServerContext,
   streamGenerator: () => ReturnType<ReturnType<typeof getAI>['models']['generateContentStream']>,
+  toolProfile: ToolProfile,
+  urls: string[] | undefined,
   jsonMode = false,
   thinkingSuppressed = false,
   responseSchema?: GeminiResponseSchema,
-): Promise<CallToolResult> {
+): Promise<AskExecutionResult> {
   await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Preparing`);
   if (thinkingSuppressed) {
     await ctx.mcpReq.log('debug', `ask: ${THINKING_SUPPRESSED_WARNING}`);
@@ -271,34 +326,57 @@ async function runAskStream(
   const hasThoughts = streamResult.thoughtText.length > 0;
   const detail = hasThoughts ? 'completed with reasoning' : 'completed';
   await reportCompletion(ctx, ASK_TOOL_LABEL, detail);
-  return formatStructuredResult(result, streamResult, jsonMode, responseSchema, thinkingSuppressed);
+  return {
+    result: formatStructuredResult(
+      result,
+      streamResult,
+      jsonMode,
+      responseSchema,
+      thinkingSuppressed,
+    ),
+    streamResult,
+    toolProfile,
+    ...(urls && urls.length > 0 ? { urls } : {}),
+  };
 }
 
 function appendSessionResource(result: CallToolResult, sessionId: string): void {
   if (result.isError) return;
   result.content.push(createResourceLink(`sessions://${sessionId}`, `Chat Session ${sessionId}`));
+  result.content.push(
+    createResourceLink(`sessions://${sessionId}/events`, `Chat Session ${sessionId} Events`),
+  );
 }
 
 async function askWithoutSession(
   args: AskArgs,
   ctx: ServerContext,
   chat?: Chat,
-): Promise<CallToolResult> {
-  const tools = args.googleSearch ? [{ googleSearch: {} }] : undefined;
+): Promise<AskExecutionResult> {
+  const { prompt, toolConfig, toolProfile, tools, urls, functionCallingMode } =
+    resolveAskTooling(args);
   const thinkingSuppressed = !!args.thinkingLevel && !!args.responseSchema;
   return await runAskStream(
     ctx,
     () =>
       chat
         ? chat.sendMessageStream({
-            message: args.message,
-            config: buildGenerateContentConfig({ ...args, tools }, ctx.mcpReq.signal),
+            message: prompt,
+            config: buildGenerateContentConfig(
+              { ...args, functionCallingMode, toolConfig, tools },
+              ctx.mcpReq.signal,
+            ),
           })
         : getAI().models.generateContentStream({
             model: MODEL,
-            contents: args.message,
-            config: buildGenerateContentConfig({ ...args, tools }, ctx.mcpReq.signal),
+            contents: prompt,
+            config: buildGenerateContentConfig(
+              { ...args, functionCallingMode, toolConfig, tools },
+              ctx.mcpReq.signal,
+            ),
           }),
+    toolProfile,
+    urls,
     !!args.responseSchema,
     thinkingSuppressed,
     args.responseSchema,
@@ -328,14 +406,45 @@ function appendTranscriptPair(
   });
 }
 
+function appendSessionTurn(
+  sessionId: string,
+  askResult: AskExecutionResult,
+  args: AskArgs,
+  deps: Pick<AskDependencies, 'appendSessionEvent' | 'appendSessionTranscript' | 'now'>,
+  taskId?: string,
+): void {
+  appendTranscriptPair(sessionId, args.message, askResult.result, deps, taskId);
+  if (askResult.result.isError) return;
+
+  deps.appendSessionEvent(sessionId, {
+    request: {
+      message: args.message,
+      ...(askResult.toolProfile !== 'none' ? { toolProfile: askResult.toolProfile } : {}),
+      ...(askResult.urls ? { urls: askResult.urls } : {}),
+    },
+    response: {
+      text: extractTextContent(askResult.result.content),
+      ...(askResult.streamResult.functionCalls.length > 0
+        ? { functionCalls: askResult.streamResult.functionCalls }
+        : {}),
+      ...(askResult.streamResult.toolEvents.length > 0
+        ? { toolEvents: askResult.streamResult.toolEvents }
+        : {}),
+    },
+    timestamp: deps.now(),
+    ...(taskId ? { taskId } : {}),
+  });
+}
+
 function createDefaultAskDependencies(): AskDependencies {
   return {
+    appendSessionEvent,
     appendSessionTranscript,
     createChat: (args) => {
-      const tools = args.googleSearch ? [{ googleSearch: {} }] : undefined;
+      const { functionCallingMode, toolConfig, tools } = resolveAskTooling(args);
       return getAI().chats.create({
         model: MODEL,
-        config: buildGenerateContentConfig({ ...args, tools }),
+        config: buildGenerateContentConfig({ ...args, functionCallingMode, toolConfig, tools }),
       });
     },
     getSession,
@@ -357,9 +466,9 @@ async function askExistingSession(
 
   await ctx.mcpReq.log('debug', `Resuming session ${args.sessionId}`);
   await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Resuming session`);
-  const result = await deps.runWithoutSession(args, ctx, chat);
-  appendTranscriptPair(args.sessionId, args.message, result, deps, ctx.task?.id);
-  return result;
+  const askResult = await deps.runWithoutSession(args, ctx, chat);
+  appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id);
+  return askResult.result;
 }
 
 async function askNewSession(
@@ -370,17 +479,17 @@ async function askNewSession(
   await ctx.mcpReq.log('debug', `Creating session ${args.sessionId}`);
   const chat = deps.createChat(args);
 
-  const result = await deps.runWithoutSession(args, ctx, chat);
+  const askResult = await deps.runWithoutSession(args, ctx, chat);
 
-  if (!result.isError) {
+  if (!askResult.result.isError) {
     deps.setSession(args.sessionId, chat);
-    appendTranscriptPair(args.sessionId, args.message, result, deps, ctx.task?.id);
-    appendSessionResource(result, args.sessionId);
+    appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id);
+    appendSessionResource(askResult.result, args.sessionId);
   } else {
     await ctx.mcpReq.log('debug', `Session ${args.sessionId} not stored due to stream error`);
   }
 
-  return result;
+  return askResult.result;
 }
 
 export function createAskWork(deps: AskDependencies = createDefaultAskDependencies()) {
@@ -389,7 +498,7 @@ export function createAskWork(deps: AskDependencies = createDefaultAskDependenci
     if (validationError) return validationError;
 
     if (!args.sessionId) {
-      return await deps.runWithoutSession(args, ctx);
+      return (await deps.runWithoutSession(args, ctx)).result;
     }
 
     const resumed = await askExistingSession(args as AskArgs & { sessionId: string }, ctx, deps);

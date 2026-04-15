@@ -95,7 +95,9 @@ export const ExecuteCodeInputSchema = z.object({
     .trim()
     .min(1)
     .optional()
-    .describe('Preferred language (Python is sandbox default)'),
+    .describe(
+      'Preferred language hint for prompt steering only. Gemini code execution still runs in Python.',
+    ),
   thinkingLevel: thinkingLevelField,
 });
 export type ExecuteCodeInput = z.infer<typeof ExecuteCodeInputSchema>;

@@ -152,4 +152,64 @@ describe('ask transcript capture', () => {
     assert.deepStrictEqual(harness.sessions.get('sess-error')?.transcript, []);
     assert.deepStrictEqual(harness.sessions.get('sess-error')?.events, []);
   });
+
+  it('persists structured output metadata in session events', async () => {
+    const harness = createHarness();
+    harness.sessions.set('sess-structured', { events: [], transcript: [] });
+    harness.deps.runWithoutSession = async () => ({
+      result: {
+        content: [{ type: 'text' as const, text: '{\n  "status": "ok"\n}' }],
+        structuredContent: {
+          answer: '{\n  "status": "ok"\n}',
+          data: { status: 'ok' },
+          schemaWarnings: [
+            'thinkingLevel was ignored because responseSchema activates JSON mode (mutually exclusive)',
+          ],
+          thoughts: 'Reasoning summary',
+          functionCalls: [{ name: 'lookupWeather', args: { city: 'Stockholm' } }],
+          toolEvents: [{ kind: 'tool_call' as const, id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
+          usage: { totalTokenCount: 25 },
+        },
+      },
+      streamResult: {
+        functionCalls: [],
+        parts: [],
+        text: '{\n  "status": "ok"\n}',
+        thoughtText: '',
+        toolEvents: [],
+        toolsUsed: [],
+      },
+      toolProfile: 'search' as const,
+      urls: ['https://example.com'],
+    });
+    const askWork = createAskWork(harness.deps as never);
+
+    await askWork(
+      { message: 'Need JSON', sessionId: 'sess-structured' },
+      createContext('task-structured'),
+    );
+
+    assert.deepStrictEqual(harness.sessions.get('sess-structured')?.events, [
+      {
+        request: {
+          message: 'Need JSON',
+          toolProfile: 'search',
+          urls: ['https://example.com'],
+        },
+        response: {
+          text: '{\n  "status": "ok"\n}',
+          data: { status: 'ok' },
+          schemaWarnings: [
+            'thinkingLevel was ignored because responseSchema activates JSON mode (mutually exclusive)',
+          ],
+          thoughts: 'Reasoning summary',
+          functionCalls: [{ name: 'lookupWeather', args: { city: 'Stockholm' } }],
+          toolEvents: [{ kind: 'tool_call', id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
+          usage: { totalTokenCount: 25 },
+        },
+        timestamp: 3,
+        taskId: 'task-structured',
+      },
+    ]);
+  });
 });

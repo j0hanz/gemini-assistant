@@ -136,6 +136,7 @@ describe('ExecuteCodeOutputSchema', () => {
       code: 'print("hello")',
       output: 'hello',
       explanation: 'Prints hello to stdout',
+      runtime: 'python',
     });
     assert.ok(result.success);
   });
@@ -145,6 +146,18 @@ describe('ExecuteCodeOutputSchema', () => {
       code: '',
       output: '',
       explanation: '',
+      runtime: 'python',
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts an advisory requestedLanguage', () => {
+    const result = ExecuteCodeOutputSchema.safeParse({
+      code: 'print("hello")',
+      output: 'hello',
+      explanation: 'Prints hello to stdout',
+      runtime: 'python',
+      requestedLanguage: 'typescript',
     });
     assert.ok(result.success);
   });
@@ -153,6 +166,7 @@ describe('ExecuteCodeOutputSchema', () => {
     const result = ExecuteCodeOutputSchema.safeParse({
       output: 'hello',
       explanation: 'x',
+      runtime: 'python',
     });
     assert.strictEqual(result.success, false);
   });
@@ -161,6 +175,7 @@ describe('ExecuteCodeOutputSchema', () => {
     const result = ExecuteCodeOutputSchema.safeParse({
       code: 'x',
       explanation: 'x',
+      runtime: 'python',
     });
     assert.strictEqual(result.success, false);
   });
@@ -169,6 +184,7 @@ describe('ExecuteCodeOutputSchema', () => {
     const result = ExecuteCodeOutputSchema.safeParse({
       code: 'x',
       output: 'x',
+      runtime: 'python',
     });
     assert.strictEqual(result.success, false);
   });
@@ -178,6 +194,7 @@ describe('ExecuteCodeOutputSchema', () => {
       code: 123,
       output: 'x',
       explanation: 'x',
+      runtime: 'python',
     });
     assert.strictEqual(result.success, false);
   });
@@ -187,12 +204,23 @@ describe('ExecuteCodeOutputSchema', () => {
       code: 'x',
       output: 'y',
       explanation: 'z',
+      runtime: 'python',
       extra: 'should be stripped',
     });
     assert.ok(result.success);
     if (result.success) {
       assert.strictEqual('extra' in result.data, false);
     }
+  });
+
+  it('rejects a non-python runtime', () => {
+    const result = ExecuteCodeOutputSchema.safeParse({
+      code: 'x',
+      output: 'y',
+      explanation: 'z',
+      runtime: 'javascript',
+    });
+    assert.strictEqual(result.success, false);
   });
 });
 

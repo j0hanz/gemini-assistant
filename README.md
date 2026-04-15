@@ -31,11 +31,23 @@ Key workflow prompts:
 - Diagnose an error message: `explain_error` or `explain-error`
 - Reuse large project context: `create_cache`, `list_caches`, `update_cache`, `delete_cache`
 
+## Capability Matrix
+
+| Capability        | Status        | Notes                                                                                        |
+| ----------------- | ------------- | -------------------------------------------------------------------------------------------- |
+| Code Execution    | `partial`     | Implemented through Gemini code execution. Runtime is Python-only.                           |
+| Structured Output | `partial`     | Implemented on `ask` with `responseSchema`, but only for single-turn calls and new sessions. |
+| Tool Combination  | `partial`     | Implemented through normalized tool/function events and selected tool presets.               |
+| File Search       | `unsupported` | This server does not expose Gemini File Search stores or persistent indexed retrieval.       |
+| Live API          | `unsupported` | This server does not expose Gemini Live API sessions, audio, or video flows.                 |
+
 ## Sessions Versus Caches
 
 Use sessions when the context is conversational and should evolve turn by turn. Sessions are created by `ask` with a `sessionId`, listed in `sessions://list`, and inspectable through `sessions://{sessionId}`, `sessions://{sessionId}/transcript`, and `sessions://{sessionId}/events`.
 
-If `ask` uses Gemini built-in tools, `sessions://{sessionId}/events` exposes normalized tool/function activity for that live session. Tool-combination state is in-memory only and disappears when the session expires or is evicted.
+If `ask` uses Gemini built-in tools, `sessions://{sessionId}/events` exposes a normalized tool/function inspection summary for that live session. It is not a raw replay-ready Gemini history. Tool-combination state is in-memory only and disappears when the session expires or is evicted.
+
+`ask.responseSchema` is supported for single-turn calls and brand-new sessions. It cannot be applied to an existing session.
 
 Use caches when the same large context should be reused across multiple asks or across different sessions. Cache state is exposed through `caches://list` and `caches://{cacheName}`.
 
@@ -44,7 +56,7 @@ The practical split:
 - Session: live working memory for one thread
 - Cache: reusable reference context for many calls
 - Transcript resource: read-only visibility into the live session history
-- Events resource: read-only visibility into Gemini tool/function activity for the live session
+- Events resource: read-only visibility into the normalized Gemini tool/function activity summary for the live session
 
 ## Discovery Resources
 
@@ -60,6 +72,8 @@ Public resources:
 - `caches://{cacheName}`
 
 `tools://list` returns a concise JSON catalog of tools, prompts, and resources. `workflows://list` returns opinionated starter workflows, with `getting-started` first.
+
+Each tool entry in `tools://list` may also include `limitations` when the public contract is narrower than the underlying Google docs.
 
 ## Requirements
 
@@ -94,6 +108,7 @@ Gemini tool-combination notes:
 
 - Built-in tool combination remains a Gemini 3 preview feature.
 - This server preserves tool/function event history in session memory only.
+- `sessions://{sessionId}/events` is an inspection surface, not a replay contract.
 - `ask.toolProfile` supports `none`, `search`, `url`, `search_url`, `code`, and `search_code`.
 
 ## Run
@@ -190,7 +205,9 @@ Prompt wrappers:
 - File tools require absolute paths inside configured roots.
 - URL tools accept only public `http/https` URLs.
 - Sessions and transcripts are in-memory only and disappear on expiry or eviction.
+- `execute_code` uses Gemini's Python runtime; `language` is advisory only.
 - Cache tooling does not change the core Gemini tool set or transport model.
+- `list_caches` is the single synchronous read-only outlier in the tool surface.
 
 ## Commands
 

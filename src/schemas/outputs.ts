@@ -9,6 +9,8 @@ export const UsageMetadataSchema = z.object({
   totalTokenCount: nonNegativeInt('Total tokens for the request').optional(),
 });
 
+export type UsageMetadata = z.infer<typeof UsageMetadataSchema>;
+
 const FunctionCallEntrySchema = z.object({
   name: z.string().describe('Function/tool name'),
   args: z.record(z.string(), z.unknown()).optional().describe('Function call arguments'),
@@ -75,6 +77,11 @@ export const ExecuteCodeOutputSchema = z.object({
   code: z.string().describe('Generated code'),
   output: z.string().describe('Execution output'),
   explanation: z.string().describe('Model explanation'),
+  runtime: z.literal('python').describe('Actual Gemini execution runtime'),
+  requestedLanguage: z
+    .string()
+    .optional()
+    .describe('Requested language hint when the caller supplied one'),
   ...baseOutputFields,
 });
 

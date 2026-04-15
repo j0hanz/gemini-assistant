@@ -248,7 +248,9 @@ function registerSessionResources(server: McpServer): void {
     }),
     {
       title: 'Chat Session Events',
-      description: 'Structured Gemini tool and function events for a single active chat session.',
+      description:
+        'Structured Gemini tool and function inspection summary for a single active chat session. ' +
+        'This is a normalized view, not a raw replay-ready Gemini history.',
       mimeType: 'application/json',
     },
     (uri, { sessionId }): ReadResourceResult => readSessionEventsResource(uri, sessionId),

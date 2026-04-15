@@ -123,7 +123,7 @@ function buildAgenticDepthInstruction(searchDepth: number): string {
   return 'Exhaustive: cover as many relevant aspects as possible.';
 }
 
-function buildAgenticSearchResult(streamResult: StreamResult, textContent: string) {
+export function buildAgenticSearchResult(streamResult: StreamResult, textContent: string) {
   const sources = collectGroundedSources(streamResult.groundingMetadata);
   const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
   const contentAdditions: CallToolResult['content'] = [];

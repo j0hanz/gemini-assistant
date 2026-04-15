@@ -79,7 +79,11 @@ describe('session events resource', () => {
       request: { message: 'Hello', toolProfile: 'search' },
       response: {
         text: 'Hi there',
+        data: { status: 'ok' },
+        schemaWarnings: ['normalized inspection summary'],
+        thoughts: 'Reasoning summary',
         toolEvents: [{ kind: 'tool_call', id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
+        usage: { totalTokenCount: 12 },
       },
       timestamp: 1,
     });

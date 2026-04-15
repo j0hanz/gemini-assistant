@@ -2,6 +2,7 @@ import type { Chat } from '@google/genai';
 
 import type { ToolProfile } from './lib/orchestration.js';
 import type { FunctionCallEntry, ToolEvent } from './lib/streaming.js';
+import type { UsageMetadata } from './schemas/outputs.js';
 
 import { getSessionLimits } from './config.js';
 
@@ -25,9 +26,13 @@ export interface SessionEventEntry {
     urls?: string[];
   };
   response: {
+    data?: unknown;
     functionCalls?: FunctionCallEntry[];
+    schemaWarnings?: string[];
+    thoughts?: string;
     text: string;
     toolEvents?: ToolEvent[];
+    usage?: UsageMetadata;
   };
   timestamp: number;
   taskId?: string;
@@ -83,6 +88,10 @@ function notifyChange(sessionIds: string[] = []): void {
 
 function now(): number {
   return Date.now();
+}
+
+function cloneValue<T>(value: T): T {
+  return structuredClone(value);
 }
 
 function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {
@@ -205,14 +214,20 @@ export function listSessionEventEntries(id: string): SessionEventEntry[] | undef
     },
     response: {
       ...item.response,
+      ...(item.response.data !== undefined ? { data: cloneValue(item.response.data) } : {}),
       ...(item.response.functionCalls
         ? {
             functionCalls: item.response.functionCalls.map((functionCall) => ({ ...functionCall })),
           }
         : {}),
+      ...(item.response.schemaWarnings
+        ? { schemaWarnings: [...item.response.schemaWarnings] }
+        : {}),
+      ...(item.response.thoughts ? { thoughts: item.response.thoughts } : {}),
       ...(item.response.toolEvents
         ? { toolEvents: item.response.toolEvents.map((toolEvent) => ({ ...toolEvent })) }
         : {}),
+      ...(item.response.usage ? { usage: { ...item.response.usage } } : {}),
     },
   }));
 }
@@ -236,14 +251,20 @@ export function appendSessionEvent(id: string, item: SessionEventEntry): boolean
     },
     response: {
       ...item.response,
+      ...(item.response.data !== undefined ? { data: cloneValue(item.response.data) } : {}),
       ...(item.response.functionCalls
         ? {
             functionCalls: item.response.functionCalls.map((functionCall) => ({ ...functionCall })),
           }
         : {}),
+      ...(item.response.schemaWarnings
+        ? { schemaWarnings: [...item.response.schemaWarnings] }
+        : {}),
+      ...(item.response.thoughts ? { thoughts: item.response.thoughts } : {}),
       ...(item.response.toolEvents
         ? { toolEvents: item.response.toolEvents.map((toolEvent) => ({ ...toolEvent })) }
         : {}),
+      ...(item.response.usage ? { usage: { ...item.response.usage } } : {}),
     },
   });
   notifyChange([id]);

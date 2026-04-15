@@ -39,6 +39,21 @@ describe('documentation and package metadata', () => {
     }
   });
 
+  it('documents the public capability matrix and contract limits', () => {
+    assert.match(readme, /\|\s*Code Execution\s*\|\s*`partial`\s*\|/);
+    assert.match(readme, /\|\s*Structured Output\s*\|\s*`partial`\s*\|/);
+    assert.match(readme, /\|\s*Tool Combination\s*\|\s*`partial`\s*\|/);
+    assert.match(readme, /\|\s*File Search\s*\|\s*`unsupported`\s*\|/);
+    assert.match(readme, /\|\s*Live API\s*\|\s*`unsupported`\s*\|/);
+    assert.match(readme, /responseSchema.*single-turn calls and brand-new sessions/i);
+    assert.match(readme, /inspection summary/i);
+    assert.match(
+      readme,
+      /`execute_code` uses Gemini's Python runtime; `language` is advisory only\./,
+    );
+    assert.match(readme, /`list_caches` is the single synchronous read-only outlier/i);
+  });
+
   it('keeps web-standard runtime guidance aligned with transport behavior', () => {
     assert.match(readme, /Auto-serves only when the process is running under Bun or Deno\./);
     assert.match(readme, /returns a `handler` but does not start a listener/);

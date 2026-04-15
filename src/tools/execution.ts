@@ -22,6 +22,7 @@ import { getAI, MODEL } from '../client.js';
 
 const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
 const EXECUTE_CODE_TOOL_LABEL = 'Execute Code';
+const EXECUTE_CODE_RUNTIME = 'python' as const;
 
 const ANALYZE_FILE_SYSTEM_INSTRUCTION =
   'Answer from the file only. Cite relevant sections, lines, or elements.';
@@ -174,7 +175,12 @@ async function executeCodeWork(
 ): Promise<CallToolResult> {
   await sendProgress(ctx, 0, undefined, `${EXECUTE_CODE_TOOL_LABEL}: Preparing sandbox`);
   await ctx.mcpReq.log('info', `Executing code${language ? ` [${language}]` : ''}`);
-  const prompt = [task, ...(language ? [`Lang: ${language}`] : [])].join('\n\n');
+  const prompt = [
+    task,
+    ...(language
+      ? [`Requested language (advisory only; execution runtime remains Python): ${language}`]
+      : []),
+  ].join('\n\n');
 
   return await handleToolExecution(
     ctx,
@@ -216,6 +222,8 @@ async function executeCodeWork(
           code: summary.code,
           output: summary.output,
           explanation: summary.explanation,
+          runtime: EXECUTE_CODE_RUNTIME,
+          ...(language ? { requestedLanguage: language } : {}),
         },
         reportMessage: summary.executionFailed ? 'execution failed' : 'completed',
       };
@@ -246,7 +254,8 @@ export function registerExecuteCodeTool(server: McpServer): void {
     {
       title: EXECUTE_CODE_TOOL_LABEL,
       description:
-        'Generate and execute code in a Gemini sandbox. Returns code, output, and explanation.',
+        'Generate and execute code in a Gemini sandbox. Execution runs in Python. ' +
+        'Returns code, output, explanation, and runtime metadata.',
       inputSchema: ExecuteCodeInputSchema,
       outputSchema: ExecuteCodeOutputSchema,
       annotations: { ...MUTABLE_ANNOTATIONS, openWorldHint: false },

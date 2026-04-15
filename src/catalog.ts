@@ -13,6 +13,7 @@ interface DiscoveryEntry {
   whenToUse: string;
   inputs: string[];
   returns: string;
+  limitations?: string[];
   related: RelatedItemRef[];
 }
 
@@ -41,6 +42,10 @@ const DISCOVERY_ENTRIES = [
     whenToUse: 'Use when a topic needs search, follow-up exploration, and cited synthesis.',
     inputs: ['topic', 'searchDepth?', 'thinkingLevel?'],
     returns: 'A structured research answer with sources and progress-aware task execution.',
+    limitations: [
+      'Grounds itself with Google Search and Gemini code execution only; it does not use File Search.',
+      'Returns normalized tool metadata in structuredContent, not a replay-ready raw Gemini history.',
+    ],
     related: [
       { kind: 'tool', name: 'search' },
       { kind: 'prompt', name: 'deep-research' },
@@ -82,6 +87,10 @@ const DISCOVERY_ENTRIES = [
     whenToUse: 'Use when a small set of specific URLs is more important than broad web search.',
     inputs: ['urls', 'question', 'systemInstruction?', 'thinkingLevel?'],
     returns: 'A URL-grounded answer plus per-URL retrieval status when available.',
+    limitations: [
+      'Only public http/https URLs are supported.',
+      'Uses Gemini URL Context, not File Search or persistent document indexing.',
+    ],
     related: [
       { kind: 'tool', name: 'search' },
       { kind: 'prompt', name: 'deep-research' },
@@ -108,6 +117,11 @@ const DISCOVERY_ENTRIES = [
     ],
     returns:
       'Answer text, optional structured data, usage metadata, and a session resource link for new chats.',
+    limitations: [
+      'responseSchema is supported for single-turn calls and new sessions only, not existing sessions.',
+      'sessions://{sessionId}/events exposes a normalized inspection summary, not raw replay-ready Gemini history.',
+      'Session and tool state are stored in memory only.',
+    ],
     related: [
       { kind: 'resource', name: 'sessions://list' },
       { kind: 'resource', name: 'sessions://{sessionId}/events' },
@@ -174,6 +188,10 @@ const DISCOVERY_ENTRIES = [
       'Use when a task needs computation, parsing, or quick code-assisted experimentation.',
     inputs: ['task', 'language?', 'thinkingLevel?'],
     returns: 'Generated code, execution output, and a structured summary of the run.',
+    limitations: [
+      'Gemini code execution runs in Python.',
+      'language is an advisory prompt hint, not a runtime switch.',
+    ],
     related: [
       { kind: 'tool', name: 'agentic_search' },
       { kind: 'resource', name: 'tools://list' },
@@ -245,6 +263,10 @@ const DISCOVERY_ENTRIES = [
       'Use when a single grounded answer is enough and you do not need a full research workflow.',
     inputs: ['query', 'systemInstruction?', 'urls?', 'thinkingLevel?'],
     returns: 'A concise grounded answer with sources and optional source details.',
+    limitations: [
+      'Search grounding is limited to Google Search and optional URL Context over public URLs.',
+      'This does not provide persistent File Search indexing or citations from uploaded corpora.',
+    ],
     related: [
       { kind: 'tool', name: 'agentic_search' },
       { kind: 'prompt', name: 'deep-research' },
@@ -500,6 +522,7 @@ const WORKFLOWS = [
       'Read tools://list for the full discovery catalog.',
       'Review workflows://list and start with the highest-fit workflow.',
       'Use ask for a quick capability tour or a first direct question.',
+      'Check each tool entry for limitations before relying on advanced tool profiles or structured output.',
       'Inspect sessions://list if a multi-turn chat is created.',
     ],
     recommendedTools: ['ask', 'search', 'analyze_file'],
@@ -515,7 +538,8 @@ const WORKFLOWS = [
       'Create or inspect caches when the same large context should be reused.',
       'Use ask with a sessionId for the active conversation thread.',
       'Inspect sessions://{sessionId}/transcript when you need to verify live session history.',
-      'Inspect sessions://{sessionId}/events when you need Gemini tool/function activity for the session.',
+      'Inspect sessions://{sessionId}/events when you need the normalized Gemini tool/function activity summary for the session.',
+      'Use ask.responseSchema only for single-turn calls or a brand-new session.',
       'Use caches://list to manage reusable project context over time.',
     ],
     recommendedTools: ['create_cache', 'list_caches', 'update_cache', 'ask'],
@@ -536,7 +560,7 @@ const WORKFLOWS = [
       'Start with agentic_search for the main research pass.',
       'Use search for narrower follow-up questions or quick verification.',
       'Use summarize to condense long findings into a requested format.',
-      'Review tools://list if the user wants adjacent capabilities such as URL or file analysis.',
+      'Review tools://list if the user wants adjacent capabilities such as URL or file analysis, keeping in mind that File Search and Live API are not part of this server.',
     ],
     recommendedTools: ['agentic_search', 'search', 'analyze_url'],
     recommendedPrompts: ['deep-research', 'summarize'],

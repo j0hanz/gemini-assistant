@@ -35,6 +35,16 @@ import {
 
 type AskArgs = AskInput;
 
+export interface AskStructuredContent extends Record<string, unknown> {
+  answer: string;
+  data?: unknown;
+  schemaWarnings?: string[];
+  thoughts?: string;
+  toolEvents?: ToolEvent[];
+  usage?: ReturnType<typeof extractUsage>;
+  functionCalls?: FunctionCallEntry[];
+}
+
 interface AskDependencies {
   appendSessionEvent: typeof appendSessionEvent;
   appendSessionTranscript: typeof appendSessionTranscript;
@@ -166,7 +176,7 @@ function buildAskWarnings(
   return warnings;
 }
 
-function buildAskStructuredContent(
+export function buildAskStructuredContent(
   text: string,
   streamResult: Pick<
     StreamResult,
@@ -174,15 +184,7 @@ function buildAskStructuredContent(
   >,
   jsonMode?: boolean,
   responseSchema?: GeminiResponseSchema,
-): {
-  answer: string;
-  data?: unknown;
-  schemaWarnings?: string[];
-  thoughts?: string;
-  toolEvents?: ToolEvent[];
-  usage?: ReturnType<typeof extractUsage>;
-  functionCalls?: FunctionCallEntry[];
-} {
+): AskStructuredContent {
   const parsedData = jsonMode ? tryParseJsonResponse(text) : undefined;
   const answer = parsedData === undefined ? text : JSON.stringify(parsedData, null, 2);
   const usage = extractUsage(streamResult.usageMetadata);
@@ -199,7 +201,7 @@ function buildAskStructuredContent(
   };
 }
 
-function formatStructuredResult(
+export function formatStructuredResult(
   result: CallToolResult,
   streamResult: Pick<
     StreamResult,
@@ -231,6 +233,14 @@ function formatStructuredResult(
     ],
     structuredContent: structured,
   };
+}
+
+function getAskStructuredContent(result: CallToolResult): AskStructuredContent | undefined {
+  if (!result.structuredContent || typeof result.structuredContent !== 'object') {
+    return undefined;
+  }
+
+  return result.structuredContent as unknown as AskStructuredContent;
 }
 
 function validateAskConflict(condition: boolean, message: string): CallToolResult | undefined {
@@ -415,6 +425,7 @@ function appendSessionTurn(
 ): void {
   appendTranscriptPair(sessionId, args.message, askResult.result, deps, taskId);
   if (askResult.result.isError) return;
+  const structured = getAskStructuredContent(askResult.result);
 
   deps.appendSessionEvent(sessionId, {
     request: {
@@ -424,12 +435,12 @@ function appendSessionTurn(
     },
     response: {
       text: extractTextContent(askResult.result.content),
-      ...(askResult.streamResult.functionCalls.length > 0
-        ? { functionCalls: askResult.streamResult.functionCalls }
-        : {}),
-      ...(askResult.streamResult.toolEvents.length > 0
-        ? { toolEvents: askResult.streamResult.toolEvents }
-        : {}),
+      ...(structured?.data !== undefined ? { data: structured.data } : {}),
+      ...(structured?.functionCalls ? { functionCalls: structured.functionCalls } : {}),
+      ...(structured?.schemaWarnings ? { schemaWarnings: structured.schemaWarnings } : {}),
+      ...(structured?.thoughts ? { thoughts: structured.thoughts } : {}),
+      ...(structured?.toolEvents ? { toolEvents: structured.toolEvents } : {}),
+      ...(structured?.usage ? { usage: structured.usage } : {}),
     },
     timestamp: deps.now(),
     ...(taskId ? { taskId } : {}),

@@ -164,4 +164,17 @@ describe('catalog', () => {
       );
     }
   });
+
+  it('documents limitations for contract-sensitive tools', () => {
+    const expectedLimitedTools = ['ask', 'execute_code', 'search', 'agentic_search', 'analyze_url'];
+
+    for (const toolName of expectedLimitedTools) {
+      const entry = findDiscoveryEntry('tool', toolName);
+      assert.ok(entry, `Missing tool entry for ${toolName}`);
+      assert.ok(
+        entry?.limitations && entry.limitations.length > 0,
+        `${toolName} should document limitations`,
+      );
+    }
+  });
 });

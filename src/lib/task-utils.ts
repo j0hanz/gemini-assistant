@@ -138,13 +138,11 @@ export function createToolTaskHandlers<TArgs>(work: TaskWork<TArgs>): ToolTaskHa
           `Failed to store error result for task ${taskId}: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
-      return { task } as CreateTaskResult;
+      return { task };
     },
     getTask: async (_args, ctx) => {
       const taskContext = requireTaskContext(ctx);
-      return {
-        task: await taskContext.store.getTask(requireTaskId(ctx)),
-      } as unknown as GetTaskResult;
+      return (await taskContext.store.getTask(requireTaskId(ctx))) as GetTaskResult;
     },
     getTaskResult: async (_args, ctx) => {
       const taskContext = requireTaskContext(ctx);

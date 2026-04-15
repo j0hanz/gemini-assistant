@@ -5,6 +5,7 @@ import {
   appendSessionTranscript,
   completeSessionIds,
   getSession,
+  getSessionEntry,
   isEvicted,
   listSessionEntries,
   listSessionTranscriptEntries,
@@ -40,6 +41,15 @@ describe('sessions', () => {
       assert.ok(after);
       assert.ok(after.lastAccess >= before.lastAccess);
     });
+
+    it('returns metadata for an active session', () => {
+      setSession('sess-entry-active', mockChat('entry-active') as never);
+      const entry = getSessionEntry('sess-entry-active');
+
+      assert.ok(entry);
+      assert.strictEqual(entry.id, 'sess-entry-active');
+      assert.strictEqual(typeof entry.lastAccess, 'number');
+    });
   });
 
   describe('transcripts', () => {
@@ -66,6 +76,25 @@ describe('sessions', () => {
         { role: 'user', text: 'Hello', timestamp: 1 },
         { role: 'assistant', text: 'Hi', timestamp: 2, taskId: 'task-1' },
       ]);
+    });
+
+    it('notifies when transcript entries are appended', () => {
+      let detailUris: string[] = [];
+      let transcriptUris: string[] = [];
+      setSession('sess-transcript-notify', mockChat('transcript-notify') as never);
+      onSessionChange((event) => {
+        detailUris = event.detailUris;
+        transcriptUris = event.transcriptUris;
+      });
+
+      appendSessionTranscript('sess-transcript-notify', {
+        role: 'user',
+        text: 'Hello again',
+        timestamp: 3,
+      });
+
+      assert.deepStrictEqual(detailUris, ['sessions://sess-transcript-notify']);
+      assert.deepStrictEqual(transcriptUris, ['sessions://sess-transcript-notify/transcript']);
     });
   });
 
@@ -239,6 +268,22 @@ describe('sessions', () => {
       assert.strictEqual(fresh.getSession('sess-expire-on-read'), undefined);
       assert.strictEqual(fresh.isEvicted('sess-expire-on-read'), true);
       assert.strictEqual(fresh.listSessionTranscriptEntries('sess-expire-on-read'), undefined);
+
+      delete process.env.SESSION_TTL_MS;
+    });
+
+    it('expires sessions on metadata reads before validation can treat them as active', async () => {
+      process.env.SESSION_TTL_MS = '1';
+      const fresh = (await import(
+        `../src/sessions.js?ttl-entry=${Date.now()}`
+      )) as typeof import('../src/sessions.js');
+
+      const chat = mockChat('ttl-entry');
+      fresh.setSession('sess-expire-on-entry', chat as never);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      assert.strictEqual(fresh.getSessionEntry('sess-expire-on-entry'), undefined);
+      assert.strictEqual(fresh.isEvicted('sess-expire-on-entry'), true);
 
       delete process.env.SESSION_TTL_MS;
     });

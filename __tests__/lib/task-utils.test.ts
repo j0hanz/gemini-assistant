@@ -260,7 +260,8 @@ describe('createToolTaskHandlers', () => {
     }));
 
     const result = await handlers.getTask({}, ctx);
-    assert.ok(result);
+    assert.equal('task' in result, false);
+    assert.strictEqual(result.taskId, 'task-42');
   });
 
   it('getTask throws when task ID is missing', async () => {

@@ -13,74 +13,93 @@ import {
 
 // ── Host Validation ───────────────────────────────────────────────────
 
-const ENV_KEY = 'MCP_ALLOWED_HOSTS';
-const savedEnv = process.env[ENV_KEY];
+const ALLOWED_HOSTS_ENV_KEY = 'MCP_ALLOWED_HOSTS';
+const ALLOWED_FILE_ROOTS_ENV_KEY = 'ALLOWED_FILE_ROOTS';
+const savedAllowedHostsEnv = process.env[ALLOWED_HOSTS_ENV_KEY];
+const savedAllowedFileRootsEnv = process.env[ALLOWED_FILE_ROOTS_ENV_KEY];
 
-function clearEnv(): void {
-  if (savedEnv === undefined) {
+function restoreAllowedHostsEnv(): void {
+  if (savedAllowedHostsEnv === undefined) {
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete process.env[ENV_KEY];
+    delete process.env[ALLOWED_HOSTS_ENV_KEY];
   } else {
-    process.env[ENV_KEY] = savedEnv;
+    process.env[ALLOWED_HOSTS_ENV_KEY] = savedAllowedHostsEnv;
   }
 }
 
-function setEnv(value: string | undefined): void {
+function setAllowedHostsEnv(value: string | undefined): void {
   if (value === undefined) {
-    clearEnv();
+    restoreAllowedHostsEnv();
   } else {
-    process.env[ENV_KEY] = value;
+    process.env[ALLOWED_HOSTS_ENV_KEY] = value;
+  }
+}
+
+function restoreAllowedFileRootsEnv(): void {
+  if (savedAllowedFileRootsEnv === undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete process.env[ALLOWED_FILE_ROOTS_ENV_KEY];
+  } else {
+    process.env[ALLOWED_FILE_ROOTS_ENV_KEY] = savedAllowedFileRootsEnv;
+  }
+}
+
+function setAllowedFileRootsEnv(value: string | undefined): void {
+  if (value === undefined) {
+    restoreAllowedFileRootsEnv();
+  } else {
+    process.env[ALLOWED_FILE_ROOTS_ENV_KEY] = value;
   }
 }
 
 describe('parseAllowedHosts', () => {
   afterEach(() => {
-    clearEnv();
+    restoreAllowedHostsEnv();
   });
 
   it('returns undefined when env is not set', () => {
-    setEnv(undefined);
+    setAllowedHostsEnv(undefined);
     assert.equal(parseAllowedHosts(), undefined);
   });
 
   it('returns undefined for empty string', () => {
-    setEnv('');
+    setAllowedHostsEnv('');
     assert.equal(parseAllowedHosts(), undefined);
   });
 
   it('returns undefined for whitespace-only string', () => {
-    setEnv('  ,  , ');
+    setAllowedHostsEnv('  ,  , ');
     assert.equal(parseAllowedHosts(), undefined);
   });
 
   it('parses comma-separated hostnames', () => {
-    setEnv('localhost, myapp.local, [::1]');
+    setAllowedHostsEnv('localhost, myapp.local, [::1]');
     assert.deepEqual(parseAllowedHosts(), ['localhost', 'myapp.local', '[::1]']);
   });
 
   it('trims whitespace from entries', () => {
-    setEnv('  host1 , host2  ');
+    setAllowedHostsEnv('  host1 , host2  ');
     assert.deepEqual(parseAllowedHosts(), ['host1', 'host2']);
   });
 
   it('handles single hostname', () => {
-    setEnv('myserver');
+    setAllowedHostsEnv('myserver');
     assert.deepEqual(parseAllowedHosts(), ['myserver']);
   });
 });
 
 describe('resolveAllowedHosts', () => {
   afterEach(() => {
-    clearEnv();
+    restoreAllowedHostsEnv();
   });
 
   it('returns explicit env hosts for localhost bind', () => {
-    setEnv('custom.local');
+    setAllowedHostsEnv('custom.local');
     assert.deepEqual(resolveAllowedHosts('127.0.0.1'), ['custom.local']);
   });
 
   it('returns explicit env hosts for broad bind', () => {
-    setEnv('myapp.example.com');
+    setAllowedHostsEnv('myapp.example.com');
     assert.deepEqual(resolveAllowedHosts('0.0.0.0'), ['myapp.example.com']);
   });
 
@@ -168,6 +187,10 @@ describe('validateHostHeader', () => {
 // ── Path Validation ───────────────────────────────────────────────────
 
 describe('resolveAndValidatePath', () => {
+  afterEach(() => {
+    restoreAllowedFileRootsEnv();
+  });
+
   it('rejects relative paths', async () => {
     await assert.rejects(() => resolveAndValidatePath('relative/path.txt'), {
       message: /must be absolute/,
@@ -253,6 +276,22 @@ describe('resolveAndValidatePath', () => {
     };
     const result = await resolveAndValidatePath(testPath, fetcher);
     assert.ok(result.endsWith('package.json'));
+  });
+
+  it('does not let client roots expand beyond ALLOWED_FILE_ROOTS', async () => {
+    const outsidePath =
+      process.platform === 'win32' ? 'C:\\Windows\\System32\\cmd.exe' : '/etc/passwd';
+
+    if (outsidePath.toLowerCase().startsWith(process.cwd().toLowerCase())) {
+      return;
+    }
+
+    setAllowedFileRootsEnv(process.cwd());
+    const fetcher = async () => [process.platform === 'win32' ? 'C:\\' : '/'];
+
+    await assert.rejects(() => resolveAndValidatePath(outsidePath, fetcher), {
+      message: /outside allowed directories/,
+    });
   });
 });
 

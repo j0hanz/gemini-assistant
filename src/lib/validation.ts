@@ -68,10 +68,21 @@ export function validateHostHeader(hostHeader: string | null, allowedHosts: stri
 
 export type RootsFetcher = () => Promise<string[]>;
 
-const allowedFileRootsEnv = getAllowedFileRootsEnv();
-const ENV_ROOTS: string[] = allowedFileRootsEnv
-  ? allowedFileRootsEnv.split(',').map((r) => normalize(r.trim()))
-  : [normalize(process.cwd())];
+function getEnvRoots(): string[] {
+  const allowedFileRootsEnv = getAllowedFileRootsEnv();
+  if (!allowedFileRootsEnv) {
+    return [normalize(process.cwd())];
+  }
+
+  const roots = allowedFileRootsEnv
+    .split(',')
+    .map((root) => root.trim())
+    .filter(Boolean)
+    .map((root) => normalize(root))
+    .filter(Boolean);
+
+  return roots.length > 0 ? roots : [normalize(process.cwd())];
+}
 
 function parseRootUri(uri: string): string | undefined {
   try {
@@ -98,13 +109,52 @@ export function isPathWithinRoot(filePath: string, rootPath: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
 
+function dedupeRoots(roots: string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const root of roots) {
+    const key = normalizePathForComparison(root);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(root);
+  }
+
+  return deduped;
+}
+
+function intersectRoots(serverRoots: string[], clientRoots: string[]): string[] {
+  const intersections: string[] = [];
+
+  for (const serverRoot of serverRoots) {
+    for (const clientRoot of clientRoots) {
+      if (isPathWithinRoot(serverRoot, clientRoot)) {
+        intersections.push(serverRoot);
+        continue;
+      }
+
+      if (isPathWithinRoot(clientRoot, serverRoot)) {
+        intersections.push(clientRoot);
+      }
+    }
+  }
+
+  return dedupeRoots(intersections);
+}
+
 export async function getAllowedRoots(rootsFetcher?: RootsFetcher): Promise<string[]> {
-  if (!rootsFetcher) return ENV_ROOTS;
+  const serverRoots = getEnvRoots();
+  if (!rootsFetcher) return serverRoots;
+
   try {
     const clientRoots = await rootsFetcher();
-    return clientRoots.length > 0 ? clientRoots : ENV_ROOTS;
+    if (clientRoots.length === 0) {
+      return serverRoots;
+    }
+
+    return intersectRoots(serverRoots, clientRoots);
   } catch {
-    return ENV_ROOTS;
+    return serverRoots;
   }
 }
 
@@ -142,7 +192,8 @@ export async function resolveAndValidatePath(
 
   const allowedRoots = await getAllowedRoots(rootsFetcher);
 
-  const isUnderAllowedRoot = allowedRoots.some((root) => isPathWithinRoot(resolved, root));
+  const isUnderAllowedRoot =
+    allowedRoots.length > 0 && allowedRoots.some((root) => isPathWithinRoot(resolved, root));
 
   if (!isUnderAllowedRoot) {
     throw new Error(

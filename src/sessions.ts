@@ -122,6 +122,16 @@ function hasExpired(entry: SessionEntry): boolean {
   return now() - entry.lastAccess > SESSION_TTL_MS;
 }
 
+function getActiveSessionEntry(id: string): SessionEntry | undefined {
+  const entry = sessions.get(id);
+  if (!entry) return undefined;
+  if (!hasExpired(entry)) return entry;
+
+  removeSession(id, true);
+  notifyChange([id]);
+  return undefined;
+}
+
 function startEvictionTimer(): void {
   if (evictionTimer) return;
   evictionTimer = setInterval(() => {
@@ -145,19 +155,25 @@ function evictOldest(): string | undefined {
 }
 
 export function listSessionEntries(): SessionSummary[] {
+  const evictedIds = evictExpiredSessions();
+  if (evictedIds.length > 0) {
+    notifyChange(evictedIds);
+  }
+
   return Array.from(sessions, ([id, entry]) => toSessionSummary(id, entry));
 }
 
 export function listSessionTranscriptEntries(id: string): TranscriptEntry[] | undefined {
-  const entry = sessions.get(id);
+  const entry = getActiveSessionEntry(id);
   if (!entry) return undefined;
   return entry.transcript.map((item) => ({ ...item }));
 }
 
 export function appendSessionTranscript(id: string, item: TranscriptEntry): boolean {
-  const entry = sessions.get(id);
+  const entry = getActiveSessionEntry(id);
   if (!entry) return false;
   entry.transcript.push({ ...item });
+  notifyChange([id]);
   return true;
 }
 
@@ -168,7 +184,7 @@ export function completeSessionIds(prefix?: string): string[] {
 }
 
 export function getSessionEntry(id: string): SessionSummary | undefined {
-  const entry = sessions.get(id);
+  const entry = getActiveSessionEntry(id);
   if (!entry) return undefined;
   return toSessionSummary(id, entry);
 }
@@ -178,13 +194,8 @@ export function isEvicted(id: string): boolean {
 }
 
 export function getSession(id: string): Chat | undefined {
-  const entry = sessions.get(id);
+  const entry = getActiveSessionEntry(id);
   if (!entry) return undefined;
-  if (hasExpired(entry)) {
-    removeSession(id, true);
-    notifyChange([id]);
-    return undefined;
-  }
   const chat = updateSessionAccess(id, entry);
   notifyChange([id]);
   return chat;

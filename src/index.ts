@@ -11,20 +11,9 @@ import { join } from 'node:path';
 import { formatError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 
-import { registerPrompts, registerResources } from './server-content.js';
+import { registerServerFeatures } from './server-registration.js';
 import { onSessionChange, type SessionChangeEvent } from './sessions.js';
-import { registerAskTool } from './tools/ask.js';
-import { type CacheChangeEvent, onCacheChange, registerCacheTools } from './tools/cache.js';
-import { registerCompareFilesTool } from './tools/compare.js';
-import { registerGenerateDiagramTool } from './tools/diagram.js';
-import { registerAnalyzeFileTool, registerExecuteCodeTool } from './tools/execution.js';
-import { registerExplainErrorTool } from './tools/explain-error.js';
-import { registerAnalyzePrTool } from './tools/pr.js';
-import {
-  registerAgenticSearchTool,
-  registerAnalyzeUrlTool,
-  registerSearchTool,
-} from './tools/research.js';
+import { type CacheChangeEvent, onCacheChange } from './tools/cache.js';
 import type {
   HttpTransportResult,
   ServerInstance,
@@ -74,19 +63,7 @@ function createServerInstance(): ServerInstance {
     },
   );
 
-  registerAskTool(server);
-  registerExecuteCodeTool(server);
-  registerSearchTool(server);
-  registerAgenticSearchTool(server);
-  registerAnalyzeFileTool(server);
-  registerAnalyzeUrlTool(server);
-  registerAnalyzePrTool(server);
-  registerExplainErrorTool(server);
-  registerCompareFilesTool(server);
-  registerGenerateDiagramTool(server);
-  registerCacheTools(server);
-  registerPrompts(server);
-  registerResources(server);
+  registerServerFeatures(server);
 
   activeServers.add(server);
 

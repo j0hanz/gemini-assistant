@@ -17,7 +17,9 @@ const { registerAnalyzeFileTool, registerExecuteCodeTool } =
 const { registerAnalyzePrTool } = await import('../../src/tools/pr.js');
 const { registerAgenticSearchTool, registerAnalyzeUrlTool, registerSearchTool } =
   await import('../../src/tools/research.js');
-const { registerResources } = await import('../../src/server-content.js');
+const { registerPrompts, registerResources } = await import('../../src/server-content.js');
+const { registerServerFeatures, SERVER_REGISTRARS } =
+  await import('../../src/server-registration.js');
 const { registerCompareFilesTool } = await import('../../src/tools/compare.js');
 const { registerGenerateDiagramTool } = await import('../../src/tools/diagram.js');
 const { registerExplainErrorTool } = await import('../../src/tools/explain-error.js');
@@ -79,6 +81,11 @@ describe('tool registration', () => {
     assert.doesNotThrow(() => registerResources(server));
   });
 
+  it('registers prompts without error', () => {
+    const server = createServer();
+    assert.doesNotThrow(() => registerPrompts(server));
+  });
+
   it('registers agentic_search tool without error', () => {
     const server = createServer();
     assert.doesNotThrow(() => registerAgenticSearchTool(server));
@@ -101,19 +108,27 @@ describe('tool registration', () => {
 
   it('registers all tools on the same server', () => {
     const server = createServer();
-    assert.doesNotThrow(() => {
-      registerAskTool(server);
-      registerExecuteCodeTool(server);
-      registerSearchTool(server);
-      registerAgenticSearchTool(server);
-      registerAnalyzeFileTool(server);
-      registerAnalyzeUrlTool(server);
-      registerAnalyzePrTool(server);
-      registerCacheTools(server);
-      registerExplainErrorTool(server);
-      registerCompareFilesTool(server);
-      registerGenerateDiagramTool(server);
-      registerResources(server);
-    });
+    assert.doesNotThrow(() => registerServerFeatures(server));
+  });
+
+  it('keeps the shared registration list aligned with targeted coverage', () => {
+    assert.deepStrictEqual(
+      SERVER_REGISTRARS.map(([name]) => name),
+      [
+        'ask tool',
+        'execute_code tool',
+        'search tool',
+        'agentic_search tool',
+        'analyze_file tool',
+        'analyze_url tool',
+        'analyze_pr tool',
+        'explain_error tool',
+        'compare_files tool',
+        'generate_diagram tool',
+        'cache tools',
+        'prompts',
+        'resources',
+      ],
+    );
   });
 });

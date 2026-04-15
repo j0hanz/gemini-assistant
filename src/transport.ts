@@ -62,12 +62,25 @@ export interface ServerInstance {
 
 export type ServerFactory = () => Promise<ServerInstance> | ServerInstance;
 export type EventStoreFactory = () => CleanupEventStore;
+type ServerTransport = Parameters<McpServer['connect']>[0];
 
 interface ManagedPair<TTransport> {
   eventStore?: CleanupEventStore;
   instance: ServerInstance;
   transport: TTransport;
   close: () => Promise<void>;
+}
+
+type TransportOptions = ConstructorParameters<typeof WebHttpTransport>[0];
+type TransportConstructor<TTransport extends ServerTransport> = new (
+  options?: TransportOptions,
+) => TTransport;
+
+type StatefulPairMap<TTransport> = Map<string, ManagedPair<TTransport>>;
+
+interface PairSelection<TTransport> {
+  pair: ManagedPair<TTransport> | undefined;
+  shouldClosePair: boolean;
 }
 
 export interface HttpTransportResult {
@@ -110,7 +123,7 @@ function logSessionEvent(label: 'open' | 'closed', sessionId: string): void {
 function buildBaseTransportOptions(
   isStateless: boolean,
   eventStore?: EventStore,
-): ConstructorParameters<typeof WebHttpTransport>[0] {
+): TransportOptions {
   return {
     enableJsonResponse: isStateless,
     onsessioninitialized: (sessionId: string) => {
@@ -124,31 +137,26 @@ function buildBaseTransportOptions(
   };
 }
 
+function rpcErrorPayload(message: string) {
+  return {
+    jsonrpc: '2.0',
+    error: { code: -32_603, message },
+    id: null,
+  };
+}
+
 function nodeErrorResponse(res: ServerResponse, status: number, message: string): void {
   if (res.headersSent) return;
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json');
-  res.end(
-    JSON.stringify({
-      jsonrpc: '2.0',
-      error: { code: -32_603, message },
-      id: null,
-    }),
-  );
+  res.end(JSON.stringify(rpcErrorPayload(message)));
 }
 
 function responseError(status: number, message: string): Response {
-  return new Response(
-    JSON.stringify({
-      jsonrpc: '2.0',
-      error: { code: -32_603, message },
-      id: null,
-    }),
-    {
-      status,
-      headers: { 'content-type': 'application/json' },
-    },
-  );
+  return new Response(JSON.stringify(rpcErrorPayload(message)), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 function getNodeSessionId(req: IncomingMessage): string | undefined {
@@ -161,14 +169,15 @@ function getRequestSessionId(req: Request): string | undefined {
   return header?.trim() ? header : undefined;
 }
 
-async function createNodePair(
+async function createManagedPair<TTransport extends ServerTransport>(
   createServer: ServerFactory,
+  Transport: TransportConstructor<TTransport>,
   isStateless: boolean,
   createEventStore?: EventStoreFactory,
-): Promise<ManagedPair<NodeStreamableHTTPServerTransport>> {
+): Promise<ManagedPair<TTransport>> {
   const instance = await createServer();
   const eventStore = isStateless ? undefined : createEventStore?.();
-  const transport = new NodeHttpTransport(buildBaseTransportOptions(isStateless, eventStore));
+  const transport = new Transport(buildBaseTransportOptions(isStateless, eventStore));
   await instance.server.connect(transport);
 
   let closed = false;
@@ -183,6 +192,14 @@ async function createNodePair(
       await instance.close();
     },
   };
+}
+
+function createNodePair(
+  createServer: ServerFactory,
+  isStateless: boolean,
+  createEventStore?: EventStoreFactory,
+): Promise<ManagedPair<NodeStreamableHTTPServerTransport>> {
+  return createManagedPair(createServer, NodeHttpTransport, isStateless, createEventStore);
 }
 
 async function createWebPair(
@@ -190,28 +207,65 @@ async function createWebPair(
   isStateless: boolean,
   createEventStore?: EventStoreFactory,
 ): Promise<ManagedPair<WebStandardStreamableHTTPServerTransport>> {
-  const instance = await createServer();
-  const eventStore = isStateless ? undefined : createEventStore?.();
-  const transport = new WebHttpTransport(buildBaseTransportOptions(isStateless, eventStore));
-  await instance.server.connect(transport);
-
-  let closed = false;
-  return {
-    instance,
-    transport,
-    ...(eventStore ? { eventStore } : {}),
-    close: async () => {
-      if (closed) return;
-      closed = true;
-      eventStore?.cleanup?.();
-      await instance.close();
-    },
-  };
+  return createManagedPair(createServer, WebHttpTransport, isStateless, createEventStore);
 }
 
 function logRequestFailure(label: string, err: unknown): void {
   const detail = err instanceof Error ? err.message : String(err);
   console.error(`${label}: ${detail}`);
+}
+
+async function selectManagedPair<TTransport>(
+  sessionId: string | undefined,
+  statefulPairs: StatefulPairMap<TTransport>,
+  isStateless: boolean,
+  createPair: (isStatelessTransport: boolean) => Promise<ManagedPair<TTransport>>,
+): Promise<PairSelection<TTransport>> {
+  if (isStateless) {
+    return { pair: await createPair(true), shouldClosePair: true };
+  }
+
+  if (sessionId) {
+    return { pair: statefulPairs.get(sessionId), shouldClosePair: false };
+  }
+
+  return { pair: await createPair(false), shouldClosePair: true };
+}
+
+function finalizeManagedPair<TTransport>(
+  pair: ManagedPair<TTransport>,
+  sessionId: string | undefined,
+  requestMethod: string,
+  isStateless: boolean,
+  statefulPairs: StatefulPairMap<TTransport>,
+  getSessionId: (transport: TTransport) => string | undefined,
+  shouldClosePair: boolean,
+): boolean {
+  if (isStateless) {
+    return true;
+  }
+
+  if (requestMethod === 'DELETE') {
+    if (sessionId) {
+      statefulPairs.delete(sessionId);
+    }
+    return true;
+  }
+
+  const createdSessionId = getSessionId(pair.transport);
+  if (!sessionId && createdSessionId) {
+    statefulPairs.set(createdSessionId, pair);
+    return false;
+  }
+
+  return shouldClosePair;
+}
+
+async function closeStatefulPairs<TTransport>(
+  statefulPairs: StatefulPairMap<TTransport>,
+): Promise<void> {
+  await Promise.allSettled([...statefulPairs.values()].map((pair) => pair.close()));
+  statefulPairs.clear();
 }
 
 export async function startHttpTransport(
@@ -251,39 +305,29 @@ export async function startHttpTransport(
     let shouldClosePair = false;
 
     try {
-      if (isStateless) {
-        pair = await createNodePair(createServer, true);
-        shouldClosePair = true;
-      } else if (sessionId) {
-        pair = statefulPairs.get(sessionId);
-        if (!pair) {
-          nodeErrorResponse(res, 404, 'Session not found');
-          return;
-        }
-      } else {
-        pair = await createNodePair(createServer, false, createEventStore);
-        shouldClosePair = true;
+      ({ pair, shouldClosePair } = await selectManagedPair(
+        sessionId,
+        statefulPairs,
+        isStateless,
+        (isStatelessTransport) =>
+          createNodePair(createServer, isStatelessTransport, createEventStore),
+      ));
+
+      if (!pair) {
+        nodeErrorResponse(res, 404, 'Session not found');
+        return;
       }
 
       await pair.transport.handleRequest(req, res, req.body);
-
-      if (isStateless) {
-        return;
-      }
-
-      if (req.method === 'DELETE') {
-        if (sessionId) {
-          statefulPairs.delete(sessionId);
-        }
-        shouldClosePair = true;
-        return;
-      }
-
-      const createdSessionId = pair.transport.sessionId;
-      if (!sessionId && createdSessionId) {
-        statefulPairs.set(createdSessionId, pair);
-        shouldClosePair = false;
-      }
+      shouldClosePair = finalizeManagedPair(
+        pair,
+        sessionId,
+        req.method,
+        isStateless,
+        statefulPairs,
+        (transport) => transport.sessionId,
+        shouldClosePair,
+      );
     } catch (err: unknown) {
       logRequestFailure('request failed', err);
       nodeErrorResponse(res, 500, 'Internal Server Error');
@@ -300,8 +344,7 @@ export async function startHttpTransport(
   });
 
   const close = async () => {
-    await Promise.allSettled([...statefulPairs.values()].map((pair) => pair.close()));
-    statefulPairs.clear();
+    await closeStatefulPairs(statefulPairs);
     await new Promise<void>((resolve, reject) => {
       httpServer.close((err) => {
         if (err) reject(err);
@@ -345,35 +388,28 @@ export function startWebStandardTransport(
     let shouldClosePair = false;
 
     try {
-      if (isStateless) {
-        pair = await createWebPair(createServer, true);
-        shouldClosePair = true;
-      } else if (sessionId) {
-        pair = statefulPairs.get(sessionId);
-        if (!pair) {
-          return responseError(404, 'Session not found');
-        }
-      } else {
-        pair = await createWebPair(createServer, false, createEventStore);
-        shouldClosePair = true;
+      ({ pair, shouldClosePair } = await selectManagedPair(
+        sessionId,
+        statefulPairs,
+        isStateless,
+        (isStatelessTransport) =>
+          createWebPair(createServer, isStatelessTransport, createEventStore),
+      ));
+
+      if (!pair) {
+        return responseError(404, 'Session not found');
       }
 
       const response = await pair.transport.handleRequest(req);
-
-      if (!isStateless) {
-        if (req.method === 'DELETE') {
-          if (sessionId) {
-            statefulPairs.delete(sessionId);
-          }
-          shouldClosePair = true;
-        } else {
-          const createdSessionId = pair.transport.sessionId;
-          if (!sessionId && createdSessionId) {
-            statefulPairs.set(createdSessionId, pair);
-            shouldClosePair = false;
-          }
-        }
-      }
+      shouldClosePair = finalizeManagedPair(
+        pair,
+        sessionId,
+        req.method,
+        isStateless,
+        statefulPairs,
+        (transport) => transport.sessionId,
+        shouldClosePair,
+      );
 
       return response;
     } catch (err: unknown) {
@@ -406,8 +442,7 @@ export function startWebStandardTransport(
   }
 
   const close = async () => {
-    await Promise.allSettled([...statefulPairs.values()].map((pair) => pair.close()));
-    statefulPairs.clear();
+    await closeStatefulPairs(statefulPairs);
     await runtimeClose?.();
   };
 

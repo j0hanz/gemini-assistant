@@ -72,6 +72,85 @@ function buildSourceReportMessage(sourceCount: number): string {
   return sourceCount > 0 ? `${formatCountLabel(sourceCount, 'source')} found` : 'completed';
 }
 
+function extractSampledText(content: unknown): string {
+  if (Array.isArray(content)) {
+    return content
+      .map((entry: unknown) =>
+        typeof entry === 'object' && entry !== null && 'text' in entry
+          ? String((entry as { text: unknown }).text)
+          : '',
+      )
+      .join('\n');
+  }
+
+  return typeof content === 'object' && content !== null && 'text' in content
+    ? String((content as { text: unknown }).text)
+    : '';
+}
+
+async function enrichTopicWithSampling(topic: string, ctx: ServerContext): Promise<string> {
+  try {
+    const samplingRes = await ctx.mcpReq.requestSampling({
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `I'm about to research the topic "${topic}". Could you provide a brief initial impression or related core keywords I should focus on?`,
+          },
+        },
+      ],
+      maxTokens: 500,
+      systemPrompt: 'You are a helpful assistant helping an agent formulate research strategies.',
+    });
+
+    const sampledText = extractSampledText(samplingRes.content);
+    if (!sampledText) {
+      return topic;
+    }
+
+    await ctx.mcpReq.log('info', `Sampled context: ${sampledText}`);
+    return `${topic}\n\nAdditional related keywords/guidance: ${sampledText}`;
+  } catch (error) {
+    await ctx.mcpReq.log('info', `requestSampling encountered an issue: ${String(error)}`);
+    return topic;
+  }
+}
+
+function buildAgenticDepthInstruction(searchDepth: number): string {
+  if (searchDepth <= 2) {
+    return 'Do a focused search covering 2-3 key aspects.';
+  }
+
+  if (searchDepth <= 3) {
+    return 'Do a thorough search covering 4-5 key aspects.';
+  }
+
+  return 'Do an exhaustive search covering as many aspects as possible.';
+}
+
+function buildAgenticSearchResult(streamResult: StreamResult, textContent: string) {
+  const sources = collectGroundedSources(streamResult.groundingMetadata);
+  const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
+  const contentAdditions: CallToolResult['content'] = [];
+
+  appendSources(contentAdditions, sources);
+
+  return {
+    resultMod: (result: CallToolResult) => ({
+      content: [...result.content, ...contentAdditions],
+    }),
+    structuredContent: pickDefined({
+      report: textContent,
+      sources,
+      sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
+      toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
+      functionCalls: streamResult.functionCalls.length > 0 ? streamResult.functionCalls : undefined,
+    }),
+    reportMessage: buildSourceReportMessage(sources.length),
+  };
+}
+
 function buildSearchResult(streamResult: StreamResult, textContent: string) {
   const sources = collectGroundedSources(streamResult.groundingMetadata);
   const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
@@ -186,50 +265,8 @@ async function agenticSearchWork(
 ): Promise<CallToolResult> {
   await sendProgress(ctx, 0, undefined, `${AGENTIC_SEARCH_TOOL_LABEL}: Starting deep research`);
   await ctx.mcpReq.log('info', `Agentic search: ${topic}`);
-
-  try {
-    const samplingRes = await ctx.mcpReq.requestSampling({
-      messages: [
-        {
-          role: 'user',
-          content: {
-            type: 'text',
-            text: `I'm about to research the topic "${topic}". Could you provide a brief initial impression or related core keywords I should focus on?`,
-          },
-        },
-      ],
-      maxTokens: 500,
-      systemPrompt: 'You are a helpful assistant helping an agent formulate research strategies.',
-    });
-
-    let sampledText = '';
-    const content = samplingRes.content;
-    if (Array.isArray(content)) {
-      sampledText = content
-        .map((c: unknown) =>
-          typeof c === 'object' && c !== null && 'text' in c
-            ? String((c as { text: unknown }).text)
-            : '',
-        )
-        .join('\n');
-    } else if ('text' in content) {
-      sampledText = String((content as { text: unknown }).text);
-    }
-
-    if (sampledText) {
-      await ctx.mcpReq.log('info', `Sampled context: ${sampledText}`);
-      topic += `\n\nAdditional related keywords/guidance: ${sampledText}`;
-    }
-  } catch (error) {
-    await ctx.mcpReq.log('info', `requestSampling encountered an issue: ${String(error)}`);
-  }
-
-  const depthInstruction =
-    searchDepth <= 2
-      ? 'Do a focused search covering 2-3 key aspects.'
-      : searchDepth <= 3
-        ? 'Do a thorough search covering 4-5 key aspects.'
-        : 'Do an exhaustive search covering as many aspects as possible.';
+  const enrichedTopic = await enrichTopicWithSampling(topic, ctx);
+  const depthInstruction = buildAgenticDepthInstruction(searchDepth);
 
   return await handleToolExecution(
     ctx,
@@ -239,7 +276,7 @@ async function agenticSearchWork(
       getAI().models.generateContentStream({
         model: MODEL,
         contents:
-          `Research this topic comprehensively: ${topic}\n\n` +
+          `Research this topic comprehensively: ${enrichedTopic}\n\n` +
           `${depthInstruction}\n` +
           'Search for multiple different aspects and compile a detailed report.',
         config: buildGenerateContentConfig(
@@ -252,28 +289,7 @@ async function agenticSearchWork(
           ctx.mcpReq.signal,
         ),
       }),
-    (streamResult, textContent) => {
-      const sources = collectGroundedSources(streamResult.groundingMetadata);
-      const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
-      const contentAdditions: CallToolResult['content'] = [];
-
-      appendSources(contentAdditions, sources);
-
-      return {
-        resultMod: (result) => ({
-          content: [...result.content, ...contentAdditions],
-        }),
-        structuredContent: pickDefined({
-          report: textContent,
-          sources,
-          sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
-          toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
-          functionCalls:
-            streamResult.functionCalls.length > 0 ? streamResult.functionCalls : undefined,
-        }),
-        reportMessage: buildSourceReportMessage(sources.length),
-      };
-    },
+    buildAgenticSearchResult,
   );
 }
 

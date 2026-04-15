@@ -49,6 +49,46 @@ function buildThinkingConfig(thinkingLevel?: AskThinkingLevel) {
   };
 }
 
+function buildMergedToolConfig(
+  toolConfig: ToolConfig | undefined,
+  functionCallingMode: FunctionCallingConfigMode | undefined,
+): ToolConfig | undefined {
+  if (!toolConfig && !functionCallingMode) {
+    return undefined;
+  }
+
+  return {
+    ...toolConfig,
+    ...(functionCallingMode
+      ? {
+          functionCallingConfig: {
+            ...toolConfig?.functionCallingConfig,
+            mode: functionCallingMode,
+          },
+        }
+      : {}),
+  };
+}
+
+function buildResponseConfig(
+  cacheName: string | undefined,
+  systemInstruction: string | undefined,
+  isJson: boolean,
+  responseSchema: Record<string, unknown> | undefined,
+  thinkingLevel: AskThinkingLevel | undefined,
+) {
+  return {
+    ...(cacheName ? { cachedContent: cacheName } : {}),
+    ...(cacheName ? {} : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
+    ...(isJson
+      ? {
+          responseMimeType: 'application/json',
+          ...(responseSchema ? { responseSchema } : {}),
+        }
+      : { thinkingConfig: buildThinkingConfig(thinkingLevel) }),
+  };
+}
+
 export function buildGenerateContentConfig(
   options: ConfigBuilderOptions,
   signal?: AbortSignal,
@@ -68,32 +108,10 @@ export function buildGenerateContentConfig(
     functionCallingMode,
   } = options;
   const isJson = jsonMode ?? responseSchema !== undefined;
-
-  // functionCallingMode intentionally overrides toolConfig.functionCallingConfig.mode
-  const mergedToolConfig: ToolConfig | undefined =
-    (toolConfig ?? functionCallingMode)
-      ? {
-          ...toolConfig,
-          ...(functionCallingMode
-            ? {
-                functionCallingConfig: {
-                  ...toolConfig?.functionCallingConfig,
-                  mode: functionCallingMode,
-                },
-              }
-            : {}),
-        }
-      : undefined;
+  const mergedToolConfig = buildMergedToolConfig(toolConfig, functionCallingMode);
 
   return {
-    ...(cacheName ? { cachedContent: cacheName } : {}),
-    ...(cacheName ? {} : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
-    ...(isJson
-      ? {
-          responseMimeType: 'application/json',
-          ...(responseSchema ? { responseSchema } : {}),
-        }
-      : { thinkingConfig: buildThinkingConfig(thinkingLevel) }),
+    ...buildResponseConfig(cacheName, systemInstruction, isJson, responseSchema, thinkingLevel),
     maxOutputTokens,
     ...(temperature !== undefined ? { temperature } : {}),
     ...(seed !== undefined ? { seed } : {}),

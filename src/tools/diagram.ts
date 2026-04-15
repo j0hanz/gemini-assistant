@@ -46,6 +46,76 @@ function extractDiagram(text: string): { diagram: string; explanation: string } 
   return { diagram: text, explanation: '' };
 }
 
+function collectDiagramSourceFiles(
+  sourceFilePath: string | undefined,
+  sourceFilePaths: string[] | undefined,
+): string[] {
+  return [...(sourceFilePath ? [sourceFilePath] : []), ...(sourceFilePaths ?? [])];
+}
+
+async function uploadDiagramSourceFiles(
+  filesToUpload: string[],
+  ctx: ServerContext,
+  rootsFetcher: RootsFetcher,
+  uploadedNames: string[],
+): Promise<Part[]> {
+  const contentParts: Part[] = [];
+  const totalSteps = filesToUpload.length + 1;
+
+  for (let i = 0; i < filesToUpload.length; i++) {
+    if (ctx.mcpReq.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    const filePath = filesToUpload[i];
+    if (!filePath) continue;
+
+    await sendProgress(
+      ctx,
+      i,
+      totalSteps,
+      `${TOOL_LABEL}: Uploading ${filePath.split(/[\\/]/).pop() ?? filePath} (${String(i + 1)}/${String(filesToUpload.length)})`,
+    );
+    const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
+    uploadedNames.push(uploaded.name);
+    contentParts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
+    contentParts.push({ text: `Source file: ${filePath}` });
+  }
+
+  return contentParts;
+}
+
+function buildDiagramTools(googleSearch?: boolean, validateSyntax?: boolean): ToolListUnion {
+  return [
+    ...(googleSearch ? [{ googleSearch: {} }] : []),
+    ...(validateSyntax ? [{ codeExecution: {} }] : []),
+  ];
+}
+
+function buildDiagramPrompt(
+  contentParts: Part[],
+  diagramType: string,
+  description: string,
+  systemInstruction: string,
+  cacheName?: string,
+): {
+  effectiveSystemInstruction: string | undefined;
+  prompt: Part[];
+} {
+  const prompt = [
+    ...contentParts,
+    {
+      text: `Generate a ${diagramType} diagram for: ${description}`,
+    },
+  ];
+
+  if (cacheName) {
+    prompt.unshift({ text: systemInstruction });
+  }
+
+  return {
+    effectiveSystemInstruction: cacheName ? undefined : systemInstruction,
+    prompt,
+  };
+}
+
 function createDiagramWork(rootsFetcher: RootsFetcher) {
   return async function diagramWork(
     {
@@ -63,36 +133,11 @@ function createDiagramWork(rootsFetcher: RootsFetcher) {
     const uploadedNames: string[] = [];
 
     try {
-      const contentParts: Part[] = [];
-
-      // Merge single and multi-file inputs into a unified list
-      const filesToUpload: string[] = [
-        ...(sourceFilePath ? [sourceFilePath] : []),
-        ...(sourceFilePaths ?? []),
-      ];
-
-      if (filesToUpload.length > 0) {
-        const totalSteps = filesToUpload.length + 1;
-        for (let i = 0; i < filesToUpload.length; i++) {
-          if (ctx.mcpReq.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-          const filePath = filesToUpload[i];
-          if (!filePath) continue;
-          await sendProgress(
-            ctx,
-            i,
-            totalSteps,
-            `${TOOL_LABEL}: Uploading ${filePath.split(/[\\/]/).pop() ?? filePath} (${String(i + 1)}/${String(filesToUpload.length)})`,
-          );
-          const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
-          uploadedNames.push(uploaded.name);
-          contentParts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
-          contentParts.push({ text: `Source file: ${filePath}` });
-        }
-      }
-
-      contentParts.push({
-        text: `Generate a ${diagramType} diagram for: ${description}`,
-      });
+      const filesToUpload = collectDiagramSourceFiles(sourceFilePath, sourceFilePaths);
+      const contentParts =
+        filesToUpload.length > 0
+          ? await uploadDiagramSourceFiles(filesToUpload, ctx, rootsFetcher, uploadedNames)
+          : [];
 
       const hasFiles = filesToUpload.length > 0;
       await sendProgress(
@@ -103,17 +148,15 @@ function createDiagramWork(rootsFetcher: RootsFetcher) {
       );
       await ctx.mcpReq.log('info', `Generating ${diagramType} diagram`);
 
-      const tools: ToolListUnion = [
-        ...(googleSearch ? [{ googleSearch: {} }] : []),
-        ...(validateSyntax ? [{ codeExecution: {} }] : []),
-      ];
-
+      const tools = buildDiagramTools(googleSearch, validateSyntax);
       const systemInstruction = buildSystemInstruction(diagramType, validateSyntax);
-      const effectiveSystemInstruction = cacheName ? undefined : systemInstruction;
-      const diagramPrompt = contentParts;
-      if (cacheName) {
-        diagramPrompt.unshift({ text: systemInstruction });
-      }
+      const { effectiveSystemInstruction, prompt } = buildDiagramPrompt(
+        contentParts,
+        diagramType,
+        description,
+        systemInstruction,
+        cacheName,
+      );
 
       return await handleToolExecution(
         ctx,
@@ -122,7 +165,7 @@ function createDiagramWork(rootsFetcher: RootsFetcher) {
         () =>
           getAI().models.generateContentStream({
             model: MODEL,
-            contents: diagramPrompt,
+            contents: prompt,
             config: buildGenerateContentConfig(
               {
                 systemInstruction: effectiveSystemInstruction,

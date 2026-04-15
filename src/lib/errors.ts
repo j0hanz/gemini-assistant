@@ -52,6 +52,78 @@ async function bridgeProgressToTask(ctx: ServerContext, message: string): Promis
   }
 }
 
+function isTerminalProgress(progress: number, total?: number): boolean {
+  return total !== undefined && progress >= total;
+}
+
+function buildThrottleKey(progressToken: string | number, message?: string): string {
+  return `${String(progressToken)}:${message ?? ''}`;
+}
+
+function shouldThrottleProgress(
+  progressToken: string | number,
+  message: string | undefined,
+  now: number,
+  isTerminal: boolean,
+): boolean {
+  if (isTerminal) {
+    return false;
+  }
+
+  const lastEmit = lastEmitTime.get(buildThrottleKey(progressToken, message));
+  return lastEmit !== undefined && now - lastEmit < MIN_PROGRESS_INTERVAL_MS;
+}
+
+function buildProgressNotification(
+  progressToken: string | number,
+  progress: number,
+  total?: number,
+  message?: string,
+): ProgressNotification {
+  return {
+    method: 'notifications/progress',
+    params: {
+      progressToken,
+      progress,
+      ...(total !== undefined ? { total } : {}),
+      ...(message ? { message } : {}),
+    },
+  };
+}
+
+function clearProgressState(progressToken: string | number, taskId?: string): void {
+  for (const key of lastEmitTime.keys()) {
+    if (key.startsWith(`${String(progressToken)}:`)) {
+      lastEmitTime.delete(key);
+    }
+  }
+
+  if (taskId) {
+    lastTaskStatusTime.delete(taskId);
+  }
+}
+
+function markProgressEmission(
+  progressToken: string | number,
+  message: string | undefined,
+  now: number,
+): void {
+  lastEmitTime.set(buildThrottleKey(progressToken, message), now);
+}
+
+async function logProgressFailure(ctx: ServerContext, err: unknown): Promise<void> {
+  if (ctx.mcpReq.signal.aborted) {
+    return;
+  }
+
+  const detail = err instanceof Error ? err.message : String(err);
+  try {
+    await ctx.mcpReq.log('debug', `Progress notification failed: ${detail}`);
+  } catch {
+    // Transport fully closed — discard
+  }
+}
+
 export async function sendProgress(
   ctx: ServerContext,
   progress: number,
@@ -61,48 +133,21 @@ export async function sendProgress(
   const progressToken = ctx.mcpReq._meta?.progressToken;
   if (progressToken === undefined || ctx.mcpReq.signal.aborted) return;
 
-  const isTerminal = total !== undefined && progress >= total;
+  const isTerminal = isTerminalProgress(progress, total);
   const now = Date.now();
-  const throttleKey = `${String(progressToken)}:${message ?? ''}`;
-  const lastEmit = lastEmitTime.get(throttleKey);
-
-  if (!isTerminal && lastEmit !== undefined && now - lastEmit < MIN_PROGRESS_INTERVAL_MS) {
+  if (shouldThrottleProgress(progressToken, message, now, isTerminal)) {
     return;
   }
 
   try {
-    const notification: ProgressNotification = {
-      method: 'notifications/progress',
-      params: {
-        progressToken,
-        progress,
-        ...(total !== undefined ? { total } : {}),
-        ...(message ? { message } : {}),
-      },
-    };
-    await ctx.mcpReq.notify(notification);
+    await ctx.mcpReq.notify(buildProgressNotification(progressToken, progress, total, message));
     if (isTerminal) {
-      // Clean up all entries for this progressToken
-      for (const key of lastEmitTime.keys()) {
-        if (key.startsWith(`${String(progressToken)}:`)) {
-          lastEmitTime.delete(key);
-        }
-      }
-      const taskId = ctx.task?.id;
-      if (taskId) lastTaskStatusTime.delete(taskId);
+      clearProgressState(progressToken, ctx.task?.id);
     } else {
-      lastEmitTime.set(throttleKey, Date.now());
+      markProgressEmission(progressToken, message, now);
     }
   } catch (err: unknown) {
-    const aborted = ctx.mcpReq.signal.aborted as boolean;
-    if (!aborted) {
-      const detail = err instanceof Error ? err.message : String(err);
-      try {
-        await ctx.mcpReq.log('debug', `Progress notification failed: ${detail}`);
-      } catch {
-        // Transport fully closed — discard
-      }
-    }
+    await logProgressFailure(ctx, err);
   }
 
   if (!isTerminal && message) {

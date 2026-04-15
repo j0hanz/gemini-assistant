@@ -47,6 +47,7 @@ const ASK_TOOL_LABEL = 'Ask Gemini';
 const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
 const THINKING_SUPPRESSED_WARNING =
   'thinkingLevel was ignored because responseSchema activates JSON mode (mutually exclusive)';
+const SCHEMA_COMPOSITION_KEYS = ['anyOf', 'oneOf', 'allOf', 'items', 'prefixItems'] as const;
 
 // ── Structured Output Validation ──────────────────────────────────────
 
@@ -77,6 +78,40 @@ const GEMINI_SUPPORTED_KEYWORDS = new Set([
   '$id',
 ]);
 
+function visitNestedSchemas(
+  schema: Record<string, unknown>,
+  visitor: (nestedSchema: Record<string, unknown>) => void,
+): void {
+  const nested = schema.properties;
+  if (nested && typeof nested === 'object') {
+    for (const value of Object.values(nested as Record<string, unknown>)) {
+      if (value && typeof value === 'object') {
+        visitor(value as Record<string, unknown>);
+      }
+    }
+  }
+
+  for (const compositionKey of SCHEMA_COMPOSITION_KEYS) {
+    const value = schema[compositionKey];
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item && typeof item === 'object') {
+          visitor(item as Record<string, unknown>);
+        }
+      }
+      continue;
+    }
+
+    if (value && typeof value === 'object') {
+      visitor(value as Record<string, unknown>);
+    }
+  }
+
+  if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
+    visitor(schema.additionalProperties as Record<string, unknown>);
+  }
+}
+
 function collectUnsupportedKeywords(
   schema: Record<string, unknown>,
   found = new Set<string>(),
@@ -87,32 +122,9 @@ function collectUnsupportedKeywords(
     }
   }
 
-  // Recurse into nested schemas
-  const nested = schema.properties;
-  if (nested && typeof nested === 'object') {
-    for (const value of Object.values(nested as Record<string, unknown>)) {
-      if (value && typeof value === 'object') {
-        collectUnsupportedKeywords(value as Record<string, unknown>, found);
-      }
-    }
-  }
-
-  for (const compositionKey of ['anyOf', 'oneOf', 'allOf', 'items', 'prefixItems'] as const) {
-    const val = schema[compositionKey];
-    if (Array.isArray(val)) {
-      for (const item of val) {
-        if (item && typeof item === 'object') {
-          collectUnsupportedKeywords(item as Record<string, unknown>, found);
-        }
-      }
-    } else if (val && typeof val === 'object') {
-      collectUnsupportedKeywords(val as Record<string, unknown>, found);
-    }
-  }
-
-  if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
-    collectUnsupportedKeywords(schema.additionalProperties as Record<string, unknown>, found);
-  }
+  visitNestedSchemas(schema, (nestedSchema) => {
+    collectUnsupportedKeywords(nestedSchema, found);
+  });
 
   return [...found];
 }
@@ -148,6 +160,24 @@ function tryParseJsonResponse(text: string): unknown {
   return undefined;
 }
 
+function buildAskWarnings(
+  parsedData: unknown,
+  jsonMode: boolean | undefined,
+  responseSchema: Record<string, unknown> | undefined,
+): string[] {
+  const warnings: string[] = [];
+
+  if (jsonMode && parsedData === undefined) {
+    warnings.push('Failed to parse JSON from model response');
+  }
+
+  if (parsedData !== undefined && responseSchema) {
+    warnings.push(...validateJsonAgainstSchema(parsedData, responseSchema));
+  }
+
+  return warnings;
+}
+
 function buildAskStructuredContent(
   text: string,
   streamResult: Pick<StreamResult, 'thoughtText' | 'usageMetadata' | 'functionCalls'>,
@@ -164,14 +194,7 @@ function buildAskStructuredContent(
   const parsedData = jsonMode ? tryParseJsonResponse(text) : undefined;
   const answer = parsedData === undefined ? text : JSON.stringify(parsedData, null, 2);
   const usage = extractUsage(streamResult.usageMetadata);
-
-  const warnings: string[] = [];
-  if (jsonMode && parsedData === undefined) {
-    warnings.push('Failed to parse JSON from model response');
-  }
-  if (parsedData !== undefined && responseSchema) {
-    warnings.push(...validateJsonAgainstSchema(parsedData, responseSchema));
-  }
+  const warnings = buildAskWarnings(parsedData, jsonMode, responseSchema);
 
   return {
     answer,
@@ -214,6 +237,10 @@ function formatStructuredResult(
   };
 }
 
+function validateAskConflict(condition: boolean, message: string): CallToolResult | undefined {
+  return condition ? errorResult(message) : undefined;
+}
+
 function validateAskRequest({
   sessionId,
   systemInstruction,
@@ -223,36 +250,28 @@ function validateAskRequest({
   seed,
 }: AskArgs): CallToolResult | undefined {
   const hasExistingSession = sessionId ? getSessionEntry(sessionId) !== undefined : false;
-
-  if (sessionId && isEvicted(sessionId)) {
-    return errorResult(`ask: Session '${sessionId}' has expired.`);
-  }
-
-  if (sessionId && cacheName && hasExistingSession) {
-    return errorResult(
+  return (
+    validateAskConflict(
+      !!sessionId && isEvicted(sessionId),
+      `ask: Session '${sessionId}' has expired.`,
+    ) ??
+    validateAskConflict(
+      !!sessionId && !!cacheName && hasExistingSession,
       'ask: Cannot apply a cachedContent to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
-    );
-  }
-
-  if (cacheName && systemInstruction) {
-    return errorResult(
+    ) ??
+    validateAskConflict(
+      !!cacheName && !!systemInstruction,
       'ask: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via create_cache instead.',
-    );
-  }
-
-  if (cacheName && (temperature !== undefined || seed !== undefined)) {
-    return errorResult(
+    ) ??
+    validateAskConflict(
+      !!cacheName && (temperature !== undefined || seed !== undefined),
       'ask: temperature and seed cannot be used with cacheName. Generation parameters are fixed at cache creation time.',
-    );
-  }
-
-  if (responseSchema && sessionId && hasExistingSession) {
-    return errorResult(
+    ) ??
+    validateAskConflict(
+      !!responseSchema && !!sessionId && hasExistingSession,
       'ask: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
-    );
-  }
-
-  return undefined;
+    )
+  );
 }
 
 async function runAskStream(
@@ -367,6 +386,71 @@ async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResul
   return await askNewSession(args as AskArgs & { sessionId: string }, ctx);
 }
 
+const AskInputSchema = z.object({
+  message: z.string().min(1).max(100_000).describe('User message or prompt'),
+  sessionId: completable(
+    z
+      .string()
+      .max(256)
+      .optional()
+      .describe('Session ID for multi-turn chat. Omit for single-turn.'),
+    completeSessionIds,
+  ),
+  systemInstruction: z
+    .string()
+    .optional()
+    .describe('System prompt (used on session creation or single-turn)'),
+  thinkingLevel: z
+    .enum(THINKING_LEVELS)
+    .optional()
+    .describe('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
+  cacheName: completable(
+    z
+      .string()
+      .optional()
+      .describe('Cache name from create_cache. Cannot be applied to an existing chat session.'),
+    completeCacheNames,
+  ),
+  responseSchema: z
+    .record(z.string(), z.unknown())
+    .refine(
+      (s) =>
+        'type' in s ||
+        'properties' in s ||
+        'anyOf' in s ||
+        'oneOf' in s ||
+        'allOf' in s ||
+        '$ref' in s ||
+        'enum' in s ||
+        'items' in s,
+      {
+        message:
+          'responseSchema must contain at least one JSON Schema keyword (type, properties, anyOf, oneOf, allOf, $ref, enum, or items)',
+      },
+    )
+    .optional()
+    .describe(
+      'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking. Gemini 2.0 models may require a propertyOrdering array.',
+    ),
+  temperature: z
+    .number()
+    .min(0)
+    .max(2)
+    .optional()
+    .describe(
+      'Controls randomness (0.0=deterministic, 2.0=most creative). Model default if omitted.',
+    ),
+  seed: z
+    .number()
+    .int()
+    .optional()
+    .describe('Fixed seed for reproducible outputs. Model default if omitted.'),
+  googleSearch: z
+    .boolean()
+    .optional()
+    .describe('Enable Google Search grounding. Model can use web results for up-to-date answers.'),
+});
+
 export function registerAskTool(server: McpServer): void {
   registerTaskTool(
     server,
@@ -374,74 +458,7 @@ export function registerAskTool(server: McpServer): void {
     {
       title: 'Ask Gemini',
       description: 'Send a message to Gemini. Supports multi-turn chat via sessionId.',
-      inputSchema: z.object({
-        message: z.string().min(1).max(100_000).describe('User message or prompt'),
-        sessionId: completable(
-          z
-            .string()
-            .max(256)
-            .optional()
-            .describe('Session ID for multi-turn chat. Omit for single-turn.'),
-          completeSessionIds,
-        ),
-        systemInstruction: z
-          .string()
-          .optional()
-          .describe('System prompt (used on session creation or single-turn)'),
-        thinkingLevel: z
-          .enum(THINKING_LEVELS)
-          .optional()
-          .describe('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
-        cacheName: completable(
-          z
-            .string()
-            .optional()
-            .describe(
-              'Cache name from create_cache. Cannot be applied to an existing chat session.',
-            ),
-          completeCacheNames,
-        ),
-        responseSchema: z
-          .record(z.string(), z.unknown())
-          .refine(
-            (s) =>
-              'type' in s ||
-              'properties' in s ||
-              'anyOf' in s ||
-              'oneOf' in s ||
-              'allOf' in s ||
-              '$ref' in s ||
-              'enum' in s ||
-              'items' in s,
-            {
-              message:
-                'responseSchema must contain at least one JSON Schema keyword (type, properties, anyOf, oneOf, allOf, $ref, enum, or items)',
-            },
-          )
-          .optional()
-          .describe(
-            'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking. Gemini 2.0 models may require a propertyOrdering array.',
-          ),
-        temperature: z
-          .number()
-          .min(0)
-          .max(2)
-          .optional()
-          .describe(
-            'Controls randomness (0.0=deterministic, 2.0=most creative). Model default if omitted.',
-          ),
-        seed: z
-          .number()
-          .int()
-          .optional()
-          .describe('Fixed seed for reproducible outputs. Model default if omitted.'),
-        googleSearch: z
-          .boolean()
-          .optional()
-          .describe(
-            'Enable Google Search grounding. Model can use web results for up-to-date answers.',
-          ),
-      }),
+      inputSchema: AskInputSchema,
       outputSchema: AskOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
     },

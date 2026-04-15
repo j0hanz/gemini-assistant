@@ -35,6 +35,7 @@ type CachePart = ReturnType<typeof createPartFromUri>;
 
 const CACHE_UPLOAD_CHUNK_SIZE = 3;
 const CACHE_NAME_DESCRIPTION = 'Cache resource name to %s (e.g., "cachedContents/...")';
+const CREATE_CACHE_TOOL_LABEL = 'Create Cache';
 
 export interface CacheChangeEvent {
   detailUris: string[];
@@ -195,12 +196,109 @@ async function confirmCacheDeletion(
   }
 }
 
+function buildCreateCacheConfig(
+  parts: CachePart[],
+  systemInstruction: string | undefined,
+  displayName: string | undefined,
+  ttl: string | undefined,
+  signal: AbortSignal,
+) {
+  return {
+    ...(parts.length > 0 ? { contents: [{ role: 'user' as const, parts }] } : {}),
+    ...(systemInstruction ? { systemInstruction } : {}),
+    ...(displayName ? { displayName } : {}),
+    ttl: ttl ?? '3600s',
+    abortSignal: signal,
+  };
+}
+
+async function createCacheWithRetry(
+  parts: CachePart[],
+  systemInstruction: string | undefined,
+  ttl: string | undefined,
+  displayName: string | undefined,
+  ctx: ServerContext,
+  totalSteps: number,
+) {
+  await sendProgress(ctx, totalSteps - 1, totalSteps, `${CREATE_CACHE_TOOL_LABEL}: Creating cache`);
+
+  return await withRetry(
+    () =>
+      getAI().caches.create({
+        model: MODEL,
+        config: buildCreateCacheConfig(
+          parts,
+          systemInstruction,
+          displayName,
+          ttl,
+          ctx.mcpReq.signal,
+        ),
+      }),
+    {
+      signal: ctx.mcpReq.signal,
+      onRetry: (attempt, max, delayMs) => {
+        void sendProgress(
+          ctx,
+          totalSteps - 1,
+          totalSteps,
+          `${CREATE_CACHE_TOOL_LABEL}: Retrying cache creation (${attempt}/${max}, ~${Math.round(delayMs / 1000)}s)`,
+        );
+      },
+    },
+  );
+}
+
+async function cleanupDuplicateCaches(
+  displayName: string | undefined,
+  cacheName: string | undefined,
+  signal: AbortSignal,
+): Promise<void> {
+  if (displayName && cacheName) {
+    await cleanupOldCaches(displayName, cacheName, signal);
+  }
+}
+
+function notifyCacheMutation(cacheName?: string): void {
+  notifyCacheChange(cacheName ? [cacheName] : []);
+}
+
+function buildCreateCacheResult(cache: {
+  name?: string;
+  displayName?: string;
+  model?: string;
+  expireTime?: string;
+}): CallToolResult {
+  const cacheName = cache.name ?? 'N/A';
+  const shortName = truncateName(cacheName);
+
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text:
+          `**Cache Created**\n\n` +
+          `- **Name:** ${shortName} (\`${cacheName}\`)\n` +
+          `- **Display Name:** ${cache.displayName ?? 'N/A'}\n` +
+          `- **Model:** ${cache.model ?? 'N/A'}\n` +
+          `- **Expires:** ${cache.expireTime ?? 'N/A'}`,
+      },
+      cacheResourceLink(cacheName, cache.displayName ?? cacheName),
+      cacheListResourceLink(),
+    ],
+    structuredContent: {
+      name: cacheName,
+      ...(cache.displayName ? { displayName: cache.displayName } : {}),
+      ...(cache.model ? { model: cache.model } : {}),
+      ...(cache.expireTime ? { expireTime: cache.expireTime } : {}),
+    },
+  };
+}
+
 function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
   return async function createCacheWork(
     { filePaths, systemInstruction, ttl, displayName }: CreateCacheInput,
     ctx: ServerContext,
   ): Promise<CallToolResult> {
-    const TOOL_LABEL = 'Create Cache';
     const uploadedFileNames: string[] = [];
     try {
       const totalSteps = (filePaths?.length ?? 0) + 1;
@@ -208,75 +306,30 @@ function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
         ? await uploadCacheParts(
             filePaths,
             ctx,
-            TOOL_LABEL,
+            CREATE_CACHE_TOOL_LABEL,
             totalSteps,
             uploadedFileNames,
             rootsFetcher,
           )
         : [];
 
-      await sendProgress(ctx, totalSteps - 1, totalSteps, `${TOOL_LABEL}: Creating cache`);
-      const cache = await withRetry(
-        () =>
-          getAI().caches.create({
-            model: MODEL,
-            config: {
-              ...(parts.length > 0 ? { contents: [{ role: 'user' as const, parts }] } : {}),
-              ...(systemInstruction ? { systemInstruction } : {}),
-              ...(displayName ? { displayName } : {}),
-              ttl: ttl ?? '3600s',
-              abortSignal: ctx.mcpReq.signal,
-            },
-          }),
-        {
-          signal: ctx.mcpReq.signal,
-          onRetry: (attempt, max, delayMs) => {
-            void sendProgress(
-              ctx,
-              totalSteps - 1,
-              totalSteps,
-              `${TOOL_LABEL}: Retrying cache creation (${attempt}/${max}, ~${Math.round(delayMs / 1000)}s)`,
-            );
-          },
-        },
+      const cache = await createCacheWithRetry(
+        parts,
+        systemInstruction,
+        ttl,
+        displayName,
+        ctx,
+        totalSteps,
+      );
+      await cleanupDuplicateCaches(displayName, cache.name, ctx.mcpReq.signal);
+      notifyCacheMutation(cache.name);
+      await reportCompletion(
+        ctx,
+        CREATE_CACHE_TOOL_LABEL,
+        `cached ${truncateName(cache.name ?? 'N/A')}`,
       );
 
-      // Replace older caches with the same displayName (create-then-cleanup)
-      if (displayName && cache.name) {
-        await cleanupOldCaches(displayName, cache.name, ctx.mcpReq.signal);
-      }
-
-      if (cache.name) {
-        notifyCacheChange([cache.name]);
-      } else {
-        notifyCacheChange();
-      }
-
-      const cacheName = cache.name ?? 'N/A';
-      const shortName = truncateName(cacheName);
-      await reportCompletion(ctx, TOOL_LABEL, `cached ${shortName}`);
-
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text:
-              `**Cache Created**\n\n` +
-              `- **Name:** ${shortName} (\`${cacheName}\`)\n` +
-              `- **Display Name:** ${cache.displayName ?? 'N/A'}\n` +
-              `- **Model:** ${cache.model ?? 'N/A'}\n` +
-              `- **Expires:** ${cache.expireTime ?? 'N/A'}`,
-          },
-          cacheResourceLink(cacheName, cache.displayName ?? cacheName),
-          cacheListResourceLink(),
-        ],
-        structuredContent: {
-          name: cacheName,
-          ...(cache.displayName ? { displayName: cache.displayName } : {}),
-          ...(cache.model ? { model: cache.model } : {}),
-          ...(cache.expireTime ? { expireTime: cache.expireTime } : {}),
-        },
-      };
+      return buildCreateCacheResult(cache);
     } catch (err) {
       throw normalizeCreateCacheError(err);
     } finally {
@@ -285,14 +338,12 @@ function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
   };
 }
 
-export function registerCacheTools(server: McpServer): void {
-  const rootsFetcher = buildServerRootsFetcher(server);
-
+function registerCreateCacheTool(server: McpServer, rootsFetcher: RootsFetcher): void {
   registerTaskTool(
     server,
     'create_cache',
     {
-      title: 'Create Cache',
+      title: CREATE_CACHE_TOOL_LABEL,
       description:
         'Create a Gemini context cache from files and/or a system instruction. ' +
         'Combined content MUST exceed ~32,000 tokens.',
@@ -302,7 +353,9 @@ export function registerCacheTools(server: McpServer): void {
     },
     buildCreateCacheWork(rootsFetcher),
   );
+}
 
+function registerListCachesTool(server: McpServer): void {
   server.registerTool(
     'list_caches',
     {
@@ -321,7 +374,45 @@ export function registerCacheTools(server: McpServer): void {
       };
     }),
   );
+}
 
+async function deleteCacheWork(
+  { cacheName, confirm }: { cacheName: string; confirm?: boolean | undefined },
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const confirmation = await confirmCacheDeletion(ctx, cacheName);
+  if (confirmation === 'declined') {
+    return {
+      content: [{ type: 'text', text: 'Cache deletion cancelled.' }],
+      structuredContent: { cacheName, deleted: false },
+    };
+  }
+
+  if (confirmation === 'unsupported' && confirm !== true) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: 'Interactive confirmation is unavailable. Re-run delete_cache with confirm=true to delete the cache.',
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  await getAI().caches.delete({
+    name: cacheName,
+    config: { abortSignal: ctx.mcpReq.signal },
+  });
+  notifyCacheMutation(cacheName);
+  await ctx.mcpReq.log('info', `Deleted cache: ${cacheName}`);
+  return {
+    content: [{ type: 'text', text: `Cache '${cacheName}' deleted.` }, cacheListResourceLink()],
+    structuredContent: { cacheName, deleted: true },
+  };
+}
+
+function registerDeleteCacheTool(server: McpServer): void {
   registerTaskTool(
     server,
     'delete_cache',
@@ -341,40 +432,39 @@ export function registerCacheTools(server: McpServer): void {
         destructiveHint: true,
       },
     },
-    async ({ cacheName, confirm }: { cacheName: string; confirm?: boolean | undefined }, ctx) => {
-      const confirmation = await confirmCacheDeletion(ctx, cacheName);
-      if (confirmation === 'declined') {
-        return {
-          content: [{ type: 'text', text: 'Cache deletion cancelled.' }],
-          structuredContent: { cacheName, deleted: false },
-        };
-      }
-
-      if (confirmation === 'unsupported' && confirm !== true) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: 'Interactive confirmation is unavailable. Re-run delete_cache with confirm=true to delete the cache.',
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      await getAI().caches.delete({
-        name: cacheName,
-        config: { abortSignal: ctx.mcpReq.signal },
-      });
-      notifyCacheChange([cacheName]);
-      await ctx.mcpReq.log('info', `Deleted cache: ${cacheName}`);
-      return {
-        content: [{ type: 'text', text: `Cache '${cacheName}' deleted.` }, cacheListResourceLink()],
-        structuredContent: { cacheName, deleted: true },
-      };
-    },
+    deleteCacheWork,
   );
+}
 
+async function updateCacheWork(
+  { cacheName, ttl }: { cacheName: string; ttl: string },
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const updated = await getAI().caches.update({
+    name: cacheName,
+    config: { ttl, abortSignal: ctx.mcpReq.signal },
+  });
+  notifyCacheMutation(cacheName);
+  await ctx.mcpReq.log('info', `Updated cache TTL: ${cacheName}`);
+  return {
+    content: [
+      {
+        type: 'text',
+        text:
+          `**Cache Updated**\n\n` +
+          `- **Name:** ${updated.name ?? cacheName}\n` +
+          `- **Expires:** ${updated.expireTime ?? 'N/A'}`,
+      },
+      cacheResourceLink(cacheName),
+    ],
+    structuredContent: {
+      cacheName,
+      ...(updated.expireTime ? { expireTime: updated.expireTime } : {}),
+    },
+  };
+}
+
+function registerUpdateCacheTool(server: McpServer): void {
   registerTaskTool(
     server,
     'update_cache',
@@ -388,29 +478,14 @@ export function registerCacheTools(server: McpServer): void {
       outputSchema: UpdateCacheOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
     },
-    async ({ cacheName, ttl }: { cacheName: string; ttl: string }, ctx: ServerContext) => {
-      const updated = await getAI().caches.update({
-        name: cacheName,
-        config: { ttl, abortSignal: ctx.mcpReq.signal },
-      });
-      notifyCacheChange([cacheName]);
-      await ctx.mcpReq.log('info', `Updated cache TTL: ${cacheName}`);
-      return {
-        content: [
-          {
-            type: 'text',
-            text:
-              `**Cache Updated**\n\n` +
-              `- **Name:** ${updated.name ?? cacheName}\n` +
-              `- **Expires:** ${updated.expireTime ?? 'N/A'}`,
-          },
-          cacheResourceLink(cacheName),
-        ],
-        structuredContent: {
-          cacheName,
-          ...(updated.expireTime ? { expireTime: updated.expireTime } : {}),
-        },
-      };
-    },
+    updateCacheWork,
   );
+}
+
+export function registerCacheTools(server: McpServer): void {
+  const rootsFetcher = buildServerRootsFetcher(server);
+  registerCreateCacheTool(server, rootsFetcher);
+  registerListCachesTool(server);
+  registerDeleteCacheTool(server);
+  registerUpdateCacheTool(server);
 }

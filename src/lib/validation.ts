@@ -163,10 +163,11 @@ function isPrivateIpv4(hostname: string): boolean {
   const parts = hostname.split('.').map((part) => Number(part));
   if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) return false;
   const [a, b] = parts;
+  const is172PrivateRange = a === 172 && b !== undefined && b >= 16 && b <= 31;
   return (
     a === 10 ||
     a === 127 ||
-    (a === 172 && b !== undefined && b >= 16 && b <= 31) ||
+    is172PrivateRange ||
     (a === 192 && b === 168) ||
     (a === 169 && b === 254)
   );

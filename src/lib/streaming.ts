@@ -59,6 +59,21 @@ interface ThoughtHeaderState {
   chunksSinceLastHeader: number;
 }
 
+interface StreamProcessingState extends StreamMetadata {
+  currentProgress: number;
+  emittedCompiling: boolean;
+  functionCalls: FunctionCallEntry[];
+  hadToolActivity: boolean;
+  parts: Part[];
+  phase: Phase;
+  text: string;
+  thoughtHeaderState: ThoughtHeaderState;
+  thoughtText: string;
+  toolsUsed: Set<string>;
+}
+
+type ProgressMessageFormatter = (message: string) => string;
+
 async function emitThoughtHeaders(
   thoughtText: string,
   state: ThoughtHeaderState,
@@ -123,31 +138,196 @@ function updateStreamMetadata(
   }
 }
 
+function createStreamProcessingState(): StreamProcessingState {
+  return {
+    currentProgress: 0,
+    emittedCompiling: false,
+    functionCalls: [],
+    hadToolActivity: false,
+    parts: [],
+    phase: Phase.Waiting,
+    text: '',
+    thoughtHeaderState: {
+      scanIndex: 0,
+      currentProgress: 0,
+      chunksSinceLastHeader: 0,
+    },
+    thoughtText: '',
+    toolsUsed: new Set<string>(),
+  };
+}
+
+async function advanceAndSendProgress(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  message: string,
+): Promise<void> {
+  state.currentProgress = advanceProgress(state.currentProgress);
+  await sendProgress(ctx, Math.floor(state.currentProgress), PROGRESS_TOTAL, msg(message));
+}
+
+async function recordToolActivity(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  progressMessage: string,
+  toolName?: string,
+): Promise<void> {
+  if (toolName) {
+    state.toolsUsed.add(toolName);
+  }
+  state.hadToolActivity = true;
+  await advanceAndSendProgress(ctx, state, msg, progressMessage);
+}
+
+async function maybeReportSearchProgress(
+  ctx: ServerContext,
+  candidate: NonNullable<GenerateContentResponse['candidates']>[number],
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+): Promise<void> {
+  if (candidate.groundingMetadata && !state.toolsUsed.has('googleSearch')) {
+    await recordToolActivity(ctx, state, msg, 'Searching the web', 'googleSearch');
+  }
+}
+
+async function transitionToThinking(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+): Promise<void> {
+  if (state.phase >= Phase.Thinking) {
+    return;
+  }
+
+  state.phase = Phase.Thinking;
+  await advanceAndSendProgress(ctx, state, msg, 'Thinking');
+}
+
+async function transitionToGenerating(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+): Promise<void> {
+  if (state.hadToolActivity && !state.emittedCompiling) {
+    state.emittedCompiling = true;
+    state.phase = Phase.Generating;
+    await advanceAndSendProgress(ctx, state, msg, 'Compiling results');
+    return;
+  }
+
+  if (state.phase >= Phase.Generating) {
+    return;
+  }
+
+  state.phase = Phase.Generating;
+  await advanceAndSendProgress(ctx, state, msg, 'Generating response');
+}
+
+async function handleFunctionCallPart(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  part: Part,
+): Promise<void> {
+  const functionCall = part.functionCall;
+  if (!functionCall) {
+    return;
+  }
+
+  if (!functionCall.name) {
+    await ctx.mcpReq.log('warning', 'Received functionCall with missing name');
+  }
+
+  const fnName = functionCall.name ?? 'tool';
+  state.functionCalls.push({
+    name: fnName,
+    ...(functionCall.args ? { args: functionCall.args } : {}),
+  });
+  await recordToolActivity(ctx, state, msg, `Tool: ${fnName}`, fnName);
+}
+
+async function handleThoughtPart(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  partText: string | undefined,
+): Promise<void> {
+  await transitionToThinking(ctx, state, msg);
+
+  if (partText === undefined) {
+    return;
+  }
+
+  state.thoughtText += partText;
+  state.thoughtHeaderState.currentProgress = state.currentProgress;
+  await emitThoughtHeaders(state.thoughtText, state.thoughtHeaderState, ctx, msg);
+  state.currentProgress = state.thoughtHeaderState.currentProgress;
+}
+
+async function handleStreamPart(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  part: Part,
+): Promise<void> {
+  state.parts.push(part);
+
+  if (part.executableCode) {
+    await recordToolActivity(ctx, state, msg, 'Executing code', 'codeExecution');
+    return;
+  }
+
+  if (part.codeExecutionResult) {
+    await recordToolActivity(ctx, state, msg, 'Code executed');
+    return;
+  }
+
+  if (part.functionCall) {
+    await handleFunctionCallPart(ctx, state, msg, part);
+    return;
+  }
+
+  const partText = part.text;
+  if (part.thought) {
+    await handleThoughtPart(ctx, state, msg, partText);
+    return;
+  }
+
+  if (partText === undefined) {
+    return;
+  }
+
+  await transitionToGenerating(ctx, state, msg);
+  state.text += partText;
+}
+
+function finalizeStreamResult(state: StreamProcessingState): StreamResult {
+  return {
+    text: state.text,
+    thoughtText: state.thoughtText,
+    parts: state.parts,
+    toolsUsed: [...state.toolsUsed],
+    functionCalls: state.functionCalls,
+    ...pickDefined({
+      finishReason: state.finishReason,
+      groundingMetadata: state.groundingMetadata,
+      urlContextMetadata: state.urlContextMetadata,
+      usageMetadata: state.usageMetadata,
+    }),
+  };
+}
+
 export async function consumeStreamWithProgress(
   stream: AsyncGenerator<GenerateContentResponse>,
   ctx: ServerContext,
   toolLabel?: string,
 ): Promise<StreamResult> {
-  const parts: Part[] = [];
-  let text = '';
-  let thoughtText = '';
-  const metadata: StreamMetadata = {};
-  let phase: Phase = Phase.Waiting;
-  let currentProgress = 0;
-  const toolsUsed = new Set<string>();
-  const functionCalls: FunctionCallEntry[] = [];
-  let hadToolActivity = false;
-  let emittedCompiling = false;
-  const thoughtHeaderState: ThoughtHeaderState = {
-    scanIndex: 0,
-    currentProgress: 0,
-    chunksSinceLastHeader: 0,
-  };
+  const state = createStreamProcessingState();
+  const msg = (message: string): string => (toolLabel ? `${toolLabel}: ${message}` : message);
 
-  const msg = (m: string): string => (toolLabel ? `${toolLabel}: ${m}` : m);
-
-  currentProgress = advanceProgress(currentProgress);
-  await sendProgress(ctx, Math.floor(currentProgress), PROGRESS_TOTAL, msg('Evaluating prompt'));
+  await advanceAndSendProgress(ctx, state, msg, 'Evaluating prompt');
 
   for await (const chunk of stream) {
     if (ctx.mcpReq.signal.aborted) break;
@@ -155,116 +335,15 @@ export async function consumeStreamWithProgress(
     const candidate = chunk.candidates?.[0];
     if (!candidate) continue;
 
-    updateStreamMetadata(chunk, candidate, metadata);
+    updateStreamMetadata(chunk, candidate, state);
+    await maybeReportSearchProgress(ctx, candidate, state, msg);
 
-    if (candidate.groundingMetadata && !toolsUsed.has('googleSearch')) {
-      toolsUsed.add('googleSearch');
-      hadToolActivity = true;
-      currentProgress = advanceProgress(currentProgress);
-      await sendProgress(
-        ctx,
-        Math.floor(currentProgress),
-        PROGRESS_TOTAL,
-        msg('Searching the web'),
-      );
-    }
-
-    const chunkParts = candidate.content?.parts ?? [];
-    for (const part of chunkParts) {
-      parts.push(part);
-
-      if (part.executableCode) {
-        toolsUsed.add('codeExecution');
-        hadToolActivity = true;
-        currentProgress = advanceProgress(currentProgress);
-        await sendProgress(ctx, Math.floor(currentProgress), PROGRESS_TOTAL, msg('Executing code'));
-        continue;
-      }
-
-      if (part.codeExecutionResult) {
-        hadToolActivity = true;
-        currentProgress = advanceProgress(currentProgress);
-        await sendProgress(ctx, Math.floor(currentProgress), PROGRESS_TOTAL, msg('Code executed'));
-        continue;
-      }
-
-      if (part.functionCall) {
-        if (!part.functionCall.name) {
-          await ctx.mcpReq.log('warning', 'Received functionCall with missing name');
-        }
-        const fnName = part.functionCall.name ?? 'tool';
-        toolsUsed.add(fnName);
-        functionCalls.push({
-          name: fnName,
-          ...(part.functionCall.args ? { args: part.functionCall.args } : {}),
-        });
-        hadToolActivity = true;
-        currentProgress = advanceProgress(currentProgress);
-        await sendProgress(
-          ctx,
-          Math.floor(currentProgress),
-          PROGRESS_TOTAL,
-          msg(`Tool: ${fnName}`),
-        );
-        continue;
-      }
-
-      const partText = part.text;
-
-      if (part.thought) {
-        if (phase < Phase.Thinking) {
-          phase = Phase.Thinking;
-          currentProgress = advanceProgress(currentProgress);
-          await sendProgress(ctx, Math.floor(currentProgress), PROGRESS_TOTAL, msg('Thinking'));
-        }
-
-        if (partText !== undefined) {
-          thoughtText += partText;
-          thoughtHeaderState.currentProgress = currentProgress;
-          await emitThoughtHeaders(thoughtText, thoughtHeaderState, ctx, msg);
-          currentProgress = thoughtHeaderState.currentProgress;
-        }
-
-        continue;
-      }
-
-      if (partText === undefined) {
-        continue;
-      }
-
-      if (hadToolActivity && !emittedCompiling) {
-        emittedCompiling = true;
-        phase = Phase.Generating;
-        currentProgress = advanceProgress(currentProgress);
-        await sendProgress(
-          ctx,
-          Math.floor(currentProgress),
-          PROGRESS_TOTAL,
-          msg('Compiling results'),
-        );
-      } else if (phase < Phase.Generating) {
-        phase = Phase.Generating;
-        currentProgress = advanceProgress(currentProgress);
-        await sendProgress(
-          ctx,
-          Math.floor(currentProgress),
-          PROGRESS_TOTAL,
-          msg('Generating response'),
-        );
-      }
-
-      text += partText;
+    for (const part of candidate.content?.parts ?? []) {
+      await handleStreamPart(ctx, state, msg, part);
     }
   }
 
-  return {
-    text,
-    thoughtText,
-    parts,
-    toolsUsed: [...toolsUsed],
-    functionCalls,
-    ...pickDefined({ ...metadata }),
-  };
+  return finalizeStreamResult(state);
 }
 
 export function validateStreamResult(result: StreamResult, toolName: string): CallToolResult {

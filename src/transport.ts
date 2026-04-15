@@ -83,6 +83,18 @@ interface PairSelection<TTransport> {
   shouldClosePair: boolean;
 }
 
+interface ManagedRequestOptions<TTransport, TResult> {
+  createPair: (isStatelessTransport: boolean) => Promise<ManagedPair<TTransport>>;
+  getSessionId: (transport: TTransport) => string | undefined;
+  handlePair: (pair: ManagedPair<TTransport>) => Promise<TResult>;
+  isStateless: boolean;
+  onError: (err: unknown) => TResult;
+  onMissingPair: () => TResult;
+  requestMethod: string;
+  sessionId: string | undefined;
+  statefulPairs: StatefulPairMap<TTransport>;
+}
+
 export interface HttpTransportResult {
   httpServer: Server;
   close: () => Promise<void>;
@@ -268,6 +280,99 @@ async function closeStatefulPairs<TTransport>(
   statefulPairs.clear();
 }
 
+async function handleManagedRequest<TTransport, TResult>({
+  createPair,
+  getSessionId,
+  handlePair,
+  isStateless,
+  onError,
+  onMissingPair,
+  requestMethod,
+  sessionId,
+  statefulPairs,
+}: ManagedRequestOptions<TTransport, TResult>): Promise<TResult> {
+  let pair: ManagedPair<TTransport> | undefined;
+  let shouldClosePair = false;
+
+  try {
+    ({ pair, shouldClosePair } = await selectManagedPair(
+      sessionId,
+      statefulPairs,
+      isStateless,
+      createPair,
+    ));
+
+    if (!pair) {
+      return onMissingPair();
+    }
+
+    const result = await handlePair(pair);
+    shouldClosePair = finalizeManagedPair(
+      pair,
+      sessionId,
+      requestMethod,
+      isStateless,
+      statefulPairs,
+      getSessionId,
+      shouldClosePair,
+    );
+    return result;
+  } catch (err: unknown) {
+    logRequestFailure('request failed', err);
+    return onError(err);
+  } finally {
+    if (shouldClosePair) {
+      await pair?.close();
+    }
+  }
+}
+
+function applyCors(app: ReturnType<typeof createMcpExpressApp>, corsOrigin: string): void {
+  if (!corsOrigin) {
+    return;
+  }
+
+  app.use((_req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, mcp-session-id, Last-Event-Id, mcp-protocol-version',
+    );
+    res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id, mcp-protocol-version');
+    next();
+  });
+  app.options('/mcp', (_req, res) => {
+    res.sendStatus(204);
+  });
+}
+
+function startDetectedRuntime(
+  runtimes: RuntimeGlobals,
+  handler: (req: Request) => Promise<Response>,
+  host: string,
+  port: number,
+): (() => Promise<void>) | undefined {
+  if (runtimes.Bun) {
+    const serverHandle = runtimes.Bun.serve({ fetch: handler, port, hostname: host });
+    logListening(host, port, 'Bun');
+    return async () => {
+      await serverHandle.stop();
+    };
+  }
+
+  if (runtimes.Deno) {
+    const serverHandle = runtimes.Deno.serve(handler, { port, hostname: host });
+    logListening(host, port, 'Deno');
+    return async () => {
+      await serverHandle.shutdown();
+    };
+  }
+
+  console.error('no auto-serve runtime detected (Bun/Deno) — wire the exported handler manually.');
+  return undefined;
+}
+
 export async function startHttpTransport(
   createServer: ServerFactory,
   createEventStore?: EventStoreFactory,
@@ -280,60 +385,30 @@ export async function startHttpTransport(
     host,
     ...(allowedHosts ? { allowedHosts } : {}),
   });
-
-  if (corsOrigin) {
-    app.use((_req, res, next) => {
-      res.setHeader('Access-Control-Allow-Origin', corsOrigin);
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-      res.setHeader(
-        'Access-Control-Allow-Headers',
-        'Content-Type, mcp-session-id, Last-Event-Id, mcp-protocol-version',
-      );
-      res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id, mcp-protocol-version');
-      next();
-    });
-    app.options('/mcp', (_req, res) => {
-      res.sendStatus(204);
-    });
-  }
+  applyCors(app, corsOrigin);
 
   const statefulPairs = new Map<string, ManagedPair<NodeStreamableHTTPServerTransport>>();
 
   app.all('/mcp', async (req, res) => {
     const sessionId = getNodeSessionId(req);
-    let pair: ManagedPair<NodeStreamableHTTPServerTransport> | undefined;
-    let shouldClosePair = false;
-
-    try {
-      ({ pair, shouldClosePair } = await selectManagedPair(
-        sessionId,
-        statefulPairs,
-        isStateless,
-        (isStatelessTransport) =>
-          createNodePair(createServer, isStatelessTransport, createEventStore),
-      ));
-
-      if (!pair) {
+    await handleManagedRequest({
+      createPair: (isStatelessTransport) =>
+        createNodePair(createServer, isStatelessTransport, createEventStore),
+      getSessionId: (transport) => transport.sessionId,
+      handlePair: async (pair) => {
+        await pair.transport.handleRequest(req, res, req.body);
+      },
+      isStateless,
+      onError: () => {
+        nodeErrorResponse(res, 500, 'Internal Server Error');
+      },
+      onMissingPair: () => {
         nodeErrorResponse(res, 404, 'Session not found');
-        return;
-      }
-
-      await pair.transport.handleRequest(req, res, req.body);
-      shouldClosePair = finalizeManagedPair(
-        pair,
-        sessionId,
-        req.method,
-        isStateless,
-        statefulPairs,
-        (transport) => transport.sessionId,
-        shouldClosePair,
-      );
-    } catch (err: unknown) {
-      logRequestFailure('request failed', err);
-      nodeErrorResponse(res, 500, 'Internal Server Error');
-    } finally {
-      if (shouldClosePair) await pair?.close();
-    }
+      },
+      requestMethod: req.method,
+      sessionId,
+      statefulPairs,
+    });
   });
 
   const httpServer = await new Promise<Server>((resolve) => {
@@ -384,62 +459,22 @@ export function startWebStandardTransport(
     }
 
     const sessionId = getRequestSessionId(req);
-    let pair: ManagedPair<WebStandardStreamableHTTPServerTransport> | undefined;
-    let shouldClosePair = false;
-
-    try {
-      ({ pair, shouldClosePair } = await selectManagedPair(
-        sessionId,
-        statefulPairs,
-        isStateless,
-        (isStatelessTransport) =>
-          createWebPair(createServer, isStatelessTransport, createEventStore),
-      ));
-
-      if (!pair) {
-        return responseError(404, 'Session not found');
-      }
-
-      const response = await pair.transport.handleRequest(req);
-      shouldClosePair = finalizeManagedPair(
-        pair,
-        sessionId,
-        req.method,
-        isStateless,
-        statefulPairs,
-        (transport) => transport.sessionId,
-        shouldClosePair,
-      );
-
-      return response;
-    } catch (err: unknown) {
-      logRequestFailure('request failed', err);
-      return responseError(500, 'Internal Server Error');
-    } finally {
-      if (shouldClosePair) await pair?.close();
-    }
+    return await handleManagedRequest({
+      createPair: (isStatelessTransport) =>
+        createWebPair(createServer, isStatelessTransport, createEventStore),
+      getSessionId: (transport) => transport.sessionId,
+      handlePair: (pair) => pair.transport.handleRequest(req),
+      isStateless,
+      onError: () => responseError(500, 'Internal Server Error'),
+      onMissingPair: () => responseError(404, 'Session not found'),
+      requestMethod: req.method,
+      sessionId,
+      statefulPairs,
+    });
   };
 
   const runtimes = globalThis as unknown as RuntimeGlobals;
-  let runtimeClose: (() => Promise<void>) | undefined;
-
-  if (runtimes.Bun) {
-    const serverHandle = runtimes.Bun.serve({ fetch: handler, port, hostname: host });
-    runtimeClose = async () => {
-      await serverHandle.stop();
-    };
-    logListening(host, port, 'Bun');
-  } else if (runtimes.Deno) {
-    const serverHandle = runtimes.Deno.serve(handler, { port, hostname: host });
-    runtimeClose = async () => {
-      await serverHandle.shutdown();
-    };
-    logListening(host, port, 'Deno');
-  } else {
-    console.error(
-      'no auto-serve runtime detected (Bun/Deno) — wire the exported handler manually.',
-    );
-  }
+  const runtimeClose = startDetectedRuntime(runtimes, handler, host, port);
 
   const close = async () => {
     await closeStatefulPairs(statefulPairs);

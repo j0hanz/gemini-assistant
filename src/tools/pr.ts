@@ -20,6 +20,9 @@ const TOOL_LABEL = 'Analyze PR';
 const GIT_TIMEOUT_MS = 30_000;
 const GIT_MAX_BUFFER = 10 * 1024 * 1024;
 const MAX_DIFF_CHARS = 500_000;
+const MAX_UNTRACKED_FILE_BYTES = 1024 * 1024;
+const EMPTY_DIFF_STATS: DiffStats = { files: 0, additions: 0, deletions: 0 };
+const UTF8_DECODER = new TextDecoder('utf-8');
 
 const NOISY_EXCLUDE_PATHSPECS = [
   ':!package-lock.json',
@@ -63,6 +66,16 @@ interface UntrackedPatchResult {
   path: string;
   binary: boolean;
 }
+
+type AnalyzePrStructuredContent = Record<string, unknown> & {
+  analysis: string;
+  stats: DiffStats;
+  reviewedPaths: string[];
+  includedUntracked: string[];
+  skippedBinaryPaths: string[];
+  empty: boolean;
+  truncated?: boolean;
+};
 
 export function matchesNoisyPath(filePath: string): boolean {
   const normalized = filePath.replaceAll('\\', '/');
@@ -123,6 +136,18 @@ function buildGitHeadNameOnlyArgs(): string[] {
   return ['diff', '--name-only', 'HEAD', '--', ...NOISY_EXCLUDE_PATHSPECS];
 }
 
+function parseGitPathList(stdout: string): string[] {
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !matchesNoisyPath(line));
+}
+
+function joinNonEmptyParts(parts: string[]): string {
+  return parts.filter((part) => part.trim()).join('\n');
+}
+
 async function findGitRoot(signal?: AbortSignal): Promise<string> {
   const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
     encoding: 'utf8',
@@ -158,7 +183,7 @@ async function generateFallbackTrackedDiff(gitRoot: string, signal?: AbortSignal
     runGit(gitRoot, buildGitDiffArgs(false), signal),
   ]);
 
-  return [stagedDiff, unstagedDiff].filter((part) => part.trim()).join('\n');
+  return joinNonEmptyParts([stagedDiff, unstagedDiff]);
 }
 
 async function listFallbackTrackedPaths(gitRoot: string, signal?: AbortSignal): Promise<string[]> {
@@ -167,10 +192,7 @@ async function listFallbackTrackedPaths(gitRoot: string, signal?: AbortSignal): 
     runGit(gitRoot, buildGitNameOnlyArgs(false), signal),
   ]);
 
-  return [...stagedPaths.split(/\r?\n/), ...unstagedPaths.split(/\r?\n/)]
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !matchesNoisyPath(line));
+  return [...parseGitPathList(stagedPaths), ...parseGitPathList(unstagedPaths)];
 }
 
 async function buildTrackedSnapshot(
@@ -184,11 +206,7 @@ async function buildTrackedSnapshot(
     ]);
     return {
       diff,
-      paths: paths
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .filter((line) => !matchesNoisyPath(line)),
+      paths: parseGitPathList(paths),
     };
   }
 
@@ -201,11 +219,7 @@ async function buildTrackedSnapshot(
 
 async function listUntrackedPaths(gitRoot: string, signal?: AbortSignal): Promise<string[]> {
   const stdout = await runGit(gitRoot, ['ls-files', '--others', '--exclude-standard'], signal);
-  return stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !matchesNoisyPath(line));
+  return parseGitPathList(stdout);
 }
 
 function isBinaryContent(buffer: Buffer): boolean {
@@ -254,7 +268,7 @@ async function buildUntrackedPatch(
   const absolutePath = join(gitRoot, relativePath);
   const fileStats = await stat(absolutePath).catch(() => null);
 
-  if (!fileStats || !fileStats.isFile() || fileStats.size > 1024 * 1024) {
+  if (!fileStats || !fileStats.isFile() || fileStats.size > MAX_UNTRACKED_FILE_BYTES) {
     return { path: relativePath, binary: false };
   }
 
@@ -263,7 +277,7 @@ async function buildUntrackedPatch(
     return { path: relativePath, binary: true };
   }
 
-  const fileContent = new TextDecoder('utf-8').decode(fileBuffer);
+  const fileContent = UTF8_DECODER.decode(fileBuffer);
   return {
     path: relativePath,
     binary: false,
@@ -337,6 +351,79 @@ export function buildAnalysisPrompt(
   return parts.join('\n');
 }
 
+function summarizeUntrackedResults(untrackedResults: UntrackedPatchResult[]): {
+  includedUntracked: string[];
+  skippedBinaryPaths: string[];
+  untrackedPatches: string[];
+} {
+  const includedUntracked: string[] = [];
+  const skippedBinaryPaths: string[] = [];
+  const untrackedPatches: string[] = [];
+
+  for (const result of untrackedResults) {
+    if (result.binary) {
+      skippedBinaryPaths.push(result.path);
+      continue;
+    }
+    if (!result.patch?.trim()) {
+      continue;
+    }
+    includedUntracked.push(result.path);
+    untrackedPatches.push(result.patch);
+  }
+
+  includedUntracked.sort();
+  skippedBinaryPaths.sort();
+
+  return { includedUntracked, skippedBinaryPaths, untrackedPatches };
+}
+
+function buildStructuredContent(
+  snapshot: LocalDiffSnapshot,
+  analysis: string,
+  truncated?: boolean,
+): AnalyzePrStructuredContent {
+  return {
+    analysis,
+    stats: snapshot.stats,
+    reviewedPaths: snapshot.reviewedPaths,
+    includedUntracked: snapshot.includedUntracked,
+    skippedBinaryPaths: snapshot.skippedBinaryPaths,
+    empty: snapshot.empty,
+    ...(truncated ? { truncated } : {}),
+  };
+}
+
+function buildNoChangesAnalysis(snapshot: LocalDiffSnapshot): string {
+  return snapshot.skippedBinaryPaths.length > 0
+    ? `No reviewable local text changes to review. Skipped binary untracked files: ${snapshot.skippedBinaryPaths.join(', ')}.`
+    : 'No local changes to review.';
+}
+
+function formatSnapshotSummary(stats: DiffStats): string {
+  return `${String(stats.files)} files (+${String(stats.additions)}, -${String(stats.deletions)})`;
+}
+
+function buildModelPrompt(
+  prompt: string,
+  cacheName?: string,
+): {
+  effectivePrompt: string;
+  effectiveSystemInstruction: string | undefined;
+} {
+  if (cacheName) {
+    return {
+      effectivePrompt: `${SYSTEM_INSTRUCTION}\n\n${prompt}`,
+      effectiveSystemInstruction: undefined,
+    };
+  }
+
+  return {
+    effectivePrompt: prompt,
+    effectiveSystemInstruction: SYSTEM_INSTRUCTION,
+  };
+}
+
 async function buildLocalDiffSnapshot(signal?: AbortSignal): Promise<LocalDiffSnapshot> {
   const gitRoot = await findGitRoot(signal);
   const [trackedSnapshot, untrackedPaths] = await Promise.all([
@@ -349,28 +436,16 @@ async function buildLocalDiffSnapshot(signal?: AbortSignal): Promise<LocalDiffSn
     untrackedResults.push(await buildUntrackedPatch(gitRoot, relativePath));
   }
 
-  const includedUntracked = untrackedResults
-    .filter(
-      (result): result is UntrackedPatchResult & { patch: string } =>
-        !result.binary && !!result.patch,
-    )
-    .map((result) => result.path)
-    .sort();
-  const skippedBinaryPaths = untrackedResults
-    .filter((result) => result.binary)
-    .map((result) => result.path)
-    .sort();
-  const untrackedPatches = untrackedResults
-    .flatMap((result) => (result.patch ? [result.patch] : []))
-    .filter((patch) => patch.trim());
+  const { includedUntracked, skippedBinaryPaths, untrackedPatches } =
+    summarizeUntrackedResults(untrackedResults);
 
   const reviewedPaths = [...new Set([...trackedSnapshot.paths, ...includedUntracked])].sort();
-  const diff = [trackedSnapshot.diff, ...untrackedPatches].filter((part) => part.trim()).join('\n');
+  const diff = joinNonEmptyParts([trackedSnapshot.diff, ...untrackedPatches]);
   const empty = !diff.trim();
 
   return {
     diff,
-    stats: empty ? { files: 0, additions: 0, deletions: 0 } : computeDiffStats(diff),
+    stats: empty ? EMPTY_DIFF_STATS : computeDiffStats(diff),
     reviewedPaths,
     includedUntracked,
     skippedBinaryPaths,
@@ -394,29 +469,15 @@ async function analyzePrWork(
     };
   }
 
-  await sendProgress(
-    ctx,
-    1,
-    3,
-    `${TOOL_LABEL}: ${String(snapshot.stats.files)} files (+${String(snapshot.stats.additions)}, -${String(snapshot.stats.deletions)})`,
-  );
+  const snapshotSummary = formatSnapshotSummary(snapshot.stats);
+  await sendProgress(ctx, 1, 3, `${TOOL_LABEL}: ${snapshotSummary}`);
 
   if (snapshot.empty) {
-    const analysis =
-      snapshot.skippedBinaryPaths.length > 0
-        ? `No reviewable local text changes to review. Skipped binary untracked files: ${snapshot.skippedBinaryPaths.join(', ')}.`
-        : 'No local changes to review.';
+    const analysis = buildNoChangesAnalysis(snapshot);
     await reportCompletion(ctx, TOOL_LABEL, 'no changes');
     return {
       content: [{ type: 'text' as const, text: analysis }],
-      structuredContent: {
-        analysis,
-        stats: snapshot.stats,
-        reviewedPaths: snapshot.reviewedPaths,
-        includedUntracked: snapshot.includedUntracked,
-        skippedBinaryPaths: snapshot.skippedBinaryPaths,
-        empty: true,
-      },
+      structuredContent: buildStructuredContent(snapshot, analysis),
     };
   }
 
@@ -426,15 +487,7 @@ async function analyzePrWork(
     await reportCompletion(ctx, TOOL_LABEL, 'snapshot ready');
     return {
       content: [{ type: 'text' as const, text: diff }],
-      structuredContent: {
-        analysis: diff,
-        stats: snapshot.stats,
-        reviewedPaths: snapshot.reviewedPaths,
-        includedUntracked: snapshot.includedUntracked,
-        skippedBinaryPaths: snapshot.skippedBinaryPaths,
-        empty: false,
-        ...(truncated ? { truncated } : {}),
-      },
+      structuredContent: buildStructuredContent(snapshot, diff, truncated),
     };
   }
 
@@ -453,8 +506,7 @@ async function analyzePrWork(
     language,
   );
 
-  const effectiveSystemInstruction = cacheName ? undefined : SYSTEM_INSTRUCTION;
-  const effectivePrompt = cacheName ? `${SYSTEM_INSTRUCTION}\n\n${prompt}` : prompt;
+  const { effectivePrompt, effectiveSystemInstruction } = buildModelPrompt(prompt, cacheName);
 
   return await handleToolExecution(
     ctx,
@@ -474,15 +526,7 @@ async function analyzePrWork(
         ),
       }),
     (_streamResult, textContent) => ({
-      structuredContent: {
-        analysis: textContent || '',
-        stats: snapshot.stats,
-        reviewedPaths: snapshot.reviewedPaths,
-        includedUntracked: snapshot.includedUntracked,
-        skippedBinaryPaths: snapshot.skippedBinaryPaths,
-        empty: false,
-        ...(truncated ? { truncated } : {}),
-      },
+      structuredContent: buildStructuredContent(snapshot, textContent || '', truncated),
       reportMessage: `${String(snapshot.stats.files)} files reviewed (+${String(snapshot.stats.additions)}, -${String(snapshot.stats.deletions)})`,
     }),
   );

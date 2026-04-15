@@ -86,20 +86,3 @@ export const CreateCacheInputSchema = z
     'Creates a Gemini API cache. Combined content (files + instructions) MUST exceed ~32,000 tokens.',
   );
 export type CreateCacheInput = z.infer<typeof CreateCacheInputSchema>;
-
-export const EmbedContentInputSchema = z.object({
-  contents: z
-    .array(z.string().min(1).max(10_000))
-    .min(1)
-    .max(100)
-    .describe('Text strings to embed (max 100, each up to 10k chars).'),
-  model: z.string().optional().describe('Embedding model. Defaults to text-embedding-004.'),
-  outputDimensionality: z
-    .number()
-    .int()
-    .min(1)
-    .max(768)
-    .optional()
-    .describe('Output vector dimensions (1-768). Lower = faster, less precise.'),
-});
-export type EmbedContentInput = z.infer<typeof EmbedContentInputSchema>;

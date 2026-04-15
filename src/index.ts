@@ -16,7 +16,6 @@ import { registerResources } from './resources.js';
 import { onSessionChange } from './sessions.js';
 import { registerAskTool } from './tools/ask.js';
 import { onCacheChange, registerCacheTools } from './tools/cache.js';
-import { registerEmbedContentTool } from './tools/embeddings.js';
 import { registerAnalyzeFileTool, registerExecuteCodeTool } from './tools/execution.js';
 import {
   registerAgenticSearchTool,
@@ -57,7 +56,6 @@ const server = new McpServer(
       'search (web-grounded answers, optional URL Context), ' +
       'agentic_search (deep multi-step research with progress notifications), ' +
       'analyze_file (file upload, mediaResolution for images/video), analyze_url (URL content analysis), ' +
-      'embed_content (text embeddings for similarity/retrieval), ' +
       'create_cache/list_caches/update_cache/delete_cache (context caching, ≥32k tokens). ' +
       'Use cacheName with ask to attach cached context. displayName auto-replaces stale caches.',
   },
@@ -65,7 +63,6 @@ const server = new McpServer(
 
 registerAskTool(server);
 registerExecuteCodeTool(server);
-registerEmbedContentTool(server);
 registerSearchTool(server);
 registerAgenticSearchTool(server);
 registerAnalyzeFileTool(server);

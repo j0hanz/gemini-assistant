@@ -372,24 +372,26 @@ async function deleteCacheWork(
   { cacheName, confirm }: DeleteCacheInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const confirmation = await confirmCacheDeletion(ctx, cacheName);
-  if (confirmation === 'declined') {
-    return {
-      content: [{ type: 'text', text: 'Cache deletion cancelled.' }],
-      structuredContent: { cacheName, deleted: false },
-    };
-  }
+  if (confirm !== true) {
+    const confirmation = await confirmCacheDeletion(ctx, cacheName);
+    if (confirmation === 'declined') {
+      return {
+        content: [{ type: 'text', text: 'Cache deletion cancelled.' }],
+        structuredContent: { cacheName, deleted: false },
+      };
+    }
 
-  if (confirmation === 'unsupported' && confirm !== true) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: 'Interactive confirmation is unavailable. Re-run delete_cache with confirm=true to delete the cache.',
-        },
-      ],
-      isError: true,
-    };
+    if (confirmation === 'unsupported') {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: 'Interactive confirmation is unavailable. Re-run delete_cache with confirm=true to delete the cache.',
+          },
+        ],
+        isError: true,
+      };
+    }
   }
 
   await getAI().caches.delete({

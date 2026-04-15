@@ -51,7 +51,7 @@ describe('documentation and package metadata', () => {
       readme,
       /`execute_code` uses Gemini's Python runtime; `language` is advisory only\./,
     );
-    assert.match(readme, /`list_caches` is the single synchronous read-only outlier/i);
+    assert.match(readme, /`list_caches` is the single non-tasked read-only outlier/i);
   });
 
   it('keeps web-standard runtime guidance aligned with transport behavior', () => {

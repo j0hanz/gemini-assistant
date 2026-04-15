@@ -207,7 +207,7 @@ Prompt wrappers:
 - Sessions and transcripts are in-memory only and disappear on expiry or eviction.
 - `execute_code` uses Gemini's Python runtime; `language` is advisory only.
 - Cache tooling does not change the core Gemini tool set or transport model.
-- `list_caches` is the single synchronous read-only outlier in the tool surface.
+- `list_caches` is the single non-tasked read-only outlier in the tool surface.
 
 ## Commands
 

@@ -123,7 +123,7 @@ export const MODEL = getGeminiModel();
 
 let _ai: GoogleGenAI | undefined;
 
-/** Lazily initialised Gemini client – throws only when first accessed. */
+/** Lazily initialized Gemini client - throws only when first accessed. */
 export function getAI(): GoogleGenAI {
   if (!_ai) {
     const apiKey = process.env.API_KEY;

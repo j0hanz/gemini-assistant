@@ -2,7 +2,7 @@ import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server
 import { completable, ResourceTemplate } from '@modelcontextprotocol/server';
 
 import { readdir, stat } from 'node:fs/promises';
-import { basename, dirname, join, normalize } from 'node:path';
+import { basename, dirname, join, normalize, sep } from 'node:path';
 
 import { z } from 'zod/v4';
 
@@ -190,7 +190,7 @@ function buildPathAcFetcher(rootsFetcher: RootsFetcher) {
             (entry) =>
               !targetPrefix || entry.name.toLowerCase().startsWith(targetPrefix.toLowerCase()),
           )
-          .map((entry) => join(targetDir, entry.name) + (entry.isDirectory() ? '\\' : ''))
+          .map((entry) => join(targetDir, entry.name) + (entry.isDirectory() ? sep : ''))
           .slice(0, 50);
       } catch {
         return allowedRoots.filter((root) =>

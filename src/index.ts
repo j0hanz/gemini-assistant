@@ -106,10 +106,12 @@ let eventStore: InMemoryEventStore | undefined;
 if (transportMode === 'http') {
   const { startHttpTransport } = await import('./transport.js');
   eventStore = new InMemoryEventStore();
+  eventStore.startPeriodicCleanup();
   httpResult = await startHttpTransport(server, eventStore);
 } else if (transportMode === 'web-standard') {
   const { startWebStandardTransport } = await import('./transport.js');
   eventStore = new InMemoryEventStore();
+  eventStore.startPeriodicCleanup();
   webStandardResult = await startWebStandardTransport(server, eventStore);
 } else {
   const transport = new StdioServerTransport();

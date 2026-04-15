@@ -1,7 +1,6 @@
 import type {
   CallToolResult,
   ProgressNotification,
-  RequestTaskStore,
   ServerContext,
 } from '@modelcontextprotocol/server';
 import { INVALID_PARAMS, ProtocolError } from '@modelcontextprotocol/server';
@@ -12,9 +11,24 @@ import { FinishReason } from '@google/genai';
 
 export const MIN_PROGRESS_INTERVAL_MS = 250;
 export const TASK_STATUS_INTERVAL_MS = 5_000;
+const PROGRESS_ENTRY_TTL_MS = 5 * 60 * 1000;
+const PROGRESS_SWEEP_INTERVAL_MS = 60 * 1000;
 
 const lastEmitTime = new Map<string, number>();
 const lastTaskStatusTime = new Map<string, number>();
+
+function sweepStaleEntries(): void {
+  const cutoff = Date.now() - PROGRESS_ENTRY_TTL_MS;
+  for (const [key, ts] of lastEmitTime) {
+    if (ts < cutoff) lastEmitTime.delete(key);
+  }
+  for (const [key, ts] of lastTaskStatusTime) {
+    if (ts < cutoff) lastTaskStatusTime.delete(key);
+  }
+}
+
+const progressSweepTimer = setInterval(sweepStaleEntries, PROGRESS_SWEEP_INTERVAL_MS);
+progressSweepTimer.unref();
 
 /** Reset the progress throttle state. Intended for testing. */
 export function resetProgressThrottle(): void {
@@ -22,13 +36,8 @@ export function resetProgressThrottle(): void {
   lastTaskStatusTime.clear();
 }
 
-interface TaskAccessor {
-  id?: string;
-  store: RequestTaskStore;
-}
-
 async function bridgeProgressToTask(ctx: ServerContext, message: string): Promise<void> {
-  const task = (ctx as unknown as { task?: TaskAccessor }).task;
+  const task = ctx.task;
   if (!task?.id) return;
 
   const now = Date.now();
@@ -79,7 +88,7 @@ export async function sendProgress(
           lastEmitTime.delete(key);
         }
       }
-      const taskId = (ctx as unknown as { task?: TaskAccessor }).task?.id;
+      const taskId = ctx.task?.id;
       if (taskId) lastTaskStatusTime.delete(taskId);
     } else {
       lastEmitTime.set(throttleKey, Date.now());

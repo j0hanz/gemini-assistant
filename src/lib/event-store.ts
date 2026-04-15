@@ -2,6 +2,8 @@ import type { EventId, EventStore, JSONRPCMessage, StreamId } from '@modelcontex
 
 const MAX_EVENTS_PER_STREAM = 1000;
 const MAX_STREAMS = 200;
+const DEFAULT_STREAM_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
 interface StoredEvent {
   eventId: EventId;
@@ -11,6 +13,7 @@ interface StoredEvent {
 interface StreamState {
   events: StoredEvent[];
   baseOffset: number;
+  lastActivity: number;
 }
 
 interface EventLocation {
@@ -22,6 +25,7 @@ export class InMemoryEventStore implements EventStore {
   private _streams = new Map<StreamId, StreamState>();
   private _eventToStream = new Map<EventId, EventLocation>();
   private _counter = 0;
+  private _sweepTimer: ReturnType<typeof setInterval> | undefined;
 
   storeEvent(streamId: StreamId, message: JSONRPCMessage): Promise<EventId> {
     const eventId: EventId = `e-${++this._counter}`;
@@ -29,9 +33,11 @@ export class InMemoryEventStore implements EventStore {
     let state = this._streams.get(streamId);
     if (!state) {
       this._evictIfNeeded();
-      state = { events: [], baseOffset: 0 };
+      state = { events: [], baseOffset: 0, lastActivity: Date.now() };
       this._streams.set(streamId, state);
     }
+
+    state.lastActivity = Date.now();
 
     if (state.events.length >= MAX_EVENTS_PER_STREAM) {
       const removed = state.events.shift();
@@ -72,9 +78,31 @@ export class InMemoryEventStore implements EventStore {
   }
 
   cleanup(): void {
+    if (this._sweepTimer) {
+      clearInterval(this._sweepTimer);
+      this._sweepTimer = undefined;
+    }
     this._streams.clear();
     this._eventToStream.clear();
     this._counter = 0;
+  }
+
+  startPeriodicCleanup(
+    intervalMs: number = DEFAULT_SWEEP_INTERVAL_MS,
+    ttlMs: number = DEFAULT_STREAM_TTL_MS,
+  ): void {
+    this.stopPeriodicCleanup();
+    this._sweepTimer = setInterval(() => {
+      this._sweepStaleStreams(ttlMs);
+    }, intervalMs);
+    this._sweepTimer.unref();
+  }
+
+  stopPeriodicCleanup(): void {
+    if (this._sweepTimer) {
+      clearInterval(this._sweepTimer);
+      this._sweepTimer = undefined;
+    }
   }
 
   private _evictIfNeeded(): void {
@@ -88,5 +116,15 @@ export class InMemoryEventStore implements EventStore {
       for (const e of state.events) this._eventToStream.delete(e.eventId);
     }
     this._streams.delete(oldest.value);
+  }
+
+  private _sweepStaleStreams(ttlMs: number): void {
+    const cutoff = Date.now() - ttlMs;
+    for (const [streamId, state] of this._streams) {
+      if (state.lastActivity < cutoff) {
+        for (const e of state.events) this._eventToStream.delete(e.eventId);
+        this._streams.delete(streamId);
+      }
+    }
   }
 }

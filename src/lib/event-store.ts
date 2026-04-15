@@ -108,14 +108,23 @@ export class InMemoryEventStore implements EventStore {
   private _evictIfNeeded(): void {
     if (this._streams.size < MAX_STREAMS) return;
 
-    const oldest = this._streams.keys().next();
-    if (oldest.done) return;
+    let oldestStreamId: StreamId | undefined;
+    let oldestActivity = Number.POSITIVE_INFINITY;
 
-    const state = this._streams.get(oldest.value);
+    for (const [streamId, state] of this._streams) {
+      if (state.lastActivity < oldestActivity) {
+        oldestActivity = state.lastActivity;
+        oldestStreamId = streamId;
+      }
+    }
+
+    if (!oldestStreamId) return;
+
+    const state = this._streams.get(oldestStreamId);
     if (state) {
       for (const e of state.events) this._eventToStream.delete(e.eventId);
     }
-    this._streams.delete(oldest.value);
+    this._streams.delete(oldestStreamId);
   }
 
   private _sweepStaleStreams(ttlMs: number): void {

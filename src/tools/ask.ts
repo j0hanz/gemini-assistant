@@ -16,7 +16,12 @@ import {
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { AskOutputSchema } from '../schemas/outputs.js';
 
-import { AskThinkingLevel, buildGenerateContentConfig, THINKING_LEVELS } from '../client.js';
+import {
+  AskThinkingLevel,
+  buildGenerateContentConfig,
+  EXPOSE_THOUGHTS,
+  THINKING_LEVELS,
+} from '../client.js';
 import { completeCacheNames, getAI, MODEL } from '../client.js';
 import {
   completeSessionIds,
@@ -172,7 +177,7 @@ function buildAskStructuredContent(
     answer,
     ...(parsedData !== undefined ? { data: parsedData } : {}),
     ...(warnings.length > 0 ? { schemaWarnings: warnings } : {}),
-    ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
+    ...(EXPOSE_THOUGHTS && streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
     ...(usage ? { usage } : {}),
     ...(streamResult.functionCalls.length > 0 ? { functionCalls: streamResult.functionCalls } : {}),
   };

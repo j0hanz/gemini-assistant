@@ -7,6 +7,7 @@ import type { GenerateContentResponse } from '@google/genai';
 import {
   appendSources,
   appendUrlStatus,
+  collectGroundedSourceDetails,
   collectGroundedSources,
   createResourceLink,
   extractTextOrError,
@@ -157,6 +158,22 @@ describe('collectGroundedSources', () => {
 
   it('returns an empty list when grounding metadata is missing', () => {
     assert.deepStrictEqual(collectGroundedSources(undefined), []);
+  });
+});
+
+describe('collectGroundedSourceDetails', () => {
+  it('collects structured source details for grounded results', () => {
+    const sources = collectGroundedSourceDetails({
+      groundingChunks: [
+        { web: { title: 'Example', uri: 'https://example.com' } },
+        { web: { uri: 'https://example.org' } },
+      ],
+    } as never);
+
+    assert.deepStrictEqual(sources, [
+      { title: 'Example', url: 'https://example.com' },
+      { url: 'https://example.org' },
+    ]);
   });
 });
 

@@ -9,7 +9,14 @@ import type {
   UrlContextMetadata,
 } from '@google/genai';
 
-import { finishReasonError, reportCompletion, sendProgress, withRetry } from './errors.js';
+import { EXPOSE_THOUGHTS } from '../client.js';
+import {
+  finishReasonError,
+  reportCompletion,
+  reportFailure,
+  sendProgress,
+  withRetry,
+} from './errors.js';
 import { extractTextContent, pickDefined } from './response.js';
 
 export const PROGRESS_TOTAL = 100;
@@ -321,25 +328,37 @@ export async function handleToolExecution<T extends Record<string, unknown>>(
     toolLabel,
     streamGenerator,
   );
-  if (result.isError) return result;
+  if (result.isError) {
+    await reportFailure(ctx, toolLabel, extractTextContent(result.content));
+    return result;
+  }
 
   const text = extractTextContent(result.content);
   const built = responseBuilder(streamResult, text);
+  const finalResult: CallToolResult = {
+    ...result,
+    ...(built.resultMod ? built.resultMod(result) : {}),
+  };
 
-  if (built.reportMessage) {
-    await reportCompletion(ctx, toolLabel, built.reportMessage);
+  if (finalResult.isError) {
+    await reportFailure(ctx, toolLabel, extractTextContent(finalResult.content));
   } else {
-    await reportCompletion(ctx, toolLabel, 'completed');
+    if (built.reportMessage) {
+      await reportCompletion(ctx, toolLabel, built.reportMessage);
+    } else {
+      await reportCompletion(ctx, toolLabel, 'completed');
+    }
   }
 
   const usage = extractUsage(streamResult.usageMetadata);
 
   return {
-    ...result,
-    ...(built.resultMod ? built.resultMod(result) : {}),
+    ...finalResult,
     structuredContent: {
       ...(built.structuredContent ?? {}),
-      ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
+      ...(EXPOSE_THOUGHTS && streamResult.thoughtText
+        ? { thoughts: streamResult.thoughtText }
+        : {}),
       ...(usage ? { usage } : {}),
     },
   };

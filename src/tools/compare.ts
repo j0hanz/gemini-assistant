@@ -24,7 +24,8 @@ const SYSTEM_INSTRUCTION =
   '## Similarities\nShared patterns, structures, or content.\n\n' +
   '## Differences\nDetailed breakdown of what differs, with specific references.\n\n' +
   '## Impact\nPractical implications of the differences (breaking changes, behavior shifts, etc.).\n\n' +
-  'Reference specific line numbers, function names, or sections from each file.';
+  'Reference quoted snippets, function/class names, section names, or structural anchors from each file. ' +
+  'Do not invent exact line numbers unless the uploaded content explicitly exposes them.';
 
 function createCompareFileWork(rootsFetcher: RootsFetcher) {
   return async function compareFileWork(

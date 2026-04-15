@@ -11,6 +11,7 @@ import {
   advanceProgress,
   consumeStreamWithProgress,
   extractUsage,
+  handleToolExecution,
   PROGRESS_CAP,
   PROGRESS_TOTAL,
   type StreamResult,
@@ -546,5 +547,50 @@ describe('extractUsage', () => {
     const result = extractUsage(meta as Parameters<typeof extractUsage>[0]);
     assert.strictEqual(result?.promptTokenCount, 42);
     assert.strictEqual('candidatesTokenCount' in (result ?? {}), false);
+  });
+});
+
+describe('handleToolExecution', () => {
+  beforeEach(() => {
+    resetProgressThrottle();
+  });
+
+  it('reports failure once when resultMod converts success into an error', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+
+    const result = await handleToolExecution(
+      ctx,
+      'execute_code',
+      'Execute Code',
+      async () => fakeStream([makeChunk([{ text: 'partial output' }], FinishReason.STOP)]),
+      () => ({
+        resultMod: () => ({
+          isError: true,
+          content: [{ type: 'text', text: 'execution failed' }],
+        }),
+      }),
+    );
+
+    assert.strictEqual(result.isError, true);
+    const terminalMessages = progressCalls
+      .filter((call) => call.progress === PROGRESS_TOTAL)
+      .map((call) => call.message);
+    assert.deepStrictEqual(terminalMessages, ['Execute Code: failed — execution failed']);
+  });
+
+  it('reports failure once for stream validation errors', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+
+    const result = await handleToolExecution(ctx, 'search', 'Web Search', async () =>
+      fakeStream([makeChunk([], FinishReason.SAFETY)]),
+    );
+
+    assert.strictEqual(result.isError, true);
+    const terminalMessages = progressCalls
+      .filter((call) => call.progress === PROGRESS_TOTAL)
+      .map((call) => call.message);
+    assert.deepStrictEqual(terminalMessages, [
+      'Web Search: failed — search: response blocked by safety filter',
+    ]);
   });
 });

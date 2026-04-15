@@ -1,6 +1,7 @@
 import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
 
 import { realpath } from 'node:fs/promises';
+import { isIP } from 'node:net';
 import { isAbsolute, normalize, parse, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -158,15 +159,71 @@ export function buildServerRootsFetcher(server: McpServer): RootsFetcher {
 
 // ── URL Validation ────────────────────────────────────────────────────
 
+function isPrivateIpv4(hostname: string): boolean {
+  const parts = hostname.split('.').map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) return false;
+  const [a, b] = parts;
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 172 && b !== undefined && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254)
+  );
+}
+
+function isPrivateIpv6(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd');
+}
+
+function isRejectedHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  if (
+    normalized === 'localhost' ||
+    normalized.endsWith('.localhost') ||
+    normalized === '[::1]' ||
+    normalized === '0.0.0.0'
+  ) {
+    return true;
+  }
+
+  const ipVersion = isIP(normalized);
+  if (ipVersion === 4) return isPrivateIpv4(normalized);
+  if (ipVersion === 6) return isPrivateIpv6(normalized);
+
+  return false;
+}
+
 export function validateUrls(urls: readonly string[] | undefined): CallToolResult | undefined {
   if (!urls) return undefined;
 
   for (const url of urls) {
+    let parsed: URL;
     try {
-      new URL(url);
+      parsed = new URL(url);
     } catch {
       return {
         content: [{ type: 'text', text: `Invalid URL provided: ${url}` }],
+        isError: true,
+      };
+    }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return {
+        content: [{ type: 'text', text: `Only http:// and https:// URLs are allowed: ${url}` }],
+        isError: true,
+      };
+    }
+
+    if (isRejectedHost(parsed.hostname)) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Private, loopback, and localhost URLs are not allowed: ${url}`,
+          },
+        ],
         isError: true,
       };
     }

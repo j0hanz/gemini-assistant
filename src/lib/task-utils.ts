@@ -39,8 +39,9 @@ interface ToolTaskHandlers<TArgs> {
 type RegisterToolTask = McpServer['experimental']['tasks']['registerToolTask'];
 type TaskToolConfig = Omit<Parameters<RegisterToolTask>[1], 'execution'>;
 type TaskToolHandler = Parameters<RegisterToolTask>[2];
+type TaskContext = NonNullable<ServerContext['task']>;
 
-function requireTaskContext(ctx: ServerContext) {
+function requireTaskContext(ctx: ServerContext): TaskContext {
   const taskContext = ctx.task;
   if (!taskContext) {
     throw new Error('Task context is unavailable for this tool execution.');
@@ -124,7 +125,14 @@ export function createToolTaskHandlers<TArgs>(work: TaskWork<TArgs>): ToolTaskHa
     createTask: async (args, ctx) => {
       const taskContext = requireTaskContext(ctx);
       const task = await taskContext.store.createTask({ ttl: taskTtl(taskContext.requestedTtl) });
-      runToolAsTask(taskContext.store, task, work(args, ctx), (taskId, err) => {
+      const taskExecutionContext: ServerContext = {
+        ...ctx,
+        task: {
+          ...taskContext,
+          id: task.taskId,
+        },
+      };
+      runToolAsTask(taskContext.store, task, work(args, taskExecutionContext), (taskId, err) => {
         void ctx.mcpReq.log(
           'error',
           `Failed to store error result for task ${taskId}: ${err instanceof Error ? err.message : String(err)}`,

@@ -15,6 +15,7 @@ import { pickDefined } from './lib/response.js';
 
 export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
 export type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
+export const EXPOSE_THOUGHTS = process.env.GEMINI_EXPOSE_THOUGHTS === 'true';
 
 export function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -43,7 +44,7 @@ export interface ConfigBuilderOptions {
 
 function buildThinkingConfig(thinkingLevel?: AskThinkingLevel) {
   return {
-    includeThoughts: true,
+    ...(EXPOSE_THOUGHTS ? { includeThoughts: true } : {}),
     ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
   };
 }

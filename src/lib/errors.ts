@@ -215,6 +215,17 @@ export function cleanupErrorLogger(ctx: ServerContext): (reason: unknown) => voi
   };
 }
 
+export function toErrorMessage(toolName: string, err: unknown): string {
+  if (isAbortError(err)) {
+    return `${toolName}: cancelled by client`;
+  }
+  if (hasHttpStatus(err)) {
+    const hint = STATUS_MESSAGES[err.status] ?? `HTTP ${err.status}`;
+    return `${toolName} failed: ${hint} — ${err.message}`;
+  }
+  return `${toolName} failed: ${formatError(err)}`;
+}
+
 export function withErrorLogging<TArgs>(
   toolName: string,
   toolLabel: string,
@@ -226,15 +237,7 @@ export function withErrorLogging<TArgs>(
     } catch (err) {
       await reportFailure(ctx, toolLabel, err);
       await ctx.mcpReq.log('error', `${toolName} failed: ${formatError(err)}`);
-
-      if (isAbortError(err)) {
-        throw new Error(`${toolName}: cancelled by client`, { cause: err });
-      }
-      if (hasHttpStatus(err)) {
-        const hint = STATUS_MESSAGES[err.status] ?? `HTTP ${err.status}`;
-        throw new Error(`${toolName} failed: ${hint} — ${err.message}`, { cause: err });
-      }
-      throw err;
+      return errorResult(toErrorMessage(toolName, err));
     }
   };
 }

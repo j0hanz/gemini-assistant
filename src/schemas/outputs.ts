@@ -45,9 +45,20 @@ const UrlMetadataEntrySchema = z.object({
 
 export type UrlMetadataEntry = z.infer<typeof UrlMetadataEntrySchema>;
 
+const SourceDetailSchema = z.object({
+  title: z.string().optional().describe('Source title when Gemini provides one'),
+  url: z.string().describe('Source URL'),
+});
+
+export type SourceDetail = z.infer<typeof SourceDetailSchema>;
+
 export const SearchOutputSchema = z.object({
   answer: z.string().describe('Grounded answer'),
   sources: z.array(z.string()).describe('Source URLs from search'),
+  sourceDetails: z
+    .array(SourceDetailSchema)
+    .optional()
+    .describe('Structured grounded source entries for client consumption'),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
   ...baseOutputFields,
 });
@@ -66,6 +77,10 @@ export const AnalyzeFileOutputSchema = z.object({
 export const AgenticSearchOutputSchema = z.object({
   report: z.string().describe('Compiled markdown research report'),
   sources: z.array(z.string()).describe('Aggregated source URLs'),
+  sourceDetails: z
+    .array(SourceDetailSchema)
+    .optional()
+    .describe('Structured grounded source entries for client consumption'),
   toolsUsed: z
     .array(z.string())
     .optional()
@@ -94,6 +109,10 @@ export const AnalyzePrOutputSchema = z.object({
     .describe(
       'Relative untracked files skipped because they exceeded the synthesized diff size limit',
     ),
+  omittedPaths: z
+    .array(z.string())
+    .optional()
+    .describe('Relative diff paths omitted from Gemini review because of the review budget'),
   empty: z.boolean().describe('Whether there were any local changes to review'),
   truncated: z.boolean().optional().describe('Whether the diff was truncated due to size'),
   ...baseOutputFields,

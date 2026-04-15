@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { getMimeType, MAX_FILE_SIZE } from '../../src/lib/file.js';
@@ -6,7 +7,8 @@ import { getMimeType, MAX_FILE_SIZE } from '../../src/lib/file.js';
 // Set dummy API key so client.ts doesn't throw
 process.env.API_KEY ??= 'test-key-for-file-upload';
 
-const { deleteUploadedFiles, uploadFile } = await import('../../src/lib/file.js');
+const fileModule: typeof import('../../src/lib/file.js') = await import('../../src/lib/file.js');
+const { deleteUploadedFiles, uploadFile } = fileModule;
 const { getAI } = await import('../../src/client.js');
 
 // ── MIME / Size ───────────────────────────────────────────────────────
@@ -150,5 +152,29 @@ describe('uploadFile', () => {
     await assert.rejects(() => uploadFile(outsidePath, controller.signal), {
       message: /outside allowed directories/,
     });
+  });
+
+  it('rejects incomplete upload handles without a name', async () => {
+    const controller = new AbortController();
+    const client = getAI();
+    const original = client.files.upload.bind(client.files);
+
+    // @ts-expect-error test override
+    client.files.upload = async () => ({
+      uri: 'gs://files/abc',
+      mimeType: 'text/plain',
+      name: '',
+    });
+
+    try {
+      await assert.rejects(
+        () => uploadFile(join(process.cwd(), 'package.json'), controller.signal),
+        {
+          message: /incomplete file handle/,
+        },
+      );
+    } finally {
+      client.files.upload = original;
+    }
   });
 });

@@ -197,16 +197,21 @@ describe('createToolTaskHandlers', () => {
   it('createTask creates a task and schedules work', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store });
+    let observedTaskId: string | undefined;
 
-    const work = async (args: { msg: string }) => ({
-      content: [{ type: 'text' as const, text: args.msg }],
-    });
+    const work = async (args: { msg: string }, workCtx: ServerContext) => {
+      observedTaskId = workCtx.task?.id;
+      return {
+        content: [{ type: 'text' as const, text: args.msg }],
+      };
+    };
 
     const handlers = createToolTaskHandlers(work);
     const result = await handlers.createTask({ msg: 'hello' }, ctx);
 
     assert.ok(result.task);
     assert.strictEqual(result.task.taskId, 'task-1');
+    assert.strictEqual(observedTaskId, 'task-1');
 
     // Let work complete
     await new Promise((r) => setTimeout(r, 10));

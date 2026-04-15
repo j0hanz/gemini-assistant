@@ -92,6 +92,18 @@ describe('buildGitDiffArgs', () => {
     assert.ok(args.includes(':!package-lock.json'));
   });
 
+  it('includes the full noisy path exclusion policy', () => {
+    const args = buildGitDiffArgs(false);
+
+    assert.ok(args.includes(':!package-lock.json'));
+    assert.ok(args.includes(':!yarn.lock'));
+    assert.ok(args.includes(':!pnpm-lock.yaml'));
+    assert.ok(args.includes(':!bun.lockb'));
+    assert.ok(args.includes(':!*.map'));
+    assert.ok(args.includes(':!*.min.js'));
+    assert.ok(args.includes(':!*.min.css'));
+  });
+
   it('builds staged tracked diff args', () => {
     const args = buildGitDiffArgs(true);
     assert.ok(args.includes('--cached'));

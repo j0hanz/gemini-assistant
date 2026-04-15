@@ -113,15 +113,17 @@ const LOW_SIGNAL_SEGMENTS = new Set([
   'tests',
   'vendor',
 ]);
+const NOISY_EXACT_BASENAMES = new Set([
+  'package-lock.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'bun.lockb',
+]);
+const NOISY_SUFFIXES = ['.map', '.min.js', '.min.css'];
 
 const NOISY_EXCLUDE_PATHSPECS = [
-  ':!package-lock.json',
-  ':!yarn.lock',
-  ':!pnpm-lock.yaml',
-  ':!bun.lockb',
-  ':!*.map',
-  ':!*.min.js',
-  ':!*.min.css',
+  ...[...NOISY_EXACT_BASENAMES].map((basename) => `:!${basename}`),
+  ...NOISY_SUFFIXES.map((suffix) => `:!*${suffix}`),
 ];
 
 const SYSTEM_INSTRUCTION =
@@ -192,13 +194,8 @@ export function matchesNoisyPath(filePath: string): boolean {
   const normalized = filePath.replaceAll('\\', '/');
   const basename = normalized.split('/').pop()?.toLowerCase() ?? '';
   return (
-    basename === 'package-lock.json' ||
-    basename === 'yarn.lock' ||
-    basename === 'pnpm-lock.yaml' ||
-    basename === 'bun.lockb' ||
-    basename.endsWith('.map') ||
-    basename.endsWith('.min.js') ||
-    basename.endsWith('.min.css')
+    NOISY_EXACT_BASENAMES.has(basename) ||
+    NOISY_SUFFIXES.some((suffix) => basename.endsWith(suffix))
   );
 }
 

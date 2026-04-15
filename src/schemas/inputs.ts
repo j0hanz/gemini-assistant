@@ -5,7 +5,14 @@ import { z } from 'zod/v4';
 import { completeCacheNames, THINKING_LEVELS } from '../client.js';
 import { completeSessionIds } from '../sessions.js';
 import { GeminiResponseSchema } from './json-schema.js';
-import { absolutePath, cacheName, publicHttpUrl, requiredText, ttlSeconds } from './shared.js';
+import {
+  absolutePath,
+  cacheName,
+  optionalText,
+  publicHttpUrl,
+  requiredText,
+  ttlSeconds,
+} from './shared.js';
 
 const URL_TOOL_PROFILES = ['url', 'search_url'] as const;
 const NON_URL_TOOL_PROFILES = ['none', 'search', 'code', 'search_code'] as const;
@@ -25,12 +32,7 @@ const askCommonShape = {
       .describe('Session ID for multi-turn chat. Omit for single-turn.'),
     completeSessionIds,
   ),
-  systemInstruction: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe('System prompt (used on session creation or single-turn)'),
+  systemInstruction: optionalText('System prompt (used on session creation or single-turn)'),
   thinkingLevel: z
     .enum(THINKING_LEVELS)
     .optional()
@@ -95,14 +97,9 @@ export type AskInput = z.infer<typeof AskInputSchema>;
 
 export const ExecuteCodeInputSchema = z.strictObject({
   task: requiredText('Code task to perform'),
-  language: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe(
-      'Preferred language hint for prompt steering only. Gemini code execution still runs in Python.',
-    ),
+  language: optionalText(
+    'Preferred language hint for prompt steering only. Gemini code execution still runs in Python.',
+  ),
   thinkingLevel: thinkingLevelField,
 });
 export type ExecuteCodeInput = z.infer<typeof ExecuteCodeInputSchema>;
@@ -155,12 +152,7 @@ export const AnalyzeUrlInputSchema = z.strictObject({
     .max(20)
     .describe('URLs to analyze (max 20). Must be publicly accessible.'),
   question: requiredText('What to analyze or ask about the URL content'),
-  systemInstruction: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe('Custom system instruction for analysis'),
+  systemInstruction: optionalText('Custom system instruction for analysis'),
   thinkingLevel: thinkingLevelField,
 });
 export type AnalyzeUrlInput = z.infer<typeof AnalyzeUrlInputSchema>;
@@ -169,7 +161,7 @@ export const AnalyzePrInputSchema = z.object({
   dryRun: z.boolean().describe('Return diff content and stats without Gemini analysis.').optional(),
   cacheName: cacheName('Cache resource name to provide project context during review.').optional(),
   thinkingLevel: thinkingLevelField,
-  language: z.string().trim().min(1).describe('Primary language for review context').optional(),
+  language: optionalText('Primary language for review context'),
 });
 export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
 
@@ -177,19 +169,14 @@ const createCacheFilePathsSchema = z
   .array(absolutePath('Absolute path to a file to cache'))
   .max(50)
   .describe('Absolute paths to files to cache');
-const createCacheSystemInstructionSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .describe('System instruction to cache with the files');
+const createCacheSystemInstructionSchema = requiredText(
+  'System instruction to cache with the files',
+);
 const createCacheSharedShape = {
   ttl: ttlSeconds('Time-to-live for the cache (e.g., "3600s"). Defaults to 1 hour.').optional(),
-  displayName: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe('Human-readable label. Existing cache with same displayName is auto-replaced.'),
+  displayName: optionalText(
+    'Human-readable label. Existing cache with same displayName is auto-replaced.',
+  ),
 };
 
 export const CreateCacheInputSchema = z
@@ -234,18 +221,8 @@ export type UpdateCacheInput = z.infer<typeof UpdateCacheInputSchema>;
 
 export const ExplainErrorInputSchema = z.strictObject({
   error: requiredText('Error message, stack trace, or log output to diagnose'),
-  codeContext: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe('Relevant source code surrounding the error for deeper analysis'),
-  language: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe('Programming language (e.g., "typescript", "python")'),
+  codeContext: optionalText('Relevant source code surrounding the error for deeper analysis'),
+  language: optionalText('Programming language (e.g., "typescript", "python")'),
   thinkingLevel: thinkingLevelField,
   googleSearch: z
     .boolean()
@@ -265,12 +242,7 @@ export type ExplainErrorInput = z.infer<typeof ExplainErrorInputSchema>;
 export const CompareFilesInputSchema = z.strictObject({
   filePathA: absolutePath('Absolute path to the first file'),
   filePathB: absolutePath('Absolute path to the second file'),
-  question: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe('Specific comparison focus (e.g., "security differences", "API changes")'),
+  question: optionalText('Specific comparison focus (e.g., "security differences", "API changes")'),
   thinkingLevel: thinkingLevelField,
   googleSearch: z
     .boolean()

@@ -353,7 +353,7 @@ function registerListCachesTool(server: McpServer): void {
     {
       title: 'List Caches',
       description: 'List all active Gemini context caches.',
-      inputSchema: z.object({}),
+      inputSchema: z.strictObject({}),
       outputSchema: ListCachesOutputSchema,
       annotations: READONLY_ANNOTATIONS,
     },

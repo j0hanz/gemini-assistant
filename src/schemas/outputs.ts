@@ -60,6 +60,19 @@ export const AgenticSearchOutputSchema = z.object({
   ...baseOutputFields,
 });
 
+export const AnalyzePrOutputSchema = z.object({
+  analysis: z.string().describe('Comprehensive PR review'),
+  stats: z
+    .object({
+      files: z.number().describe('Files changed'),
+      additions: z.number().describe('Lines added'),
+      deletions: z.number().describe('Lines deleted'),
+    })
+    .describe('Diff statistics'),
+  mode: z.string().describe('Diff mode used'),
+  ...baseOutputFields,
+});
+
 const CacheSummarySchema = z.object({
   name: z.string().optional().describe('Cache resource name'),
   displayName: z.string().optional().describe('Human-readable label'),

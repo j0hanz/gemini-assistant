@@ -16,6 +16,7 @@ import { onSessionChange } from './sessions.js';
 import { registerAskTool } from './tools/ask.js';
 import { onCacheChange, registerCacheTools } from './tools/cache.js';
 import { registerAnalyzeFileTool, registerExecuteCodeTool } from './tools/execution.js';
+import { registerAnalyzePrTool } from './tools/pr.js';
 import {
   registerAgenticSearchTool,
   registerAnalyzeUrlTool,
@@ -35,7 +36,7 @@ const server = new McpServer(
     version,
     description:
       'Gemini AI assistant: multi-turn chat, sandboxed code execution, ' +
-      'Google Search grounding, file analysis, and context caching.',
+      'Google Search grounding, file analysis, context caching, and PR diff analysis.',
     websiteUrl: 'https://github.com/j0hanz/gemini-assistant',
   },
   {
@@ -54,7 +55,8 @@ const server = new McpServer(
       'search (web-grounded answers, optional URL Context), ' +
       'agentic_search (deep multi-step research with progress notifications), ' +
       'analyze_file (file upload, mediaResolution for images/video), analyze_url (URL content analysis), ' +
-      'create_cache/list_caches/update_cache/delete_cache (context caching, ≥32k tokens). ' +
+      'create_cache/list_caches/update_cache/delete_cache (context caching, ≥32k tokens), ' +
+      'analyze_pr (generate git diff and review with Gemini in one step). ' +
       'Use cacheName with ask to attach cached context. displayName auto-replaces stale caches.',
   },
 );
@@ -65,6 +67,7 @@ registerSearchTool(server);
 registerAgenticSearchTool(server);
 registerAnalyzeFileTool(server);
 registerAnalyzeUrlTool(server);
+registerAnalyzePrTool(server);
 registerCacheTools(server);
 registerPrompts(server);
 registerResources(server);

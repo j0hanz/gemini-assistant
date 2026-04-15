@@ -63,6 +63,16 @@ export const AnalyzeUrlInputSchema = z.object({
 });
 export type AnalyzeUrlInput = z.infer<typeof AnalyzeUrlInputSchema>;
 
+export const AnalyzePrInputSchema = z.object({
+  mode: z
+    .enum(['unstaged', 'staged'])
+    .default('unstaged')
+    .describe('"unstaged": working-tree changes. "staged": changes added with git add.'),
+  thinkingLevel: thinkingLevelField,
+  language: z.string().optional().describe('Primary language for review context'),
+});
+export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
+
 export const CreateCacheInputSchema = z
   .object({
     filePaths: z

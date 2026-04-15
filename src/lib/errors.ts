@@ -7,6 +7,8 @@ import { INVALID_PARAMS, ProtocolError } from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
 
+import { withToolLogging } from './logger.js';
+
 // ── Progress / Context ────────────────────────────────────────────────
 
 const MIN_PROGRESS_INTERVAL_MS = 250;
@@ -268,12 +270,19 @@ export function withErrorLogging<TArgs>(
   toolLabel: string,
   handler: (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
 ): (args: TArgs, ctx: ServerContext) => Promise<CallToolResult> {
+  const wrapped = withToolLogging(
+    toolName,
+    async (argsCtx: { args: TArgs; ctx: ServerContext }) => {
+      return await handler(argsCtx.args, argsCtx.ctx);
+    },
+  );
+
   return async (args: TArgs, ctx: ServerContext) => {
     try {
-      return await handler(args, ctx);
+      return await wrapped({ args, ctx });
     } catch (err) {
       await reportFailure(ctx, toolLabel, err);
-      await ctx.mcpReq.log('error', `${toolName} failed: ${formatError(err)}`);
+      // Removed direct ctx.mcpReq.log to avoid duplicates, as logger handles it
       return errorResult(toErrorMessage(toolName, err));
     }
   };

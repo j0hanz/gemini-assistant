@@ -10,6 +10,7 @@ import { join } from 'node:path';
 
 import { formatError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
+import { logger } from './lib/logger.js';
 
 import { getTransportMode } from './config.js';
 import { registerPrompts } from './prompts.js';
@@ -95,12 +96,11 @@ function createServerInstance(): ServerInstance {
   for (const register of SERVER_TOOL_REGISTRARS) {
     register(server);
   }
+
+  logger.attachServer(server);
+
   registerPrompts(server);
   registerResources(server);
-
-  activeServers.add(server);
-
-  let closed = false;
   return {
     server,
     close: async () => {
@@ -153,14 +153,10 @@ if (transportMode === 'http') {
   const transport = new StdioServerTransport();
   try {
     await stdioInstance.server.connect(transport);
-    await stdioInstance.server.sendLoggingMessage({
-      level: 'info',
-      logger: 'gemini-assistant',
-      data: 'MCP server running on stdio',
-    });
+    logger.info('system', 'MCP server running on stdio');
   } catch (err) {
     await stdioInstance.close();
-    console.error('Failed to connect transport:', err);
+    logger.fatal('system', 'Failed to connect transport', { error: err });
     process.exit(1);
   }
 }
@@ -182,14 +178,7 @@ process.on('SIGINT', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
 
 function logCriticalAndExit(label: string, err: unknown): void {
-  for (const server of activeServers) {
-    if (!server.isConnected()) continue;
-    void server.sendLoggingMessage({
-      level: 'emergency',
-      logger: 'gemini-assistant',
-      data: `${label}: ${formatError(err)}`,
-    });
-  }
+  logger.fatal('system', `${label}: ${formatError(err)}`);
   process.exit(1);
 }
 

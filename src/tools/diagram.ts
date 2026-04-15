@@ -20,14 +20,14 @@ const DIAGRAM_FENCED_PATTERN = /```(?:mermaid|plantuml)?\s*\n([\s\S]*?)```/;
 
 function buildSystemInstruction(diagramType: string, validateSyntax?: boolean): string {
   return (
-    `Generate a ${diagramType} diagram from the provided description and files.\n\n` +
+    `Generate a ${diagramType} diagram from the description and files.\n\n` +
     'Rules:\n' +
-    `1. Return exactly one fenced \`\`\`${diagramType} block with valid ${diagramType} syntax.\n` +
+    `1. Return exactly one fenced \`\`\`${diagramType} block.\n` +
     '2. Keep it readable.\n' +
     '3. Use clear node and edge labels.\n' +
     '4. If source code is provided, derive the diagram from it.' +
     (validateSyntax
-      ? '\n5. If syntax validation is requested, use code execution for a best-effort check and state uncertainty clearly.'
+      ? '\n5. If syntax validation is requested, use code execution for a best-effort check and state uncertainty.'
       : '')
   );
 }
@@ -100,7 +100,7 @@ function buildDiagramPrompt(
   const prompt = [
     ...contentParts,
     {
-      text: `Task: Generate a ${diagramType} diagram for ${description}`,
+      text: `Task: ${description}`,
     },
   ];
 

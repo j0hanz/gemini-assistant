@@ -262,14 +262,12 @@ function renderWorkflowSection(name: string): string {
 export function buildAnalyzeFilePrompt(
   args: z.infer<ReturnType<typeof createAnalyzeFilePromptSchema>>,
 ) {
-  return userPromptMessage(
-    `File: ${args.filePath}\nQuestion: ${args.question}\nAnswer from the file only.`,
-  );
+  return userPromptMessage(`File: ${args.filePath}\nQ: ${args.question}\nUse only file content.`);
 }
 
 export function buildCodeReviewPrompt(args: z.infer<typeof CodeReviewPromptSchema>) {
   return userPromptMessage(
-    `Review this${args.language ? ` ${args.language}` : ''} code.\n\n${fencedCodeBlock(args.code, args.language)}\n\nOutput:\n1. Bugs\n2. Improvements\nKeep it actionable.`,
+    `Review this${args.language ? ` ${args.language}` : ''} code.\n\n${fencedCodeBlock(args.code, args.language)}\n\nOutput:\n1. Bugs\n2. Improvements\nBe actionable.`,
   );
 }
 
@@ -290,7 +288,7 @@ export function buildGettingStartedPrompt() {
     [
       'Help a first-time user understand gemini-assistant and what to try first.',
       renderWorkflowSection('getting-started'),
-      'Be practical. Say what to try first, what it returns, and what resource to inspect next.',
+      'Be practical. Say what to try first, what it returns, and what to inspect next.',
     ].join('\n\n'),
   );
 }
@@ -301,7 +299,7 @@ export function buildDeepResearchPrompt(args: z.infer<typeof DeepResearchPromptS
       `Research topic: ${args.topic}`,
       ...(args.deliverable ? [`Requested deliverable: ${args.deliverable}`] : []),
       renderWorkflowSection('deep-research'),
-      'Explain the recommended path and the grounded result the user should expect.',
+      'Explain the path and expected grounded result.',
     ].join('\n\n'),
   );
 }
@@ -312,7 +310,7 @@ export function buildProjectMemoryPrompt(args: z.infer<typeof ProjectMemoryPromp
       ...(args.project ? [`Project: ${args.project}`] : []),
       ...(args.currentTask ? [`Current task: ${args.currentTask}`] : []),
       renderWorkflowSection('project-memory'),
-      'Explain when to use a live session vs a cache. Mention transcript inspection.',
+      'Explain when to use a session vs a cache. Mention transcript inspection.',
     ].join('\n\n'),
   );
 }

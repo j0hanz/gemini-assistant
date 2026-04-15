@@ -23,10 +23,10 @@ const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
 const EXECUTE_CODE_TOOL_LABEL = 'Execute Code';
 
 const ANALYZE_FILE_SYSTEM_INSTRUCTION =
-  'Answer from the file only. Cite relevant sections, lines, or elements. Use headings when useful.';
+  'Answer from the file only. Cite relevant sections, lines, or elements.';
 
 const EXECUTE_CODE_SYSTEM_INSTRUCTION =
-  'Write working code. Comment only non-obvious logic. Handle likely edge cases. Briefly explain the result after execution.';
+  'Write code that runs. Comment only non-obvious logic. Handle likely edge cases. Explain the result briefly.';
 
 interface ExecutionSummary {
   code: string;
@@ -173,7 +173,7 @@ async function executeCodeWork(
 ): Promise<CallToolResult> {
   await sendProgress(ctx, 0, undefined, `${EXECUTE_CODE_TOOL_LABEL}: Preparing sandbox`);
   await ctx.mcpReq.log('info', `Executing code${language ? ` [${language}]` : ''}`);
-  const prompt = [task, ...(language ? [`Language: ${language}`] : [])].join('\n\n');
+  const prompt = [task, ...(language ? [`Lang: ${language}`] : [])].join('\n\n');
 
   return await handleToolExecution(
     ctx,

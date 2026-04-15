@@ -51,7 +51,7 @@ export const AskInputSchema = z.object({
         'enum' in s ||
         'items' in s,
       {
-        message:
+        error:
           'responseSchema must contain at least one JSON Schema keyword (type, properties, anyOf, oneOf, allOf, $ref, enum, or items)',
       },
     )
@@ -150,22 +150,17 @@ export const AnalyzeUrlInputSchema = z.object({
 });
 export type AnalyzeUrlInput = z.infer<typeof AnalyzeUrlInputSchema>;
 
-export const AnalyzePrInputSchema = z
-  .object({
-    dryRun: z
-      .boolean()
-      .optional()
-      .describe('Return diff content and stats without Gemini analysis.'),
-    cacheName: z
-      .string()
-      .trim()
-      .min(1)
-      .optional()
-      .describe('Cache resource name to provide project context during review.'),
-    thinkingLevel: thinkingLevelField,
-    language: z.string().trim().min(1).optional().describe('Primary language for review context'),
-  })
-  .strict();
+export const AnalyzePrInputSchema = z.strictObject({
+  dryRun: z.boolean().optional().describe('Return diff content and stats without Gemini analysis.'),
+  cacheName: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe('Cache resource name to provide project context during review.'),
+  thinkingLevel: thinkingLevelField,
+  language: z.string().trim().min(1).optional().describe('Primary language for review context'),
+});
 export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
 
 export const CreateCacheInputSchema = z
@@ -191,7 +186,7 @@ export const CreateCacheInputSchema = z
   })
   // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- LHS is boolean; ?? would not fall through on `false`
   .refine((data) => (data.filePaths && data.filePaths.length > 0) || data.systemInstruction, {
-    message: 'At least one of filePaths or systemInstruction must be provided.',
+    error: 'At least one of filePaths or systemInstruction must be provided.',
   })
   .describe(
     'Creates a Gemini API cache. Combined content (files + instructions) MUST exceed ~32,000 tokens.',
@@ -314,6 +309,6 @@ export const GenerateDiagramInputSchema = z
       .describe('Validate generated diagram syntax via code execution sandbox.'),
   })
   .refine((data) => !(data.sourceFilePath && data.sourceFilePaths), {
-    message: 'Provide sourceFilePath or sourceFilePaths, not both.',
+    error: 'Provide sourceFilePath or sourceFilePaths, not both.',
   });
 export type GenerateDiagramInput = z.infer<typeof GenerateDiagramInputSchema>;

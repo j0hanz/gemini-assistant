@@ -15,7 +15,7 @@ export function optionalText(description: string, maxLength?: number) {
 
 export function absolutePath(description: string) {
   return requiredText(description).refine((value) => isAbsolute(value), {
-    message: 'Path must be absolute',
+    error: 'Path must be absolute',
   });
 }
 
@@ -24,11 +24,11 @@ export function ttlSeconds(description: string) {
     .string()
     .trim()
     .regex(TTL_SECONDS_PATTERN, {
-      message: 'TTL must be a positive integer number of seconds ending in "s" (e.g. "3600s")',
+      error: 'TTL must be a positive integer number of seconds ending in "s" (e.g. "3600s")',
     })
     .describe(description);
 }
 
 export function nonNegativeInt(description: string) {
-  return z.number().int().nonnegative().describe(description);
+  return z.int().nonnegative().describe(description);
 }

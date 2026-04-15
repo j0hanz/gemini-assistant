@@ -92,3 +92,9 @@ export const UpdateCacheOutputSchema = z.object({
   cacheName: z.string().describe('Cache resource name'),
   expireTime: z.string().optional().describe('New expiration timestamp'),
 });
+
+export const EmbedContentOutputSchema = z.object({
+  embeddings: z
+    .array(z.object({ values: z.array(z.number()).describe('Embedding vector') }))
+    .describe('Embedding vectors for each input'),
+});

@@ -42,6 +42,10 @@ export const AnalyzeFileInputSchema = z.object({
     .enum(THINKING_LEVELS)
     .optional()
     .describe("Thinking depth for analysis. Use 'LOW' for fast, 'HIGH' for deep reasoning."),
+  mediaResolution: z
+    .enum(['MEDIA_RESOLUTION_LOW', 'MEDIA_RESOLUTION_MEDIUM', 'MEDIA_RESOLUTION_HIGH'])
+    .optional()
+    .describe('Resolution for image/video processing. Higher = more detail, more tokens.'),
 });
 export type AnalyzeFileInput = z.infer<typeof AnalyzeFileInputSchema>;
 
@@ -82,3 +86,20 @@ export const CreateCacheInputSchema = z
     'Creates a Gemini API cache. Combined content (files + instructions) MUST exceed ~32,000 tokens.',
   );
 export type CreateCacheInput = z.infer<typeof CreateCacheInputSchema>;
+
+export const EmbedContentInputSchema = z.object({
+  contents: z
+    .array(z.string().min(1).max(10_000))
+    .min(1)
+    .max(100)
+    .describe('Text strings to embed (max 100, each up to 10k chars).'),
+  model: z.string().optional().describe('Embedding model. Defaults to text-embedding-004.'),
+  outputDimensionality: z
+    .number()
+    .int()
+    .min(1)
+    .max(768)
+    .optional()
+    .describe('Output vector dimensions (1-768). Lower = faster, less precise.'),
+});
+export type EmbedContentInput = z.infer<typeof EmbedContentInputSchema>;

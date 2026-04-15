@@ -1,4 +1,4 @@
-import type { GenerateContentConfig, ThinkingLevel } from '@google/genai';
+import type { GenerateContentConfig, MediaResolution, ThinkingLevel } from '@google/genai';
 
 export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
 export type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
@@ -20,6 +20,9 @@ export interface ConfigBuilderOptions {
   responseSchema?: Record<string, unknown> | undefined;
   jsonMode?: boolean | undefined;
   maxOutputTokens?: number | undefined;
+  temperature?: number | undefined;
+  seed?: number | undefined;
+  mediaResolution?: string | undefined;
 }
 
 function buildThinkingConfig(thinkingLevel?: AskThinkingLevel) {
@@ -40,6 +43,9 @@ export function buildGenerateContentConfig(
     responseSchema,
     jsonMode,
     maxOutputTokens = 8192,
+    temperature,
+    seed,
+    mediaResolution,
   } = options;
   const isJson = jsonMode ?? responseSchema !== undefined;
 
@@ -53,6 +59,9 @@ export function buildGenerateContentConfig(
         }
       : { thinkingConfig: buildThinkingConfig(thinkingLevel) }),
     maxOutputTokens,
+    ...(temperature !== undefined ? { temperature } : {}),
+    ...(seed !== undefined ? { seed } : {}),
+    ...(mediaResolution ? { mediaResolution: mediaResolution as MediaResolution } : {}),
     ...(signal ? { abortSignal: signal } : {}),
   };
 }

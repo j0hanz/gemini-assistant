@@ -32,6 +32,8 @@ interface AskArgs {
   thinkingLevel?: AskThinkingLevel | undefined;
   cacheName?: string | undefined;
   responseSchema?: Record<string, unknown> | undefined;
+  temperature?: number | undefined;
+  seed?: number | undefined;
 }
 
 const ASK_TOOL_LABEL = 'Ask Gemini';
@@ -106,6 +108,8 @@ function validateAskRequest({
   systemInstruction,
   cacheName,
   responseSchema,
+  temperature,
+  seed,
 }: AskArgs): CallToolResult | undefined {
   const hasExistingSession = sessionId ? getSessionEntry(sessionId) !== undefined : false;
 
@@ -122,6 +126,12 @@ function validateAskRequest({
   if (cacheName && systemInstruction) {
     return errorResult(
       'ask: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via create_cache instead.',
+    );
+  }
+
+  if (cacheName && (temperature !== undefined || seed !== undefined)) {
+    return errorResult(
+      'ask: temperature and seed cannot be used with cacheName. Generation parameters are fixed at cache creation time.',
     );
   }
 
@@ -282,6 +292,19 @@ export function registerAskTool(server: McpServer): void {
           .describe(
             'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking.',
           ),
+        temperature: z
+          .number()
+          .min(0)
+          .max(2)
+          .optional()
+          .describe(
+            'Controls randomness (0.0=deterministic, 2.0=most creative). Model default if omitted.',
+          ),
+        seed: z
+          .number()
+          .int()
+          .optional()
+          .describe('Fixed seed for reproducible outputs. Model default if omitted.'),
       }),
       outputSchema: AskOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,

@@ -123,7 +123,7 @@ function summarizeExecutionParts(parts: readonly Part[]): ExecutionSummary {
 
 function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
   return async function analyzeFileWork(
-    { filePath, question, thinkingLevel }: AnalyzeFileInput,
+    { filePath, question, thinkingLevel, mediaResolution }: AnalyzeFileInput,
     ctx: ServerContext,
   ): Promise<CallToolResult> {
     let uploadedFileName: string | undefined;
@@ -148,6 +148,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
               {
                 systemInstruction: ANALYZE_FILE_SYSTEM_INSTRUCTION,
                 thinkingLevel: thinkingLevel ?? 'LOW',
+                ...(mediaResolution ? { mediaResolution } : {}),
               },
               ctx.mcpReq.signal,
             ),

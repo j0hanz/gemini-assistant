@@ -11,8 +11,7 @@ import { join } from 'node:path';
 import { formatError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 
-import { registerPrompts } from './prompts.js';
-import { registerResources } from './resources.js';
+import { registerPrompts, registerResources } from './server-content.js';
 import { onSessionChange } from './sessions.js';
 import { registerAskTool } from './tools/ask.js';
 import { onCacheChange, registerCacheTools } from './tools/cache.js';
@@ -22,8 +21,7 @@ import {
   registerAnalyzeUrlTool,
   registerSearchTool,
 } from './tools/research.js';
-import type { HttpTransportResult } from './transport/http.js';
-import type { WebStandardTransportResult } from './transport/web-standard.js';
+import type { HttpTransportResult, WebStandardTransportResult } from './transport.js';
 
 const { version } = JSON.parse(
   readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf-8'),
@@ -93,11 +91,11 @@ let webStandardResult: WebStandardTransportResult | undefined;
 let eventStore: InMemoryEventStore | undefined;
 
 if (transportMode === 'http') {
-  const { startHttpTransport } = await import('./transport/http.js');
+  const { startHttpTransport } = await import('./transport.js');
   eventStore = new InMemoryEventStore();
   httpResult = await startHttpTransport(server, eventStore);
 } else if (transportMode === 'web-standard') {
-  const { startWebStandardTransport } = await import('./transport/web-standard.js');
+  const { startWebStandardTransport } = await import('./transport.js');
   eventStore = new InMemoryEventStore();
   webStandardResult = await startWebStandardTransport(server, eventStore);
 } else {

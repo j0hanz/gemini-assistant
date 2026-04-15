@@ -16,7 +16,7 @@ const { registerAnalyzeFileTool, registerExecuteCodeTool } =
   await import('../../src/tools/execution.js');
 const { registerAgenticSearchTool, registerAnalyzeUrlTool, registerSearchTool } =
   await import('../../src/tools/research.js');
-const { registerResources } = await import('../../src/resources.js');
+const { registerResources } = await import('../../src/server-content.js');
 
 function createServer(): McpServer {
   return new McpServer(

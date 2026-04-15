@@ -74,6 +74,14 @@ describe('AskOutputSchema', () => {
     });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects unknown fields', () => {
+    const result = AskOutputSchema.safeParse({
+      answer: 'test',
+      extra: true,
+    });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('AnalyzePrOutputSchema', () => {
@@ -120,6 +128,19 @@ describe('AnalyzePrOutputSchema', () => {
     const result = AnalyzePrOutputSchema.safeParse({
       analysis: 'Review text',
       stats: { files: -1, additions: 10, deletions: 5 },
+      reviewedPaths: ['src/index.ts'],
+      includedUntracked: [],
+      skippedBinaryPaths: [],
+      skippedLargePaths: [],
+      empty: false,
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects unknown stats fields', () => {
+    const result = AnalyzePrOutputSchema.safeParse({
+      analysis: 'Review text',
+      stats: { files: 1, additions: 10, deletions: 5, extra: 1 },
       reviewedPaths: ['src/index.ts'],
       includedUntracked: [],
       skippedBinaryPaths: [],
@@ -199,7 +220,7 @@ describe('ExecuteCodeOutputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
-  it('strips unknown properties', () => {
+  it('rejects unknown properties', () => {
     const result = ExecuteCodeOutputSchema.safeParse({
       code: 'x',
       output: 'y',
@@ -207,10 +228,7 @@ describe('ExecuteCodeOutputSchema', () => {
       runtime: 'python',
       extra: 'should be stripped',
     });
-    assert.ok(result.success);
-    if (result.success) {
-      assert.strictEqual('extra' in result.data, false);
-    }
+    assert.strictEqual(result.success, false);
   });
 
   it('rejects a non-python runtime', () => {

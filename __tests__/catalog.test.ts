@@ -25,11 +25,53 @@ import {
   UpdateCacheInputSchema,
 } from '../src/schemas/inputs.js';
 
-function schemaInputs(schema: {
+interface ObjectLikeSchema {
   shape: Record<string, { isOptional: () => boolean }>;
   keyof: () => { options: string[] };
-}): string[] {
-  return schema.keyof().options.map((key) => (schema.shape[key]?.isOptional() ? `${key}?` : key));
+}
+
+function isObjectLikeSchema(schema: unknown): schema is ObjectLikeSchema {
+  return (
+    !!schema &&
+    typeof schema === 'object' &&
+    'shape' in schema &&
+    'keyof' in schema &&
+    typeof schema.keyof === 'function'
+  );
+}
+
+function isUnionLikeSchema(schema: unknown): schema is { options: unknown[] } {
+  return (
+    !!schema && typeof schema === 'object' && 'options' in schema && Array.isArray(schema.options)
+  );
+}
+
+function schemaInputs(schema: unknown): string[] {
+  if (isObjectLikeSchema(schema)) {
+    return schema.keyof().options.map((key) => (schema.shape[key]?.isOptional() ? `${key}?` : key));
+  }
+
+  if (isUnionLikeSchema(schema)) {
+    const options = schema.options.filter(isObjectLikeSchema);
+    const keys: string[] = [];
+
+    for (const option of options) {
+      for (const key of option.keyof().options) {
+        if (!keys.includes(key)) {
+          keys.push(key);
+        }
+      }
+    }
+
+    return keys.map((key) => {
+      const requiredInAllOptions = options.every(
+        (option) => key in option.shape && !option.shape[key]?.isOptional(),
+      );
+      return requiredInAllOptions ? key : `${key}?`;
+    });
+  }
+
+  return [];
 }
 
 function resourceInputs(uri: string): string[] {
@@ -56,16 +98,7 @@ const toolSchemas = new Map<string, string[]>([
 const promptSchemas = new Map(
   createPromptDefinitions(async () => ['C:\\workspace']).map((definition) => [
     definition.name,
-    definition.argsSchema &&
-    'shape' in definition.argsSchema &&
-    typeof definition.argsSchema.keyof === 'function'
-      ? schemaInputs(
-          definition.argsSchema as {
-            shape: Record<string, { isOptional: () => boolean }>;
-            keyof: () => { options: string[] };
-          },
-        )
-      : [],
+    definition.argsSchema ? schemaInputs(definition.argsSchema) : [],
   ]),
 );
 

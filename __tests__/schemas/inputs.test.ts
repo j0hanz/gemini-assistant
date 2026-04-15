@@ -58,6 +58,31 @@ describe('AskInputSchema', () => {
     });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects unknown fields', () => {
+    const result = AskInputSchema.safeParse({ message: 'hello', extra: true });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects responseSchema required keys missing from properties', () => {
+    const result = AskInputSchema.safeParse({
+      message: 'return JSON',
+      responseSchema: {
+        type: 'object',
+        properties: { answer: { type: 'string' } },
+        required: ['missing'],
+      },
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects responseSchema with inverted numeric bounds', () => {
+    const result = AskInputSchema.safeParse({
+      message: 'return JSON',
+      responseSchema: { type: 'number', minimum: 10, maximum: 1 },
+    });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('ExecuteCodeInputSchema', () => {
@@ -81,6 +106,11 @@ describe('ExecuteCodeInputSchema', () => {
 
   it('rejects empty task', () => {
     const result = ExecuteCodeInputSchema.safeParse({ task: '' });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects unknown fields', () => {
+    const result = ExecuteCodeInputSchema.safeParse({ task: 'sort an array', extra: true });
     assert.strictEqual(result.success, false);
   });
 });
@@ -143,6 +173,11 @@ describe('SearchInputSchema', () => {
     const result = SearchInputSchema.safeParse({ query: 'test', urls });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects unknown fields', () => {
+    const result = SearchInputSchema.safeParse({ query: 'weather', extra: true });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('AgenticSearchInputSchema', () => {
@@ -188,6 +223,11 @@ describe('AgenticSearchInputSchema', () => {
     const result = AgenticSearchInputSchema.safeParse({ topic: 'test', thinkingLevel: 'HIGH' });
     assert.ok(result.success);
   });
+
+  it('rejects unknown fields', () => {
+    const result = AgenticSearchInputSchema.safeParse({ topic: 'test', extra: true });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('AnalyzeFileInputSchema', () => {
@@ -227,6 +267,15 @@ describe('AnalyzeFileInputSchema', () => {
     assert.strictEqual(AnalyzeFileInputSchema.safeParse({}).success, false);
     assert.strictEqual(AnalyzeFileInputSchema.safeParse({ filePath: '/a' }).success, false);
     assert.strictEqual(AnalyzeFileInputSchema.safeParse({ question: 'q' }).success, false);
+  });
+
+  it('rejects unknown fields', () => {
+    const result = AnalyzeFileInputSchema.safeParse({
+      filePath: absolutePath('fixtures', 'file.pdf'),
+      question: 'Summarize this document',
+      extra: true,
+    });
+    assert.strictEqual(result.success, false);
   });
 });
 
@@ -284,6 +333,14 @@ describe('CreateCacheInputSchema', () => {
     });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects unknown fields', () => {
+    const result = CreateCacheInputSchema.safeParse({
+      systemInstruction: 'Cache this',
+      extra: true,
+    });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('DeleteCacheInputSchema', () => {
@@ -298,6 +355,14 @@ describe('DeleteCacheInputSchema', () => {
       confirm: true,
     });
     assert.ok(result.success);
+  });
+
+  it('rejects unknown fields', () => {
+    const result = DeleteCacheInputSchema.safeParse({
+      cacheName: 'cachedContents/abc123',
+      extra: true,
+    });
+    assert.strictEqual(result.success, false);
   });
 });
 
@@ -322,6 +387,15 @@ describe('UpdateCacheInputSchema', () => {
     const result = UpdateCacheInputSchema.safeParse({
       cacheName: 'cachedContents/abc123',
       ttl: 'ten minutes',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects unknown fields', () => {
+    const result = UpdateCacheInputSchema.safeParse({
+      cacheName: 'cachedContents/abc123',
+      ttl: '7200s',
+      extra: true,
     });
     assert.strictEqual(result.success, false);
   });
@@ -424,6 +498,15 @@ describe('AnalyzeUrlInputSchema', () => {
     const result = AnalyzeUrlInputSchema.safeParse({ question: 'test' });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects unknown fields', () => {
+    const result = AnalyzeUrlInputSchema.safeParse({
+      urls: ['https://example.com'],
+      question: 'Summarize this page',
+      extra: true,
+    });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('ExplainErrorInputSchema', () => {
@@ -488,6 +571,14 @@ describe('ExplainErrorInputSchema', () => {
     });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects unknown fields', () => {
+    const result = ExplainErrorInputSchema.safeParse({
+      error: 'test',
+      extra: true,
+    });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('CompareFilesInputSchema', () => {
@@ -545,6 +636,15 @@ describe('CompareFilesInputSchema', () => {
     const result = CompareFilesInputSchema.safeParse({
       filePathA: 'a.ts',
       filePathB: absolutePath('b.ts'),
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects unknown fields', () => {
+    const result = CompareFilesInputSchema.safeParse({
+      filePathA: absolutePath('a.ts'),
+      filePathB: absolutePath('b.ts'),
+      extra: true,
     });
     assert.strictEqual(result.success, false);
   });

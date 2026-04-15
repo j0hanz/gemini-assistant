@@ -2,7 +2,7 @@ import { z } from 'zod/v4';
 
 import { cacheName, nonNegativeInt, PublicHttpUrlSchema, timestamp } from './shared.js';
 
-export const UsageMetadataSchema = z.object({
+export const UsageMetadataSchema = z.strictObject({
   promptTokenCount: nonNegativeInt('Tokens in the prompt').optional(),
   candidatesTokenCount: nonNegativeInt('Tokens in the response').optional(),
   thoughtsTokenCount: nonNegativeInt('Tokens used for thinking').optional(),
@@ -11,7 +11,7 @@ export const UsageMetadataSchema = z.object({
 
 export type UsageMetadata = z.infer<typeof UsageMetadataSchema>;
 
-const FunctionCallEntrySchema = z.object({
+const FunctionCallEntrySchema = z.strictObject({
   name: z.string().describe('Function/tool name'),
   args: z.record(z.string(), z.unknown()).optional().describe('Function call arguments'),
   id: z.string().optional().describe('Function call identifier when present'),
@@ -27,7 +27,7 @@ const ToolEventKindSchema = z.enum([
   'code_execution_result',
 ]);
 
-const ToolEventSchema = z.object({
+const ToolEventSchema = z.strictObject({
   kind: ToolEventKindSchema.describe('Normalized Gemini tool/function event type'),
   name: z.string().optional().describe('Function name when available'),
   toolType: z.string().optional().describe('Built-in tool type when available'),
@@ -63,7 +63,7 @@ const baseOutputFields = {
     .describe('Normalized Gemini tool/function event stream captured during generation'),
 };
 
-export const AskOutputSchema = z.object({
+export const AskOutputSchema = z.strictObject({
   answer: z.string().describe('Generated response'),
   data: z.unknown().optional().describe('Parsed structured response when JSON mode is used'),
   schemaWarnings: z
@@ -73,7 +73,7 @@ export const AskOutputSchema = z.object({
   ...baseOutputFields,
 });
 
-export const ExecuteCodeOutputSchema = z.object({
+export const ExecuteCodeOutputSchema = z.strictObject({
   code: z.string().describe('Generated code'),
   output: z.string().describe('Execution output'),
   explanation: z.string().describe('Model explanation'),
@@ -85,21 +85,21 @@ export const ExecuteCodeOutputSchema = z.object({
   ...baseOutputFields,
 });
 
-const UrlMetadataEntrySchema = z.object({
+const UrlMetadataEntrySchema = z.strictObject({
   url: PublicHttpUrlSchema.describe('Retrieved URL'),
   status: z.string().describe('Retrieval status (e.g. URL_RETRIEVAL_STATUS_SUCCESS)'),
 });
 
 export type UrlMetadataEntry = z.infer<typeof UrlMetadataEntrySchema>;
 
-const SourceDetailSchema = z.object({
+const SourceDetailSchema = z.strictObject({
   title: z.string().optional().describe('Source title when Gemini provides one'),
   url: PublicHttpUrlSchema.describe('Source URL'),
 });
 
 export type SourceDetail = z.infer<typeof SourceDetailSchema>;
 
-export const SearchOutputSchema = z.object({
+export const SearchOutputSchema = z.strictObject({
   answer: z.string().describe('Grounded answer'),
   sources: z.array(PublicHttpUrlSchema).describe('Source URLs from search'),
   sourceDetails: z
@@ -110,18 +110,18 @@ export const SearchOutputSchema = z.object({
   ...baseOutputFields,
 });
 
-export const AnalyzeUrlOutputSchema = z.object({
+export const AnalyzeUrlOutputSchema = z.strictObject({
   answer: z.string().describe('URL content analysis'),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('Retrieval status per URL'),
   ...baseOutputFields,
 });
 
-export const AnalyzeFileOutputSchema = z.object({
+export const AnalyzeFileOutputSchema = z.strictObject({
   analysis: z.string().describe('File analysis result'),
   ...baseOutputFields,
 });
 
-export const AgenticSearchOutputSchema = z.object({
+export const AgenticSearchOutputSchema = z.strictObject({
   report: z.string().describe('Compiled markdown research report'),
   sources: z.array(PublicHttpUrlSchema).describe('Aggregated source URLs'),
   sourceDetails: z
@@ -135,10 +135,10 @@ export const AgenticSearchOutputSchema = z.object({
   ...baseOutputFields,
 });
 
-export const AnalyzePrOutputSchema = z.object({
+export const AnalyzePrOutputSchema = z.strictObject({
   analysis: z.string().describe('Comprehensive PR review'),
   stats: z
-    .object({
+    .strictObject({
       files: nonNegativeInt('Files changed'),
       additions: nonNegativeInt('Lines added'),
       deletions: nonNegativeInt('Lines deleted'),
@@ -165,7 +165,7 @@ export const AnalyzePrOutputSchema = z.object({
   ...baseOutputFields,
 });
 
-const CacheSummarySchema = z.object({
+const CacheSummarySchema = z.strictObject({
   name: cacheName('Cache resource name').optional(),
   displayName: z.string().optional().describe('Human-readable label'),
   model: z.string().optional().describe('Model used'),
@@ -175,41 +175,41 @@ const CacheSummarySchema = z.object({
   totalTokenCount: nonNegativeInt('Total cached tokens').optional(),
 });
 
-export const CreateCacheOutputSchema = z.object({
+export const CreateCacheOutputSchema = z.strictObject({
   name: cacheName('Cache resource name'),
   displayName: z.string().optional().describe('Human-readable label'),
   model: z.string().optional().describe('Model used'),
   expireTime: timestamp('Expiration timestamp').optional(),
 });
 
-export const ListCachesOutputSchema = z.object({
+export const ListCachesOutputSchema = z.strictObject({
   caches: z.array(CacheSummarySchema).describe('Active caches'),
   count: nonNegativeInt('Number of active caches'),
 });
 
-export const DeleteCacheOutputSchema = z.object({
+export const DeleteCacheOutputSchema = z.strictObject({
   cacheName: cacheName('Cache resource name'),
   deleted: z.boolean().describe('Whether deletion was performed'),
 });
 
-export const UpdateCacheOutputSchema = z.object({
+export const UpdateCacheOutputSchema = z.strictObject({
   cacheName: cacheName('Cache resource name'),
   expireTime: timestamp('New expiration timestamp').optional(),
 });
 
-export const ExplainErrorOutputSchema = z.object({
+export const ExplainErrorOutputSchema = z.strictObject({
   explanation: z
     .string()
     .describe('Structured error diagnosis with root cause, explanation, and suggested fix'),
   ...baseOutputFields,
 });
 
-export const CompareFilesOutputSchema = z.object({
+export const CompareFilesOutputSchema = z.strictObject({
   comparison: z.string().describe('Structured comparison analysis'),
   ...baseOutputFields,
 });
 
-export const GenerateDiagramOutputSchema = z.object({
+export const GenerateDiagramOutputSchema = z.strictObject({
   diagram: z.string().describe('Generated diagram markup (Mermaid or PlantUML)'),
   diagramType: z.enum(['mermaid', 'plantuml']).describe('Diagram format used'),
   explanation: z.string().optional().describe('Brief explanation of the diagram structure'),

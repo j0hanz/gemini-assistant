@@ -110,18 +110,13 @@ function buildDiagramPrompt(
 
 function createDiagramWork(rootsFetcher: RootsFetcher) {
   return async function diagramWork(
-    {
-      description,
-      diagramType,
-      sourceFilePath,
-      sourceFilePaths,
-      thinkingLevel,
-      googleSearch,
-      cacheName,
-      validateSyntax,
-    }: GenerateDiagramInput,
+    args: GenerateDiagramInput,
     ctx: ServerContext,
   ): Promise<CallToolResult> {
+    const { description, diagramType, thinkingLevel, googleSearch, cacheName, validateSyntax } =
+      args;
+    const sourceFilePath = 'sourceFilePath' in args ? args.sourceFilePath : undefined;
+    const sourceFilePaths = 'sourceFilePaths' in args ? args.sourceFilePaths : undefined;
     const uploadedNames: string[] = [];
 
     try {

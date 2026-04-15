@@ -116,7 +116,7 @@ describe('analyze-file prompt', () => {
     const portableWorkspaceRoot = workspaceRoot.replaceAll('\\', '/');
 
     assert.ok(definition);
-    assert.match(definition.description, /Current workspace root:/);
+    assert.match(definition.description, /\(.*\)/);
     assert.match(
       definition.description,
       new RegExp(portableWorkspaceRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),

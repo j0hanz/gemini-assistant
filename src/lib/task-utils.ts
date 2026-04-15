@@ -56,9 +56,19 @@ function requireTaskId(ctx: ServerContext): string {
   return taskId;
 }
 
+async function isTaskCancelled(store: RequestTaskStore, taskId: string): Promise<boolean> {
+  try {
+    const current = await store.getTask(taskId);
+    return current.status === 'cancelled';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Runs tool work in the background and stores the result in the task store.
  * Maps `isError: true` results to `'failed'` task status.
+ * Skips storing if the task has been cancelled.
  */
 export function runToolAsTask(
   store: RequestTaskStore,
@@ -68,6 +78,8 @@ export function runToolAsTask(
 ): void {
   work
     .then(async (result) => {
+      if (await isTaskCancelled(store, task.taskId)) return;
+
       const status = result.isError ? 'failed' : 'completed';
 
       if (result.isError) {
@@ -84,6 +96,8 @@ export function runToolAsTask(
       await store.storeTaskResult(task.taskId, status, result);
     })
     .catch(async (err: unknown) => {
+      if (await isTaskCancelled(store, task.taskId)) return;
+
       const errorMessage = err instanceof Error ? err.message : String(err);
       try {
         await store.updateTaskStatus(task.taskId, 'working', errorMessage);

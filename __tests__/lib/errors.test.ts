@@ -225,6 +225,126 @@ describe('sendProgress', () => {
     await sendProgress(ctx, 1, 1);
     assert.strictEqual(notifyCalled, false);
   });
+
+  it('bridges progress to task statusMessage when task context exists', async () => {
+    let capturedStatus: string | undefined;
+    let capturedMessage: string | undefined;
+    const ctx = makeMockContext({ progressToken: 'tok-bridge' });
+    (ctx as unknown as Record<string, unknown>).task = {
+      id: 'task-1',
+      store: {
+        updateTaskStatus: async (_id: string, status: string, msg?: string) => {
+          capturedStatus = status;
+          capturedMessage = msg;
+        },
+      },
+    };
+    (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async () => {};
+
+    await sendProgress(ctx, 5, 100, 'Analyzing files');
+
+    assert.strictEqual(capturedStatus, 'working');
+    assert.strictEqual(capturedMessage, 'Analyzing files');
+  });
+
+  it('does not bridge to task status on terminal progress', async () => {
+    let updateCalled = false;
+    const ctx = makeMockContext({ progressToken: 'tok-term' });
+    (ctx as unknown as Record<string, unknown>).task = {
+      id: 'task-2',
+      store: {
+        updateTaskStatus: async () => {
+          updateCalled = true;
+        },
+      },
+    };
+    (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async () => {};
+
+    await sendProgress(ctx, 100, 100, 'Done');
+
+    assert.strictEqual(updateCalled, false);
+  });
+
+  it('does not bridge when message is empty', async () => {
+    let updateCalled = false;
+    const ctx = makeMockContext({ progressToken: 'tok-nomsg' });
+    (ctx as unknown as Record<string, unknown>).task = {
+      id: 'task-3',
+      store: {
+        updateTaskStatus: async () => {
+          updateCalled = true;
+        },
+      },
+    };
+    (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async () => {};
+
+    await sendProgress(ctx, 5, 100);
+
+    assert.strictEqual(updateCalled, false);
+  });
+
+  it('throttles task status updates', async () => {
+    let updateCount = 0;
+    const ctx = makeMockContext({ progressToken: 'tok-throttle' });
+    (ctx as unknown as Record<string, unknown>).task = {
+      id: 'task-4',
+      store: {
+        updateTaskStatus: async () => {
+          updateCount++;
+        },
+      },
+    };
+    (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async () => {};
+
+    await sendProgress(ctx, 5, 100, 'step 1');
+    await sendProgress(ctx, 10, 100, 'step 2');
+    await sendProgress(ctx, 15, 100, 'step 3');
+
+    // Only the first call should bridge due to 5s throttle
+    assert.strictEqual(updateCount, 1);
+  });
+
+  it('throttles task status updates independently per task', async () => {
+    resetProgressThrottle();
+    let updateCountA = 0;
+    let updateCountB = 0;
+
+    const ctxA = makeMockContext({ progressToken: 'tok-iso-a' });
+    (ctxA as unknown as Record<string, unknown>).task = {
+      id: 'task-iso-a',
+      store: {
+        updateTaskStatus: async () => {
+          updateCountA++;
+        },
+      },
+    };
+    (ctxA.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async () => {};
+
+    const ctxB = makeMockContext({ progressToken: 'tok-iso-b' });
+    (ctxB as unknown as Record<string, unknown>).task = {
+      id: 'task-iso-b',
+      store: {
+        updateTaskStatus: async () => {
+          updateCountB++;
+        },
+      },
+    };
+    (ctxB.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async () => {};
+
+    // Both tasks should get their first status update independently
+    await sendProgress(ctxA, 5, 100, 'step A1');
+    await sendProgress(ctxB, 5, 100, 'step B1');
+
+    assert.strictEqual(updateCountA, 1);
+    assert.strictEqual(updateCountB, 1);
+
+    // Subsequent calls within the throttle window are still suppressed per-task
+    await sendProgress(ctxA, 10, 100, 'step A2');
+    await sendProgress(ctxB, 10, 100, 'step B2');
+
+    assert.strictEqual(updateCountA, 1);
+    assert.strictEqual(updateCountB, 1);
+  });
 });
 
 // ── withRetry ─────────────────────────────────────────────────────────

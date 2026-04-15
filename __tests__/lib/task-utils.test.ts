@@ -19,6 +19,7 @@ function makeMockStore(overrides?: {
   getTask?: RequestTaskStore['getTask'];
   getTaskResult?: RequestTaskStore['getTaskResult'];
   storeTaskResult?: RequestTaskStore['storeTaskResult'];
+  updateTaskStatus?: RequestTaskStore['updateTaskStatus'];
 }): RequestTaskStore & { stored: { taskId: string; status: string; result: CallToolResult }[] } {
   const stored: { taskId: string; status: string; result: CallToolResult }[] = [];
   return {
@@ -34,6 +35,8 @@ function makeMockStore(overrides?: {
       (async (taskId: string, status: string, result: CallToolResult) => {
         stored.push({ taskId, status, result });
       }),
+    updateTaskStatus: overrides?.updateTaskStatus ?? (async () => {}),
+    listTasks: async () => ({ tasks: [] }),
   };
 }
 
@@ -158,6 +161,31 @@ describe('runToolAsTask', () => {
     const firstContent = entry.result.content[0];
     assert.ok(firstContent);
     assert.ok((firstContent as { text: string }).text.includes('string error'));
+  });
+
+  it('skips storing result when task is cancelled (success path)', async () => {
+    const store = makeMockStore({
+      getTask: async () => ({ taskId: 'task-cancel', status: 'cancelled' }) as Task,
+    });
+    const task = { taskId: 'task-cancel' } as Task;
+    const result: CallToolResult = { content: [{ type: 'text', text: 'done' }] };
+
+    runToolAsTask(store, task, Promise.resolve(result));
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(store.stored.length, 0);
+  });
+
+  it('skips storing result when task is cancelled (error path)', async () => {
+    const store = makeMockStore({
+      getTask: async () => ({ taskId: 'task-cancel', status: 'cancelled' }) as Task,
+    });
+    const task = { taskId: 'task-cancel' } as Task;
+
+    runToolAsTask(store, task, Promise.reject(new Error('boom')));
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(store.stored.length, 0);
   });
 });
 

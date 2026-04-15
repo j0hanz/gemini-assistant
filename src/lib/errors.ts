@@ -1,6 +1,7 @@
 import type {
   CallToolResult,
   ProgressNotification,
+  RequestTaskStore,
   ServerContext,
 } from '@modelcontextprotocol/server';
 import { INVALID_PARAMS, ProtocolError } from '@modelcontextprotocol/server';
@@ -10,12 +11,36 @@ import { FinishReason } from '@google/genai';
 // ── Progress / Context ────────────────────────────────────────────────
 
 export const MIN_PROGRESS_INTERVAL_MS = 250;
+export const TASK_STATUS_INTERVAL_MS = 5_000;
 
 const lastEmitTime = new Map<string, number>();
+const lastTaskStatusTime = new Map<string, number>();
 
 /** Reset the progress throttle state. Intended for testing. */
 export function resetProgressThrottle(): void {
   lastEmitTime.clear();
+  lastTaskStatusTime.clear();
+}
+
+interface TaskAccessor {
+  id?: string;
+  store: RequestTaskStore;
+}
+
+async function bridgeProgressToTask(ctx: ServerContext, message: string): Promise<void> {
+  const task = (ctx as unknown as { task?: TaskAccessor }).task;
+  if (!task?.id) return;
+
+  const now = Date.now();
+  const lastUpdate = lastTaskStatusTime.get(task.id) ?? 0;
+  if (now - lastUpdate < TASK_STATUS_INTERVAL_MS) return;
+  lastTaskStatusTime.set(task.id, now);
+
+  try {
+    await task.store.updateTaskStatus(task.id, 'working', message);
+  } catch {
+    // Task may already be in terminal status — ignore
+  }
 }
 
 export async function sendProgress(
@@ -54,6 +79,8 @@ export async function sendProgress(
           lastEmitTime.delete(key);
         }
       }
+      const taskId = (ctx as unknown as { task?: TaskAccessor }).task?.id;
+      if (taskId) lastTaskStatusTime.delete(taskId);
     } else {
       lastEmitTime.set(throttleKey, Date.now());
     }
@@ -67,6 +94,10 @@ export async function sendProgress(
         // Transport fully closed — discard
       }
     }
+  }
+
+  if (!isTerminal && message) {
+    await bridgeProgressToTask(ctx, message);
   }
 }
 

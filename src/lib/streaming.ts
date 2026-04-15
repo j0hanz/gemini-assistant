@@ -20,11 +20,17 @@ export function advanceProgress(current: number): number {
   return Math.min(current + (PROGRESS_TOTAL - current) * PROGRESS_STEP_FRACTION, PROGRESS_CAP);
 }
 
+export interface FunctionCallEntry {
+  name: string;
+  args?: Record<string, unknown>;
+}
+
 export interface StreamResult {
   text: string;
   thoughtText: string;
   parts: Part[];
   toolsUsed: string[];
+  functionCalls: FunctionCallEntry[];
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
   urlContextMetadata?: UrlContextMetadata;
@@ -122,6 +128,7 @@ export async function consumeStreamWithProgress(
   let phase: Phase = Phase.Waiting;
   let currentProgress = 0;
   const toolsUsed = new Set<string>();
+  const functionCalls: FunctionCallEntry[] = [];
   let hadToolActivity = false;
   let emittedCompiling = false;
   const thoughtHeaderState: ThoughtHeaderState = {
@@ -175,8 +182,15 @@ export async function consumeStreamWithProgress(
       }
 
       if (part.functionCall) {
+        if (!part.functionCall.name) {
+          await ctx.mcpReq.log('warning', 'Received functionCall with missing name');
+        }
         const fnName = part.functionCall.name ?? 'tool';
         toolsUsed.add(fnName);
+        functionCalls.push({
+          name: fnName,
+          ...(part.functionCall.args ? { args: part.functionCall.args } : {}),
+        });
         hadToolActivity = true;
         currentProgress = advanceProgress(currentProgress);
         await sendProgress(
@@ -241,6 +255,7 @@ export async function consumeStreamWithProgress(
     thoughtText,
     parts,
     toolsUsed: [...toolsUsed],
+    functionCalls,
     ...pickDefined({ ...metadata }),
   };
 }

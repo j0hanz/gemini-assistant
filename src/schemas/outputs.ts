@@ -7,9 +7,18 @@ export const UsageMetadataSchema = z.object({
   totalTokenCount: z.number().optional().describe('Total tokens for the request'),
 });
 
+const FunctionCallEntrySchema = z.object({
+  name: z.string().describe('Function/tool name'),
+  args: z.record(z.string(), z.unknown()).optional().describe('Function call arguments'),
+});
+
 const baseOutputFields = {
   thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
   usage: UsageMetadataSchema.optional().describe('Token usage'),
+  functionCalls: z
+    .array(FunctionCallEntrySchema)
+    .optional()
+    .describe('Server-side function calls made during generation'),
 };
 
 export const AskOutputSchema = z.object({

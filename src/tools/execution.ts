@@ -185,16 +185,14 @@ async function executeCodeWork(
       getAI().models.generateContentStream({
         model: MODEL,
         contents: prompt,
-        config: {
-          tools: [{ codeExecution: {} }],
-          ...buildGenerateContentConfig(
-            {
-              systemInstruction: EXECUTE_CODE_SYSTEM_INSTRUCTION,
-              thinkingLevel: thinkingLevel ?? 'LOW',
-            },
-            ctx.mcpReq.signal,
-          ),
-        },
+        config: buildGenerateContentConfig(
+          {
+            systemInstruction: EXECUTE_CODE_SYSTEM_INSTRUCTION,
+            thinkingLevel: thinkingLevel ?? 'LOW',
+            tools: [{ codeExecution: {} }],
+          },
+          ctx.mcpReq.signal,
+        ),
       }),
     (streamResult) => {
       if (streamResult.parts.length === 0) {

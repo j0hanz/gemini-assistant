@@ -6,7 +6,12 @@ import { z } from 'zod/v4';
 
 import { errorResult, reportCompletion, sendProgress } from '../lib/errors.js';
 import { createResourceLink, extractTextContent } from '../lib/response.js';
-import { executeToolStream, extractUsage, type StreamResult } from '../lib/streaming.js';
+import {
+  executeToolStream,
+  extractUsage,
+  type FunctionCallEntry,
+  type StreamResult,
+} from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { AskOutputSchema } from '../schemas/outputs.js';
 
@@ -29,6 +34,7 @@ interface AskArgs {
   responseSchema?: Record<string, unknown> | undefined;
   temperature?: number | undefined;
   seed?: number | undefined;
+  googleSearch?: boolean | undefined;
 }
 
 const ASK_TOOL_LABEL = 'Ask Gemini';
@@ -56,13 +62,14 @@ function tryParseJsonResponse(text: string): unknown {
 
 function buildAskStructuredContent(
   text: string,
-  streamResult: Pick<StreamResult, 'thoughtText' | 'usageMetadata'>,
+  streamResult: Pick<StreamResult, 'thoughtText' | 'usageMetadata' | 'functionCalls'>,
   jsonMode?: boolean,
 ): {
   answer: string;
   data?: unknown;
   thoughts?: string;
   usage?: ReturnType<typeof extractUsage>;
+  functionCalls?: FunctionCallEntry[];
 } {
   const parsedData = jsonMode ? tryParseJsonResponse(text) : undefined;
   const answer = parsedData === undefined ? text : JSON.stringify(parsedData, null, 2);
@@ -73,12 +80,13 @@ function buildAskStructuredContent(
     ...(parsedData !== undefined ? { data: parsedData } : {}),
     ...(streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
     ...(usage ? { usage } : {}),
+    ...(streamResult.functionCalls.length > 0 ? { functionCalls: streamResult.functionCalls } : {}),
   };
 }
 
 function formatStructuredResult(
   result: CallToolResult,
-  streamResult: Pick<StreamResult, 'thoughtText' | 'usageMetadata'>,
+  streamResult: Pick<StreamResult, 'thoughtText' | 'usageMetadata' | 'functionCalls'>,
   jsonMode?: boolean,
 ): CallToolResult {
   if (result.isError) return result;
@@ -143,8 +151,15 @@ async function runAskStream(
   ctx: ServerContext,
   streamGenerator: () => ReturnType<ReturnType<typeof getAI>['models']['generateContentStream']>,
   jsonMode = false,
+  thinkingSuppressed = false,
 ): Promise<CallToolResult> {
   await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Preparing`);
+  if (thinkingSuppressed) {
+    await ctx.mcpReq.log(
+      'debug',
+      'ask: thinkingLevel ignored because responseSchema activates JSON mode (mutually exclusive)',
+    );
+  }
   const { streamResult, result } = await executeToolStream(
     ctx,
     'ask',
@@ -167,20 +182,23 @@ async function askWithoutSession(
   ctx: ServerContext,
   chat?: Chat,
 ): Promise<CallToolResult> {
+  const tools = args.googleSearch ? [{ googleSearch: {} }] : undefined;
+  const thinkingSuppressed = !!args.thinkingLevel && !!args.responseSchema;
   return await runAskStream(
     ctx,
     () =>
       chat
         ? chat.sendMessageStream({
             message: args.message,
-            config: buildGenerateContentConfig(args, ctx.mcpReq.signal),
+            config: buildGenerateContentConfig({ ...args, tools }, ctx.mcpReq.signal),
           })
         : getAI().models.generateContentStream({
             model: MODEL,
             contents: args.message,
-            config: buildGenerateContentConfig(args, ctx.mcpReq.signal),
+            config: buildGenerateContentConfig({ ...args, tools }, ctx.mcpReq.signal),
           }),
     !!args.responseSchema,
+    thinkingSuppressed,
   );
 }
 
@@ -201,9 +219,10 @@ async function askNewSession(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   await ctx.mcpReq.log('debug', `Creating session ${args.sessionId}`);
+  const tools = args.googleSearch ? [{ googleSearch: {} }] : undefined;
   const chat = getAI().chats.create({
     model: MODEL,
-    config: buildGenerateContentConfig(args),
+    config: buildGenerateContentConfig({ ...args, tools }),
   });
 
   const result = await askWithoutSession(args, ctx, chat);
@@ -300,6 +319,12 @@ export function registerAskTool(server: McpServer): void {
           .int()
           .optional()
           .describe('Fixed seed for reproducible outputs. Model default if omitted.'),
+        googleSearch: z
+          .boolean()
+          .optional()
+          .describe(
+            'Enable Google Search grounding. Model can use web results for up-to-date answers.',
+          ),
       }),
       outputSchema: AskOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,

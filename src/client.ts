@@ -1,6 +1,12 @@
-import type { GenerateContentConfig, MediaResolution, ThinkingLevel } from '@google/genai';
+import type {
+  GenerateContentConfig,
+  MediaResolution,
+  ThinkingLevel,
+  ToolConfig,
+  ToolListUnion,
+} from '@google/genai';
 import type { CachedContent } from '@google/genai';
-import { GoogleGenAI } from '@google/genai';
+import { FunctionCallingConfigMode, GoogleGenAI } from '@google/genai';
 
 import { withRetry } from './lib/errors.js';
 import { pickDefined } from './lib/response.js';
@@ -30,6 +36,9 @@ export interface ConfigBuilderOptions {
   temperature?: number | undefined;
   seed?: number | undefined;
   mediaResolution?: string | undefined;
+  tools?: ToolListUnion | undefined;
+  toolConfig?: ToolConfig | undefined;
+  functionCallingMode?: FunctionCallingConfigMode | undefined;
 }
 
 function buildThinkingConfig(thinkingLevel?: AskThinkingLevel) {
@@ -53,8 +62,27 @@ export function buildGenerateContentConfig(
     temperature,
     seed,
     mediaResolution,
+    tools,
+    toolConfig,
+    functionCallingMode,
   } = options;
   const isJson = jsonMode ?? responseSchema !== undefined;
+
+  // functionCallingMode intentionally overrides toolConfig.functionCallingConfig.mode
+  const mergedToolConfig: ToolConfig | undefined =
+    (toolConfig ?? functionCallingMode)
+      ? {
+          ...toolConfig,
+          ...(functionCallingMode
+            ? {
+                functionCallingConfig: {
+                  ...toolConfig?.functionCallingConfig,
+                  mode: functionCallingMode,
+                },
+              }
+            : {}),
+        }
+      : undefined;
 
   return {
     ...(cacheName ? { cachedContent: cacheName } : {}),
@@ -69,6 +97,8 @@ export function buildGenerateContentConfig(
     ...(temperature !== undefined ? { temperature } : {}),
     ...(seed !== undefined ? { seed } : {}),
     ...(mediaResolution ? { mediaResolution: mediaResolution as MediaResolution } : {}),
+    ...(tools ? { tools } : {}),
+    ...(mergedToolConfig ? { toolConfig: mergedToolConfig } : {}),
     ...(signal ? { abortSignal: signal } : {}),
   };
 }

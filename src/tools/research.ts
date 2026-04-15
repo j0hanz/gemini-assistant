@@ -1,5 +1,7 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
+import { FunctionCallingConfigMode } from '@google/genai';
+
 import { sendProgress } from '../lib/errors.js';
 import {
   appendSources,
@@ -135,10 +137,7 @@ async function searchWork(
 
   await sendProgress(ctx, 0, undefined, `${SEARCH_TOOL_LABEL}: Starting`);
   await ctx.mcpReq.log('info', `Search: ${query}`);
-  const tools: Record<string, Record<string, never>>[] = [
-    { googleSearch: {} },
-    ...((urls?.length ?? 0) > 0 ? [{ urlContext: {} }] : []),
-  ];
+  const tools = [{ googleSearch: {} }, ...((urls?.length ?? 0) > 0 ? [{ urlContext: {} }] : [])];
 
   return await handleToolExecution(
     ctx,
@@ -148,17 +147,15 @@ async function searchWork(
       getAI().models.generateContentStream({
         model: MODEL,
         contents: buildSearchContents(query, urls),
-        config: {
-          tools,
-          ...buildGenerateContentConfig(
-            {
-              systemInstruction: systemInstruction ?? SEARCH_SYSTEM_INSTRUCTION,
-              thinkingLevel: thinkingLevel ?? 'LOW',
-            },
-            ctx.mcpReq.signal,
-          ),
-          maxOutputTokens: 4096,
-        },
+        config: buildGenerateContentConfig(
+          {
+            systemInstruction: systemInstruction ?? SEARCH_SYSTEM_INSTRUCTION,
+            thinkingLevel: thinkingLevel ?? 'LOW',
+            tools,
+            functionCallingMode: FunctionCallingConfigMode.ANY,
+          },
+          ctx.mcpReq.signal,
+        ),
       }),
     buildSearchResult,
   );
@@ -183,16 +180,14 @@ async function analyzeUrlWork(
       getAI().models.generateContentStream({
         model: MODEL,
         contents: buildPromptWithUrls(urls, question),
-        config: {
-          tools: [{ urlContext: {} }],
-          ...buildGenerateContentConfig(
-            {
-              systemInstruction: systemInstruction ?? ANALYZE_URL_SYSTEM_INSTRUCTION,
-              thinkingLevel: thinkingLevel ?? 'LOW',
-            },
-            ctx.mcpReq.signal,
-          ),
-        },
+        config: buildGenerateContentConfig(
+          {
+            systemInstruction: systemInstruction ?? ANALYZE_URL_SYSTEM_INSTRUCTION,
+            thinkingLevel: thinkingLevel ?? 'LOW',
+            tools: [{ urlContext: {} }],
+          },
+          ctx.mcpReq.signal,
+        ),
       }),
     buildAnalyzeUrlResult,
   );
@@ -260,17 +255,15 @@ async function agenticSearchWork(
           `Research this topic comprehensively: ${topic}\n\n` +
           `${depthInstruction}\n` +
           'Search for multiple different aspects and compile a detailed report.',
-        config: {
-          tools: [{ googleSearch: {} }, { codeExecution: {} }],
-          toolConfig: { includeServerSideToolInvocations: true },
-          ...buildGenerateContentConfig(
-            {
-              systemInstruction: AGENT_SYSTEM_INSTRUCTION,
-              thinkingLevel: thinkingLevel ?? 'MEDIUM',
-            },
-            ctx.mcpReq.signal,
-          ),
-        },
+        config: buildGenerateContentConfig(
+          {
+            systemInstruction: AGENT_SYSTEM_INSTRUCTION,
+            thinkingLevel: thinkingLevel ?? 'MEDIUM',
+            tools: [{ googleSearch: {} }, { codeExecution: {} }],
+            toolConfig: { includeServerSideToolInvocations: true },
+          },
+          ctx.mcpReq.signal,
+        ),
       }),
     (streamResult, textContent) => {
       const sources = collectGroundedSources(streamResult.groundingMetadata);
@@ -286,6 +279,8 @@ async function agenticSearchWork(
           report: textContent,
           sources,
           toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
+          functionCalls:
+            streamResult.functionCalls.length > 0 ? streamResult.functionCalls : undefined,
         }),
         reportMessage: buildSourceReportMessage(sources.length),
       };

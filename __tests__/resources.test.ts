@@ -7,7 +7,7 @@ import {
   readSessionTranscriptResource,
   readToolsListResource,
   readWorkflowsListResource,
-} from '../src/server-content.js';
+} from '../src/resources.js';
 import {
   appendSessionTranscript,
   listSessionTranscriptEntries,

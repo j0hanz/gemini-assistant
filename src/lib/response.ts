@@ -6,7 +6,7 @@ import type { SourceDetail, UrlMetadataEntry } from '../schemas/outputs.js';
 
 import { errorResult, finishReasonError } from './errors.js';
 
-export type PickDefined<T> = {
+type PickDefined<T> = {
   [K in keyof T as undefined extends T[K] ? K : never]?: Exclude<T[K], undefined>;
 } & {
   [K in keyof T as undefined extends T[K] ? never : K]: T[K];

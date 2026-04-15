@@ -200,7 +200,7 @@ describe('sessions', () => {
         transcriptUris = event.transcriptUris;
       });
 
-      setSession('sess-task-set', mockChat('task-set') as never, 'task-123');
+      setSession('sess-task-set', mockChat('task-set') as never);
       assert.ok(detailUris.includes('sessions://sess-task-set'));
       assert.ok(transcriptUris.includes('sessions://sess-task-set/transcript'));
     });
@@ -214,7 +214,7 @@ describe('sessions', () => {
         transcriptUris = event.transcriptUris;
       });
 
-      getSession('sess-task-get', 'task-456');
+      getSession('sess-task-get');
       assert.deepStrictEqual(detailUris, ['sessions://sess-task-get']);
       assert.deepStrictEqual(transcriptUris, ['sessions://sess-task-get/transcript']);
     });

@@ -1,15 +1,14 @@
 import type { Chat } from '@google/genai';
 
-import { parseIntEnv } from './client.js';
+import { getSessionLimits } from './config.js';
 
-const SESSION_TTL_MS = parseIntEnv('SESSION_TTL_MS', 30 * 60 * 1000);
-const MAX_SESSIONS = parseIntEnv('MAX_SESSIONS', 50);
+const { ttlMs: SESSION_TTL_MS, maxSessions: MAX_SESSIONS } = getSessionLimits();
 
 const MAX_EVICTED_ENTRIES = 1000;
 const EVICTED_TRIM_TARGET = Math.floor(MAX_EVICTED_ENTRIES / 2);
 const EVICTION_SWEEP_INTERVAL_MS = 60_000;
 
-export interface TranscriptEntry {
+interface TranscriptEntry {
   role: 'user' | 'assistant';
   text: string;
   timestamp: number;
@@ -178,28 +177,25 @@ export function isEvicted(id: string): boolean {
   return evictedSessions.has(id);
 }
 
-export function getSession(id: string, taskId?: string): Chat | undefined {
+export function getSession(id: string): Chat | undefined {
   const entry = sessions.get(id);
   if (!entry) return undefined;
   if (hasExpired(entry)) {
     removeSession(id, true);
-    void taskId;
     notifyChange([id]);
     return undefined;
   }
   const chat = updateSessionAccess(id, entry);
-  void taskId;
   notifyChange([id]);
   return chat;
 }
 
-export function setSession(id: string, chat: Chat, taskId?: string): void {
+export function setSession(id: string, chat: Chat): void {
   let evictedId: string | undefined;
   if (sessions.size >= MAX_SESSIONS && !sessions.has(id)) {
     evictedId = evictOldest();
   }
   storeSession(id, chat);
   startEvictionTimer();
-  void taskId;
   notifyChange(evictedId ? [evictedId, id] : [id]);
 }

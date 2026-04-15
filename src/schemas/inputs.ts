@@ -1,11 +1,80 @@
+import { completable } from '@modelcontextprotocol/server';
+
 import { z } from 'zod/v4';
 
-import { THINKING_LEVELS } from '../client.js';
+import { completeCacheNames, THINKING_LEVELS } from '../client.js';
+import { completeSessionIds } from '../sessions.js';
 
 const thinkingLevelField = z
   .enum(THINKING_LEVELS)
   .optional()
   .describe('Thinking depth for reasoning.');
+
+export const AskInputSchema = z.object({
+  message: z.string().min(1).max(100_000).describe('User message or prompt'),
+  sessionId: completable(
+    z
+      .string()
+      .max(256)
+      .optional()
+      .describe('Session ID for multi-turn chat. Omit for single-turn.'),
+    completeSessionIds,
+  ),
+  systemInstruction: z
+    .string()
+    .optional()
+    .describe('System prompt (used on session creation or single-turn)'),
+  thinkingLevel: z
+    .enum(THINKING_LEVELS)
+    .optional()
+    .describe('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
+  cacheName: completable(
+    z
+      .string()
+      .optional()
+      .describe('Cache name from create_cache. Cannot be applied to an existing chat session.'),
+    completeCacheNames,
+  ),
+  responseSchema: z
+    .record(z.string(), z.unknown())
+    .refine(
+      (s) =>
+        'type' in s ||
+        'properties' in s ||
+        'anyOf' in s ||
+        'oneOf' in s ||
+        'allOf' in s ||
+        '$ref' in s ||
+        'enum' in s ||
+        'items' in s,
+      {
+        message:
+          'responseSchema must contain at least one JSON Schema keyword (type, properties, anyOf, oneOf, allOf, $ref, enum, or items)',
+      },
+    )
+    .optional()
+    .describe(
+      'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking. Gemini 2.0 models may require a propertyOrdering array.',
+    ),
+  temperature: z
+    .number()
+    .min(0)
+    .max(2)
+    .optional()
+    .describe(
+      'Controls randomness (0.0=deterministic, 2.0=most creative). Model default if omitted.',
+    ),
+  seed: z
+    .number()
+    .int()
+    .optional()
+    .describe('Fixed seed for reproducible outputs. Model default if omitted.'),
+  googleSearch: z
+    .boolean()
+    .optional()
+    .describe('Enable Google Search grounding. Model can use web results for up-to-date answers.'),
+});
+export type AskInput = z.infer<typeof AskInputSchema>;
 
 export const ExecuteCodeInputSchema = z.object({
   task: z.string().min(1).describe('Code task to perform'),
@@ -104,6 +173,28 @@ export const CreateCacheInputSchema = z
     'Creates a Gemini API cache. Combined content (files + instructions) MUST exceed ~32,000 tokens.',
   );
 export type CreateCacheInput = z.infer<typeof CreateCacheInputSchema>;
+
+function createCacheNameSchema(action: 'delete' | 'update') {
+  return completable(
+    z.string().min(1).describe(`Cache resource name to ${action} (e.g., "cachedContents/...")`),
+    completeCacheNames,
+  );
+}
+
+export const DeleteCacheInputSchema = z.object({
+  cacheName: createCacheNameSchema('delete'),
+  confirm: z
+    .boolean()
+    .optional()
+    .describe('Required when the client cannot confirm deletion interactively.'),
+});
+export type DeleteCacheInput = z.infer<typeof DeleteCacheInputSchema>;
+
+export const UpdateCacheInputSchema = z.object({
+  cacheName: createCacheNameSchema('update'),
+  ttl: z.string().min(1).describe('New TTL from now (e.g., "7200s" for 2 hours)'),
+});
+export type UpdateCacheInput = z.infer<typeof UpdateCacheInputSchema>;
 
 export const ExplainErrorInputSchema = z.object({
   error: z.string().min(1).describe('Error message, stack trace, or log output to diagnose'),

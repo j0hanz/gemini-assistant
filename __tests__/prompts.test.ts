@@ -18,7 +18,7 @@ import {
   PUBLIC_PROMPT_NAMES,
   SummarizePromptSchema,
   SUMMARY_STYLES,
-} from '../src/server-content.js';
+} from '../src/prompts.js';
 
 const promptDefinitions = createPromptDefinitions(async () => ['C:\\workspace']);
 

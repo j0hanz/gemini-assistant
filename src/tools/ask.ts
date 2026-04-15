@@ -1,9 +1,7 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
-import { completable } from '@modelcontextprotocol/server';
 
 import { Validator } from '@cfworker/json-schema';
 import type { Chat } from '@google/genai';
-import { z } from 'zod/v4';
 
 import { errorResult, reportCompletion, sendProgress } from '../lib/errors.js';
 import { createResourceLink, extractTextContent } from '../lib/response.js';
@@ -14,35 +12,20 @@ import {
   type StreamResult,
 } from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { type AskInput, AskInputSchema } from '../schemas/inputs.js';
 import { AskOutputSchema } from '../schemas/outputs.js';
 
-import {
-  AskThinkingLevel,
-  buildGenerateContentConfig,
-  EXPOSE_THOUGHTS,
-  THINKING_LEVELS,
-} from '../client.js';
-import { completeCacheNames, getAI, MODEL } from '../client.js';
+import { buildGenerateContentConfig, EXPOSE_THOUGHTS } from '../client.js';
+import { getAI, MODEL } from '../client.js';
 import {
   appendSessionTranscript,
-  completeSessionIds,
   getSession,
   getSessionEntry,
   isEvicted,
   setSession,
 } from '../sessions.js';
 
-interface AskArgs {
-  message: string;
-  sessionId?: string | undefined;
-  systemInstruction?: string | undefined;
-  thinkingLevel?: AskThinkingLevel | undefined;
-  cacheName?: string | undefined;
-  responseSchema?: Record<string, unknown> | undefined;
-  temperature?: number | undefined;
-  seed?: number | undefined;
-  googleSearch?: boolean | undefined;
-}
+type AskArgs = AskInput;
 
 interface AskDependencies {
   appendSessionTranscript: typeof appendSessionTranscript;
@@ -354,18 +337,17 @@ function appendTranscriptPair(
 ): void {
   if (result.isError) return;
 
-  const taskRef = taskId ? { taskId } : {};
   deps.appendSessionTranscript(sessionId, {
     role: 'user',
     text: message,
     timestamp: deps.now(),
-    ...taskRef,
+    ...(taskId ? { taskId } : {}),
   });
   deps.appendSessionTranscript(sessionId, {
     role: 'assistant',
     text: extractTextContent(result.content),
     timestamp: deps.now(),
-    ...taskRef,
+    ...(taskId ? { taskId } : {}),
   });
 }
 
@@ -393,7 +375,7 @@ async function askExistingSession(
   ctx: ServerContext,
   deps: AskDependencies,
 ): Promise<CallToolResult | undefined> {
-  const chat = deps.getSession(args.sessionId, ctx.task?.id);
+  const chat = deps.getSession(args.sessionId);
   if (!chat) return undefined;
 
   await ctx.mcpReq.log('debug', `Resuming session ${args.sessionId}`);
@@ -414,7 +396,7 @@ async function askNewSession(
   const result = await deps.runWithoutSession(args, ctx, chat);
 
   if (!result.isError) {
-    deps.setSession(args.sessionId, chat, ctx.task?.id);
+    deps.setSession(args.sessionId, chat);
     appendTranscriptPair(args.sessionId, args.message, result, deps, ctx.task?.id);
     appendSessionResource(result, args.sessionId);
   } else {
@@ -441,71 +423,6 @@ export function createAskWork(deps: AskDependencies = createDefaultAskDependenci
 }
 
 const askWork = createAskWork();
-
-const AskInputSchema = z.object({
-  message: z.string().min(1).max(100_000).describe('User message or prompt'),
-  sessionId: completable(
-    z
-      .string()
-      .max(256)
-      .optional()
-      .describe('Session ID for multi-turn chat. Omit for single-turn.'),
-    completeSessionIds,
-  ),
-  systemInstruction: z
-    .string()
-    .optional()
-    .describe('System prompt (used on session creation or single-turn)'),
-  thinkingLevel: z
-    .enum(THINKING_LEVELS)
-    .optional()
-    .describe('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
-  cacheName: completable(
-    z
-      .string()
-      .optional()
-      .describe('Cache name from create_cache. Cannot be applied to an existing chat session.'),
-    completeCacheNames,
-  ),
-  responseSchema: z
-    .record(z.string(), z.unknown())
-    .refine(
-      (s) =>
-        'type' in s ||
-        'properties' in s ||
-        'anyOf' in s ||
-        'oneOf' in s ||
-        'allOf' in s ||
-        '$ref' in s ||
-        'enum' in s ||
-        'items' in s,
-      {
-        message:
-          'responseSchema must contain at least one JSON Schema keyword (type, properties, anyOf, oneOf, allOf, $ref, enum, or items)',
-      },
-    )
-    .optional()
-    .describe(
-      'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking. Gemini 2.0 models may require a propertyOrdering array.',
-    ),
-  temperature: z
-    .number()
-    .min(0)
-    .max(2)
-    .optional()
-    .describe(
-      'Controls randomness (0.0=deterministic, 2.0=most creative). Model default if omitted.',
-    ),
-  seed: z
-    .number()
-    .int()
-    .optional()
-    .describe('Fixed seed for reproducible outputs. Model default if omitted.'),
-  googleSearch: z
-    .boolean()
-    .optional()
-    .describe('Enable Google Search grounding. Model can use web results for up-to-date answers.'),
-});
 
 export function registerAskTool(server: McpServer): void {
   registerTaskTool(

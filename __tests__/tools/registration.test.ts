@@ -17,15 +17,9 @@ const { registerAnalyzeFileTool, registerExecuteCodeTool } =
 const { registerAnalyzePrTool } = await import('../../src/tools/pr.js');
 const { registerAgenticSearchTool, registerAnalyzeUrlTool, registerSearchTool } =
   await import('../../src/tools/research.js');
-const {
-  createPromptDefinitions,
-  PUBLIC_PROMPT_NAMES,
-  PUBLIC_RESOURCE_URIS,
-  registerPrompts,
-  registerResources,
-} = await import('../../src/server-content.js');
-const { registerServerFeatures, SERVER_REGISTRARS } =
-  await import('../../src/server-registration.js');
+const { createPromptDefinitions, PUBLIC_PROMPT_NAMES, registerPrompts } =
+  await import('../../src/prompts.js');
+const { PUBLIC_RESOURCE_URIS, registerResources } = await import('../../src/resources.js');
 const { registerCompareFilesTool } = await import('../../src/tools/compare.js');
 const { registerGenerateDiagramTool } = await import('../../src/tools/diagram.js');
 const { registerExplainErrorTool } = await import('../../src/tools/explain-error.js');
@@ -112,30 +106,27 @@ describe('tool registration', () => {
     assert.doesNotThrow(() => registerGenerateDiagramTool(server));
   });
 
-  it('registers all tools on the same server', () => {
+  it('registers all tools, prompts, and resources on the same server', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerServerFeatures(server));
-  });
-
-  it('keeps the shared registration list aligned with targeted coverage', () => {
-    assert.deepStrictEqual(
-      SERVER_REGISTRARS.map(([name]) => name),
-      [
-        'ask tool',
-        'execute_code tool',
-        'search tool',
-        'agentic_search tool',
-        'analyze_file tool',
-        'analyze_url tool',
-        'analyze_pr tool',
-        'explain_error tool',
-        'compare_files tool',
-        'generate_diagram tool',
-        'cache tools',
-        'prompts',
-        'resources',
-      ],
-    );
+    assert.doesNotThrow(() => {
+      for (const register of [
+        registerAskTool,
+        registerExecuteCodeTool,
+        registerSearchTool,
+        registerAgenticSearchTool,
+        registerAnalyzeFileTool,
+        registerAnalyzeUrlTool,
+        registerAnalyzePrTool,
+        registerExplainErrorTool,
+        registerCompareFilesTool,
+        registerGenerateDiagramTool,
+        registerCacheTools,
+        registerPrompts,
+        registerResources,
+      ]) {
+        register(server);
+      }
+    });
   });
 
   it('keeps the exported prompt and resource surface aligned with discoverability docs', () => {

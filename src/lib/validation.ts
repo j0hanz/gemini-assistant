@@ -5,6 +5,8 @@ import { isIP } from 'node:net';
 import { isAbsolute, normalize, parse, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { getAllowedFileRootsEnv, getAllowedHostsEnv } from '../config.js';
+
 // ── Host Validation ───────────────────────────────────────────────────
 
 const LOCALHOST_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
@@ -15,7 +17,7 @@ function isBroadBind(host: string): boolean {
 }
 
 export function parseAllowedHosts(): string[] | undefined {
-  const raw = process.env.MCP_ALLOWED_HOSTS;
+  const raw = getAllowedHostsEnv();
   if (!raw) return undefined;
   const hosts = raw
     .split(',')
@@ -66,8 +68,9 @@ export function validateHostHeader(hostHeader: string | null, allowedHosts: stri
 
 export type RootsFetcher = () => Promise<string[]>;
 
-const ENV_ROOTS: string[] = process.env.ALLOWED_FILE_ROOTS
-  ? process.env.ALLOWED_FILE_ROOTS.split(',').map((r) => normalize(r.trim()))
+const allowedFileRootsEnv = getAllowedFileRootsEnv();
+const ENV_ROOTS: string[] = allowedFileRootsEnv
+  ? allowedFileRootsEnv.split(',').map((r) => normalize(r.trim()))
   : [normalize(process.cwd())];
 
 function parseRootUri(uri: string): string | undefined {
@@ -105,7 +108,7 @@ export async function getAllowedRoots(rootsFetcher?: RootsFetcher): Promise<stri
   }
 }
 
-export function buildRootsFetcher(
+function buildRootsFetcher(
   getClientCapabilities: () =>
     | { roots?: { listChanged?: boolean | undefined } | undefined }
     | undefined,

@@ -46,7 +46,7 @@ const SYSTEM_INSTRUCTION =
   '## Fixes\n' +
   'Short next steps.';
 
-export interface DiffStats {
+interface DiffStats {
   files: number;
   additions: number;
   deletions: number;

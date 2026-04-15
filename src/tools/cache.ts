@@ -1,5 +1,4 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
-import { completable } from '@modelcontextprotocol/server';
 
 import { createPartFromUri } from '@google/genai';
 import { z } from 'zod/v4';
@@ -15,7 +14,14 @@ import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { createResourceLink } from '../lib/response.js';
 import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
-import { type CreateCacheInput, CreateCacheInputSchema } from '../schemas/inputs.js';
+import {
+  type CreateCacheInput,
+  CreateCacheInputSchema,
+  type DeleteCacheInput,
+  DeleteCacheInputSchema,
+  type UpdateCacheInput,
+  UpdateCacheInputSchema,
+} from '../schemas/inputs.js';
 import {
   CreateCacheOutputSchema,
   DeleteCacheOutputSchema,
@@ -23,18 +29,11 @@ import {
   UpdateCacheOutputSchema,
 } from '../schemas/outputs.js';
 
-import {
-  type CacheSummary,
-  completeCacheNames,
-  getAI,
-  listCacheSummaries,
-  MODEL,
-} from '../client.js';
+import { type CacheSummary, getAI, listCacheSummaries, MODEL } from '../client.js';
 
 type CachePart = ReturnType<typeof createPartFromUri>;
 
 const CACHE_UPLOAD_CHUNK_SIZE = 3;
-const CACHE_NAME_DESCRIPTION = 'Cache resource name to %s (e.g., "cachedContents/...")';
 const CREATE_CACHE_TOOL_LABEL = 'Create Cache';
 
 export interface CacheChangeEvent {
@@ -74,13 +73,6 @@ function formatCacheListMarkdown(caches: CacheSummary[]): string {
 
 function truncateName(name: string, maxLen = 10): string {
   return name.length > maxLen ? `${name.slice(0, maxLen)}…` : name;
-}
-
-function createCacheNameSchema(action: 'delete' | 'update') {
-  return completable(
-    z.string().min(1).describe(CACHE_NAME_DESCRIPTION.replace('%s', action)),
-    completeCacheNames,
-  );
 }
 
 function cacheResourceLink(cacheName: string, displayName?: string) {
@@ -377,7 +369,7 @@ function registerListCachesTool(server: McpServer): void {
 }
 
 async function deleteCacheWork(
-  { cacheName, confirm }: { cacheName: string; confirm?: boolean | undefined },
+  { cacheName, confirm }: DeleteCacheInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const confirmation = await confirmCacheDeletion(ctx, cacheName);
@@ -419,13 +411,7 @@ function registerDeleteCacheTool(server: McpServer): void {
     {
       title: 'Delete Cache',
       description: 'Delete a Gemini context cache by resource name.',
-      inputSchema: z.object({
-        cacheName: createCacheNameSchema('delete'),
-        confirm: z
-          .boolean()
-          .optional()
-          .describe('Required when the client cannot confirm deletion interactively.'),
-      }),
+      inputSchema: DeleteCacheInputSchema,
       outputSchema: DeleteCacheOutputSchema,
       annotations: {
         ...MUTABLE_ANNOTATIONS,
@@ -437,7 +423,7 @@ function registerDeleteCacheTool(server: McpServer): void {
 }
 
 async function updateCacheWork(
-  { cacheName, ttl }: { cacheName: string; ttl: string },
+  { cacheName, ttl }: UpdateCacheInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const updated = await getAI().caches.update({
@@ -471,10 +457,7 @@ function registerUpdateCacheTool(server: McpServer): void {
     {
       title: 'Update Cache',
       description: 'Update the TTL of an existing Gemini context cache.',
-      inputSchema: z.object({
-        cacheName: createCacheNameSchema('update'),
-        ttl: z.string().min(1).describe('New TTL from now (e.g., "7200s" for 2 hours)'),
-      }),
+      inputSchema: UpdateCacheInputSchema,
       outputSchema: UpdateCacheOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
     },

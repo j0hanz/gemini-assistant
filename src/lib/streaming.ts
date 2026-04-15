@@ -20,7 +20,7 @@ import {
 import { extractTextContent, pickDefined } from './response.js';
 
 export const PROGRESS_TOTAL = 100;
-export const PROGRESS_STEP_FRACTION = 0.15;
+const PROGRESS_STEP_FRACTION = 0.15;
 export const PROGRESS_CAP = 95;
 
 export function advanceProgress(current: number): number {

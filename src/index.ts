@@ -11,9 +11,23 @@ import { join } from 'node:path';
 import { formatError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 
-import { registerServerFeatures } from './server-registration.js';
+import { getTransportMode } from './config.js';
+import { registerPrompts } from './prompts.js';
+import { registerResources } from './resources.js';
 import { onSessionChange, type SessionChangeEvent } from './sessions.js';
+import { registerAskTool } from './tools/ask.js';
 import { type CacheChangeEvent, onCacheChange } from './tools/cache.js';
+import { registerCacheTools } from './tools/cache.js';
+import { registerCompareFilesTool } from './tools/compare.js';
+import { registerGenerateDiagramTool } from './tools/diagram.js';
+import { registerAnalyzeFileTool, registerExecuteCodeTool } from './tools/execution.js';
+import { registerExplainErrorTool } from './tools/explain-error.js';
+import { registerAnalyzePrTool } from './tools/pr.js';
+import {
+  registerAgenticSearchTool,
+  registerAnalyzeUrlTool,
+  registerSearchTool,
+} from './tools/research.js';
 import type {
   HttpTransportResult,
   ServerInstance,
@@ -25,6 +39,21 @@ const { version } = JSON.parse(
 ) as { version: string };
 
 const activeServers = new Set<McpServer>();
+type ServerRegistrar = (server: McpServer) => void;
+
+const SERVER_TOOL_REGISTRARS = [
+  registerAskTool,
+  registerExecuteCodeTool,
+  registerSearchTool,
+  registerAgenticSearchTool,
+  registerAnalyzeFileTool,
+  registerAnalyzeUrlTool,
+  registerAnalyzePrTool,
+  registerExplainErrorTool,
+  registerCompareFilesTool,
+  registerGenerateDiagramTool,
+  registerCacheTools,
+] as const satisfies readonly ServerRegistrar[];
 
 function createServerInstance(): ServerInstance {
   const taskStore = new InMemoryTaskStore();
@@ -63,7 +92,11 @@ function createServerInstance(): ServerInstance {
     },
   );
 
-  registerServerFeatures(server);
+  for (const register of SERVER_TOOL_REGISTRARS) {
+    register(server);
+  }
+  registerPrompts(server);
+  registerResources(server);
 
   activeServers.add(server);
 
@@ -104,7 +137,7 @@ onCacheChange(({ detailUris }: CacheChangeEvent) => {
   sendResourceChanged('caches://list', detailUris);
 });
 
-const transportMode = process.env.MCP_TRANSPORT ?? 'stdio';
+const transportMode = getTransportMode();
 let httpResult: HttpTransportResult | undefined;
 let webStandardResult: WebStandardTransportResult | undefined;
 let stdioInstance: ServerInstance | undefined;

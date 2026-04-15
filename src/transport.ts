@@ -13,8 +13,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 
 import { parseAllowedHosts, resolveAllowedHosts, validateHostHeader } from './lib/validation.js';
 
-const DEFAULT_PORT = 3000;
-const DEFAULT_HOST = '127.0.0.1';
+import { getTransportConfig } from './config.js';
 
 interface BunServerHandle {
   stop: () => void | Promise<void>;
@@ -44,13 +43,6 @@ interface RuntimeGlobals {
   Deno?: DenoRuntime;
 }
 
-interface TransportConfig {
-  port: number;
-  host: string;
-  corsOrigin: string;
-  isStateless: boolean;
-}
-
 interface CleanupEventStore extends EventStore {
   cleanup?: () => void;
 }
@@ -60,8 +52,8 @@ export interface ServerInstance {
   close: () => Promise<void>;
 }
 
-export type ServerFactory = () => Promise<ServerInstance> | ServerInstance;
-export type EventStoreFactory = () => CleanupEventStore;
+type ServerFactory = () => Promise<ServerInstance> | ServerInstance;
+type EventStoreFactory = () => CleanupEventStore;
 type ServerTransport = Parameters<McpServer['connect']>[0];
 
 interface ManagedPair<TTransport> {
@@ -103,15 +95,6 @@ export interface HttpTransportResult {
 export interface WebStandardTransportResult {
   handler: (req: Request) => Promise<Response>;
   close: () => Promise<void>;
-}
-
-function resolveTransportConfig(): TransportConfig {
-  return {
-    port: parseInt(process.env.MCP_HTTP_PORT ?? '', 10) || DEFAULT_PORT,
-    host: process.env.MCP_HTTP_HOST ?? DEFAULT_HOST,
-    corsOrigin: process.env.MCP_CORS_ORIGIN ?? '',
-    isStateless: process.env.MCP_STATELESS === 'true',
-  };
 }
 
 function warnIfUnprotected(host: string, hasProtection: boolean): void {
@@ -377,7 +360,7 @@ export async function startHttpTransport(
   createServer: ServerFactory,
   createEventStore?: EventStoreFactory,
 ): Promise<HttpTransportResult> {
-  const { port, host, corsOrigin, isStateless } = resolveTransportConfig();
+  const { port, host, corsOrigin, isStateless } = getTransportConfig();
   const allowedHosts = parseAllowedHosts();
   warnIfUnprotected(host, !!allowedHosts);
 
@@ -442,7 +425,7 @@ export function startWebStandardTransport(
   createServer: ServerFactory,
   createEventStore?: EventStoreFactory,
 ): Promise<WebStandardTransportResult> {
-  const { port, host, isStateless } = resolveTransportConfig();
+  const { port, host, isStateless } = getTransportConfig();
   const allowedHosts = resolveAllowedHosts(host);
   warnIfUnprotected(host, !!allowedHosts);
 

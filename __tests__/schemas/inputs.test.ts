@@ -6,13 +6,46 @@ import {
   AnalyzeFileInputSchema,
   AnalyzePrInputSchema,
   AnalyzeUrlInputSchema,
+  AskInputSchema,
   CompareFilesInputSchema,
   CreateCacheInputSchema,
+  DeleteCacheInputSchema,
   ExecuteCodeInputSchema,
   ExplainErrorInputSchema,
   GenerateDiagramInputSchema,
   SearchInputSchema,
+  UpdateCacheInputSchema,
 } from '../../src/schemas/inputs.js';
+
+describe('AskInputSchema', () => {
+  it('accepts valid minimal input', () => {
+    const result = AskInputSchema.safeParse({ message: 'hello' });
+    assert.ok(result.success);
+  });
+
+  it('accepts the full structured-output surface', () => {
+    const result = AskInputSchema.safeParse({
+      message: 'return JSON',
+      sessionId: 'sess-1',
+      systemInstruction: 'Be concise',
+      thinkingLevel: 'LOW',
+      cacheName: 'cachedContents/abc123',
+      responseSchema: { type: 'object', properties: { answer: { type: 'string' } } },
+      temperature: 0.2,
+      seed: 42,
+      googleSearch: true,
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects responseSchema objects without a JSON Schema keyword', () => {
+    const result = AskInputSchema.safeParse({
+      message: 'test',
+      responseSchema: { foo: 'bar' },
+    });
+    assert.strictEqual(result.success, false);
+  });
+});
 
 describe('ExecuteCodeInputSchema', () => {
   it('accepts valid input', () => {
@@ -205,6 +238,39 @@ describe('CreateCacheInputSchema', () => {
   it('rejects filePaths exceeding 50 entries', () => {
     const paths = Array.from({ length: 51 }, (_, i) => `/file${i}.txt`);
     const result = CreateCacheInputSchema.safeParse({ filePaths: paths });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('DeleteCacheInputSchema', () => {
+  it('accepts cache deletion input', () => {
+    const result = DeleteCacheInputSchema.safeParse({ cacheName: 'cachedContents/abc123' });
+    assert.ok(result.success);
+  });
+
+  it('accepts explicit confirmation override', () => {
+    const result = DeleteCacheInputSchema.safeParse({
+      cacheName: 'cachedContents/abc123',
+      confirm: true,
+    });
+    assert.ok(result.success);
+  });
+});
+
+describe('UpdateCacheInputSchema', () => {
+  it('accepts cache ttl updates', () => {
+    const result = UpdateCacheInputSchema.safeParse({
+      cacheName: 'cachedContents/abc123',
+      ttl: '7200s',
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects empty ttl', () => {
+    const result = UpdateCacheInputSchema.safeParse({
+      cacheName: 'cachedContents/abc123',
+      ttl: '',
+    });
     assert.strictEqual(result.success, false);
   });
 });

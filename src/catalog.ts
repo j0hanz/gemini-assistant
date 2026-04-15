@@ -1,11 +1,11 @@
-export type DiscoveryKind = 'tool' | 'prompt' | 'resource';
+type DiscoveryKind = 'tool' | 'prompt' | 'resource';
 
-export interface RelatedItemRef {
+interface RelatedItemRef {
   kind: DiscoveryKind;
   name: string;
 }
 
-export interface DiscoveryEntry {
+interface DiscoveryEntry {
   name: string;
   kind: DiscoveryKind;
   title: string;
@@ -16,7 +16,7 @@ export interface DiscoveryEntry {
   related: RelatedItemRef[];
 }
 
-export interface WorkflowEntry {
+interface WorkflowEntry {
   name: string;
   goal: string;
   whenToUse: string;
@@ -39,7 +39,7 @@ const DISCOVERY_ENTRIES = [
     title: 'Deep Research',
     bestFor: 'Multi-step research that needs web grounding and synthesized findings.',
     whenToUse: 'Use when a topic needs search, follow-up exploration, and cited synthesis.',
-    inputs: ['query', 'depth?', 'timeBudget?'],
+    inputs: ['topic', 'searchDepth?', 'thinkingLevel?'],
     returns: 'A structured research answer with sources and progress-aware task execution.',
     related: [
       { kind: 'tool', name: 'search' },
@@ -53,7 +53,7 @@ const DISCOVERY_ENTRIES = [
     title: 'Analyze Local File',
     bestFor: 'Inspecting a local file from approved workspace roots.',
     whenToUse: 'Use when you need Gemini to reason about code, text, or media in one file.',
-    inputs: ['filePath', 'question', 'mediaResolution?'],
+    inputs: ['filePath', 'question', 'thinkingLevel?', 'mediaResolution?'],
     returns: 'An answer grounded in the uploaded file content.',
     related: [
       { kind: 'prompt', name: 'analyze-file' },
@@ -66,7 +66,7 @@ const DISCOVERY_ENTRIES = [
     title: 'Review Local Diff',
     bestFor: 'Reviewing the current repository diff without remote GitHub access.',
     whenToUse: 'Use when you want a structured review of local changes or staged work.',
-    inputs: ['baseRef?', 'includeUntracked?', 'focus?'],
+    inputs: ['dryRun?', 'cacheName?', 'thinkingLevel?', 'language?'],
     returns: 'A review summary with findings, omitted paths, and diff-aware context.',
     related: [
       { kind: 'prompt', name: 'diff-review' },
@@ -80,7 +80,7 @@ const DISCOVERY_ENTRIES = [
     title: 'Analyze Public URL',
     bestFor: 'Reading public web pages directly through Gemini.',
     whenToUse: 'Use when a small set of specific URLs is more important than broad web search.',
-    inputs: ['urls', 'question'],
+    inputs: ['urls', 'question', 'systemInstruction?', 'thinkingLevel?'],
     returns: 'A URL-grounded answer plus per-URL retrieval status when available.',
     related: [
       { kind: 'tool', name: 'search' },
@@ -118,7 +118,14 @@ const DISCOVERY_ENTRIES = [
     title: 'Compare Two Files',
     bestFor: 'Side-by-side analysis of two local files.',
     whenToUse: 'Use when you need a structured comparison instead of a repo-wide diff review.',
-    inputs: ['leftPath', 'rightPath', 'question?'],
+    inputs: [
+      'filePathA',
+      'filePathB',
+      'question?',
+      'thinkingLevel?',
+      'googleSearch?',
+      'cacheName?',
+    ],
     returns: 'A structured explanation of differences, similarities, and notable changes.',
     related: [
       { kind: 'tool', name: 'analyze_pr' },
@@ -132,7 +139,7 @@ const DISCOVERY_ENTRIES = [
     bestFor: 'Saving large reference context for repeated Gemini calls.',
     whenToUse:
       'Use when a project brief, code snapshot, or long document should be reused across asks.',
-    inputs: ['cacheName', 'contents', 'displayName?', 'ttlSeconds?'],
+    inputs: ['filePaths?', 'systemInstruction?', 'ttl?', 'displayName?'],
     returns: 'Cache metadata including the active cache name and expiry details.',
     related: [
       { kind: 'tool', name: 'update_cache' },
@@ -162,7 +169,7 @@ const DISCOVERY_ENTRIES = [
     bestFor: 'Running Gemini-generated code in a sandbox and inspecting the output.',
     whenToUse:
       'Use when a task needs computation, parsing, or quick code-assisted experimentation.',
-    inputs: ['prompt', 'language?', 'files?'],
+    inputs: ['task', 'language?', 'thinkingLevel?'],
     returns: 'Generated code, execution output, and a structured summary of the run.',
     related: [
       { kind: 'tool', name: 'agentic_search' },
@@ -175,7 +182,15 @@ const DISCOVERY_ENTRIES = [
     title: 'Explain Error',
     bestFor: 'Diagnosing stack traces and error output.',
     whenToUse: 'Use when you already have an error message and want root cause plus fix guidance.',
-    inputs: ['error', 'context?'],
+    inputs: [
+      'error',
+      'codeContext?',
+      'language?',
+      'thinkingLevel?',
+      'googleSearch?',
+      'urls?',
+      'cacheName?',
+    ],
     returns: 'An explanation of root cause, fixes, and prevention steps.',
     related: [
       { kind: 'prompt', name: 'explain-error' },
@@ -188,7 +203,16 @@ const DISCOVERY_ENTRIES = [
     title: 'Generate Diagram',
     bestFor: 'Turning descriptions or code into Mermaid or PlantUML diagrams.',
     whenToUse: 'Use when a workflow, architecture, or process is easier to understand visually.',
-    inputs: ['prompt', 'format?', 'sourceCode?'],
+    inputs: [
+      'description',
+      'diagramType?',
+      'sourceFilePath?',
+      'sourceFilePaths?',
+      'thinkingLevel?',
+      'googleSearch?',
+      'cacheName?',
+      'validateSyntax?',
+    ],
     returns: 'Diagram text plus structured metadata about the generated output.',
     related: [
       { kind: 'tool', name: 'analyze_file' },
@@ -201,7 +225,7 @@ const DISCOVERY_ENTRIES = [
     title: 'List Caches',
     bestFor: 'Inspecting active Gemini caches and their expiry state.',
     whenToUse: 'Use when deciding whether to reuse, update, or delete cached context.',
-    inputs: ['prefix?'],
+    inputs: [],
     returns: 'A list of active caches and their basic metadata.',
     related: [
       { kind: 'tool', name: 'create_cache' },
@@ -216,7 +240,7 @@ const DISCOVERY_ENTRIES = [
     bestFor: 'Quick answers that need up-to-date web grounding.',
     whenToUse:
       'Use when a single grounded answer is enough and you do not need a full research workflow.',
-    inputs: ['query', 'urls?'],
+    inputs: ['query', 'systemInstruction?', 'urls?', 'thinkingLevel?'],
     returns: 'A concise grounded answer with sources and optional source details.',
     related: [
       { kind: 'tool', name: 'agentic_search' },
@@ -229,7 +253,7 @@ const DISCOVERY_ENTRIES = [
     title: 'Update Cache',
     bestFor: 'Refreshing cached context without changing the calling pattern.',
     whenToUse: 'Use when a stored project brief or reference set needs new contents or TTL.',
-    inputs: ['cacheName', 'contents?', 'displayName?', 'ttlSeconds?'],
+    inputs: ['cacheName', 'ttl'],
     returns: 'Updated cache metadata with the new expiry state.',
     related: [
       { kind: 'tool', name: 'create_cache' },

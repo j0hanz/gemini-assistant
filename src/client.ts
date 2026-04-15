@@ -11,22 +11,17 @@ import { FunctionCallingConfigMode, GoogleGenAI } from '@google/genai';
 import { withRetry } from './lib/errors.js';
 import { pickDefined } from './lib/response.js';
 
+import { getExposeThoughts, getGeminiModel } from './config.js';
+
 // ── Config Utilities ──────────────────────────────────────────────────
 
 export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
-export type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
-export const EXPOSE_THOUGHTS = process.env.GEMINI_EXPOSE_THOUGHTS === 'true';
-
-export function parseIntEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined) return fallback;
-  const parsed = Number(raw);
-  return Number.isNaN(parsed) ? fallback : parsed;
-}
+type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
+export const EXPOSE_THOUGHTS = getExposeThoughts();
 
 const DEFAULT_SYSTEM_INSTRUCTION = 'Be direct, accurate, and concise. Use Markdown when useful.';
 
-export interface ConfigBuilderOptions {
+interface ConfigBuilderOptions {
   systemInstruction?: string | undefined;
   thinkingLevel?: AskThinkingLevel | undefined;
   cacheName?: string | undefined;
@@ -123,7 +118,7 @@ export function buildGenerateContentConfig(
 
 // ── Client ────────────────────────────────────────────────────────────
 
-export const MODEL = process.env.GEMINI_MODEL ?? 'gemini-3-flash-preview';
+export const MODEL = getGeminiModel();
 
 let _ai: GoogleGenAI | undefined;
 
@@ -183,7 +178,7 @@ export async function listCacheSummaries(signal?: AbortSignal): Promise<CacheSum
   return caches;
 }
 
-export async function listCacheNames(prefix?: string, signal?: AbortSignal): Promise<string[]> {
+async function listCacheNames(prefix?: string, signal?: AbortSignal): Promise<string[]> {
   return (await listCacheSummaries(signal))
     .map((cache) => cache.name)
     .filter((name): name is string => name?.startsWith(prefix ?? '') === true);

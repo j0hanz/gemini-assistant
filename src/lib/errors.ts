@@ -9,8 +9,8 @@ import { FinishReason } from '@google/genai';
 
 // ── Progress / Context ────────────────────────────────────────────────
 
-export const MIN_PROGRESS_INTERVAL_MS = 250;
-export const TASK_STATUS_INTERVAL_MS = 5_000;
+const MIN_PROGRESS_INTERVAL_MS = 250;
+const TASK_STATUS_INTERVAL_MS = 5_000;
 const PROGRESS_ENTRY_TTL_MS = 5 * 60 * 1000;
 const PROGRESS_SWEEP_INTERVAL_MS = 60 * 1000;
 
@@ -190,7 +190,7 @@ export function errorResult(message: string): CallToolResult {
   };
 }
 
-export function hasHttpStatus(err: unknown): err is Error & { status: number } {
+function hasHttpStatus(err: unknown): err is Error & { status: number } {
   return err instanceof Error && 'status' in err && typeof err.status === 'number';
 }
 
@@ -235,15 +235,6 @@ export function geminiErrorResult(toolName: string, err: unknown): CallToolResul
   return errorResult(`${toolName} failed: ${formatError(err)}`);
 }
 
-export async function logAndReturnError(
-  ctx: ServerContext,
-  toolName: string,
-  err: unknown,
-): Promise<CallToolResult> {
-  await ctx.mcpReq.log('error', `${toolName} failed: ${formatError(err)}`);
-  return geminiErrorResult(toolName, err);
-}
-
 export async function handleToolError(
   ctx: ServerContext,
   toolName: string,
@@ -251,7 +242,8 @@ export async function handleToolError(
   err: unknown,
 ): Promise<CallToolResult> {
   await reportFailure(ctx, toolLabel, err);
-  return logAndReturnError(ctx, toolName, err);
+  await ctx.mcpReq.log('error', `${toolName} failed: ${formatError(err)}`);
+  return geminiErrorResult(toolName, err);
 }
 
 export function cleanupErrorLogger(ctx: ServerContext): (reason: unknown) => void {
@@ -260,7 +252,7 @@ export function cleanupErrorLogger(ctx: ServerContext): (reason: unknown) => voi
   };
 }
 
-export function toErrorMessage(toolName: string, err: unknown): string {
+function toErrorMessage(toolName: string, err: unknown): string {
   if (isAbortError(err)) {
     return `${toolName}: cancelled by client`;
   }

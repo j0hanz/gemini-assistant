@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { listWorkflowEntries } from '../src/catalog.js';
-import { PUBLIC_RESOURCE_URIS } from '../src/server-content.js';
+import { PUBLIC_RESOURCE_URIS } from '../src/resources.js';
 
 const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 const packageJson = JSON.parse(

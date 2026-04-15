@@ -26,7 +26,7 @@ export const MUTABLE_ANNOTATIONS = {
   openWorldHint: true,
 } as const;
 
-export const TASK_EXECUTION = { taskSupport: 'optional' } as const;
+const TASK_EXECUTION = { taskSupport: 'optional' } as const;
 
 type TaskWork<TArgs> = (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>;
 

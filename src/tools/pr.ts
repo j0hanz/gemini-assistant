@@ -87,6 +87,13 @@ interface DiffUnit {
   text: string;
 }
 
+interface BudgetedSnapshotDiff {
+  diff: string;
+  omittedPaths: string[];
+  summary: string;
+  truncated: boolean;
+}
+
 interface GitDiffArgsOptions {
   againstHead?: boolean;
   nameOnly?: boolean;
@@ -177,6 +184,10 @@ function joinNonEmptyParts(parts: string[]): string {
   return parts.filter((part) => part.trim()).join('\n');
 }
 
+function uniqueSortedPaths(paths: Iterable<string>): string[] {
+  return [...new Set(paths)].sort();
+}
+
 async function findGitRoot(signal?: AbortSignal): Promise<string> {
   const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
     encoding: 'utf8',
@@ -249,6 +260,19 @@ async function buildTrackedSnapshot(
 async function listUntrackedPaths(gitRoot: string, signal?: AbortSignal): Promise<string[]> {
   const stdout = await runGit(gitRoot, ['ls-files', '--others', '--exclude-standard'], signal);
   return parseGitPathList(stdout);
+}
+
+async function collectUntrackedResults(
+  gitRoot: string,
+  untrackedPaths: string[],
+): Promise<UntrackedPatchResult[]> {
+  const results: UntrackedPatchResult[] = [];
+
+  for (const relativePath of untrackedPaths) {
+    results.push(await buildUntrackedPatch(gitRoot, relativePath));
+  }
+
+  return results;
 }
 
 function isBinaryContent(buffer: Buffer): boolean {
@@ -471,6 +495,28 @@ function summarizeUntrackedResults(untrackedResults: UntrackedPatchResult[]): {
   return { includedUntracked, skippedBinaryPaths, skippedLargePaths, untrackedPatches };
 }
 
+function buildSnapshotDiff(diff: string, untrackedPatches: string[]): string {
+  return joinNonEmptyParts([diff, ...untrackedPatches]);
+}
+
+function buildSnapshotStats(diff: string): Pick<LocalDiffSnapshot, 'empty' | 'stats'> {
+  const empty = !diff.trim();
+  return {
+    empty,
+    stats: empty ? EMPTY_DIFF_STATS : computeDiffStats(diff),
+  };
+}
+
+function buildBudgetedSnapshotDiff(snapshot: LocalDiffSnapshot): BudgetedSnapshotDiff {
+  const { diff, omittedPaths, truncated } = budgetDiffUnits(splitDiffUnits(snapshot.diff));
+  return {
+    diff,
+    omittedPaths,
+    summary: formatSnapshotSummary(snapshot.stats, omittedPaths),
+    truncated,
+  };
+}
+
 function buildStructuredContent(
   snapshot: LocalDiffSnapshot,
   analysis: string,
@@ -509,6 +555,36 @@ function formatSnapshotSummary(stats: DiffStats, omittedPaths: string[] = []): s
   return `${String(stats.files)} files (+${String(stats.additions)}, -${String(stats.deletions)})${omittedPaths.length > 0 ? `, omitted ${String(omittedPaths.length)}` : ''}`;
 }
 
+function buildTextResult(
+  snapshot: LocalDiffSnapshot,
+  text: string,
+  omittedPaths: string[] = [],
+  truncated?: boolean,
+): CallToolResult {
+  return {
+    content: [{ type: 'text' as const, text }],
+    structuredContent: buildStructuredContent(snapshot, text, omittedPaths, truncated),
+  };
+}
+
+function buildAnalyzePrErrorResult(err: unknown): CallToolResult {
+  return {
+    content: [{ type: 'text', text: `${TOOL_LABEL}: ${formatAnalyzePrError(err)}` }],
+    isError: true,
+  };
+}
+
+async function logSnapshotStats(
+  ctx: ServerContext,
+  snapshot: LocalDiffSnapshot,
+  truncated: boolean,
+): Promise<void> {
+  await ctx.mcpReq.log(
+    'info',
+    `analyze_pr: ${String(snapshot.stats.files)} files, +${String(snapshot.stats.additions)}/-${String(snapshot.stats.deletions)}${truncated ? ' (truncated)' : ''}`,
+  );
+}
+
 function buildModelPrompt(
   prompt: string,
   cacheName?: string,
@@ -536,21 +612,16 @@ async function buildLocalDiffSnapshot(signal?: AbortSignal): Promise<LocalDiffSn
     listUntrackedPaths(gitRoot, signal),
   ]);
 
-  const untrackedResults: UntrackedPatchResult[] = [];
-  for (const relativePath of untrackedPaths) {
-    untrackedResults.push(await buildUntrackedPatch(gitRoot, relativePath));
-  }
-
+  const untrackedResults = await collectUntrackedResults(gitRoot, untrackedPaths);
   const { includedUntracked, skippedBinaryPaths, skippedLargePaths, untrackedPatches } =
     summarizeUntrackedResults(untrackedResults);
-
-  const reviewedPaths = [...new Set([...trackedSnapshot.paths, ...includedUntracked])].sort();
-  const diff = joinNonEmptyParts([trackedSnapshot.diff, ...untrackedPatches]);
-  const empty = !diff.trim();
+  const reviewedPaths = uniqueSortedPaths([...trackedSnapshot.paths, ...includedUntracked]);
+  const diff = buildSnapshotDiff(trackedSnapshot.diff, untrackedPatches);
+  const { empty, stats } = buildSnapshotStats(diff);
 
   return {
     diff,
-    stats: empty ? EMPTY_DIFF_STATS : computeDiffStats(diff),
+    stats,
     reviewedPaths,
     includedUntracked,
     skippedBinaryPaths,
@@ -569,47 +640,39 @@ async function analyzePrWork(
   try {
     snapshot = await buildLocalDiffSnapshot(ctx.mcpReq.signal);
   } catch (err) {
-    return {
-      content: [{ type: 'text', text: `${TOOL_LABEL}: ${formatAnalyzePrError(err)}` }],
-      isError: true,
-    };
+    return buildAnalyzePrErrorResult(err);
   }
 
-  const { diff, omittedPaths, truncated } = budgetDiffUnits(splitDiffUnits(snapshot.diff));
-  const snapshotSummary = formatSnapshotSummary(snapshot.stats, omittedPaths);
-  await sendProgress(ctx, 1, 3, `${TOOL_LABEL}: ${snapshotSummary}`);
+  const budgetedDiff = buildBudgetedSnapshotDiff(snapshot);
+  await sendProgress(ctx, 1, 3, `${TOOL_LABEL}: ${budgetedDiff.summary}`);
 
   if (snapshot.empty) {
     const analysis = buildNoChangesAnalysis(snapshot);
     await reportCompletion(ctx, TOOL_LABEL, 'no changes');
-    return {
-      content: [{ type: 'text' as const, text: analysis }],
-      structuredContent: buildStructuredContent(snapshot, analysis),
-    };
+    return buildTextResult(snapshot, analysis);
   }
 
   if (dryRun) {
     await reportCompletion(ctx, TOOL_LABEL, 'snapshot ready');
-    return {
-      content: [{ type: 'text' as const, text: diff }],
-      structuredContent: buildStructuredContent(snapshot, diff, omittedPaths, truncated),
-    };
+    return buildTextResult(
+      snapshot,
+      budgetedDiff.diff,
+      budgetedDiff.omittedPaths,
+      budgetedDiff.truncated,
+    );
   }
 
   await sendProgress(ctx, 2, 3, `${TOOL_LABEL}: Analyzing generated diff`);
-  await ctx.mcpReq.log(
-    'info',
-    `analyze_pr: ${String(snapshot.stats.files)} files, +${String(snapshot.stats.additions)}/-${String(snapshot.stats.deletions)}${truncated ? ' (truncated)' : ''}`,
-  );
+  await logSnapshotStats(ctx, snapshot, budgetedDiff.truncated);
 
   const prompt = buildAnalysisPrompt(
-    diff,
+    budgetedDiff.diff,
     snapshot.stats,
     snapshot.reviewedPaths,
     snapshot.includedUntracked,
     snapshot.skippedBinaryPaths,
     snapshot.skippedLargePaths,
-    omittedPaths,
+    budgetedDiff.omittedPaths,
     language,
   );
 
@@ -636,8 +699,8 @@ async function analyzePrWork(
       structuredContent: buildStructuredContent(
         snapshot,
         textContent || '',
-        omittedPaths,
-        truncated,
+        budgetedDiff.omittedPaths,
+        budgetedDiff.truncated,
       ),
       reportMessage: `${String(snapshot.stats.files)} files reviewed (+${String(snapshot.stats.additions)}, -${String(snapshot.stats.deletions)})`,
     }),

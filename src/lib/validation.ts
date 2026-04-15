@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/server';
+import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
 
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, normalize, resolve } from 'node:path';
@@ -139,4 +139,23 @@ export function buildServerRootsFetcher(server: McpServer): RootsFetcher {
     () => server.server.getClientCapabilities(),
     () => server.server.listRoots(),
   );
+}
+
+// ── URL Validation ────────────────────────────────────────────────────
+
+export function validateUrls(urls: readonly string[] | undefined): CallToolResult | undefined {
+  if (!urls) return undefined;
+
+  for (const url of urls) {
+    try {
+      new URL(url);
+    } catch {
+      return {
+        content: [{ type: 'text', text: `Invalid URL provided: ${url}` }],
+        isError: true,
+      };
+    }
+  }
+
+  return undefined;
 }

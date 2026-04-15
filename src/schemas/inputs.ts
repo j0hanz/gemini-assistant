@@ -114,3 +114,84 @@ export const CreateCacheInputSchema = z
     'Creates a Gemini API cache. Combined content (files + instructions) MUST exceed ~32,000 tokens.',
   );
 export type CreateCacheInput = z.infer<typeof CreateCacheInputSchema>;
+
+export const ExplainErrorInputSchema = z.object({
+  error: z.string().min(1).describe('Error message, stack trace, or log output to diagnose'),
+  codeContext: z
+    .string()
+    .optional()
+    .describe('Relevant source code surrounding the error for deeper analysis'),
+  language: z.string().optional().describe('Programming language (e.g., "typescript", "python")'),
+  thinkingLevel: thinkingLevelField,
+  googleSearch: z
+    .boolean()
+    .optional()
+    .describe('Enable Google Search to look up error messages in docs, issues, and forums.'),
+  urls: z
+    .array(z.string())
+    .max(20)
+    .optional()
+    .describe('URLs for additional context (docs, issues). Enables URL Context (max 20).'),
+  cacheName: z
+    .string()
+    .optional()
+    .describe('Cache resource name to provide project context during diagnosis.'),
+});
+export type ExplainErrorInput = z.infer<typeof ExplainErrorInputSchema>;
+
+export const CompareFilesInputSchema = z.object({
+  filePathA: z.string().trim().min(1).describe('Absolute path to the first file'),
+  filePathB: z.string().trim().min(1).describe('Absolute path to the second file'),
+  question: z
+    .string()
+    .optional()
+    .describe('Specific comparison focus (e.g., "security differences", "API changes")'),
+  thinkingLevel: thinkingLevelField,
+  googleSearch: z
+    .boolean()
+    .optional()
+    .describe('Enable Google Search for best practices or migration context.'),
+  cacheName: z
+    .string()
+    .optional()
+    .describe('Cache resource name to provide project context during comparison.'),
+});
+export type CompareFilesInput = z.infer<typeof CompareFilesInputSchema>;
+
+export const GenerateDiagramInputSchema = z
+  .object({
+    description: z.string().min(1).describe('What to diagram: architecture, flow, sequence, etc.'),
+    diagramType: z
+      .enum(['mermaid', 'plantuml'])
+      .optional()
+      .default('mermaid')
+      .describe('Diagram syntax format (default: mermaid)'),
+    sourceFilePath: z
+      .string()
+      .trim()
+      .optional()
+      .describe('Absolute path to a single source file to derive the diagram from'),
+    sourceFilePaths: z
+      .array(z.string().trim().min(1))
+      .min(1)
+      .max(10)
+      .optional()
+      .describe('Absolute paths to multiple source files for architecture diagrams (max 10).'),
+    thinkingLevel: thinkingLevelField,
+    googleSearch: z
+      .boolean()
+      .optional()
+      .describe('Enable Google Search for diagram patterns or syntax reference.'),
+    cacheName: z
+      .string()
+      .optional()
+      .describe('Cache resource name to provide project context for diagram generation.'),
+    validateSyntax: z
+      .boolean()
+      .optional()
+      .describe('Validate generated diagram syntax via code execution sandbox.'),
+  })
+  .refine((data) => !(data.sourceFilePath && data.sourceFilePaths), {
+    message: 'Provide sourceFilePath or sourceFilePaths, not both.',
+  });
+export type GenerateDiagramInput = z.infer<typeof GenerateDiagramInputSchema>;

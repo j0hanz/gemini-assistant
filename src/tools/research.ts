@@ -13,6 +13,7 @@ import {
 } from '../lib/response.js';
 import { handleToolExecution, type StreamResult } from '../lib/streaming.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { validateUrls } from '../lib/validation.js';
 import {
   type AgenticSearchInput,
   AgenticSearchInputSchema,
@@ -68,23 +69,6 @@ function buildPromptWithUrls(urls: string[], question: string): string {
 
 function buildSourceReportMessage(sourceCount: number): string {
   return sourceCount > 0 ? `${formatCountLabel(sourceCount, 'source')} found` : 'completed';
-}
-
-function validateUrls(urls: readonly string[] | undefined): CallToolResult | undefined {
-  if (!urls) return undefined;
-
-  for (const url of urls) {
-    try {
-      new URL(url);
-    } catch {
-      return {
-        content: [{ type: 'text', text: `Invalid URL provided: ${url}` }],
-        isError: true,
-      };
-    }
-  }
-
-  return undefined;
 }
 
 function buildSearchResult(streamResult: StreamResult, textContent: string) {

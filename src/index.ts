@@ -15,7 +15,10 @@ import { registerPrompts, registerResources } from './server-content.js';
 import { onSessionChange } from './sessions.js';
 import { registerAskTool } from './tools/ask.js';
 import { onCacheChange, registerCacheTools } from './tools/cache.js';
+import { registerCompareFilesTool } from './tools/compare.js';
+import { registerGenerateDiagramTool } from './tools/diagram.js';
 import { registerAnalyzeFileTool, registerExecuteCodeTool } from './tools/execution.js';
+import { registerExplainErrorTool } from './tools/explain-error.js';
 import { registerAnalyzePrTool } from './tools/pr.js';
 import {
   registerAgenticSearchTool,
@@ -36,7 +39,8 @@ const server = new McpServer(
     version,
     description:
       'Gemini AI assistant: multi-turn chat, sandboxed code execution, ' +
-      'Google Search grounding, file analysis, context caching, and PR diff analysis.',
+      'Google Search grounding, file analysis, context caching, PR diff analysis, ' +
+      'error diagnosis, file comparison, and diagram generation.',
     websiteUrl: 'https://github.com/j0hanz/gemini-assistant',
   },
   {
@@ -56,7 +60,10 @@ const server = new McpServer(
       'agentic_search (deep multi-step research with progress notifications), ' +
       'analyze_file (file upload, mediaResolution for images/video), analyze_url (URL content analysis), ' +
       'create_cache/list_caches/update_cache/delete_cache (context caching, ≥32k tokens), ' +
-      'analyze_pr (generate git diff and review with Gemini in one step). ' +
+      'analyze_pr (generate git diff and review with Gemini in one step), ' +
+      'explain_error (diagnose stack traces and error messages), ' +
+      'compare_files (upload two files for structured comparison), ' +
+      'generate_diagram (create Mermaid/PlantUML diagrams from descriptions or code). ' +
       'Use cacheName with ask to attach cached context. displayName auto-replaces stale caches.',
   },
 );
@@ -68,6 +75,9 @@ registerAgenticSearchTool(server);
 registerAnalyzeFileTool(server);
 registerAnalyzeUrlTool(server);
 registerAnalyzePrTool(server);
+registerExplainErrorTool(server);
+registerCompareFilesTool(server);
+registerGenerateDiagramTool(server);
 registerCacheTools(server);
 registerPrompts(server);
 registerResources(server);

@@ -118,3 +118,22 @@ export const UpdateCacheOutputSchema = z.object({
   cacheName: z.string().describe('Cache resource name'),
   expireTime: z.string().optional().describe('New expiration timestamp'),
 });
+
+export const ExplainErrorOutputSchema = z.object({
+  explanation: z
+    .string()
+    .describe('Structured error diagnosis with root cause, explanation, and suggested fix'),
+  ...baseOutputFields,
+});
+
+export const CompareFilesOutputSchema = z.object({
+  comparison: z.string().describe('Structured comparison analysis'),
+  ...baseOutputFields,
+});
+
+export const GenerateDiagramOutputSchema = z.object({
+  diagram: z.string().describe('Generated diagram markup (Mermaid or PlantUML)'),
+  diagramType: z.enum(['mermaid', 'plantuml']).describe('Diagram format used'),
+  explanation: z.string().optional().describe('Brief explanation of the diagram structure'),
+  ...baseOutputFields,
+});

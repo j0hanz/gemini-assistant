@@ -5,8 +5,11 @@ import {
   AgenticSearchInputSchema,
   AnalyzeFileInputSchema,
   AnalyzeUrlInputSchema,
+  CompareFilesInputSchema,
   CreateCacheInputSchema,
   ExecuteCodeInputSchema,
+  ExplainErrorInputSchema,
+  GenerateDiagramInputSchema,
   SearchInputSchema,
 } from '../../src/schemas/inputs.js';
 
@@ -268,6 +271,197 @@ describe('AnalyzeUrlInputSchema', () => {
 
   it('rejects missing urls', () => {
     const result = AnalyzeUrlInputSchema.safeParse({ question: 'test' });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('ExplainErrorInputSchema', () => {
+  it('accepts valid minimal input', () => {
+    const result = ExplainErrorInputSchema.safeParse({ error: 'TypeError: x is not a function' });
+    assert.ok(result.success);
+  });
+
+  it('accepts with codeContext and language', () => {
+    const result = ExplainErrorInputSchema.safeParse({
+      error: 'NullPointerException',
+      codeContext: 'const x = null; x.foo();',
+      language: 'typescript',
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts with googleSearch enabled', () => {
+    const result = ExplainErrorInputSchema.safeParse({
+      error: 'ECONNREFUSED',
+      googleSearch: true,
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts with urls', () => {
+    const result = ExplainErrorInputSchema.safeParse({
+      error: 'Module not found',
+      urls: ['https://github.com/issue/123'],
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts with cacheName', () => {
+    const result = ExplainErrorInputSchema.safeParse({
+      error: 'Build failed',
+      cacheName: 'cachedContents/abc123',
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects more than 20 urls', () => {
+    const urls = Array.from({ length: 21 }, (_, i) => `https://example.com/${i}`);
+    const result = ExplainErrorInputSchema.safeParse({ error: 'test', urls });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects empty error', () => {
+    const result = ExplainErrorInputSchema.safeParse({ error: '' });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects missing error', () => {
+    const result = ExplainErrorInputSchema.safeParse({});
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('CompareFilesInputSchema', () => {
+  it('accepts valid minimal input', () => {
+    const result = CompareFilesInputSchema.safeParse({
+      filePathA: '/path/to/a.ts',
+      filePathB: '/path/to/b.ts',
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts with question', () => {
+    const result = CompareFilesInputSchema.safeParse({
+      filePathA: '/a.ts',
+      filePathB: '/b.ts',
+      question: 'security differences',
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts with googleSearch', () => {
+    const result = CompareFilesInputSchema.safeParse({
+      filePathA: '/a.ts',
+      filePathB: '/b.ts',
+      googleSearch: true,
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts with cacheName', () => {
+    const result = CompareFilesInputSchema.safeParse({
+      filePathA: '/a.ts',
+      filePathB: '/b.ts',
+      cacheName: 'cachedContents/abc',
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects missing filePathA', () => {
+    const result = CompareFilesInputSchema.safeParse({ filePathB: '/b.ts' });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects missing filePathB', () => {
+    const result = CompareFilesInputSchema.safeParse({ filePathA: '/a.ts' });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects empty filePathA', () => {
+    const result = CompareFilesInputSchema.safeParse({ filePathA: '', filePathB: '/b.ts' });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('GenerateDiagramInputSchema', () => {
+  it('accepts valid minimal input', () => {
+    const result = GenerateDiagramInputSchema.safeParse({ description: 'auth flow' });
+    assert.ok(result.success);
+  });
+
+  it('defaults diagramType to mermaid', () => {
+    const result = GenerateDiagramInputSchema.safeParse({ description: 'test' });
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.diagramType, 'mermaid');
+    }
+  });
+
+  it('accepts with sourceFilePath', () => {
+    const result = GenerateDiagramInputSchema.safeParse({
+      description: 'class diagram',
+      sourceFilePath: '/src/index.ts',
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts with sourceFilePaths', () => {
+    const result = GenerateDiagramInputSchema.safeParse({
+      description: 'architecture',
+      sourceFilePaths: ['/src/a.ts', '/src/b.ts'],
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects both sourceFilePath and sourceFilePaths', () => {
+    const result = GenerateDiagramInputSchema.safeParse({
+      description: 'test',
+      sourceFilePath: '/a.ts',
+      sourceFilePaths: ['/b.ts'],
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects more than 10 sourceFilePaths', () => {
+    const paths = Array.from({ length: 11 }, (_, i) => `/file${i}.ts`);
+    const result = GenerateDiagramInputSchema.safeParse({
+      description: 'test',
+      sourceFilePaths: paths,
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('accepts with validateSyntax', () => {
+    const result = GenerateDiagramInputSchema.safeParse({
+      description: 'sequence diagram',
+      validateSyntax: true,
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts with googleSearch', () => {
+    const result = GenerateDiagramInputSchema.safeParse({
+      description: 'ER diagram',
+      googleSearch: true,
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts with cacheName', () => {
+    const result = GenerateDiagramInputSchema.safeParse({
+      description: 'test',
+      cacheName: 'cachedContents/xyz',
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects empty description', () => {
+    const result = GenerateDiagramInputSchema.safeParse({ description: '' });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects missing description', () => {
+    const result = GenerateDiagramInputSchema.safeParse({});
     assert.strictEqual(result.success, false);
   });
 });

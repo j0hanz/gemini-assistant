@@ -18,6 +18,9 @@ const { registerAnalyzePrTool } = await import('../../src/tools/pr.js');
 const { registerAgenticSearchTool, registerAnalyzeUrlTool, registerSearchTool } =
   await import('../../src/tools/research.js');
 const { registerResources } = await import('../../src/server-content.js');
+const { registerCompareFilesTool } = await import('../../src/tools/compare.js');
+const { registerGenerateDiagramTool } = await import('../../src/tools/diagram.js');
+const { registerExplainErrorTool } = await import('../../src/tools/explain-error.js');
 
 function createServer(): McpServer {
   return new McpServer(
@@ -81,6 +84,21 @@ describe('tool registration', () => {
     assert.doesNotThrow(() => registerAgenticSearchTool(server));
   });
 
+  it('registers explain_error tool without error', () => {
+    const server = createServer();
+    assert.doesNotThrow(() => registerExplainErrorTool(server));
+  });
+
+  it('registers compare_files tool without error', () => {
+    const server = createServer();
+    assert.doesNotThrow(() => registerCompareFilesTool(server));
+  });
+
+  it('registers generate_diagram tool without error', () => {
+    const server = createServer();
+    assert.doesNotThrow(() => registerGenerateDiagramTool(server));
+  });
+
   it('registers all tools on the same server', () => {
     const server = createServer();
     assert.doesNotThrow(() => {
@@ -92,6 +110,9 @@ describe('tool registration', () => {
       registerAnalyzeUrlTool(server);
       registerAnalyzePrTool(server);
       registerCacheTools(server);
+      registerExplainErrorTool(server);
+      registerCompareFilesTool(server);
+      registerGenerateDiagramTool(server);
       registerResources(server);
     });
   });

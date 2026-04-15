@@ -181,13 +181,13 @@ describe('buildAnalysisPrompt', () => {
 
   it('builds prompt without language', () => {
     const prompt = buildAnalysisPrompt('diff content', stats, reviewedPaths, [], [], []);
-    assert.ok(prompt.includes('## Local Diff Snapshot'));
+    assert.ok(prompt.includes('## Snapshot'));
     assert.ok(prompt.includes('Files: 2 | +10 -5'));
-    assert.ok(prompt.includes('Reviewed Paths:'));
+    assert.ok(prompt.includes('Paths:'));
     assert.ok(prompt.includes('- src/a.ts'));
     assert.ok(prompt.includes('```diff'));
     assert.ok(prompt.includes('diff content'));
-    assert.ok(!prompt.includes('Language:'));
+    assert.ok(!prompt.includes('Lang:'));
   });
 
   it('includes untracked and skipped binary metadata when provided', () => {
@@ -201,14 +201,14 @@ describe('buildAnalysisPrompt', () => {
       ['src/omitted.ts'],
       'TypeScript',
     );
-    assert.ok(prompt.includes('Language: TypeScript'));
-    assert.ok(prompt.includes('Included Untracked Text Files:'));
+    assert.ok(prompt.includes('Lang: TypeScript'));
+    assert.ok(prompt.includes('Untracked:'));
     assert.ok(prompt.includes('- src/new-file.ts'));
-    assert.ok(prompt.includes('Skipped Binary Untracked Files:'));
+    assert.ok(prompt.includes('Skipped binary:'));
     assert.ok(prompt.includes('- assets/logo.png'));
-    assert.ok(prompt.includes('Skipped Large Untracked Files (> 1048576 bytes):'));
+    assert.ok(prompt.includes('Skipped large (> 1048576 bytes):'));
     assert.ok(prompt.includes('- fixtures/big.json'));
-    assert.ok(prompt.includes('Omitted From Gemini Review Budget:'));
+    assert.ok(prompt.includes('Omitted:'));
     assert.ok(prompt.includes('- src/omitted.ts'));
   });
 });

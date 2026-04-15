@@ -82,7 +82,14 @@ export const AnalyzePrOutputSchema = z.object({
       deletions: z.number().describe('Lines deleted'),
     })
     .describe('Diff statistics'),
-  mode: z.enum(['unstaged', 'staged']).describe('Diff mode used'),
+  reviewedPaths: z.array(z.string()).describe('Relative file paths included in the review'),
+  includedUntracked: z
+    .array(z.string())
+    .describe('Relative untracked text files synthesized into the generated diff'),
+  skippedBinaryPaths: z
+    .array(z.string())
+    .describe('Relative untracked binary files skipped from the generated diff'),
+  empty: z.boolean().describe('Whether there were any local changes to review'),
   truncated: z.boolean().optional().describe('Whether the diff was truncated due to size'),
   ...baseOutputFields,
 });

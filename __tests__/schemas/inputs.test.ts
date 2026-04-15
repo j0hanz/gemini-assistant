@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   AgenticSearchInputSchema,
   AnalyzeFileInputSchema,
+  AnalyzePrInputSchema,
   AnalyzeUrlInputSchema,
   CompareFilesInputSchema,
   CreateCacheInputSchema,
@@ -204,6 +205,38 @@ describe('CreateCacheInputSchema', () => {
   it('rejects filePaths exceeding 50 entries', () => {
     const paths = Array.from({ length: 51 }, (_, i) => `/file${i}.txt`);
     const result = CreateCacheInputSchema.safeParse({ filePaths: paths });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('AnalyzePrInputSchema', () => {
+  it('accepts valid minimal input', () => {
+    const result = AnalyzePrInputSchema.safeParse({});
+    assert.ok(result.success);
+  });
+
+  it('accepts supported fields', () => {
+    const result = AnalyzePrInputSchema.safeParse({
+      dryRun: true,
+      cacheName: 'cachedContents/abc123',
+      thinkingLevel: 'HIGH',
+      language: 'TypeScript',
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects removed mode field', () => {
+    const result = AnalyzePrInputSchema.safeParse({ mode: 'unstaged' });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects removed base field', () => {
+    const result = AnalyzePrInputSchema.safeParse({ base: 'origin/main' });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects removed paths field', () => {
+    const result = AnalyzePrInputSchema.safeParse({ paths: ['src/'] });
     assert.strictEqual(result.success, false);
   });
 });

@@ -60,7 +60,7 @@ const server = new McpServer(
       'agentic_search (deep multi-step research with progress notifications), ' +
       'analyze_file (file upload, mediaResolution for images/video), analyze_url (URL content analysis), ' +
       'create_cache/list_caches/update_cache/delete_cache (context caching, ≥32k tokens), ' +
-      'analyze_pr (generate git diff and review with Gemini in one step), ' +
+      'analyze_pr (inspect the current repo, auto-generate a local diff, and review it with Gemini), ' +
       'explain_error (diagnose stack traces and error messages), ' +
       'compare_files (upload two files for structured comparison), ' +
       'generate_diagram (create Mermaid/PlantUML diagrams from descriptions or code). ' +

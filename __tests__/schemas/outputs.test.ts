@@ -62,29 +62,37 @@ describe('AskOutputSchema', () => {
 });
 
 describe('AnalyzePrOutputSchema', () => {
-  it('accepts valid mode enum values', () => {
+  it('accepts valid generated diff metadata', () => {
     const result = AnalyzePrOutputSchema.safeParse({
       analysis: 'Review text',
       stats: { files: 1, additions: 10, deletions: 5 },
-      mode: 'unstaged',
+      reviewedPaths: ['src/index.ts'],
+      includedUntracked: ['src/new-file.ts'],
+      skippedBinaryPaths: ['assets/logo.png'],
+      empty: false,
     });
     assert.ok(result.success);
   });
 
-  it('accepts staged mode', () => {
+  it('accepts empty review output', () => {
     const result = AnalyzePrOutputSchema.safeParse({
-      analysis: 'Review text',
-      stats: { files: 2, additions: 20, deletions: 10 },
-      mode: 'staged',
+      analysis: 'No local changes to review.',
+      stats: { files: 0, additions: 0, deletions: 0 },
+      reviewedPaths: [],
+      includedUntracked: [],
+      skippedBinaryPaths: [],
+      empty: true,
     });
     assert.ok(result.success);
   });
 
-  it('rejects invalid mode value', () => {
+  it('rejects missing reviewedPaths', () => {
     const result = AnalyzePrOutputSchema.safeParse({
       analysis: 'Review text',
       stats: { files: 1, additions: 10, deletions: 5 },
-      mode: 'invalid',
+      includedUntracked: [],
+      skippedBinaryPaths: [],
+      empty: false,
     });
     assert.strictEqual(result.success, false);
   });

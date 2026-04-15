@@ -4,10 +4,15 @@ import { describe, it } from 'node:test';
 // Set dummy API key so client.ts doesn't exit
 process.env.API_KEY ??= 'test-key-for-pr';
 
-const { computeDiffStats, buildGitDiffArgs, truncateDiff, buildAnalysisPrompt, formatGitError } =
-  await import('../../src/tools/pr.js');
-
-// ── computeDiffStats ──────────────────────────────────────────────────
+const {
+  buildAnalysisPrompt,
+  buildGitDiffArgs,
+  buildUntrackedFilePatch,
+  computeDiffStats,
+  formatGitError,
+  matchesNoisyPath,
+  truncateDiff,
+} = await import('../../src/tools/pr.js');
 
 describe('computeDiffStats', () => {
   it('returns zeros for an empty string', () => {
@@ -15,35 +20,26 @@ describe('computeDiffStats', () => {
     assert.deepStrictEqual(stats, { files: 0, additions: 0, deletions: 0 });
   });
 
-  it('counts a single-file diff', () => {
+  it('counts unique files across repeated diff headers', () => {
     const diff = [
+      'diff --git "a/src/index file.ts" "b/src/index file.ts"',
+      '--- "a/src/index file.ts"',
+      '+++ "b/src/index file.ts"',
+      '+const a = 1;',
       'diff --git a/src/index.ts b/src/index.ts',
-      'index abc..def 100644',
       '--- a/src/index.ts',
       '+++ b/src/index.ts',
-      '@@ -1,3 +1,4 @@',
-      ' const a = 1;',
       '-const b = 2;',
-      '+const b = 3;',
-      '+const c = 4;',
     ].join('\n');
-    const stats = computeDiffStats(diff);
-    assert.deepStrictEqual(stats, { files: 1, additions: 2, deletions: 1 });
-  });
 
-  it('counts multiple files', () => {
-    const diff = [
-      'diff --git a/a.ts b/a.ts',
-      '--- a/a.ts',
-      '+++ b/a.ts',
-      '+line',
-      'diff --git a/b.ts b/b.ts',
-      '--- a/b.ts',
-      '+++ b/b.ts',
-      '-removed',
-    ].join('\n');
     const stats = computeDiffStats(diff);
     assert.deepStrictEqual(stats, { files: 2, additions: 1, deletions: 1 });
+  });
+
+  it('counts synthetic untracked file patches', () => {
+    const diff = buildUntrackedFilePatch('src/new-file.ts', 'const answer = 42;\n');
+    const stats = computeDiffStats(diff);
+    assert.deepStrictEqual(stats, { files: 1, additions: 1, deletions: 0 });
   });
 
   it('ignores +++ and --- header lines', () => {
@@ -53,11 +49,23 @@ describe('computeDiffStats', () => {
   });
 });
 
-// ── buildGitDiffArgs ──────────────────────────────────────────────────
+describe('matchesNoisyPath', () => {
+  it('matches excluded lockfiles and minified assets', () => {
+    assert.strictEqual(matchesNoisyPath('package-lock.json'), true);
+    assert.strictEqual(matchesNoisyPath('nested/yarn.lock'), true);
+    assert.strictEqual(matchesNoisyPath('foo/bar/app.min.js'), true);
+    assert.strictEqual(matchesNoisyPath('foo/bar/styles.min.css'), true);
+  });
+
+  it('keeps normal source files', () => {
+    assert.strictEqual(matchesNoisyPath('src/index.ts'), false);
+    assert.strictEqual(matchesNoisyPath('README.md'), false);
+  });
+});
 
 describe('buildGitDiffArgs', () => {
-  it('builds unstaged args with default exclusions', () => {
-    const args = buildGitDiffArgs('unstaged');
+  it('builds tracked diff args with default exclusions', () => {
+    const args = buildGitDiffArgs(false);
     assert.ok(args.includes('diff'));
     assert.ok(args.includes('--no-color'));
     assert.ok(!args.includes('--cached'));
@@ -65,33 +73,32 @@ describe('buildGitDiffArgs', () => {
     assert.ok(args.includes(':!package-lock.json'));
   });
 
-  it('builds staged args with --cached', () => {
-    const args = buildGitDiffArgs('staged');
+  it('builds staged tracked diff args', () => {
+    const args = buildGitDiffArgs(true);
     assert.ok(args.includes('--cached'));
-  });
-
-  it('includes base ref when provided', () => {
-    const args = buildGitDiffArgs('unstaged', 'origin/main');
-    const dashDashIdx = args.indexOf('--');
-    const baseIdx = args.indexOf('origin/main');
-    assert.ok(baseIdx !== -1, 'base ref should be in args');
-    assert.ok(baseIdx < dashDashIdx, 'base ref should appear before --');
-  });
-
-  it('uses user paths instead of default exclusions', () => {
-    const args = buildGitDiffArgs('unstaged', undefined, ['src/', 'lib/']);
-    assert.ok(args.includes('src/'));
-    assert.ok(args.includes('lib/'));
-    assert.ok(!args.includes(':!package-lock.json'));
-  });
-
-  it('uses default exclusions when paths is empty', () => {
-    const args = buildGitDiffArgs('unstaged', undefined, []);
-    assert.ok(args.includes(':!package-lock.json'));
   });
 });
 
-// ── truncateDiff ──────────────────────────────────────────────────────
+describe('buildUntrackedFilePatch', () => {
+  it('creates a new file patch for text content', () => {
+    const patch = buildUntrackedFilePatch('src/new-file.ts', 'const a = 1;\nconst b = 2;\n');
+    assert.ok(patch.includes('diff --git a/src/new-file.ts b/src/new-file.ts'));
+    assert.ok(patch.includes('new file mode 100644'));
+    assert.ok(patch.includes('@@ -0,0 +1,2 @@'));
+    assert.ok(patch.includes('+const a = 1;'));
+    assert.ok(patch.includes('+const b = 2;'));
+  });
+
+  it('marks executable files correctly', () => {
+    const patch = buildUntrackedFilePatch('scripts/run.sh', '#!/bin/sh\necho ok\n', true);
+    assert.ok(patch.includes('new file mode 100755'));
+  });
+
+  it('handles files without a trailing newline', () => {
+    const patch = buildUntrackedFilePatch('README.md', 'hello');
+    assert.ok(patch.includes('\\ No newline at end of file'));
+  });
+});
 
 describe('truncateDiff', () => {
   it('returns original for short diffs', () => {
@@ -116,28 +123,37 @@ describe('truncateDiff', () => {
   });
 });
 
-// ── buildAnalysisPrompt ───────────────────────────────────────────────
-
 describe('buildAnalysisPrompt', () => {
   const stats = { files: 2, additions: 10, deletions: 5 };
+  const reviewedPaths = ['src/a.ts', 'src/b.ts'];
 
   it('builds prompt without language', () => {
-    const prompt = buildAnalysisPrompt('diff content', 'unstaged', stats);
-    assert.ok(prompt.includes('## Git Diff (unstaged)'));
+    const prompt = buildAnalysisPrompt('diff content', stats, reviewedPaths, [], []);
+    assert.ok(prompt.includes('## Local Diff Snapshot'));
     assert.ok(prompt.includes('Files: 2 | +10 -5'));
+    assert.ok(prompt.includes('Reviewed Paths:'));
+    assert.ok(prompt.includes('- src/a.ts'));
     assert.ok(prompt.includes('```diff'));
     assert.ok(prompt.includes('diff content'));
     assert.ok(!prompt.includes('Language:'));
   });
 
-  it('includes language when provided', () => {
-    const prompt = buildAnalysisPrompt('diff content', 'staged', stats, 'TypeScript');
-    assert.ok(prompt.includes('## Git Diff (staged)'));
+  it('includes untracked and skipped binary metadata when provided', () => {
+    const prompt = buildAnalysisPrompt(
+      'diff content',
+      stats,
+      reviewedPaths,
+      ['src/new-file.ts'],
+      ['assets/logo.png'],
+      'TypeScript',
+    );
     assert.ok(prompt.includes('Language: TypeScript'));
+    assert.ok(prompt.includes('Included Untracked Text Files:'));
+    assert.ok(prompt.includes('- src/new-file.ts'));
+    assert.ok(prompt.includes('Skipped Binary Untracked Files:'));
+    assert.ok(prompt.includes('- assets/logo.png'));
   });
 });
-
-// ── formatGitError ────────────────────────────────────────────────────
 
 describe('formatGitError', () => {
   it('handles Error with numeric code and stderr', () => {
@@ -156,15 +172,5 @@ describe('formatGitError', () => {
   it('handles non-Error values', () => {
     const msg = formatGitError('something broke');
     assert.ok(msg.includes('Failed to run git: something broke'));
-  });
-
-  it('handles undefined', () => {
-    const msg = formatGitError(undefined);
-    assert.ok(msg.includes('Failed to run git: undefined'));
-  });
-
-  it('handles null', () => {
-    const msg = formatGitError(null);
-    assert.ok(msg.includes('Failed to run git: null'));
   });
 });

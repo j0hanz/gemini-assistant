@@ -63,30 +63,20 @@ export const AnalyzeUrlInputSchema = z.object({
 });
 export type AnalyzeUrlInput = z.infer<typeof AnalyzeUrlInputSchema>;
 
-export const AnalyzePrInputSchema = z.object({
-  mode: z
-    .enum(['unstaged', 'staged'])
-    .default('unstaged')
-    .describe('"unstaged": working-tree changes. "staged": changes added with git add.'),
-  base: z
-    .string()
-    .optional()
-    .describe(
-      'Base ref for comparison (e.g., "origin/main", "HEAD~3"). Omit for working-tree diff.',
-    ),
-  paths: z
-    .array(z.string())
-    .max(20)
-    .optional()
-    .describe('File paths or directories to include. Overrides default lock/minified exclusions.'),
-  dryRun: z.boolean().optional().describe('Return diff content and stats without Gemini analysis.'),
-  cacheName: z
-    .string()
-    .optional()
-    .describe('Cache resource name to provide project context during review.'),
-  thinkingLevel: thinkingLevelField,
-  language: z.string().optional().describe('Primary language for review context'),
-});
+export const AnalyzePrInputSchema = z
+  .object({
+    dryRun: z
+      .boolean()
+      .optional()
+      .describe('Return diff content and stats without Gemini analysis.'),
+    cacheName: z
+      .string()
+      .optional()
+      .describe('Cache resource name to provide project context during review.'),
+    thinkingLevel: thinkingLevelField,
+    language: z.string().optional().describe('Primary language for review context'),
+  })
+  .strict();
 export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
 
 export const CreateCacheInputSchema = z

@@ -1,9 +1,11 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { execFile } from 'node:child_process';
+import { readFile, stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { errorResult, sendProgress } from '../lib/errors.js';
+import { reportCompletion, sendProgress } from '../lib/errors.js';
 import { handleToolExecution } from '../lib/streaming.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { type AnalyzePrInput, AnalyzePrInputSchema } from '../schemas/inputs.js';
@@ -23,7 +25,8 @@ const NOISY_EXCLUDE_PATHSPECS = [
   ':!package-lock.json',
   ':!yarn.lock',
   ':!pnpm-lock.yaml',
-  ':!*.lock',
+  ':!bun.lockb',
+  ':!*.map',
   ':!*.min.js',
   ':!*.min.css',
 ];
@@ -40,40 +43,84 @@ const SYSTEM_INSTRUCTION =
   '- Cite specific files and hunks. Never invent content not in the diff.\n' +
   '- If the diff is clean, say so briefly — do not pad the review.';
 
-type DiffMode = 'unstaged' | 'staged';
-
-interface DiffStats {
+export interface DiffStats {
   files: number;
   additions: number;
   deletions: number;
 }
 
+interface LocalDiffSnapshot {
+  diff: string;
+  stats: DiffStats;
+  reviewedPaths: string[];
+  includedUntracked: string[];
+  skippedBinaryPaths: string[];
+  empty: boolean;
+}
+
+interface UntrackedPatchResult {
+  patch?: string;
+  path: string;
+  binary: boolean;
+}
+
+export function matchesNoisyPath(filePath: string): boolean {
+  const normalized = filePath.replaceAll('\\', '/');
+  const basename = normalized.split('/').pop()?.toLowerCase() ?? '';
+  return (
+    basename === 'package-lock.json' ||
+    basename === 'yarn.lock' ||
+    basename === 'pnpm-lock.yaml' ||
+    basename === 'bun.lockb' ||
+    basename.endsWith('.map') ||
+    basename.endsWith('.min.js') ||
+    basename.endsWith('.min.css')
+  );
+}
+
 export function computeDiffStats(diff: string): DiffStats {
-  let files = 0;
+  const files = new Set<string>();
   let additions = 0;
   let deletions = 0;
 
   for (const line of diff.split('\n')) {
-    if (line.startsWith('diff --git')) files++;
-    else if (line.startsWith('+') && !line.startsWith('+++')) additions++;
-    else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+    if (line.startsWith('diff --git ')) {
+      const match = /^diff --git (?:"a\/(.+?)"|a\/(.+?)) (?:"b\/(.+?)"|b\/(.+?))$/.exec(line);
+      files.add(match ? (match[3] ?? match[4] ?? line) : line);
+      continue;
+    }
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      additions++;
+      continue;
+    }
+    if (line.startsWith('-') && !line.startsWith('---')) {
+      deletions++;
+    }
   }
 
-  return { files, additions, deletions };
+  return { files: files.size, additions, deletions };
 }
 
-export function buildGitDiffArgs(mode: DiffMode, base?: string, paths?: string[]): string[] {
-  // '--' separates flags from pathspecs to prevent flag injection
+export function buildGitDiffArgs(staged: boolean): string[] {
   const args = ['diff', '--no-color', '--no-ext-diff'];
-  if (mode === 'staged') args.push('--cached');
-  if (base) args.push(base);
-  // User-specified paths override default exclusions
-  if (paths && paths.length > 0) {
-    args.push('--', ...paths);
-  } else {
-    args.push('--', ...NOISY_EXCLUDE_PATHSPECS);
-  }
+  if (staged) args.push('--cached');
+  args.push('--', ...NOISY_EXCLUDE_PATHSPECS);
   return args;
+}
+
+function buildGitHeadDiffArgs(): string[] {
+  return ['diff', '--no-color', '--no-ext-diff', 'HEAD', '--', ...NOISY_EXCLUDE_PATHSPECS];
+}
+
+function buildGitNameOnlyArgs(staged: boolean): string[] {
+  const args = ['diff', '--name-only'];
+  if (staged) args.push('--cached');
+  args.push('--', ...NOISY_EXCLUDE_PATHSPECS);
+  return args;
+}
+
+function buildGitHeadNameOnlyArgs(): string[] {
+  return ['diff', '--name-only', 'HEAD', '--', ...NOISY_EXCLUDE_PATHSPECS];
 }
 
 async function findGitRoot(signal?: AbortSignal): Promise<string> {
@@ -85,14 +132,8 @@ async function findGitRoot(signal?: AbortSignal): Promise<string> {
   return stdout.trim();
 }
 
-async function generateDiff(
-  mode: DiffMode,
-  signal?: AbortSignal,
-  base?: string,
-  paths?: string[],
-): Promise<string> {
-  const gitRoot = await findGitRoot(signal);
-  const { stdout } = await execFileAsync('git', buildGitDiffArgs(mode, base, paths), {
+async function runGit(gitRoot: string, args: string[], signal?: AbortSignal): Promise<string> {
+  const { stdout } = await execFileAsync('git', args, {
     cwd: gitRoot,
     encoding: 'utf8',
     maxBuffer: GIT_MAX_BUFFER,
@@ -102,16 +143,140 @@ async function generateDiff(
   return stdout;
 }
 
-export function truncateDiff(diff: string): { diff: string; truncated: boolean } {
-  if (diff.length <= MAX_DIFF_CHARS) return { diff, truncated: false };
+async function hasHeadCommit(gitRoot: string, signal?: AbortSignal): Promise<boolean> {
+  try {
+    await runGit(gitRoot, ['rev-parse', '--verify', 'HEAD'], signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function generateFallbackTrackedDiff(gitRoot: string, signal?: AbortSignal): Promise<string> {
+  const [stagedDiff, unstagedDiff] = await Promise.all([
+    runGit(gitRoot, buildGitDiffArgs(true), signal),
+    runGit(gitRoot, buildGitDiffArgs(false), signal),
+  ]);
+
+  return [stagedDiff, unstagedDiff].filter((part) => part.trim()).join('\n');
+}
+
+async function listFallbackTrackedPaths(gitRoot: string, signal?: AbortSignal): Promise<string[]> {
+  const [stagedPaths, unstagedPaths] = await Promise.all([
+    runGit(gitRoot, buildGitNameOnlyArgs(true), signal),
+    runGit(gitRoot, buildGitNameOnlyArgs(false), signal),
+  ]);
+
+  return [...stagedPaths.split(/\r?\n/), ...unstagedPaths.split(/\r?\n/)]
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !matchesNoisyPath(line));
+}
+
+async function buildTrackedSnapshot(
+  gitRoot: string,
+  signal?: AbortSignal,
+): Promise<{ diff: string; paths: string[] }> {
+  if (await hasHeadCommit(gitRoot, signal)) {
+    const [diff, paths] = await Promise.all([
+      runGit(gitRoot, buildGitHeadDiffArgs(), signal),
+      runGit(gitRoot, buildGitHeadNameOnlyArgs(), signal),
+    ]);
+    return {
+      diff,
+      paths: paths
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .filter((line) => !matchesNoisyPath(line)),
+    };
+  }
+
+  const [diff, paths] = await Promise.all([
+    generateFallbackTrackedDiff(gitRoot, signal),
+    listFallbackTrackedPaths(gitRoot, signal),
+  ]);
+  return { diff, paths };
+}
+
+async function listUntrackedPaths(gitRoot: string, signal?: AbortSignal): Promise<string[]> {
+  const stdout = await runGit(gitRoot, ['ls-files', '--others', '--exclude-standard'], signal);
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !matchesNoisyPath(line));
+}
+
+function isBinaryContent(buffer: Buffer): boolean {
+  if (buffer.includes(0)) return true;
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+export function buildUntrackedFilePatch(
+  filePath: string,
+  content: string,
+  executable = false,
+): string {
+  const normalizedContent = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  const hasTrailingNewline = normalizedContent.endsWith('\n');
+  const body = hasTrailingNewline ? normalizedContent.slice(0, -1) : normalizedContent;
+  const lines = normalizedContent === '' ? [] : body.split('\n');
+  const patchLines = [
+    `diff --git a/${filePath} b/${filePath}`,
+    `new file mode ${executable ? '100755' : '100644'}`,
+    '--- /dev/null',
+    `+++ b/${filePath}`,
+  ];
+
+  if (lines.length === 0) {
+    return patchLines.join('\n');
+  }
+
+  patchLines.push(`@@ -0,0 +1,${String(lines.length)} @@`);
+  patchLines.push(...lines.map((line) => `+${line}`));
+  if (!hasTrailingNewline) {
+    patchLines.push('\\ No newline at end of file');
+  }
+
+  return patchLines.join('\n');
+}
+
+async function buildUntrackedPatch(
+  gitRoot: string,
+  relativePath: string,
+): Promise<UntrackedPatchResult> {
+  const absolutePath = join(gitRoot, relativePath);
+  const fileStats = await stat(absolutePath).catch(() => null);
+
+  if (!fileStats || !fileStats.isFile() || fileStats.size > 1024 * 1024) {
+    return { path: relativePath, binary: false };
+  }
+
+  const fileBuffer = await readFile(absolutePath);
+  if (isBinaryContent(fileBuffer)) {
+    return { path: relativePath, binary: true };
+  }
+
+  const fileContent = new TextDecoder('utf-8').decode(fileBuffer);
   return {
-    diff: diff.slice(0, MAX_DIFF_CHARS) + '\n\n[... diff truncated due to size ...]',
-    truncated: true,
+    path: relativePath,
+    binary: false,
+    patch: buildUntrackedFilePatch(relativePath, fileContent, (fileStats.mode & 0o111) !== 0),
   };
 }
 
-function describeModeHint(mode: DiffMode): string {
-  return mode === 'staged' ? 'staged with git add' : 'modified but not yet staged';
+export function truncateDiff(diff: string): { diff: string; truncated: boolean } {
+  if (diff.length <= MAX_DIFF_CHARS) return { diff, truncated: false };
+  return {
+    diff: `${diff.slice(0, MAX_DIFF_CHARS)}\n\n[... diff truncated due to size ...]`,
+    truncated: true,
+  };
 }
 
 export function formatGitError(err: unknown): string {
@@ -126,16 +291,44 @@ export function formatGitError(err: unknown): string {
   return `Failed to run git: ${gitErr.message}. Ensure git is installed.`;
 }
 
+function formatAnalyzePrError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const nodeErr = err as Error & { code?: number | string; stderr?: string; syscall?: string };
+  if (typeof nodeErr.code === 'number' || nodeErr.stderr || nodeErr.syscall === 'spawn git') {
+    return formatGitError(err);
+  }
+  return nodeErr.message;
+}
+
 export function buildAnalysisPrompt(
   diff: string,
-  mode: DiffMode,
   stats: DiffStats,
+  reviewedPaths: string[],
+  includedUntracked: string[],
+  skippedBinaryPaths: string[],
   language?: string,
 ): string {
   const parts = [
-    `## Git Diff (${mode})`,
+    '## Local Diff Snapshot',
     `Files: ${String(stats.files)} | +${String(stats.additions)} -${String(stats.deletions)}`,
     ...(language ? [`Language: ${language}`] : []),
+    '',
+    'Reviewed Paths:',
+    ...reviewedPaths.map((filePath) => `- ${filePath}`),
+    ...(includedUntracked.length > 0
+      ? [
+          '',
+          'Included Untracked Text Files:',
+          ...includedUntracked.map((filePath) => `- ${filePath}`),
+        ]
+      : []),
+    ...(skippedBinaryPaths.length > 0
+      ? [
+          '',
+          'Skipped Binary Untracked Files:',
+          ...skippedBinaryPaths.map((filePath) => `- ${filePath}`),
+        ]
+      : []),
     '',
     '```diff',
     diff,
@@ -144,69 +337,122 @@ export function buildAnalysisPrompt(
   return parts.join('\n');
 }
 
-/** Validates a git ref to prevent flag injection. */
-const SAFE_GIT_REF = /^[\w/.\-~^@{}]+$/;
+async function buildLocalDiffSnapshot(signal?: AbortSignal): Promise<LocalDiffSnapshot> {
+  const gitRoot = await findGitRoot(signal);
+  const [trackedSnapshot, untrackedPaths] = await Promise.all([
+    buildTrackedSnapshot(gitRoot, signal),
+    listUntrackedPaths(gitRoot, signal),
+  ]);
+
+  const untrackedResults: UntrackedPatchResult[] = [];
+  for (const relativePath of untrackedPaths) {
+    untrackedResults.push(await buildUntrackedPatch(gitRoot, relativePath));
+  }
+
+  const includedUntracked = untrackedResults
+    .filter(
+      (result): result is UntrackedPatchResult & { patch: string } =>
+        !result.binary && !!result.patch,
+    )
+    .map((result) => result.path)
+    .sort();
+  const skippedBinaryPaths = untrackedResults
+    .filter((result) => result.binary)
+    .map((result) => result.path)
+    .sort();
+  const untrackedPatches = untrackedResults
+    .flatMap((result) => (result.patch ? [result.patch] : []))
+    .filter((patch) => patch.trim());
+
+  const reviewedPaths = [...new Set([...trackedSnapshot.paths, ...includedUntracked])].sort();
+  const diff = [trackedSnapshot.diff, ...untrackedPatches].filter((part) => part.trim()).join('\n');
+  const empty = !diff.trim();
+
+  return {
+    diff,
+    stats: empty ? { files: 0, additions: 0, deletions: 0 } : computeDiffStats(diff),
+    reviewedPaths,
+    includedUntracked,
+    skippedBinaryPaths,
+    empty,
+  };
+}
 
 async function analyzePrWork(
-  { mode, thinkingLevel, language, base, paths, dryRun, cacheName }: AnalyzePrInput,
+  { thinkingLevel, language, dryRun, cacheName }: AnalyzePrInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  // Validate base ref if provided
-  if (base && !SAFE_GIT_REF.test(base)) {
-    return errorResult(
-      `${TOOL_LABEL}: Invalid base ref "${base}". Only alphanumeric, /, ., -, ~, ^, @, {} are allowed.`,
-    );
-  }
+  await sendProgress(ctx, 0, 3, `${TOOL_LABEL}: Inspecting local changes`);
 
-  // Step 1: Generate diff
-  await sendProgress(ctx, 0, 3, `${TOOL_LABEL}: Generating ${mode} diff`);
-
-  let rawDiff: string;
+  let snapshot: LocalDiffSnapshot;
   try {
-    rawDiff = await generateDiff(mode, ctx.mcpReq.signal, base, paths);
+    snapshot = await buildLocalDiffSnapshot(ctx.mcpReq.signal);
   } catch (err) {
-    return errorResult(`${TOOL_LABEL}: ${formatGitError(err)}`);
+    return {
+      content: [{ type: 'text', text: `${TOOL_LABEL}: ${formatAnalyzePrError(err)}` }],
+      isError: true,
+    };
   }
-
-  if (!rawDiff.trim()) {
-    return errorResult(
-      `No ${mode} changes found. Ensure you have changes that are ${describeModeHint(mode)}.`,
-    );
-  }
-
-  const stats = computeDiffStats(rawDiff);
-  const { diff, truncated } = truncateDiff(rawDiff);
 
   await sendProgress(
     ctx,
     1,
     3,
-    `${TOOL_LABEL}: ${String(stats.files)} files (+${String(stats.additions)}, -${String(stats.deletions)})`,
+    `${TOOL_LABEL}: ${String(snapshot.stats.files)} files (+${String(snapshot.stats.additions)}, -${String(snapshot.stats.deletions)})`,
   );
 
-  // Dry-run mode: return diff + stats without Gemini analysis
+  if (snapshot.empty) {
+    const analysis =
+      snapshot.skippedBinaryPaths.length > 0
+        ? `No reviewable local text changes to review. Skipped binary untracked files: ${snapshot.skippedBinaryPaths.join(', ')}.`
+        : 'No local changes to review.';
+    await reportCompletion(ctx, TOOL_LABEL, 'no changes');
+    return {
+      content: [{ type: 'text' as const, text: analysis }],
+      structuredContent: {
+        analysis,
+        stats: snapshot.stats,
+        reviewedPaths: snapshot.reviewedPaths,
+        includedUntracked: snapshot.includedUntracked,
+        skippedBinaryPaths: snapshot.skippedBinaryPaths,
+        empty: true,
+      },
+    };
+  }
+
+  const { diff, truncated } = truncateDiff(snapshot.diff);
+
   if (dryRun) {
+    await reportCompletion(ctx, TOOL_LABEL, 'snapshot ready');
     return {
       content: [{ type: 'text' as const, text: diff }],
       structuredContent: {
         analysis: diff,
-        stats,
-        mode,
+        stats: snapshot.stats,
+        reviewedPaths: snapshot.reviewedPaths,
+        includedUntracked: snapshot.includedUntracked,
+        skippedBinaryPaths: snapshot.skippedBinaryPaths,
+        empty: false,
         ...(truncated ? { truncated } : {}),
       },
     };
   }
 
-  // Step 2: Analyze with Gemini
-  await sendProgress(ctx, 2, 3, `${TOOL_LABEL}: Analyzing changes`);
+  await sendProgress(ctx, 2, 3, `${TOOL_LABEL}: Analyzing generated diff`);
   await ctx.mcpReq.log(
     'info',
-    `analyze_pr: ${String(stats.files)} files, +${String(stats.additions)}/-${String(stats.deletions)}${truncated ? ' (truncated)' : ''}`,
+    `analyze_pr: ${String(snapshot.stats.files)} files, +${String(snapshot.stats.additions)}/-${String(snapshot.stats.deletions)}${truncated ? ' (truncated)' : ''}`,
   );
 
-  const prompt = buildAnalysisPrompt(diff, mode, stats, language);
+  const prompt = buildAnalysisPrompt(
+    diff,
+    snapshot.stats,
+    snapshot.reviewedPaths,
+    snapshot.includedUntracked,
+    snapshot.skippedBinaryPaths,
+    language,
+  );
 
-  // When cacheName is set, Gemini ignores systemInstruction — prepend it to the prompt
   const effectiveSystemInstruction = cacheName ? undefined : SYSTEM_INSTRUCTION;
   const effectivePrompt = cacheName ? `${SYSTEM_INSTRUCTION}\n\n${prompt}` : prompt;
 
@@ -230,11 +476,14 @@ async function analyzePrWork(
     (_streamResult, textContent) => ({
       structuredContent: {
         analysis: textContent || '',
-        stats,
-        mode,
+        stats: snapshot.stats,
+        reviewedPaths: snapshot.reviewedPaths,
+        includedUntracked: snapshot.includedUntracked,
+        skippedBinaryPaths: snapshot.skippedBinaryPaths,
+        empty: false,
         ...(truncated ? { truncated } : {}),
       },
-      reportMessage: `${String(stats.files)} files reviewed (+${String(stats.additions)}, -${String(stats.deletions)})`,
+      reportMessage: `${String(snapshot.stats.files)} files reviewed (+${String(snapshot.stats.additions)}, -${String(snapshot.stats.deletions)})`,
     }),
   );
 }
@@ -246,10 +495,9 @@ export function registerAnalyzePrTool(server: McpServer): void {
     {
       title: TOOL_LABEL,
       description:
-        'Analyze local git diff with Gemini. ' +
-        'Supports unstaged, staged, and branch comparison (via base ref). ' +
-        'Use dryRun to preview the diff without AI analysis. ' +
-        'Use cacheName to provide project context during review.',
+        'Inspect the current local git repository, auto-generate a diff of all local changes, ' +
+        'and review that generated diff with Gemini. Use dryRun to preview the generated diff ' +
+        'without AI analysis. Use cacheName to provide project context during review.',
       inputSchema: AnalyzePrInputSchema,
       outputSchema: AnalyzePrOutputSchema,
       annotations: READONLY_ANNOTATIONS,

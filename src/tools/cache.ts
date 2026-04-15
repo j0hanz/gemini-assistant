@@ -28,6 +28,7 @@ import {
   ListCachesOutputSchema,
   UpdateCacheOutputSchema,
 } from '../schemas/outputs.js';
+import { withCurrentWorkspaceRoot } from '../schemas/shared.js';
 
 import { type CacheSummary, getAI, listCacheSummaries, MODEL } from '../client.js';
 
@@ -336,9 +337,10 @@ function registerCreateCacheTool(server: McpServer, rootsFetcher: RootsFetcher):
     'create_cache',
     {
       title: CREATE_CACHE_TOOL_LABEL,
-      description:
+      description: withCurrentWorkspaceRoot(
         'Create a Gemini context cache from files and/or a system instruction. ' +
-        'Combined content MUST exceed ~32,000 tokens.',
+          'Combined content MUST exceed ~32,000 tokens.',
+      ),
       inputSchema: CreateCacheInputSchema,
       outputSchema: CreateCacheOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,

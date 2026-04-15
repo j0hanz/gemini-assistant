@@ -6,12 +6,12 @@ import { completeCacheNames, THINKING_LEVELS } from '../client.js';
 import { completeSessionIds } from '../sessions.js';
 import { GeminiResponseSchema } from './json-schema.js';
 import {
-  absolutePath,
   cacheName,
   optionalText,
   publicHttpUrl,
   requiredText,
   ttlSeconds,
+  workspacePath,
 } from './shared.js';
 
 const URL_TOOL_PROFILES = ['url', 'search_url'] as const;
@@ -135,7 +135,7 @@ export const AgenticSearchInputSchema = z.strictObject({
 export type AgenticSearchInput = z.infer<typeof AgenticSearchInputSchema>;
 
 export const AnalyzeFileInputSchema = z.strictObject({
-  filePath: absolutePath('Absolute path to the file'),
+  filePath: workspacePath('Workspace-relative or absolute path to the file'),
   question: requiredText('What to analyze or ask about the file'),
   thinkingLevel: thinkingLevelField,
   mediaResolution: z
@@ -166,9 +166,9 @@ export const AnalyzePrInputSchema = z.object({
 export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
 
 const createCacheFilePathsSchema = z
-  .array(absolutePath('Absolute path to a file to cache'))
+  .array(workspacePath('Workspace-relative or absolute path to a file to cache'))
   .max(50)
-  .describe('Absolute paths to files to cache');
+  .describe('Workspace-relative or absolute paths to files to cache');
 const createCacheSystemInstructionSchema = requiredText(
   'System instruction to cache with the files',
 );
@@ -240,8 +240,8 @@ export const ExplainErrorInputSchema = z.strictObject({
 export type ExplainErrorInput = z.infer<typeof ExplainErrorInputSchema>;
 
 export const CompareFilesInputSchema = z.strictObject({
-  filePathA: absolutePath('Absolute path to the first file'),
-  filePathB: absolutePath('Absolute path to the second file'),
+  filePathA: workspacePath('Workspace-relative or absolute path to the first file'),
+  filePathB: workspacePath('Workspace-relative or absolute path to the second file'),
   question: optionalText('Specific comparison focus (e.g., "security differences", "API changes")'),
   thinkingLevel: thinkingLevelField,
   googleSearch: z
@@ -262,15 +262,21 @@ export const GenerateDiagramInputSchema = z
       .optional()
       .default('mermaid')
       .describe('Diagram syntax format (default: mermaid)'),
-    sourceFilePath: absolutePath(
-      'Absolute path to a single source file to derive the diagram from',
+    sourceFilePath: workspacePath(
+      'Workspace-relative or absolute path to a single source file to derive the diagram from',
     ).optional(),
     sourceFilePaths: z
-      .array(absolutePath('Absolute path to a source file for diagram generation'))
+      .array(
+        workspacePath(
+          'Workspace-relative or absolute path to a source file for diagram generation',
+        ),
+      )
       .min(1)
       .max(10)
       .optional()
-      .describe('Absolute paths to multiple source files for architecture diagrams (max 10).'),
+      .describe(
+        'Workspace-relative or absolute paths to multiple source files for architecture diagrams (max 10).',
+      ),
     thinkingLevel: thinkingLevelField,
     googleSearch: z
       .boolean()

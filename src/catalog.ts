@@ -56,7 +56,8 @@ const DISCOVERY_ENTRIES = [
     name: 'analyze_file',
     kind: 'tool',
     title: 'Analyze Local File',
-    bestFor: 'Inspecting a local file from approved workspace roots.',
+    bestFor:
+      'Inspecting a local file from approved workspace roots with a workspace-relative or absolute path.',
     whenToUse: 'Use when you need Gemini to reason about code, text, or media in one file.',
     inputs: ['filePath', 'question', 'thinkingLevel?', 'mediaResolution?'],
     returns: 'An answer grounded in the uploaded file content.',
@@ -290,7 +291,8 @@ const DISCOVERY_ENTRIES = [
     name: 'analyze-file',
     kind: 'prompt',
     title: 'Analyze File Prompt',
-    bestFor: 'Packaging a file path and question into a ready-to-run prompt.',
+    bestFor:
+      'Packaging a workspace-relative or absolute file path and question into a ready-to-run prompt.',
     whenToUse:
       'Use when a client wants a guided starting point before calling file analysis tools.',
     inputs: ['filePath', 'question'],
@@ -588,7 +590,7 @@ const WORKFLOWS = [
       'Use when the user already knows which file matters and wants a grounded answer about it.',
     steps: [
       'Use the analyze-file prompt to package the file path and question.',
-      'Run analyze_file against an absolute path inside allowed roots.',
+      'Run analyze_file against a workspace-relative or absolute path inside allowed roots.',
       'Escalate to ask or generate_diagram if the answer needs broader synthesis or visualization.',
     ],
     recommendedTools: ['analyze_file', 'ask', 'generate_diagram'],

@@ -104,6 +104,14 @@ Useful optional variables:
 - `SESSION_TTL_MS`: session idle TTL in milliseconds, default `1800000`
 - `MAX_SESSIONS`: max in-memory chat sessions before LRU eviction, default `50`
 
+File path handling:
+
+- File-input fields accept either workspace-relative paths like `src/index.ts` or absolute paths.
+- Relative paths resolve against the active MCP workspace root when the client provides one.
+- If the client does not expose workspace roots, relative paths resolve against the server `cwd`.
+- If the same relative path matches more than one active workspace root, the server returns an ambiguity error.
+- `ALLOWED_FILE_ROOTS` remains an absolute-root security boundary for file access.
+
 Gemini tool-combination notes:
 
 - Built-in tool combination remains a Gemini 3 preview feature.
@@ -202,7 +210,7 @@ Prompt wrappers:
 
 ## Safety Boundaries
 
-- File tools require absolute paths inside configured roots.
+- File tools require workspace-relative or absolute paths inside configured roots.
 - URL tools accept only public `http/https` URLs.
 - Sessions and transcripts are in-memory only and disappear on expiry or eviction.
 - `execute_code` uses Gemini's Python runtime; `language` is advisory only.

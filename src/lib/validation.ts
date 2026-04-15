@@ -1,6 +1,6 @@
 import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
 
-import { realpath } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { dirname, isAbsolute, normalize, parse, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -68,6 +68,12 @@ export function validateHostHeader(hostHeader: string | null, allowedHosts: stri
 
 export type RootsFetcher = () => Promise<string[]>;
 
+export interface ResolvedWorkspacePath {
+  resolvedPath: string;
+  displayPath: string;
+  workspaceRoot: string | undefined;
+}
+
 function getEnvRoots(): string[] {
   const allowedFileRootsEnv = getAllowedFileRootsEnv();
   if (!allowedFileRootsEnv) {
@@ -123,6 +129,78 @@ function dedupeRoots(roots: string[]): string[] {
   return deduped;
 }
 
+async function getClientRoots(rootsFetcher?: RootsFetcher): Promise<string[]> {
+  if (!rootsFetcher) return [];
+
+  try {
+    return dedupeRoots((await rootsFetcher()).map((root) => normalize(root)).filter(Boolean));
+  } catch {
+    return [];
+  }
+}
+
+function getDefaultWorkspaceRoot(): string {
+  return normalize(process.cwd());
+}
+
+function getEffectiveWorkspaceRoots(clientRoots: string[]): string[] {
+  return clientRoots.length > 0 ? clientRoots : [getDefaultWorkspaceRoot()];
+}
+
+function toPortablePath(filePath: string): string {
+  return filePath.replaceAll('\\', '/');
+}
+
+function toDisplayPath(filePath: string, rootPath: string | undefined): string {
+  if (!rootPath || !isPathWithinRoot(filePath, rootPath)) {
+    return toPortablePath(filePath);
+  }
+
+  return toPortablePath(relative(rootPath, filePath));
+}
+
+function chooseDisplayRoot(filePath: string, roots: string[]): string | undefined {
+  return [...roots]
+    .filter((root) => isPathWithinRoot(filePath, root))
+    .sort((left, right) => right.length - left.length)[0];
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await stat(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function canonicalizePath(filePath: string): Promise<string> {
+  const normalized = normalize(filePath);
+
+  try {
+    return await realpath(normalized);
+  } catch {
+    let current = dirname(normalized);
+    while (current !== dirname(current)) {
+      try {
+        const parentRealpath = await realpath(current);
+        return resolve(parentRealpath, relative(current, normalized));
+      } catch {
+        current = dirname(current);
+      }
+    }
+
+    return resolve(normalized);
+  }
+}
+
+function buildAmbiguousWorkspacePathError(filePath: string, roots: string[]): Error {
+  const listedRoots = roots.map((root) => `- ${toPortablePath(root)}`).join('\n');
+  return new Error(
+    `Relative path '${filePath}' is ambiguous across workspace roots:\n${listedRoots}`,
+  );
+}
+
 function intersectRoots(serverRoots: string[], clientRoots: string[]): string[] {
   const intersections: string[] = [];
 
@@ -175,36 +253,62 @@ export async function resolveAndValidatePath(
   filePath: string,
   rootsFetcher?: RootsFetcher,
 ): Promise<string> {
-  if (!isAbsolute(filePath)) {
-    throw new Error(`Path must be absolute: ${filePath}`);
-  }
+  return (await resolveWorkspacePath(filePath, rootsFetcher)).resolvedPath;
+}
 
-  const normalized = normalize(filePath);
+export async function resolveWorkspacePath(
+  filePath: string,
+  rootsFetcher?: RootsFetcher,
+): Promise<ResolvedWorkspacePath> {
+  const clientRoots = await getClientRoots(rootsFetcher);
+  const workspaceRoots = getEffectiveWorkspaceRoots(clientRoots);
 
-  // Resolve symlinks to get the real path
-  let resolved: string | undefined;
-  try {
-    resolved = await realpath(normalized);
-  } catch {
-    // File may not exist yet — find the closest existing parent
-    let current = dirname(normalized);
-    while (current !== dirname(current)) {
-      try {
-        const parentRealpath = await realpath(current);
-        resolved = resolve(parentRealpath, relative(current, normalized));
-        break;
-      } catch {
-        current = dirname(current);
+  let resolvedPath: string;
+  let workspaceRoot: string | undefined;
+
+  if (isAbsolute(filePath)) {
+    resolvedPath = await canonicalizePath(filePath);
+    workspaceRoot = chooseDisplayRoot(resolvedPath, workspaceRoots);
+  } else {
+    const normalizedRelative = normalize(filePath);
+    const candidates = workspaceRoots
+      .map((root) => ({
+        root,
+        candidate: resolve(root, normalizedRelative),
+      }))
+      .filter(({ root, candidate }) => isPathWithinRoot(candidate, root));
+
+    if (candidates.length === 0) {
+      throw new Error(`Relative path '${filePath}' escapes the workspace root.`);
+    }
+
+    const existingCandidates: typeof candidates = [];
+    for (const candidate of candidates) {
+      if (await pathExists(candidate.candidate)) {
+        existingCandidates.push(candidate);
       }
     }
-    // If we reach the root and it still fails, use the normalized path
-    resolved ??= resolve(normalized);
+
+    const matchedCandidates = existingCandidates.length > 0 ? existingCandidates : candidates;
+    if (matchedCandidates.length > 1) {
+      throw buildAmbiguousWorkspacePathError(
+        filePath,
+        matchedCandidates.map((candidate) => candidate.root),
+      );
+    }
+
+    const selected = matchedCandidates[0];
+    if (!selected) {
+      throw new Error(`Unable to resolve path: ${filePath}`);
+    }
+
+    resolvedPath = await canonicalizePath(selected.candidate);
+    workspaceRoot = selected.root;
   }
 
   const allowedRoots = await getAllowedRoots(rootsFetcher);
-
   const isUnderAllowedRoot =
-    allowedRoots.length > 0 && allowedRoots.some((root) => isPathWithinRoot(resolved, root));
+    allowedRoots.length > 0 && allowedRoots.some((root) => isPathWithinRoot(resolvedPath, root));
 
   if (!isUnderAllowedRoot) {
     throw new Error(
@@ -212,7 +316,11 @@ export async function resolveAndValidatePath(
     );
   }
 
-  return resolved;
+  return {
+    resolvedPath,
+    displayPath: toDisplayPath(resolvedPath, workspaceRoot),
+    workspaceRoot,
+  };
 }
 
 export function buildServerRootsFetcher(server: McpServer): RootsFetcher {

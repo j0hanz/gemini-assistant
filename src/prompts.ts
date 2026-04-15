@@ -1,8 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { completable } from '@modelcontextprotocol/server';
 
-import { readdir, stat } from 'node:fs/promises';
-import { basename, dirname, join, normalize, sep } from 'node:path';
+import { readdir } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 
 import { z } from 'zod/v4';
 
@@ -10,9 +10,15 @@ import {
   buildServerRootsFetcher,
   getAllowedRoots,
   isPathWithinRoot,
+  resolveWorkspacePath,
   type RootsFetcher,
 } from './lib/validation.js';
-import { absolutePath, optionalText, requiredText } from './schemas/shared.js';
+import {
+  optionalText,
+  requiredText,
+  withCurrentWorkspaceRoot,
+  workspacePath,
+} from './schemas/shared.js';
 
 import { findWorkflowEntry } from './catalog.js';
 
@@ -57,7 +63,9 @@ interface PromptDefinition {
   title: string;
   description: string;
   argsSchema?: z.ZodType;
-  buildMessage: (args: Record<string, unknown>) => ReturnType<typeof userPromptMessage>;
+  buildMessage:
+    | ((args: Record<string, unknown>) => ReturnType<typeof userPromptMessage>)
+    | ((args: Record<string, unknown>) => Promise<ReturnType<typeof userPromptMessage>>);
 }
 
 function promptText(description: string) {
@@ -90,6 +98,10 @@ function userPromptMessage(text: string) {
       },
     ],
   };
+}
+
+function toPortablePath(filePath: string): string {
+  return filePath.replaceAll('\\', '/');
 }
 
 function fencedCodeBlock(code: string, language?: string): string {
@@ -130,7 +142,7 @@ const completeSummaryStyle = completeByPrefix(SUMMARY_STYLES);
 export function createAnalyzeFilePromptSchema(rootsFetcher: RootsFetcher) {
   return z.strictObject({
     filePath: completable(
-      absolutePath('Absolute path to the file to analyze from workspace roots'),
+      workspacePath('Path to the file to analyze, either absolute or workspace-relative.'),
       buildPathAcFetcher(rootsFetcher),
     ),
     question: promptText('Your question or analysis request about the file'),
@@ -189,8 +201,12 @@ export const DiffReviewPromptSchema = z.strictObject({
   focus: optionalPromptText('Optional review focus, such as tests, performance, or regressions'),
 });
 
-function buildAnalyzeFilePrompt(args: z.infer<ReturnType<typeof createAnalyzeFilePromptSchema>>) {
-  return userPromptMessage(`File: ${args.filePath}\nQ: ${args.question}\nUse only file content.`);
+async function buildAnalyzeFilePrompt(
+  args: z.infer<ReturnType<typeof createAnalyzeFilePromptSchema>>,
+  rootsFetcher: RootsFetcher,
+) {
+  const { displayPath } = await resolveWorkspacePath(args.filePath, rootsFetcher);
+  return userPromptMessage(`File: ${displayPath}\nQ: ${args.question}\nUse only file content.`);
 }
 
 function buildCodeReviewPrompt(args: z.infer<typeof CodeReviewPromptSchema>) {
@@ -260,10 +276,13 @@ export function createPromptDefinitions(rootsFetcher: RootsFetcher): PromptDefin
     {
       name: 'analyze-file',
       title: 'Analyze File',
-      description: 'Analyze a specific file with a custom question.',
+      description: withCurrentWorkspaceRoot('Analyze a specific file with a custom question.'),
       argsSchema: analyzeFileSchema,
       buildMessage: (args) =>
-        buildAnalyzeFilePrompt(args as z.infer<ReturnType<typeof createAnalyzeFilePromptSchema>>),
+        buildAnalyzeFilePrompt(
+          args as z.infer<ReturnType<typeof createAnalyzeFilePromptSchema>>,
+          rootsFetcher,
+        ),
     },
     {
       name: 'code-review',
@@ -324,55 +343,107 @@ function buildPathAcFetcher(rootsFetcher: RootsFetcher) {
   return async (value: string | undefined): Promise<string[]> => {
     try {
       const allowedRoots = await getAllowedRoots(rootsFetcher);
+      const clientRoots = await rootsFetcher().catch(() => []);
+      const workspaceRoots =
+        clientRoots.length > 0
+          ? clientRoots.map((root) => normalize(root)).filter(Boolean)
+          : [normalize(process.cwd())];
       const rawValue = value ?? '';
 
       if (!rawValue) {
-        return allowedRoots;
+        const suggestions = await collectRelativePathSuggestions('', workspaceRoots, allowedRoots);
+        return suggestions.length > 0 ? suggestions : workspaceRoots.map(toPortablePath);
       }
 
-      const normalized = normalize(rawValue);
-      let targetDir = normalized;
-      let targetPrefix = '';
-
-      try {
-        const stats = await stat(normalized);
-        if (stats.isDirectory()) {
-          targetDir = normalized;
-        } else {
-          targetDir = dirname(normalized);
-          targetPrefix = basename(normalized);
-        }
-      } catch {
-        targetDir = dirname(normalized);
-        targetPrefix = basename(normalized);
+      if (isAbsolute(rawValue)) {
+        return await collectAbsolutePathSuggestions(rawValue, allowedRoots);
       }
 
-      const isAllowed = allowedRoots.some((root) => isPathWithinRoot(targetDir, root));
-
-      if (!isAllowed) {
-        return allowedRoots.filter((root) =>
-          root.toLowerCase().startsWith(normalized.toLowerCase()),
-        );
-      }
-
-      try {
-        const entries = await readdir(targetDir, { withFileTypes: true });
-        return entries
-          .filter(
-            (entry) =>
-              !targetPrefix || entry.name.toLowerCase().startsWith(targetPrefix.toLowerCase()),
-          )
-          .map((entry) => join(targetDir, entry.name) + (entry.isDirectory() ? sep : ''))
-          .slice(0, 50);
-      } catch {
-        return allowedRoots.filter((root) =>
-          root.toLowerCase().startsWith(normalized.toLowerCase()),
-        );
-      }
+      return await collectRelativePathSuggestions(rawValue, workspaceRoots, allowedRoots);
     } catch {
       return [];
     }
   };
+}
+
+async function collectAbsolutePathSuggestions(
+  rawValue: string,
+  allowedRoots: string[],
+): Promise<string[]> {
+  const normalized = normalize(rawValue);
+  const targetDir =
+    rawValue.endsWith('/') || rawValue.endsWith('\\') ? normalized : dirname(normalized);
+  const targetPrefix =
+    rawValue.endsWith('/') || rawValue.endsWith('\\') ? '' : basename(normalized);
+
+  const isAllowed = allowedRoots.some((root) => isPathWithinRoot(targetDir, root));
+  if (!isAllowed) {
+    return allowedRoots
+      .filter((root) => root.toLowerCase().startsWith(normalized.toLowerCase()))
+      .map(toPortablePath);
+  }
+
+  try {
+    const entries = await readdir(targetDir, { withFileTypes: true });
+    return entries
+      .filter(
+        (entry) => !targetPrefix || entry.name.toLowerCase().startsWith(targetPrefix.toLowerCase()),
+      )
+      .map(
+        (entry) => toPortablePath(join(targetDir, entry.name)) + (entry.isDirectory() ? '/' : ''),
+      )
+      .slice(0, 50);
+  } catch {
+    return allowedRoots
+      .filter((root) => root.toLowerCase().startsWith(normalized.toLowerCase()))
+      .map(toPortablePath);
+  }
+}
+
+async function collectRelativePathSuggestions(
+  rawValue: string,
+  workspaceRoots: string[],
+  allowedRoots: string[],
+): Promise<string[]> {
+  const normalized = rawValue ? normalize(rawValue) : '';
+  const hasTrailingSeparator = /[\\/]$/.test(rawValue);
+  const relativeDir =
+    !normalized || normalized === '.'
+      ? ''
+      : hasTrailingSeparator
+        ? normalized
+        : dirname(normalized) === '.'
+          ? ''
+          : dirname(normalized);
+  const targetPrefix =
+    !normalized || normalized === '.' ? '' : hasTrailingSeparator ? '' : basename(normalized);
+
+  const suggestions = new Set<string>();
+
+  for (const workspaceRoot of workspaceRoots) {
+    const targetDir = resolve(workspaceRoot, relativeDir || '.');
+    if (!isPathWithinRoot(targetDir, workspaceRoot)) continue;
+    if (!allowedRoots.some((root) => isPathWithinRoot(targetDir, root))) continue;
+
+    try {
+      const entries = await readdir(targetDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (targetPrefix && !entry.name.toLowerCase().startsWith(targetPrefix.toLowerCase())) {
+          continue;
+        }
+
+        const relativePath = toPortablePath(relative(workspaceRoot, join(targetDir, entry.name)));
+        suggestions.add(relativePath + (entry.isDirectory() ? '/' : ''));
+        if (suggestions.size >= 50) {
+          return [...suggestions];
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return [...suggestions];
 }
 
 export function registerPrompts(server: McpServer): void {

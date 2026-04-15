@@ -1,3 +1,5 @@
+import { isCompletable } from '@modelcontextprotocol/server';
+
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -25,6 +27,24 @@ const workspaceRoot = process.cwd();
 const absolutePath = (...segments: string[]) => join(workspaceRoot, ...segments);
 const promptDefinitions = createPromptDefinitions(async () => [workspaceRoot]);
 
+function getCompletionCallback(schema: ReturnType<typeof createAnalyzeFilePromptSchema>) {
+  const filePathSchema = schema.shape.filePath;
+  assert.ok(isCompletable(filePathSchema));
+
+  const completionMeta = Object.getOwnPropertySymbols(filePathSchema)
+    .map((symbol) => (filePathSchema as Record<symbol, unknown>)[symbol])
+    .find(
+      (value): value is { complete: (value: string | undefined) => Promise<string[]> | string[] } =>
+        !!value &&
+        typeof value === 'object' &&
+        'complete' in value &&
+        typeof value.complete === 'function',
+    );
+
+  assert.ok(completionMeta);
+  return completionMeta.complete;
+}
+
 describe('prompt definitions', () => {
   it('exports the full public prompt surface', () => {
     assert.deepStrictEqual(
@@ -45,17 +65,62 @@ describe('analyze-file prompt', () => {
     assert.ok(result.success);
   });
 
+  it('accepts relative filePath', () => {
+    const result = schema.safeParse({
+      filePath: 'src/index.ts',
+      question: 'What does this file do?',
+    });
+    assert.ok(result.success);
+  });
+
   it('rejects missing filePath', () => {
     const result = schema.safeParse({ question: 'Missing path' });
     assert.strictEqual(result.success, false);
   });
 
-  it('rejects relative filePath', () => {
+  it('rejects root-escaping relative filePath', () => {
     const result = schema.safeParse({
+      filePath: '../src/index.ts',
+      question: 'What does this file do?',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('does not expose CURRENT_WORKSPACE_ROOT as a prompt arg', () => {
+    const result = schema.safeParse({
+      CURRENT_WORKSPACE_ROOT: workspaceRoot,
       filePath: 'src/index.ts',
       question: 'What does this file do?',
     });
     assert.strictEqual(result.success, false);
+  });
+
+  it('returns workspace-relative completion suggestions', async () => {
+    const complete = getCompletionCallback(schema);
+    const suggestions = await complete('src/');
+
+    assert.ok(suggestions.length > 0);
+    assert.ok(suggestions.every((suggestion) => suggestion.startsWith('src/')));
+  });
+
+  it('handles nested completion prefixes', async () => {
+    const complete = getCompletionCallback(schema);
+    const suggestions = await complete('src/lib/');
+
+    assert.ok(suggestions.length > 0);
+    assert.ok(suggestions.every((suggestion) => suggestion.startsWith('src/lib/')));
+  });
+
+  it('shows the workspace root in the prompt description instead of as an arg', () => {
+    const definition = promptDefinitions.find((entry) => entry.name === 'analyze-file');
+    const portableWorkspaceRoot = workspaceRoot.replaceAll('\\', '/');
+
+    assert.ok(definition);
+    assert.match(definition.description, /Current workspace root:/);
+    assert.match(
+      definition.description,
+      new RegExp(portableWorkspaceRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    );
   });
 });
 

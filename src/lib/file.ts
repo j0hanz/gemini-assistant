@@ -4,7 +4,7 @@ import { extname } from 'node:path';
 import { getAI } from '../client.js';
 import { withRetry } from './errors.js';
 import type { RootsFetcher } from './validation.js';
-import { resolveAndValidatePath } from './validation.js';
+import { resolveWorkspacePath } from './validation.js';
 
 // ── MIME / Size ───────────────────────────────────────────────────────
 
@@ -74,6 +74,8 @@ interface UploadedFile {
   name: string;
   uri: string;
   mimeType: string;
+  path: string;
+  displayPath: string;
 }
 
 export async function uploadFile(
@@ -81,27 +83,33 @@ export async function uploadFile(
   signal: AbortSignal,
   rootsFetcher?: RootsFetcher,
 ): Promise<UploadedFile> {
-  const validPath = await resolveAndValidatePath(filePath, rootsFetcher);
+  const { resolvedPath, displayPath } = await resolveWorkspacePath(filePath, rootsFetcher);
 
-  const fileStat = await stat(validPath);
+  const fileStat = await stat(resolvedPath);
   if (fileStat.size > MAX_FILE_SIZE) {
     throw new Error(
-      `File exceeds 20MB limit: ${validPath} (${(fileStat.size / 1024 / 1024).toFixed(1)}MB)`,
+      `File exceeds 20MB limit: ${displayPath} (${(fileStat.size / 1024 / 1024).toFixed(1)}MB)`,
     );
   }
 
-  const mimeType = getMimeType(validPath);
+  const mimeType = getMimeType(resolvedPath);
 
   const uploaded = await withRetry(
-    () => getAI().files.upload({ file: validPath, config: { mimeType, abortSignal: signal } }),
+    () => getAI().files.upload({ file: resolvedPath, config: { mimeType, abortSignal: signal } }),
     { signal },
   );
 
   if (!uploaded.uri || !uploaded.mimeType || !uploaded.name) {
-    throw new Error(`File upload returned an incomplete file handle: ${validPath}`);
+    throw new Error(`File upload returned an incomplete file handle: ${displayPath}`);
   }
 
-  return { name: uploaded.name, uri: uploaded.uri, mimeType: uploaded.mimeType };
+  return {
+    name: uploaded.name,
+    uri: uploaded.uri,
+    mimeType: uploaded.mimeType,
+    path: resolvedPath,
+    displayPath,
+  };
 }
 
 export async function deleteUploadedFiles(

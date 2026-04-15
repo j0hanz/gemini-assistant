@@ -10,6 +10,7 @@ import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
 import { type CompareFilesInput, CompareFilesInputSchema } from '../schemas/inputs.js';
 import { CompareFilesOutputSchema } from '../schemas/outputs.js';
+import { withCurrentWorkspaceRoot } from '../schemas/shared.js';
 
 import { buildGenerateContentConfig } from '../client.js';
 import { getAI, MODEL } from '../client.js';
@@ -40,7 +41,7 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
       const fileB = await uploadFile(filePathB, ctx.mcpReq.signal, rootsFetcher);
       uploadedNames.push(fileB.name);
 
-      await ctx.mcpReq.log('info', `Comparing: ${filePathA} vs ${filePathB}`);
+      await ctx.mcpReq.log('info', `Comparing: ${fileA.displayPath} vs ${fileB.displayPath}`);
       await sendProgress(ctx, 2, 4, `${TOOL_LABEL}: Analyzing differences`);
 
       const prompt = question ? `Focus: ${question}` : 'Task: Compare the two files.';
@@ -56,9 +57,9 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
           getAI().models.generateContentStream({
             model: MODEL,
             contents: [
-              { text: `File A: ${filePathA}` },
+              { text: `File A: ${fileA.displayPath}` },
               createPartFromUri(fileA.uri, fileA.mimeType),
-              { text: `File B: ${filePathB}` },
+              { text: `File B: ${fileB.displayPath}` },
               createPartFromUri(fileB.uri, fileB.mimeType),
               { text: effectivePrompt },
             ],
@@ -94,10 +95,11 @@ export function registerCompareFilesTool(server: McpServer): void {
     'compare_files',
     {
       title: TOOL_LABEL,
-      description:
+      description: withCurrentWorkspaceRoot(
         'Upload two files to Gemini and get a structured comparison analysis. ' +
-        'Supports code, documents, configs, and other file types. ' +
-        'Optionally uses Google Search for best practices or migration context.',
+          'Supports code, documents, configs, and other file types. ' +
+          'Optionally uses Google Search for best practices or migration context.',
+      ),
       inputSchema: CompareFilesInputSchema,
       outputSchema: CompareFilesOutputSchema,
       annotations: READONLY_ANNOTATIONS,

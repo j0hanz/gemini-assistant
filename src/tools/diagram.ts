@@ -11,6 +11,7 @@ import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
 import { type GenerateDiagramInput, GenerateDiagramInputSchema } from '../schemas/inputs.js';
 import { GenerateDiagramOutputSchema } from '../schemas/outputs.js';
+import { withCurrentWorkspaceRoot } from '../schemas/shared.js';
 
 import { buildGenerateContentConfig } from '../client.js';
 import { getAI, MODEL } from '../client.js';
@@ -75,7 +76,7 @@ async function uploadDiagramSourceFiles(
     const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
     uploadedNames.push(uploaded.name);
     contentParts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
-    contentParts.push({ text: `Source file: ${filePath}` });
+    contentParts.push({ text: `Source file: ${uploaded.displayPath}` });
   }
 
   return contentParts;
@@ -197,10 +198,11 @@ export function registerGenerateDiagramTool(server: McpServer): void {
     'generate_diagram',
     {
       title: TOOL_LABEL,
-      description:
+      description: withCurrentWorkspaceRoot(
         'Generate a Mermaid or PlantUML diagram from a text description or source files. ' +
-        'Supports single or multiple source files for architecture diagrams. ' +
-        'Optionally validates syntax via code execution and uses Google Search for patterns.',
+          'Supports single or multiple source files for architecture diagrams. ' +
+          'Optionally validates syntax via code execution and uses Google Search for patterns.',
+      ),
       inputSchema: GenerateDiagramInputSchema,
       outputSchema: GenerateDiagramOutputSchema,
       annotations: READONLY_ANNOTATIONS,

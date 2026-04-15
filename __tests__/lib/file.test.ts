@@ -136,11 +136,26 @@ describe('deleteUploadedFiles', () => {
 });
 
 describe('uploadFile', () => {
-  it('rejects relative paths', async () => {
+  it('accepts relative paths under cwd', async () => {
     const controller = new AbortController();
-    await assert.rejects(() => uploadFile('relative/path.txt', controller.signal), {
-      message: /Path must be absolute/,
+    const client = getAI();
+    const original = client.files.upload.bind(client.files);
+
+    // @ts-expect-error test override
+    client.files.upload = async (opts: { file: string }) => ({
+      uri: 'gs://files/abc',
+      mimeType: 'application/json',
+      name: 'uploaded-package',
+      file: opts.file,
     });
+
+    try {
+      const result = await uploadFile('package.json', controller.signal);
+      assert.ok(result.path.endsWith('package.json'));
+      assert.strictEqual(result.displayPath, 'package.json');
+    } finally {
+      client.files.upload = original;
+    }
   });
 
   it('rejects paths outside allowed roots', async () => {

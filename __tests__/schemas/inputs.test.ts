@@ -239,6 +239,14 @@ describe('AnalyzeFileInputSchema', () => {
     assert.ok(result.success);
   });
 
+  it('accepts relative filePath', () => {
+    const result = AnalyzeFileInputSchema.safeParse({
+      filePath: 'fixtures/file.pdf',
+      question: 'Summarize this document',
+    });
+    assert.ok(result.success);
+  });
+
   it('rejects empty filePath', () => {
     const result = AnalyzeFileInputSchema.safeParse({
       filePath: '',
@@ -255,9 +263,9 @@ describe('AnalyzeFileInputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
-  it('rejects relative filePath', () => {
+  it('rejects root-escaping relative filePath', () => {
     const result = AnalyzeFileInputSchema.safeParse({
-      filePath: 'relative/file.pdf',
+      filePath: '../file.pdf',
       question: 'Summarize this document',
     });
     assert.strictEqual(result.success, false);
@@ -267,6 +275,15 @@ describe('AnalyzeFileInputSchema', () => {
     assert.strictEqual(AnalyzeFileInputSchema.safeParse({}).success, false);
     assert.strictEqual(AnalyzeFileInputSchema.safeParse({ filePath: '/a' }).success, false);
     assert.strictEqual(AnalyzeFileInputSchema.safeParse({ question: 'q' }).success, false);
+  });
+
+  it('rejects the removed CURRENT_WORKSPACE_ROOT field', () => {
+    const result = AnalyzeFileInputSchema.safeParse({
+      CURRENT_WORKSPACE_ROOT: process.cwd(),
+      filePath: absolutePath('fixtures', 'file.pdf'),
+      question: 'Summarize this document',
+    });
+    assert.strictEqual(result.success, false);
   });
 
   it('rejects unknown fields', () => {
@@ -283,6 +300,13 @@ describe('CreateCacheInputSchema', () => {
   it('accepts with filePaths', () => {
     const result = CreateCacheInputSchema.safeParse({
       filePaths: [absolutePath('fixtures', 'big-file.pdf')],
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts relative filePaths', () => {
+    const result = CreateCacheInputSchema.safeParse({
+      filePaths: ['fixtures/big-file.pdf'],
     });
     assert.ok(result.success);
   });
@@ -319,9 +343,9 @@ describe('CreateCacheInputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
-  it('rejects relative filePaths', () => {
+  it('rejects root-escaping relative filePaths', () => {
     const result = CreateCacheInputSchema.safeParse({
-      filePaths: ['relative/file.txt'],
+      filePaths: ['../file.txt'],
     });
     assert.strictEqual(result.success, false);
   });
@@ -330,6 +354,14 @@ describe('CreateCacheInputSchema', () => {
     const result = CreateCacheInputSchema.safeParse({
       systemInstruction: 'Cache this',
       ttl: '2 hours',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects the removed CURRENT_WORKSPACE_ROOT field', () => {
+    const result = CreateCacheInputSchema.safeParse({
+      CURRENT_WORKSPACE_ROOT: process.cwd(),
+      systemInstruction: 'Cache this',
     });
     assert.strictEqual(result.success, false);
   });
@@ -599,6 +631,14 @@ describe('CompareFilesInputSchema', () => {
     assert.ok(result.success);
   });
 
+  it('accepts relative file paths', () => {
+    const result = CompareFilesInputSchema.safeParse({
+      filePathA: 'src/a.ts',
+      filePathB: 'src/b.ts',
+    });
+    assert.ok(result.success);
+  });
+
   it('accepts with googleSearch', () => {
     const result = CompareFilesInputSchema.safeParse({
       filePathA: absolutePath('a.ts'),
@@ -632,9 +672,18 @@ describe('CompareFilesInputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
-  it('rejects relative file paths', () => {
+  it('rejects root-escaping relative file paths', () => {
     const result = CompareFilesInputSchema.safeParse({
-      filePathA: 'a.ts',
+      filePathA: '../a.ts',
+      filePathB: absolutePath('b.ts'),
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects the removed CURRENT_WORKSPACE_ROOT field', () => {
+    const result = CompareFilesInputSchema.safeParse({
+      CURRENT_WORKSPACE_ROOT: process.cwd(),
+      filePathA: absolutePath('a.ts'),
       filePathB: absolutePath('b.ts'),
     });
     assert.strictEqual(result.success, false);
@@ -668,6 +717,14 @@ describe('GenerateDiagramInputSchema', () => {
     const result = GenerateDiagramInputSchema.safeParse({
       description: 'class diagram',
       sourceFilePath: absolutePath('src', 'index.ts'),
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts relative source file paths', () => {
+    const result = GenerateDiagramInputSchema.safeParse({
+      description: 'class diagram',
+      sourceFilePath: 'src/index.ts',
     });
     assert.ok(result.success);
   });
@@ -722,10 +779,10 @@ describe('GenerateDiagramInputSchema', () => {
     assert.ok(result.success);
   });
 
-  it('rejects relative source file paths', () => {
+  it('rejects root-escaping relative source file paths', () => {
     const result = GenerateDiagramInputSchema.safeParse({
       description: 'test',
-      sourceFilePath: 'src/index.ts',
+      sourceFilePath: '../src/index.ts',
     });
     assert.strictEqual(result.success, false);
   });
@@ -737,6 +794,14 @@ describe('GenerateDiagramInputSchema', () => {
 
   it('rejects missing description', () => {
     const result = GenerateDiagramInputSchema.safeParse({});
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects the removed CURRENT_WORKSPACE_ROOT field', () => {
+    const result = GenerateDiagramInputSchema.safeParse({
+      CURRENT_WORKSPACE_ROOT: process.cwd(),
+      description: 'test',
+    });
     assert.strictEqual(result.success, false);
   });
 

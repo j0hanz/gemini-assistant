@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
@@ -7,6 +9,7 @@ import {
   parseAllowedHosts,
   resolveAllowedHosts,
   resolveAndValidatePath,
+  resolveWorkspacePath,
   validateHostHeader,
   validateUrls,
 } from '../../src/lib/validation.js';
@@ -191,16 +194,14 @@ describe('resolveAndValidatePath', () => {
     restoreAllowedFileRootsEnv();
   });
 
-  it('rejects relative paths', async () => {
-    await assert.rejects(() => resolveAndValidatePath('relative/path.txt'), {
-      message: /must be absolute/,
-    });
+  it('accepts relative paths under cwd', async () => {
+    const result = await resolveAndValidatePath('package.json');
+    assert.ok(result.endsWith('package.json'));
   });
 
-  it('rejects relative dot paths', async () => {
-    await assert.rejects(() => resolveAndValidatePath('./file.txt'), {
-      message: /must be absolute/,
-    });
+  it('accepts relative dot paths under cwd', async () => {
+    const result = await resolveAndValidatePath('./package.json');
+    assert.ok(result.endsWith('package.json'));
   });
 
   it('accepts absolute paths under cwd', async () => {
@@ -292,6 +293,54 @@ describe('resolveAndValidatePath', () => {
     await assert.rejects(() => resolveAndValidatePath(outsidePath, fetcher), {
       message: /outside allowed directories/,
     });
+  });
+});
+
+describe('resolveWorkspacePath', () => {
+  afterEach(() => {
+    restoreAllowedFileRootsEnv();
+  });
+
+  it('returns a workspace-relative display path for cwd files', async () => {
+    const result = await resolveWorkspacePath(join(process.cwd(), 'src', 'index.ts'));
+    assert.strictEqual(result.displayPath, 'src/index.ts');
+  });
+
+  it('resolves relative paths using client roots', async () => {
+    const fetcher = async () => [process.cwd()];
+    const result = await resolveWorkspacePath('src/index.ts', fetcher);
+
+    assert.ok(result.resolvedPath.endsWith(join('src', 'index.ts')));
+    assert.strictEqual(result.displayPath, 'src/index.ts');
+    assert.strictEqual(result.workspaceRoot, process.cwd());
+  });
+
+  it('rejects relative paths that escape the workspace root', async () => {
+    await assert.rejects(() => resolveWorkspacePath('../package.json'), {
+      message: /escapes the workspace root/,
+    });
+  });
+
+  it('rejects ambiguous relative paths across multiple roots', async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'gemini-assistant-roots-'));
+    const rootA = join(tempRoot, 'root-a');
+    const rootB = join(tempRoot, 'root-b');
+
+    try {
+      await mkdir(join(rootA, 'src'), { recursive: true });
+      await mkdir(join(rootB, 'src'), { recursive: true });
+      await writeFile(join(rootA, 'src', 'shared.ts'), 'export const a = 1;\n');
+      await writeFile(join(rootB, 'src', 'shared.ts'), 'export const b = 2;\n');
+
+      setAllowedFileRootsEnv(`${rootA},${rootB}`);
+      const fetcher = async () => [rootA, rootB];
+
+      await assert.rejects(() => resolveWorkspacePath('src/shared.ts', fetcher), {
+        message: /ambiguous across workspace roots/,
+      });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 });
 

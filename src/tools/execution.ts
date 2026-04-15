@@ -16,6 +16,7 @@ import {
   ExecuteCodeInputSchema,
 } from '../schemas/inputs.js';
 import { AnalyzeFileOutputSchema, ExecuteCodeOutputSchema } from '../schemas/outputs.js';
+import { withCurrentWorkspaceRoot } from '../schemas/shared.js';
 
 import { buildGenerateContentConfig } from '../client.js';
 import { getAI, MODEL } from '../client.js';
@@ -132,7 +133,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
       const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
       uploadedFileName = uploaded.name;
 
-      await ctx.mcpReq.log('info', `Analyzing ${filePath} (${uploaded.mimeType})`);
+      await ctx.mcpReq.log('info', `Analyzing ${uploaded.displayPath} (${uploaded.mimeType})`);
       await sendProgress(ctx, 1, 3, `${ANALYZE_FILE_TOOL_LABEL}: Analyzing content`);
 
       return await handleToolExecution(
@@ -237,8 +238,9 @@ export function registerAnalyzeFileTool(server: McpServer): void {
     'analyze_file',
     {
       title: ANALYZE_FILE_TOOL_LABEL,
-      description:
+      description: withCurrentWorkspaceRoot(
         'Upload a file to Gemini and ask questions about it (PDFs, images, code files, etc.).',
+      ),
       inputSchema: AnalyzeFileInputSchema,
       outputSchema: AnalyzeFileOutputSchema,
       annotations: READONLY_ANNOTATIONS,

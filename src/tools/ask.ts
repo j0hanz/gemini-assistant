@@ -24,6 +24,7 @@ import {
 } from '../client.js';
 import { completeCacheNames, getAI, MODEL } from '../client.js';
 import {
+  appendSessionTranscript,
   completeSessionIds,
   getSession,
   getSessionEntry,
@@ -41,6 +42,17 @@ interface AskArgs {
   temperature?: number | undefined;
   seed?: number | undefined;
   googleSearch?: boolean | undefined;
+}
+
+interface AskDependencies {
+  appendSessionTranscript: typeof appendSessionTranscript;
+  createChat: (args: AskArgs) => Chat;
+  getSession: typeof getSession;
+  getSessionEntry: typeof getSessionEntry;
+  isEvicted: typeof isEvicted;
+  now: () => number;
+  runWithoutSession: (args: AskArgs, ctx: ServerContext, chat?: Chat) => Promise<CallToolResult>;
+  setSession: typeof setSession;
 }
 
 const ASK_TOOL_LABEL = 'Ask Gemini';
@@ -241,18 +253,14 @@ function validateAskConflict(condition: boolean, message: string): CallToolResul
   return condition ? errorResult(message) : undefined;
 }
 
-function validateAskRequest({
-  sessionId,
-  systemInstruction,
-  cacheName,
-  responseSchema,
-  temperature,
-  seed,
-}: AskArgs): CallToolResult | undefined {
-  const hasExistingSession = sessionId ? getSessionEntry(sessionId) !== undefined : false;
+function validateAskRequest(
+  { sessionId, systemInstruction, cacheName, responseSchema, temperature, seed }: AskArgs,
+  deps: Pick<AskDependencies, 'getSessionEntry' | 'isEvicted'>,
+): CallToolResult | undefined {
+  const hasExistingSession = sessionId ? deps.getSessionEntry(sessionId) !== undefined : false;
   return (
     validateAskConflict(
-      !!sessionId && isEvicted(sessionId),
+      !!sessionId && deps.isEvicted(sessionId),
       `ask: Session '${sessionId}' has expired.`,
     ) ??
     validateAskConflict(
@@ -337,33 +345,77 @@ async function askWithoutSession(
   );
 }
 
+function appendTranscriptPair(
+  sessionId: string,
+  message: string,
+  result: CallToolResult,
+  deps: Pick<AskDependencies, 'appendSessionTranscript' | 'now'>,
+  taskId?: string,
+): void {
+  if (result.isError) return;
+
+  const taskRef = taskId ? { taskId } : {};
+  deps.appendSessionTranscript(sessionId, {
+    role: 'user',
+    text: message,
+    timestamp: deps.now(),
+    ...taskRef,
+  });
+  deps.appendSessionTranscript(sessionId, {
+    role: 'assistant',
+    text: extractTextContent(result.content),
+    timestamp: deps.now(),
+    ...taskRef,
+  });
+}
+
+function createDefaultAskDependencies(): AskDependencies {
+  return {
+    appendSessionTranscript,
+    createChat: (args) => {
+      const tools = args.googleSearch ? [{ googleSearch: {} }] : undefined;
+      return getAI().chats.create({
+        model: MODEL,
+        config: buildGenerateContentConfig({ ...args, tools }),
+      });
+    },
+    getSession,
+    getSessionEntry,
+    isEvicted,
+    now: () => Date.now(),
+    runWithoutSession: askWithoutSession,
+    setSession,
+  };
+}
+
 async function askExistingSession(
   args: AskArgs & { sessionId: string },
   ctx: ServerContext,
+  deps: AskDependencies,
 ): Promise<CallToolResult | undefined> {
-  const chat = getSession(args.sessionId, ctx.task?.id);
+  const chat = deps.getSession(args.sessionId, ctx.task?.id);
   if (!chat) return undefined;
 
   await ctx.mcpReq.log('debug', `Resuming session ${args.sessionId}`);
   await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Resuming session`);
-  return await askWithoutSession(args, ctx, chat);
+  const result = await deps.runWithoutSession(args, ctx, chat);
+  appendTranscriptPair(args.sessionId, args.message, result, deps, ctx.task?.id);
+  return result;
 }
 
 async function askNewSession(
   args: AskArgs & { sessionId: string },
   ctx: ServerContext,
+  deps: AskDependencies,
 ): Promise<CallToolResult> {
   await ctx.mcpReq.log('debug', `Creating session ${args.sessionId}`);
-  const tools = args.googleSearch ? [{ googleSearch: {} }] : undefined;
-  const chat = getAI().chats.create({
-    model: MODEL,
-    config: buildGenerateContentConfig({ ...args, tools }),
-  });
+  const chat = deps.createChat(args);
 
-  const result = await askWithoutSession(args, ctx, chat);
+  const result = await deps.runWithoutSession(args, ctx, chat);
 
   if (!result.isError) {
-    setSession(args.sessionId, chat, ctx.task?.id);
+    deps.setSession(args.sessionId, chat, ctx.task?.id);
+    appendTranscriptPair(args.sessionId, args.message, result, deps, ctx.task?.id);
     appendSessionResource(result, args.sessionId);
   } else {
     await ctx.mcpReq.log('debug', `Session ${args.sessionId} not stored due to stream error`);
@@ -372,19 +424,23 @@ async function askNewSession(
   return result;
 }
 
-async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
-  const validationError = validateAskRequest(args);
-  if (validationError) return validationError;
+export function createAskWork(deps: AskDependencies = createDefaultAskDependencies()) {
+  return async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
+    const validationError = validateAskRequest(args, deps);
+    if (validationError) return validationError;
 
-  if (!args.sessionId) {
-    return await askWithoutSession(args, ctx);
-  }
+    if (!args.sessionId) {
+      return await deps.runWithoutSession(args, ctx);
+    }
 
-  const resumed = await askExistingSession(args as AskArgs & { sessionId: string }, ctx);
-  if (resumed) return resumed;
+    const resumed = await askExistingSession(args as AskArgs & { sessionId: string }, ctx, deps);
+    if (resumed) return resumed;
 
-  return await askNewSession(args as AskArgs & { sessionId: string }, ctx);
+    return await askNewSession(args as AskArgs & { sessionId: string }, ctx, deps);
+  };
 }
+
+const askWork = createAskWork();
 
 const AskInputSchema = z.object({
   message: z.string().min(1).max(100_000).describe('User message or prompt'),

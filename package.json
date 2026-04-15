@@ -1,9 +1,31 @@
 {
   "name": "gemini-assistant",
   "version": "1.0.0",
-  "description": "General-purpose Gemini AI assistant exposed as an MCP server",
+  "description": "Workflow-first Gemini MCP server for chat, research, file analysis, review, and project memory",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/j0hanz/gemini-assistant.git"
+  },
+  "keywords": [
+    "mcp",
+    "gemini",
+    "workflow",
+    "research",
+    "sessions",
+    "caches",
+    "model-context-protocol"
+  ],
+  "license": "MIT",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",

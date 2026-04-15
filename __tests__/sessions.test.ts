@@ -1,26 +1,22 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-// Sessions module uses module-level state. We import fresh each test via dynamic import.
-// Since ESM caches modules, we test the exported API directly.
 import {
+  appendSessionTranscript,
   completeSessionIds,
   getSession,
   isEvicted,
   listSessionEntries,
+  listSessionTranscriptEntries,
   onSessionChange,
   setSession,
 } from '../src/sessions.js';
 
-// Minimal mock Chat object — sessions only store the reference
 function mockChat(label = 'chat'): { _label: string } {
   return { _label: label } as unknown as ReturnType<typeof mockChat>;
 }
 
 describe('sessions', () => {
-  // NOTE: Since sessions is module-scoped state, tests are not fully isolated.
-  // We test behaviors that don't depend on clean state first.
-
   describe('getSession / setSession', () => {
     it('stores and retrieves a session', () => {
       const chat = mockChat('test-1');
@@ -36,14 +32,40 @@ describe('sessions', () => {
 
     it('updates lastAccess on get', () => {
       setSession('sess-access', mockChat() as never);
-      const before = listSessionEntries().find((s) => s.id === 'sess-access');
+      const before = listSessionEntries().find((session) => session.id === 'sess-access');
       assert.ok(before);
 
-      // Access the session - lastAccess should be >= before
       getSession('sess-access');
-      const after = listSessionEntries().find((s) => s.id === 'sess-access');
+      const after = listSessionEntries().find((session) => session.id === 'sess-access');
       assert.ok(after);
       assert.ok(after.lastAccess >= before.lastAccess);
+    });
+  });
+
+  describe('transcripts', () => {
+    it('initializes an empty transcript for new sessions', () => {
+      setSession('sess-empty-transcript', mockChat('empty') as never);
+      assert.deepStrictEqual(listSessionTranscriptEntries('sess-empty-transcript'), []);
+    });
+
+    it('appends and reads transcript entries', () => {
+      setSession('sess-transcript-append', mockChat('append') as never);
+      appendSessionTranscript('sess-transcript-append', {
+        role: 'user',
+        text: 'Hello',
+        timestamp: 1,
+      });
+      appendSessionTranscript('sess-transcript-append', {
+        role: 'assistant',
+        text: 'Hi',
+        timestamp: 2,
+        taskId: 'task-1',
+      });
+
+      assert.deepStrictEqual(listSessionTranscriptEntries('sess-transcript-append'), [
+        { role: 'user', text: 'Hello', timestamp: 1 },
+        { role: 'assistant', text: 'Hi', timestamp: 2, taskId: 'task-1' },
+      ]);
     });
   });
 
@@ -62,8 +84,9 @@ describe('sessions', () => {
     it('returns array of session entries', () => {
       setSession('sess-list-test', mockChat() as never);
       const entries = listSessionEntries();
+      const entry = entries.find((session) => session.id === 'sess-list-test');
+
       assert.ok(Array.isArray(entries));
-      const entry = entries.find((e) => e.id === 'sess-list-test');
       assert.ok(entry);
       assert.strictEqual(typeof entry.lastAccess, 'number');
     });
@@ -88,9 +111,16 @@ describe('sessions', () => {
       const chat1 = mockChat('first');
       const chat2 = mockChat('second');
       setSession('sess-overwrite', chat1 as never);
+      appendSessionTranscript('sess-overwrite', {
+        role: 'user',
+        text: 'Old turn',
+        timestamp: 1,
+      });
+
       setSession('sess-overwrite', chat2 as never);
-      const retrieved = getSession('sess-overwrite');
-      assert.strictEqual(retrieved, chat2);
+
+      assert.strictEqual(getSession('sess-overwrite'), chat2);
+      assert.deepStrictEqual(listSessionTranscriptEntries('sess-overwrite'), []);
     });
 
     it('clears evicted state when a session ID is reused', () => {
@@ -109,12 +139,18 @@ describe('sessions', () => {
       assert.strictEqual(getSession(`${prefix}0`), revived);
     });
 
-    it('evicts the least recently used active session', () => {
+    it('evicts the least recently used active session and its transcript', () => {
       const prefix = 'sess-lru-order-';
 
       for (let i = 0; i <= 60; i += 1) {
         setSession(`${prefix}${String(i)}`, mockChat(`lru-${String(i)}`) as never);
       }
+
+      appendSessionTranscript(`${prefix}12`, {
+        role: 'user',
+        text: 'Will be evicted',
+        timestamp: 1,
+      });
 
       assert.ok(getSession(`${prefix}11`));
 
@@ -122,6 +158,7 @@ describe('sessions', () => {
 
       assert.strictEqual(isEvicted(`${prefix}11`), false);
       assert.strictEqual(isEvicted(`${prefix}12`), true);
+      assert.strictEqual(listSessionTranscriptEntries(`${prefix}12`), undefined);
     });
   });
 
@@ -155,35 +192,31 @@ describe('sessions', () => {
       assert.strictEqual(calls, 1);
     });
 
-    it('includes the changed session detail URI on setSession', () => {
+    it('includes detail and transcript URIs on setSession', () => {
       let detailUris: string[] = [];
+      let transcriptUris: string[] = [];
       onSessionChange((event) => {
         detailUris = event.detailUris;
+        transcriptUris = event.transcriptUris;
       });
 
       setSession('sess-task-set', mockChat('task-set') as never, 'task-123');
       assert.ok(detailUris.includes('sessions://sess-task-set'));
+      assert.ok(transcriptUris.includes('sessions://sess-task-set/transcript'));
     });
 
-    it('includes the changed session detail URI on getSession', () => {
+    it('includes detail and transcript URIs on getSession', () => {
       let detailUris: string[] = [];
+      let transcriptUris: string[] = [];
       setSession('sess-task-get', mockChat('task-get') as never);
       onSessionChange((event) => {
         detailUris = event.detailUris;
+        transcriptUris = event.transcriptUris;
       });
 
       getSession('sess-task-get', 'task-456');
       assert.deepStrictEqual(detailUris, ['sessions://sess-task-get']);
-    });
-
-    it('provides detail URIs even without a taskId', () => {
-      let detailUris: string[] = [];
-      onSessionChange((event) => {
-        detailUris = event.detailUris;
-      });
-
-      setSession('sess-no-task', mockChat('no-task') as never);
-      assert.ok(detailUris.includes('sessions://sess-no-task'));
+      assert.deepStrictEqual(transcriptUris, ['sessions://sess-task-get/transcript']);
     });
   });
 
@@ -196,10 +229,16 @@ describe('sessions', () => {
 
       const chat = mockChat('ttl-read');
       fresh.setSession('sess-expire-on-read', chat as never);
+      fresh.appendSessionTranscript('sess-expire-on-read', {
+        role: 'user',
+        text: 'hello',
+        timestamp: 1,
+      });
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       assert.strictEqual(fresh.getSession('sess-expire-on-read'), undefined);
       assert.strictEqual(fresh.isEvicted('sess-expire-on-read'), true);
+      assert.strictEqual(fresh.listSessionTranscriptEntries('sess-expire-on-read'), undefined);
 
       delete process.env.SESSION_TTL_MS;
     });

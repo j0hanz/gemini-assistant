@@ -9,9 +9,17 @@ const MAX_EVICTED_ENTRIES = 1000;
 const EVICTED_TRIM_TARGET = Math.floor(MAX_EVICTED_ENTRIES / 2);
 const EVICTION_SWEEP_INTERVAL_MS = 60_000;
 
+export interface TranscriptEntry {
+  role: 'user' | 'assistant';
+  text: string;
+  timestamp: number;
+  taskId?: string;
+}
+
 interface SessionEntry {
   chat: Chat;
   lastAccess: number;
+  transcript: TranscriptEntry[];
 }
 
 interface SessionSummary {
@@ -21,6 +29,7 @@ interface SessionSummary {
 
 export interface SessionChangeEvent {
   detailUris: string[];
+  transcriptUris: string[];
 }
 
 const sessions = new Map<string, SessionEntry>();
@@ -37,9 +46,14 @@ function sessionDetailUri(id: string): string {
   return `sessions://${id}`;
 }
 
+function sessionTranscriptUri(id: string): string {
+  return `sessions://${id}/transcript`;
+}
+
 function notifyChange(sessionIds: string[] = []): void {
   changeCallback?.({
     detailUris: sessionIds.map((id) => sessionDetailUri(id)),
+    transcriptUris: sessionIds.map((id) => sessionTranscriptUri(id)),
   });
 }
 
@@ -77,7 +91,7 @@ function updateSessionAccess(id: string, entry: SessionEntry): Chat {
 
 function storeSession(id: string, chat: Chat): void {
   evictedSessions.delete(id);
-  setSessionEntry(id, { chat, lastAccess: now() });
+  setSessionEntry(id, { chat, lastAccess: now(), transcript: [] });
 }
 
 function trimEvictedSessions(): void {
@@ -133,6 +147,19 @@ function evictOldest(): string | undefined {
 
 export function listSessionEntries(): SessionSummary[] {
   return Array.from(sessions, ([id, entry]) => toSessionSummary(id, entry));
+}
+
+export function listSessionTranscriptEntries(id: string): TranscriptEntry[] | undefined {
+  const entry = sessions.get(id);
+  if (!entry) return undefined;
+  return entry.transcript.map((item) => ({ ...item }));
+}
+
+export function appendSessionTranscript(id: string, item: TranscriptEntry): boolean {
+  const entry = sessions.get(id);
+  if (!entry) return false;
+  entry.transcript.push({ ...item });
+  return true;
 }
 
 export function completeSessionIds(prefix?: string): string[] {

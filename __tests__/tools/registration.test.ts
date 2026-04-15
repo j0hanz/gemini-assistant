@@ -17,7 +17,13 @@ const { registerAnalyzeFileTool, registerExecuteCodeTool } =
 const { registerAnalyzePrTool } = await import('../../src/tools/pr.js');
 const { registerAgenticSearchTool, registerAnalyzeUrlTool, registerSearchTool } =
   await import('../../src/tools/research.js');
-const { registerPrompts, registerResources } = await import('../../src/server-content.js');
+const {
+  createPromptDefinitions,
+  PUBLIC_PROMPT_NAMES,
+  PUBLIC_RESOURCE_URIS,
+  registerPrompts,
+  registerResources,
+} = await import('../../src/server-content.js');
 const { registerServerFeatures, SERVER_REGISTRARS } =
   await import('../../src/server-registration.js');
 const { registerCompareFilesTool } = await import('../../src/tools/compare.js');
@@ -128,6 +134,25 @@ describe('tool registration', () => {
         'cache tools',
         'prompts',
         'resources',
+      ],
+    );
+  });
+
+  it('keeps the exported prompt and resource surface aligned with discoverability docs', () => {
+    assert.deepStrictEqual(
+      createPromptDefinitions(async () => []).map((definition) => definition.name),
+      [...PUBLIC_PROMPT_NAMES],
+    );
+    assert.deepStrictEqual(
+      [...PUBLIC_RESOURCE_URIS],
+      [
+        'sessions://list',
+        'sessions://{sessionId}',
+        'sessions://{sessionId}/transcript',
+        'caches://list',
+        'caches://{cacheName}',
+        'tools://list',
+        'workflows://list',
       ],
     );
   });

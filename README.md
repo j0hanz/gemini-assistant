@@ -1,107 +1,183 @@
 # Gemini Assistant
 
-Gemini Assistant is a Model Context Protocol server that exposes Google Gemini as a tool-oriented assistant. It supports multi-turn chat, grounded web research, URL analysis, file analysis, sandboxed code execution, cache management, PR review, file comparison, and diagram generation.
+`gemini-assistant` is an MCP server that packages Google Gemini around clear workflows: chat, deep research, file analysis, local diff review, caches, and session inspection.
+
+## Start Here
+
+First-run MCP flow:
+
+1. Read `tools://list` for the full discovery catalog of tools, prompts, and resources.
+2. Read `workflows://list` and start with `getting-started`.
+3. Use the `getting-started` prompt or call `ask` directly for the first task.
+4. If you create a multi-turn chat, inspect `sessions://list`, `sessions://{sessionId}`, and `sessions://{sessionId}/transcript`.
+
+Key workflow prompts:
+
+- `getting-started`
+- `deep-research`
+- `project-memory`
+- `diff-review`
+- `analyze-file`
+
+## Common Jobs
+
+- Quick Gemini chat or structured JSON output: `ask`
+- Grounded web answer: `search`
+- Multi-step research with sources: `agentic_search` or `deep-research`
+- Analyze one local file: `analyze_file` or `analyze-file`
+- Review the current repo diff: `analyze_pr` or `diff-review`
+- Compare two local files: `compare_files`
+- Diagnose an error message: `explain_error` or `explain-error`
+- Reuse large project context: `create_cache`, `list_caches`, `update_cache`, `delete_cache`
+
+## Sessions Versus Caches
+
+Use sessions when the context is conversational and should evolve turn by turn. Sessions are created by `ask` with a `sessionId`, listed in `sessions://list`, and inspectable through `sessions://{sessionId}` and `sessions://{sessionId}/transcript`.
+
+Use caches when the same large context should be reused across multiple asks or across different sessions. Cache state is exposed through `caches://list` and `caches://{cacheName}`.
+
+The practical split:
+
+- Session: live working memory for one thread
+- Cache: reusable reference context for many calls
+- Transcript resource: read-only visibility into the live session history
+
+## Discovery Resources
+
+Public resources:
+
+- `tools://list`
+- `workflows://list`
+- `sessions://list`
+- `sessions://{sessionId}`
+- `sessions://{sessionId}/transcript`
+- `caches://list`
+- `caches://{cacheName}`
+
+`tools://list` returns a concise JSON catalog of tools, prompts, and resources. `workflows://list` returns opinionated starter workflows, with `getting-started` first.
 
 ## Requirements
 
 - Node.js `>=24`
-- An `API_KEY` for the Gemini API
 - `npm`
+- Gemini API key in `API_KEY`
 
-## Install
+## Environment
+
+Minimal `.env` example:
+
+```env
+API_KEY=your-gemini-api-key
+MCP_TRANSPORT=stdio
+```
+
+Useful optional variables:
+
+- `GEMINI_MODEL`: override the default model (`gemini-3-flash-preview`)
+- `GEMINI_EXPOSE_THOUGHTS`: expose Gemini thought text in non-JSON outputs when set to `true`
+- `MCP_TRANSPORT`: `stdio`, `http`, or `web-standard`
+- `MCP_HTTP_PORT`: HTTP bind port, default `3000`
+- `MCP_HTTP_HOST`: HTTP bind host, default `127.0.0.1`
+- `MCP_STATELESS`: enable stateless streamable HTTP mode when set to `true`
+- `MCP_CORS_ORIGIN`: optional `Access-Control-Allow-Origin` for HTTP mode
+- `MCP_ALLOWED_HOSTS`: optional comma-separated host allowlist for HTTP/web-standard mode
+- `ALLOWED_FILE_ROOTS`: optional comma-separated absolute roots allowed for file tools
+- `SESSION_TTL_MS`: session idle TTL in milliseconds, default `1800000`
+- `MAX_SESSIONS`: max in-memory chat sessions before LRU eviction, default `50`
+
+## Run
+
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-## Run
-
-Stdio transport for local MCP clients:
-
-```bash
-API_KEY=your-key npm start
-```
-
 Development entrypoint without a build:
 
 ```bash
-API_KEY=your-key npx tsx src/index.ts
+npx tsx src/index.ts
+```
+
+Run built output:
+
+```bash
+npm run build
+npm start
 ```
 
 HTTP transport:
 
 ```bash
-API_KEY=your-key MCP_TRANSPORT=http npx tsx src/index.ts
+MCP_TRANSPORT=http npx tsx src/index.ts
 ```
 
 Web-standard transport:
 
 ```bash
-API_KEY=your-key MCP_TRANSPORT=web-standard npx tsx src/index.ts
+MCP_TRANSPORT=web-standard npx tsx src/index.ts
 ```
 
-## Environment
+## MCP Client Setup
 
-- `API_KEY`: required Gemini API key.
-- `GEMINI_MODEL`: optional model override. Default: `gemini-3-flash-preview`.
-- `GEMINI_EXPOSE_THOUGHTS`: optional. Default: `false`. When `true`, non-JSON tool responses may include Gemini thought text in structured output.
-- `MCP_TRANSPORT`: `stdio`, `http`, or `web-standard`. Default: `stdio`.
-- `MCP_HTTP_PORT`: HTTP bind port. Default: `3000`.
-- `MCP_HTTP_HOST`: HTTP bind host. Default: `127.0.0.1`.
-- `MCP_STATELESS`: when `true`, streamable HTTP uses stateless per-request transports. When unset or `false`, HTTP/Web transports keep per-session transport instances.
-- `MCP_CORS_ORIGIN`: optional `Access-Control-Allow-Origin` value for HTTP mode.
-- `MCP_ALLOWED_HOSTS`: optional comma-separated host allowlist for Host-header validation.
-- `ALLOWED_FILE_ROOTS`: optional comma-separated absolute roots allowed for file tools. Default: current working directory.
-- `SESSION_TTL_MS`: session idle TTL in milliseconds. Default: `1800000`.
-- `MAX_SESSIONS`: max in-memory chat sessions before LRU eviction. Default: `50`.
+Minimal stdio client configuration:
 
-## Tools
+```json
+{
+  "mcpServers": {
+    "gemini-assistant": {
+      "command": "npx",
+      "args": ["tsx", "src/index.ts"],
+      "cwd": "/absolute/path/to/gemini-assistant",
+      "env": {
+        "API_KEY": "your-gemini-api-key",
+        "MCP_TRANSPORT": "stdio"
+      }
+    }
+  }
+}
+```
 
-- `ask`: single-turn or multi-turn Gemini chat with optional structured output and Google Search.
-- `search`: Gemini web-grounded answering with optional public URL analysis.
-- `agentic_search`: deeper research using Google Search and code execution.
-- `analyze_url`: analyze one or more public `http/https` URLs.
-- `analyze_file`: upload and analyze a local file from allowed roots.
-- `execute_code`: generate and run code in Gemini's sandbox.
-- `analyze_pr`: build a local git diff, include reviewable untracked files, and ask Gemini for a review.
-- `explain_error`: diagnose stack traces and error output.
-- `compare_files`: upload two files and compare them.
-- `generate_diagram`: generate Mermaid or PlantUML diagrams.
-- `create_cache`, `list_caches`, `update_cache`, `delete_cache`: manage Gemini cached context.
+## Tool Surface
 
-## Prompts And Resources
+Tools:
 
-Registered prompts:
+- `ask`
+- `search`
+- `agentic_search`
+- `analyze_url`
+- `analyze_file`
+- `execute_code`
+- `analyze_pr`
+- `explain_error`
+- `compare_files`
+- `generate_diagram`
+- `create_cache`
+- `list_caches`
+- `update_cache`
+- `delete_cache`
 
+Prompt wrappers:
+
+- `getting-started`
+- `deep-research`
+- `project-memory`
+- `diff-review`
 - `analyze-file`
 - `code-review`
 - `summarize`
 - `explain-error`
 
-Registered resources:
-
-- `sessions://list`
-- `sessions://{sessionId}`
-- `caches://list`
-- `caches://{cacheName}`
-
-## Workflow Notes
-
-- Task-aware tools run through MCP task support and bridge progress updates into task status messages.
-- Session and cache resources emit resource-list and resource-update notifications when state changes.
-- Session expiry is enforced both by periodic cleanup and immediately on read, so stale sessions cannot be revived by access timing.
-- Search-style outputs keep legacy `sources: string[]` and now also expose structured `sourceDetails` entries when available.
-- `analyze_pr` budgets reviews by whole-file diff units and reports omitted paths when the review budget is exceeded.
-- `delete_cache` uses interactive confirmation when available; otherwise callers must pass `confirm=true`.
-
 ## Safety Boundaries
 
-- File tools require absolute paths and restrict access to configured roots.
-- URL tools only accept public `http/https` URLs and reject localhost, loopback, and private-network literals.
-- Host-header validation is supported for HTTP and web-standard transports through `MCP_ALLOWED_HOSTS`.
-- Uploaded Gemini file handles must contain a non-empty `name`; incomplete handles are treated as failures.
+- File tools require absolute paths inside configured roots.
+- URL tools accept only public `http/https` URLs.
+- Sessions and transcripts are in-memory only and disappear on expiry or eviction.
+- Cache tooling does not change the core Gemini tool set or transport model.
 
 ## Commands
+
+Required checks:
 
 ```bash
 npm run lint

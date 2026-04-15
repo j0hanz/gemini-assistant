@@ -97,8 +97,8 @@ function sendResourceChanged(listUri: string, detailUris: readonly string[] = []
   }
 }
 
-onSessionChange(({ detailUris }: SessionChangeEvent) => {
-  sendResourceChanged('sessions://list', detailUris);
+onSessionChange(({ detailUris, transcriptUris }: SessionChangeEvent) => {
+  sendResourceChanged('sessions://list', [...detailUris, ...transcriptUris]);
 });
 onCacheChange(({ detailUris }: CacheChangeEvent) => {
   sendResourceChanged('caches://list', detailUris);

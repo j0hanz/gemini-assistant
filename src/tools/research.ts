@@ -1,7 +1,6 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import { buildGenerateContentConfig } from '../lib/config-utils.js';
-import { sendProgress } from '../lib/context.js';
+import { sendProgress } from '../lib/errors.js';
 import {
   appendSources,
   appendUrlStatus,
@@ -26,7 +25,8 @@ import {
   SearchOutputSchema,
 } from '../schemas/outputs.js';
 
-import { ai, MODEL } from '../client.js';
+import { buildGenerateContentConfig } from '../client.js';
+import { getAI, MODEL } from '../client.js';
 
 const SEARCH_TOOL_LABEL = 'Web Search';
 const ANALYZE_URL_TOOL_LABEL = 'Analyze URL';
@@ -145,7 +145,7 @@ async function searchWork(
     'search',
     SEARCH_TOOL_LABEL,
     () =>
-      ai.models.generateContentStream({
+      getAI().models.generateContentStream({
         model: MODEL,
         contents: buildSearchContents(query, urls),
         config: {
@@ -180,7 +180,7 @@ async function analyzeUrlWork(
     'analyze_url',
     ANALYZE_URL_TOOL_LABEL,
     () =>
-      ai.models.generateContentStream({
+      getAI().models.generateContentStream({
         model: MODEL,
         contents: buildPromptWithUrls(urls, question),
         config: {
@@ -254,7 +254,7 @@ async function agenticSearchWork(
     'agentic_search',
     AGENTIC_SEARCH_TOOL_LABEL,
     () =>
-      ai.models.generateContentStream({
+      getAI().models.generateContentStream({
         model: MODEL,
         contents:
           `Research this topic comprehensively: ${topic}\n\n` +

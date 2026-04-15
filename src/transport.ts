@@ -6,11 +6,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 
-import {
-  parseAllowedHosts,
-  resolveAllowedHosts,
-  validateHostHeader,
-} from './lib/host-validation.js';
+import { parseAllowedHosts, resolveAllowedHosts, validateHostHeader } from './lib/validation.js';
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_HOST = '127.0.0.1';

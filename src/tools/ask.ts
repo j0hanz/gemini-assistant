@@ -4,19 +4,14 @@ import { completable } from '@modelcontextprotocol/server';
 import type { Chat } from '@google/genai';
 import { z } from 'zod/v4';
 
-import {
-  AskThinkingLevel,
-  buildGenerateContentConfig,
-  THINKING_LEVELS,
-} from '../lib/config-utils.js';
-import { reportCompletion, sendProgress } from '../lib/context.js';
-import { errorResult } from '../lib/errors.js';
+import { errorResult, reportCompletion, sendProgress } from '../lib/errors.js';
 import { createResourceLink, extractTextContent } from '../lib/response.js';
 import { executeToolStream, extractUsage, type StreamResult } from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { AskOutputSchema } from '../schemas/outputs.js';
 
-import { ai, completeCacheNames, MODEL } from '../client.js';
+import { AskThinkingLevel, buildGenerateContentConfig, THINKING_LEVELS } from '../client.js';
+import { completeCacheNames, getAI, MODEL } from '../client.js';
 import {
   completeSessionIds,
   getSession,
@@ -146,7 +141,7 @@ function validateAskRequest({
 
 async function runAskStream(
   ctx: ServerContext,
-  streamGenerator: () => ReturnType<typeof ai.models.generateContentStream>,
+  streamGenerator: () => ReturnType<ReturnType<typeof getAI>['models']['generateContentStream']>,
   jsonMode = false,
 ): Promise<CallToolResult> {
   await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Preparing`);
@@ -180,7 +175,7 @@ async function askWithoutSession(
             message: args.message,
             config: buildGenerateContentConfig(args, ctx.mcpReq.signal),
           })
-        : ai.models.generateContentStream({
+        : getAI().models.generateContentStream({
             model: MODEL,
             contents: args.message,
             config: buildGenerateContentConfig(args, ctx.mcpReq.signal),
@@ -206,7 +201,7 @@ async function askNewSession(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   await ctx.mcpReq.log('debug', `Creating session ${args.sessionId}`);
-  const chat = ai.chats.create({
+  const chat = getAI().chats.create({
     model: MODEL,
     config: buildGenerateContentConfig(args),
   });

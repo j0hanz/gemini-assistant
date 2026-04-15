@@ -9,10 +9,8 @@ import type {
   UrlContextMetadata,
 } from '@google/genai';
 
-import { reportCompletion, sendProgress } from './context.js';
-import { finishReasonError } from './errors.js';
+import { finishReasonError, reportCompletion, sendProgress, withRetry } from './errors.js';
 import { extractTextContent, pickDefined } from './response.js';
-import { withRetry } from './retry.js';
 
 export const PROGRESS_TOTAL = 100;
 export const PROGRESS_STEP_FRACTION = 0.15;

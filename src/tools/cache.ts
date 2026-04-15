@@ -4,13 +4,17 @@ import { completable } from '@modelcontextprotocol/server';
 import { createPartFromUri } from '@google/genai';
 import { z } from 'zod/v4';
 
-import { reportCompletion, sendProgress } from '../lib/context.js';
-import { cleanupErrorLogger, withErrorLogging } from '../lib/errors.js';
-import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
-import { buildServerRootsFetcher, type RootsFetcher } from '../lib/path-validation.js';
+import {
+  cleanupErrorLogger,
+  reportCompletion,
+  sendProgress,
+  withErrorLogging,
+  withRetry,
+} from '../lib/errors.js';
+import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { createResourceLink } from '../lib/response.js';
-import { withRetry } from '../lib/retry.js';
 import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
 import { type CreateCacheInput, CreateCacheInputSchema } from '../schemas/inputs.js';
 import {
   CreateCacheOutputSchema,
@@ -19,7 +23,13 @@ import {
   UpdateCacheOutputSchema,
 } from '../schemas/outputs.js';
 
-import { ai, type CacheSummary, completeCacheNames, listCacheSummaries, MODEL } from '../client.js';
+import {
+  type CacheSummary,
+  completeCacheNames,
+  getAI,
+  listCacheSummaries,
+  MODEL,
+} from '../client.js';
 
 type CachePart = ReturnType<typeof createPartFromUri>;
 
@@ -145,7 +155,7 @@ async function cleanupOldCaches(
       (c): c is CacheSummary & { name: string } =>
         typeof c.name === 'string' && c.displayName === displayName && c.name !== keepName,
     );
-    await Promise.allSettled(stale.map((c) => ai.caches.delete({ name: c.name })));
+    await Promise.allSettled(stale.map((c) => getAI().caches.delete({ name: c.name })));
   } catch {
     // Best-effort cleanup — failures are non-fatal
   }
@@ -196,7 +206,7 @@ function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
       await sendProgress(ctx, totalSteps - 1, totalSteps, `${TOOL_LABEL}: Creating cache`);
       const cache = await withRetry(
         () =>
-          ai.caches.create({
+          getAI().caches.create({
             model: MODEL,
             config: {
               ...(parts.length > 0 ? { contents: [{ role: 'user' as const, parts }] } : {}),
@@ -321,7 +331,10 @@ export function registerCacheTools(server: McpServer): void {
           };
         }
 
-        await ai.caches.delete({ name: cacheName, config: { abortSignal: ctx.mcpReq.signal } });
+        await getAI().caches.delete({
+          name: cacheName,
+          config: { abortSignal: ctx.mcpReq.signal },
+        });
         notifyCacheChange(ctx.task?.id);
         await ctx.mcpReq.log('info', `Deleted cache: ${cacheName}`);
         return {
@@ -351,7 +364,7 @@ export function registerCacheTools(server: McpServer): void {
       'update_cache',
       'Update Cache',
       async ({ cacheName, ttl }: { cacheName: string; ttl: string }, ctx: ServerContext) => {
-        const updated = await ai.caches.update({
+        const updated = await getAI().caches.update({
           name: cacheName,
           config: { ttl, abortSignal: ctx.mcpReq.signal },
         });

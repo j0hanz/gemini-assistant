@@ -1,9 +1,94 @@
-import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
+import type {
+  CallToolResult,
+  ProgressNotification,
+  ServerContext,
+} from '@modelcontextprotocol/server';
 import { INVALID_PARAMS, ProtocolError } from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
 
-import { reportFailure } from './context.js';
+// ── Progress / Context ────────────────────────────────────────────────
+
+export const MIN_PROGRESS_INTERVAL_MS = 250;
+
+const lastEmitTime = new Map<string, number>();
+
+/** Reset the progress throttle state. Intended for testing. */
+export function resetProgressThrottle(): void {
+  lastEmitTime.clear();
+}
+
+export async function sendProgress(
+  ctx: ServerContext,
+  progress: number,
+  total?: number,
+  message?: string,
+): Promise<void> {
+  const progressToken = ctx.mcpReq._meta?.progressToken;
+  if (progressToken === undefined || ctx.mcpReq.signal.aborted) return;
+
+  const isTerminal = total !== undefined && progress >= total;
+  const now = Date.now();
+  const throttleKey = `${String(progressToken)}:${message ?? ''}`;
+  const lastEmit = lastEmitTime.get(throttleKey);
+
+  if (!isTerminal && lastEmit !== undefined && now - lastEmit < MIN_PROGRESS_INTERVAL_MS) {
+    return;
+  }
+
+  try {
+    const notification: ProgressNotification = {
+      method: 'notifications/progress',
+      params: {
+        progressToken,
+        progress,
+        ...(total !== undefined ? { total } : {}),
+        ...(message ? { message } : {}),
+      },
+    };
+    await ctx.mcpReq.notify(notification);
+    if (isTerminal) {
+      // Clean up all entries for this progressToken
+      for (const key of lastEmitTime.keys()) {
+        if (key.startsWith(`${String(progressToken)}:`)) {
+          lastEmitTime.delete(key);
+        }
+      }
+    } else {
+      lastEmitTime.set(throttleKey, Date.now());
+    }
+  } catch (err: unknown) {
+    const aborted = ctx.mcpReq.signal.aborted as boolean;
+    if (!aborted) {
+      const detail = err instanceof Error ? err.message : String(err);
+      try {
+        await ctx.mcpReq.log('debug', `Progress notification failed: ${detail}`);
+      } catch {
+        // Transport fully closed — discard
+      }
+    }
+  }
+}
+
+export async function reportCompletion(
+  ctx: ServerContext,
+  toolLabel: string,
+  detail: string,
+): Promise<void> {
+  await sendProgress(ctx, 100, 100, `${toolLabel}: ${detail}`);
+}
+
+export async function reportFailure(
+  ctx: ServerContext,
+  toolLabel: string,
+  error: unknown,
+): Promise<void> {
+  const raw = error instanceof Error ? error.message : String(error);
+  const short = raw.length > 80 ? raw.substring(0, 77) : raw;
+  await sendProgress(ctx, 100, 100, `${toolLabel}: failed — ${short}`);
+}
+
+// ── Error Formatting ──────────────────────────────────────────────────
 
 export function formatError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -112,4 +197,74 @@ export function withErrorLogging<TArgs>(
       throw err;
     }
   };
+}
+
+// ── Retry ─────────────────────────────────────────────────────────────
+
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 503]);
+const DEFAULT_MAX_RETRIES = 2;
+const BASE_DELAY_MS = 1000;
+const MAX_DELAY_MS = 10_000;
+const JITTER_MS = 500;
+
+function isRetryableError(err: unknown): boolean {
+  return hasHttpStatus(err) && RETRYABLE_STATUS_CODES.has(err.status);
+}
+
+function extractRetryAfterMs(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const details = err as Record<string, unknown>;
+  if (typeof details.retryAfter === 'number' && details.retryAfter > 0) {
+    return details.retryAfter;
+  }
+  return undefined;
+}
+
+function computeDelay(attempt: number, retryAfterMs?: number): number {
+  const exponential = Math.min(Math.pow(2, attempt) * BASE_DELAY_MS, MAX_DELAY_MS);
+  const jitter = Math.random() * JITTER_MS;
+  if (retryAfterMs !== undefined) {
+    return Math.max(retryAfterMs, exponential) + jitter;
+  }
+  return exponential + jitter;
+}
+
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  options?: {
+    maxRetries?: number;
+    signal?: AbortSignal;
+    onRetry?: (attempt: number, maxRetries: number, delayMs: number) => void;
+  },
+): Promise<T> {
+  const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt >= maxRetries || !isRetryableError(err)) throw err;
+      if (options?.signal?.aborted) throw err;
+
+      await new Promise<void>((resolve, reject) => {
+        const delay = computeDelay(attempt, extractRetryAfterMs(err));
+
+        options?.onRetry?.(attempt + 1, maxRetries, Math.round(delay));
+
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(new DOMException('Aborted', 'AbortError'));
+        };
+
+        const timer = setTimeout(() => {
+          options?.signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }, delay);
+
+        if (options?.signal) {
+          options.signal.addEventListener('abort', onAbort, { once: true });
+        }
+      });
+    }
+  }
 }

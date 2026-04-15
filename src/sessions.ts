@@ -1,6 +1,6 @@
 import type { Chat } from '@google/genai';
 
-import { parseIntEnv } from './lib/config-utils.js';
+import { parseIntEnv } from './client.js';
 
 const SESSION_TTL_MS = parseIntEnv('SESSION_TTL_MS', 30 * 60 * 1000);
 const MAX_SESSIONS = parseIntEnv('MAX_SESSIONS', 50);

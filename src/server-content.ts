@@ -7,11 +7,7 @@ import { basename, dirname, join, normalize } from 'node:path';
 import { z } from 'zod/v4';
 
 import { formatError } from './lib/errors.js';
-import {
-  buildServerRootsFetcher,
-  getAllowedRoots,
-  type RootsFetcher,
-} from './lib/path-validation.js';
+import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from './lib/validation.js';
 
 import { completeCacheNames, getCacheSummary, listCacheSummaries } from './client.js';
 import { completeSessionIds, getSessionEntry, listSessionEntries } from './sessions.js';

@@ -1,17 +1,95 @@
+import type { GenerateContentConfig, MediaResolution, ThinkingLevel } from '@google/genai';
 import type { CachedContent } from '@google/genai';
 import { GoogleGenAI } from '@google/genai';
 
+import { withRetry } from './lib/errors.js';
 import { pickDefined } from './lib/response.js';
-import { withRetry } from './lib/retry.js';
 
-const apiKey = process.env.API_KEY;
-if (!apiKey) {
-  throw new Error('API_KEY environment variable is required');
+// ── Config Utilities ──────────────────────────────────────────────────
+
+export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
+export type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+export function parseIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const parsed = Number(raw);
+  return Number.isNaN(parsed) ? fallback : parsed;
 }
+
+const DEFAULT_SYSTEM_INSTRUCTION =
+  'Provide direct, accurate answers. Use Markdown for structure. Be concise.';
+
+export interface ConfigBuilderOptions {
+  systemInstruction?: string | undefined;
+  thinkingLevel?: AskThinkingLevel | undefined;
+  cacheName?: string | undefined;
+  responseSchema?: Record<string, unknown> | undefined;
+  jsonMode?: boolean | undefined;
+  maxOutputTokens?: number | undefined;
+  temperature?: number | undefined;
+  seed?: number | undefined;
+  mediaResolution?: string | undefined;
+}
+
+function buildThinkingConfig(thinkingLevel?: AskThinkingLevel) {
+  return {
+    includeThoughts: true,
+    ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
+  };
+}
+
+export function buildGenerateContentConfig(
+  options: ConfigBuilderOptions,
+  signal?: AbortSignal,
+): GenerateContentConfig {
+  const {
+    systemInstruction,
+    thinkingLevel,
+    cacheName,
+    responseSchema,
+    jsonMode,
+    maxOutputTokens = 8192,
+    temperature,
+    seed,
+    mediaResolution,
+  } = options;
+  const isJson = jsonMode ?? responseSchema !== undefined;
+
+  return {
+    ...(cacheName ? { cachedContent: cacheName } : {}),
+    ...(cacheName ? {} : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
+    ...(isJson
+      ? {
+          responseMimeType: 'application/json',
+          ...(responseSchema ? { responseSchema } : {}),
+        }
+      : { thinkingConfig: buildThinkingConfig(thinkingLevel) }),
+    maxOutputTokens,
+    ...(temperature !== undefined ? { temperature } : {}),
+    ...(seed !== undefined ? { seed } : {}),
+    ...(mediaResolution ? { mediaResolution: mediaResolution as MediaResolution } : {}),
+    ...(signal ? { abortSignal: signal } : {}),
+  };
+}
+
+// ── Client ────────────────────────────────────────────────────────────
 
 export const MODEL = process.env.GEMINI_MODEL ?? 'gemini-3-flash-preview';
 
-export const ai = new GoogleGenAI({ apiKey });
+let _ai: GoogleGenAI | undefined;
+
+/** Lazily initialised Gemini client – throws only when first accessed. */
+export function getAI(): GoogleGenAI {
+  if (!_ai) {
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
+      throw new Error('API_KEY environment variable is required');
+    }
+    _ai = new GoogleGenAI({ apiKey });
+  }
+  return _ai;
+}
 
 export interface CacheSummary {
   name?: string;
@@ -38,7 +116,7 @@ function toCacheSummary(cache: CachedContent): CacheSummary {
 export async function getCacheSummary(name: string, signal?: AbortSignal): Promise<CacheSummary> {
   const cache = await withRetry(
     () =>
-      ai.caches.get({
+      getAI().caches.get({
         name,
         ...(signal ? { config: { abortSignal: signal } } : {}),
       }),
@@ -49,7 +127,7 @@ export async function getCacheSummary(name: string, signal?: AbortSignal): Promi
 
 export async function listCacheSummaries(signal?: AbortSignal): Promise<CacheSummary[]> {
   const caches: CacheSummary[] = [];
-  const pager = await withRetry(() => ai.caches.list(), ...(signal ? [{ signal }] : []));
+  const pager = await withRetry(() => getAI().caches.list(), ...(signal ? [{ signal }] : []));
   for await (const cache of pager) {
     if (signal?.aborted) break;
     caches.push(toCacheSummary(cache));

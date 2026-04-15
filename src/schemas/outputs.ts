@@ -7,19 +7,22 @@ export const UsageMetadataSchema = z.object({
   totalTokenCount: z.number().optional().describe('Total tokens for the request'),
 });
 
+const baseOutputFields = {
+  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
+  usage: UsageMetadataSchema.optional().describe('Token usage'),
+};
+
 export const AskOutputSchema = z.object({
   answer: z.string().describe('Generated response'),
   data: z.unknown().optional().describe('Parsed structured response when JSON mode is used'),
-  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
-  usage: UsageMetadataSchema.optional().describe('Token usage'),
+  ...baseOutputFields,
 });
 
 export const ExecuteCodeOutputSchema = z.object({
   code: z.string().describe('Generated code'),
   output: z.string().describe('Execution output'),
   explanation: z.string().describe('Model explanation'),
-  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
-  usage: UsageMetadataSchema.optional().describe('Token usage'),
+  ...baseOutputFields,
 });
 
 const UrlMetadataEntrySchema = z.object({
@@ -33,21 +36,18 @@ export const SearchOutputSchema = z.object({
   answer: z.string().describe('Grounded answer'),
   sources: z.array(z.string()).describe('Source URLs from search'),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
-  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
-  usage: UsageMetadataSchema.optional().describe('Token usage'),
+  ...baseOutputFields,
 });
 
 export const AnalyzeUrlOutputSchema = z.object({
   answer: z.string().describe('URL content analysis'),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('Retrieval status per URL'),
-  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
-  usage: UsageMetadataSchema.optional().describe('Token usage'),
+  ...baseOutputFields,
 });
 
 export const AnalyzeFileOutputSchema = z.object({
   analysis: z.string().describe('File analysis result'),
-  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
-  usage: UsageMetadataSchema.optional().describe('Token usage'),
+  ...baseOutputFields,
 });
 
 export const AgenticSearchOutputSchema = z.object({
@@ -57,8 +57,7 @@ export const AgenticSearchOutputSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Tools invoked during research (e.g. googleSearch, codeExecution)'),
-  thoughts: z.string().optional().describe('Internal model reasoning/thinking process'),
-  usage: UsageMetadataSchema.optional().describe('Token usage from final synthesis'),
+  ...baseOutputFields,
 });
 
 const CacheSummarySchema = z.object({

@@ -3,13 +3,11 @@ import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprot
 import { createPartFromUri, Outcome } from '@google/genai';
 import type { Part } from '@google/genai';
 
-import { buildGenerateContentConfig } from '../lib/config-utils.js';
-import { sendProgress } from '../lib/context.js';
-import { cleanupErrorLogger, errorResult, handleToolError } from '../lib/errors.js';
-import { deleteUploadedFiles, uploadFile } from '../lib/file-upload.js';
-import { buildServerRootsFetcher, type RootsFetcher } from '../lib/path-validation.js';
+import { cleanupErrorLogger, errorResult, handleToolError, sendProgress } from '../lib/errors.js';
+import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { handleToolExecution } from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
 import {
   type AnalyzeFileInput,
   AnalyzeFileInputSchema,
@@ -18,7 +16,8 @@ import {
 } from '../schemas/inputs.js';
 import { AnalyzeFileOutputSchema, ExecuteCodeOutputSchema } from '../schemas/outputs.js';
 
-import { ai, MODEL } from '../client.js';
+import { buildGenerateContentConfig } from '../client.js';
+import { getAI, MODEL } from '../client.js';
 
 const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
 const EXECUTE_CODE_TOOL_LABEL = 'Execute Code';
@@ -141,7 +140,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
         'analyze_file',
         ANALYZE_FILE_TOOL_LABEL,
         () =>
-          ai.models.generateContentStream({
+          getAI().models.generateContentStream({
             model: MODEL,
             contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: question }],
             config: buildGenerateContentConfig(
@@ -183,7 +182,7 @@ async function executeCodeWork(
     'execute_code',
     EXECUTE_CODE_TOOL_LABEL,
     () =>
-      ai.models.generateContentStream({
+      getAI().models.generateContentStream({
         model: MODEL,
         contents: prompt,
         config: {

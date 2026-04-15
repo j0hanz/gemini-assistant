@@ -80,6 +80,11 @@ describe('code-review prompt', () => {
     assert.strictEqual(result.success, false);
   });
 
+  it('rejects unknown prompt args', () => {
+    const result = CodeReviewPromptSchema.safeParse({ code: 'x', extra: true });
+    assert.strictEqual(result.success, false);
+  });
+
   it('language completion filters by prefix', () => {
     const filtered = COMMON_LANGUAGES.filter((language) => language.startsWith('py'));
     assert.deepStrictEqual(filtered, ['python']);
@@ -138,6 +143,11 @@ describe('workflow prompts', () => {
   it('keeps getting-started argument-free', () => {
     const result = GettingStartedPromptSchema.safeParse({});
     assert.ok(result.success);
+  });
+
+  it('rejects unexpected getting-started args', () => {
+    const result = GettingStartedPromptSchema.safeParse({ extra: true });
+    assert.strictEqual(result.success, false);
   });
 
   it('builds a getting-started prompt that references discovery resources', () => {

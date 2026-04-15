@@ -132,7 +132,7 @@ const completeLanguage = completeByPrefix(COMMON_LANGUAGES, (value) => value?.to
 const completeSummaryStyle = completeByPrefix(SUMMARY_STYLES);
 
 export function createAnalyzeFilePromptSchema(rootsFetcher: RootsFetcher) {
-  return z.object({
+  return z.strictObject({
     filePath: completable(
       absolutePath('Absolute path to the file to analyze from workspace roots'),
       buildPathAcFetcher(rootsFetcher),
@@ -141,12 +141,12 @@ export function createAnalyzeFilePromptSchema(rootsFetcher: RootsFetcher) {
   });
 }
 
-export const CodeReviewPromptSchema = z.object({
+export const CodeReviewPromptSchema = z.strictObject({
   code: promptText('The code to review'),
   language: completable(optionalPromptText('Programming language of the code'), completeLanguage),
 });
 
-export const SummarizePromptSchema = z.object({
+export const SummarizePromptSchema = z.strictObject({
   text: promptText('The text to summarize'),
   style: completable(
     z.enum(SUMMARY_STYLES).optional().describe('Summary style'),
@@ -154,26 +154,26 @@ export const SummarizePromptSchema = z.object({
   ),
 });
 
-export const ExplainErrorPromptSchema = z.object({
+export const ExplainErrorPromptSchema = z.strictObject({
   error: promptText('The error message or stack trace'),
   context: contextText('Additional context about what was being done'),
 });
 
-export const GettingStartedPromptSchema = z.object({});
+export const GettingStartedPromptSchema = z.strictObject({});
 
-export const DeepResearchPromptSchema = z.object({
+export const DeepResearchPromptSchema = z.strictObject({
   topic: promptText('Topic or question to research'),
   deliverable: optionalPromptText('Optional requested output format or deliverable'),
 });
 
-export const ProjectMemoryPromptSchema = z.object({
+export const ProjectMemoryPromptSchema = z.strictObject({
   project: optionalPromptText('Optional project or codebase label'),
   currentTask: optionalPromptText(
     'Optional current task that should influence cache/session advice',
   ),
 });
 
-export const DiffReviewPromptSchema = z.object({
+export const DiffReviewPromptSchema = z.strictObject({
   focus: optionalPromptText('Optional review focus, such as tests, performance, or regressions'),
 });
 

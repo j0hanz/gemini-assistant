@@ -10,6 +10,7 @@ import { FunctionCallingConfigMode, GoogleGenAI } from '@google/genai';
 
 import { withRetry } from './lib/errors.js';
 import { pickDefined } from './lib/response.js';
+import type { GeminiResponseSchema } from './schemas/json-schema.js';
 
 import { getExposeThoughts, getGeminiModel } from './config.js';
 
@@ -25,7 +26,7 @@ interface ConfigBuilderOptions {
   systemInstruction?: string | undefined;
   thinkingLevel?: AskThinkingLevel | undefined;
   cacheName?: string | undefined;
-  responseSchema?: Record<string, unknown> | undefined;
+  responseSchema?: GeminiResponseSchema | undefined;
   jsonMode?: boolean | undefined;
   maxOutputTokens?: number | undefined;
   temperature?: number | undefined;
@@ -68,7 +69,7 @@ function buildResponseConfig(
   cacheName: string | undefined,
   systemInstruction: string | undefined,
   isJson: boolean,
-  responseSchema: Record<string, unknown> | undefined,
+  responseSchema: GeminiResponseSchema | undefined,
   thinkingLevel: AskThinkingLevel | undefined,
 ) {
   return {

@@ -13,6 +13,10 @@ import {
 } from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { type AskInput, AskInputSchema } from '../schemas/inputs.js';
+import {
+  type GeminiResponseSchema,
+  isGeminiResponseSchemaKeyword,
+} from '../schemas/json-schema.js';
 import { AskOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, EXPOSE_THOUGHTS } from '../client.js';
@@ -46,42 +50,15 @@ const SCHEMA_COMPOSITION_KEYS = ['anyOf', 'oneOf', 'allOf', 'items', 'prefixItem
 
 // ── Structured Output Validation ──────────────────────────────────────
 
-const GEMINI_SUPPORTED_KEYWORDS = new Set([
-  // structural
-  'type',
-  'properties',
-  'required',
-  'additionalProperties',
-  'enum',
-  'format',
-  'minimum',
-  'maximum',
-  'items',
-  'prefixItems',
-  'minItems',
-  'maxItems',
-  // descriptive
-  'title',
-  'description',
-  // composition
-  'anyOf',
-  'oneOf',
-  'allOf',
-  '$ref',
-  // meta
-  '$schema',
-  '$id',
-]);
-
 function visitNestedSchemas(
-  schema: Record<string, unknown>,
-  visitor: (nestedSchema: Record<string, unknown>) => void,
+  schema: GeminiResponseSchema,
+  visitor: (nestedSchema: GeminiResponseSchema) => void,
 ): void {
   const nested = schema.properties;
   if (nested && typeof nested === 'object') {
     for (const value of Object.values(nested as Record<string, unknown>)) {
       if (value && typeof value === 'object') {
-        visitor(value as Record<string, unknown>);
+        visitor(value as GeminiResponseSchema);
       }
     }
   }
@@ -91,28 +68,28 @@ function visitNestedSchemas(
     if (Array.isArray(value)) {
       for (const item of value) {
         if (item && typeof item === 'object') {
-          visitor(item as Record<string, unknown>);
+          visitor(item as GeminiResponseSchema);
         }
       }
       continue;
     }
 
     if (value && typeof value === 'object') {
-      visitor(value as Record<string, unknown>);
+      visitor(value as GeminiResponseSchema);
     }
   }
 
   if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
-    visitor(schema.additionalProperties as Record<string, unknown>);
+    visitor(schema.additionalProperties as GeminiResponseSchema);
   }
 }
 
 function collectUnsupportedKeywords(
-  schema: Record<string, unknown>,
+  schema: GeminiResponseSchema,
   found = new Set<string>(),
 ): string[] {
   for (const key of Object.keys(schema)) {
-    if (!GEMINI_SUPPORTED_KEYWORDS.has(key)) {
+    if (!isGeminiResponseSchemaKeyword(key)) {
       found.add(key);
     }
   }
@@ -124,7 +101,7 @@ function collectUnsupportedKeywords(
   return [...found];
 }
 
-function validateJsonAgainstSchema(data: unknown, schema: Record<string, unknown>): string[] {
+function validateJsonAgainstSchema(data: unknown, schema: GeminiResponseSchema): string[] {
   try {
     const validator = new Validator(schema, '2020-12', false);
     const result = validator.validate(data);
@@ -158,7 +135,7 @@ function tryParseJsonResponse(text: string): unknown {
 function buildAskWarnings(
   parsedData: unknown,
   jsonMode: boolean | undefined,
-  responseSchema: Record<string, unknown> | undefined,
+  responseSchema: GeminiResponseSchema | undefined,
 ): string[] {
   const warnings: string[] = [];
 
@@ -177,7 +154,7 @@ function buildAskStructuredContent(
   text: string,
   streamResult: Pick<StreamResult, 'thoughtText' | 'usageMetadata' | 'functionCalls'>,
   jsonMode?: boolean,
-  responseSchema?: Record<string, unknown>,
+  responseSchema?: GeminiResponseSchema,
 ): {
   answer: string;
   data?: unknown;
@@ -205,7 +182,7 @@ function formatStructuredResult(
   result: CallToolResult,
   streamResult: Pick<StreamResult, 'thoughtText' | 'usageMetadata' | 'functionCalls'>,
   jsonMode?: boolean,
-  responseSchema?: Record<string, unknown>,
+  responseSchema?: GeminiResponseSchema,
   thinkingSuppressed?: boolean,
 ): CallToolResult {
   if (result.isError) return result;
@@ -270,7 +247,7 @@ async function runAskStream(
   streamGenerator: () => ReturnType<ReturnType<typeof getAI>['models']['generateContentStream']>,
   jsonMode = false,
   thinkingSuppressed = false,
-  responseSchema?: Record<string, unknown>,
+  responseSchema?: GeminiResponseSchema,
 ): Promise<CallToolResult> {
   await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Preparing`);
   if (thinkingSuppressed) {

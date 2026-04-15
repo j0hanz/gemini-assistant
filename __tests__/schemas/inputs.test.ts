@@ -112,12 +112,20 @@ describe('SearchInputSchema', () => {
     assert.ok(result.success);
   });
 
-  it('accepts any string as url (validated at handler level)', () => {
+  it('rejects invalid urls', () => {
     const result = SearchInputSchema.safeParse({
       query: 'test',
       urls: ['not-a-url'],
     });
-    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects private urls', () => {
+    const result = SearchInputSchema.safeParse({
+      query: 'test',
+      urls: ['http://localhost:3000'],
+    });
+    assert.strictEqual(result.success, false);
   });
 
   it('rejects more than 20 urls', () => {
@@ -325,19 +333,19 @@ describe('AnalyzePrInputSchema', () => {
     assert.ok(result.success);
   });
 
-  it('rejects removed mode field', () => {
+  it('ignores removed mode field', () => {
     const result = AnalyzePrInputSchema.safeParse({ mode: 'unstaged' });
-    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.success, true);
   });
 
-  it('rejects removed base field', () => {
+  it('ignores removed base field', () => {
     const result = AnalyzePrInputSchema.safeParse({ base: 'origin/main' });
-    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.success, true);
   });
 
-  it('rejects removed paths field', () => {
+  it('ignores removed paths field', () => {
     const result = AnalyzePrInputSchema.safeParse({ paths: ['src/'] });
-    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.success, true);
   });
 });
 
@@ -375,12 +383,12 @@ describe('AnalyzeUrlInputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
-  it('accepts any string as url (validated at handler level)', () => {
+  it('rejects invalid urls', () => {
     const result = AnalyzeUrlInputSchema.safeParse({
       urls: ['not-a-url'],
       question: 'test',
     });
-    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.success, false);
   });
 
   it('rejects more than 20 urls', () => {
@@ -460,6 +468,14 @@ describe('ExplainErrorInputSchema', () => {
 
   it('rejects missing error', () => {
     const result = ExplainErrorInputSchema.safeParse({});
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects invalid urls', () => {
+    const result = ExplainErrorInputSchema.safeParse({
+      error: 'test',
+      urls: ['ftp://example.com'],
+    });
     assert.strictEqual(result.success, false);
   });
 });
@@ -611,6 +627,14 @@ describe('GenerateDiagramInputSchema', () => {
 
   it('rejects missing description', () => {
     const result = GenerateDiagramInputSchema.safeParse({});
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects unknown input fields', () => {
+    const result = GenerateDiagramInputSchema.safeParse({
+      description: 'test',
+      extra: true,
+    });
     assert.strictEqual(result.success, false);
   });
 });

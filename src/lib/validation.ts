@@ -2,7 +2,7 @@ import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
 
 import { realpath } from 'node:fs/promises';
 import { isIP } from 'node:net';
-import { isAbsolute, normalize, parse, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, normalize, parse, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { getAllowedFileRootsEnv, getAllowedHostsEnv } from '../config.js';
@@ -182,12 +182,23 @@ export async function resolveAndValidatePath(
   const normalized = normalize(filePath);
 
   // Resolve symlinks to get the real path
-  let resolved: string;
+  let resolved: string | undefined;
   try {
     resolved = await realpath(normalized);
   } catch {
-    // File may not exist yet — use normalized path for the check
-    resolved = resolve(normalized);
+    // File may not exist yet — find the closest existing parent
+    let current = dirname(normalized);
+    while (current !== dirname(current)) {
+      try {
+        const parentRealpath = await realpath(current);
+        resolved = resolve(parentRealpath, relative(current, normalized));
+        break;
+      } catch {
+        current = dirname(current);
+      }
+    }
+    // If we reach the root and it still fails, use the normalized path
+    resolved ??= resolve(normalized);
   }
 
   const allowedRoots = await getAllowedRoots(rootsFetcher);
@@ -229,10 +240,19 @@ function isPrivateIpv4(hostname: string): boolean {
 
 function isPrivateIpv6(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
-  return normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd');
+  return (
+    normalized === '::1' ||
+    normalized.startsWith('fc') ||
+    normalized.startsWith('fd') ||
+    normalized.startsWith('fe8') ||
+    normalized.startsWith('fe9') ||
+    normalized.startsWith('fea') ||
+    normalized.startsWith('feb') ||
+    normalized.startsWith('::ffff:')
+  );
 }
 
-function isRejectedHost(hostname: string): boolean {
+export function isRejectedHost(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
   if (
     normalized === 'localhost' ||
@@ -243,11 +263,26 @@ function isRejectedHost(hostname: string): boolean {
     return true;
   }
 
-  const ipVersion = isIP(normalized);
-  if (ipVersion === 4) return isPrivateIpv4(normalized);
-  if (ipVersion === 6) return isPrivateIpv6(normalized);
+  const cleanHost = normalized.replace(/^\[(.*)\]$/, '$1');
+  const ipVersion = isIP(cleanHost);
+  if (ipVersion === 4) return isPrivateIpv4(cleanHost);
+  if (ipVersion === 6) return isPrivateIpv6(cleanHost);
 
   return false;
+}
+
+export function isPublicHttpUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+
+  return (
+    (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+    !isRejectedHost(parsed.hostname)
+  );
 }
 
 export function validateUrls(urls: readonly string[] | undefined): CallToolResult | undefined {

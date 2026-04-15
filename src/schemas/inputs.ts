@@ -4,7 +4,8 @@ import { z } from 'zod/v4';
 
 import { completeCacheNames, THINKING_LEVELS } from '../client.js';
 import { completeSessionIds } from '../sessions.js';
-import { absolutePath, requiredText, ttlSeconds } from './shared.js';
+import { GeminiResponseSchema } from './json-schema.js';
+import { absolutePath, cacheName, publicHttpUrl, requiredText, ttlSeconds } from './shared.js';
 
 const thinkingLevelField = z
   .enum(THINKING_LEVELS)
@@ -32,33 +33,14 @@ export const AskInputSchema = z.object({
     .optional()
     .describe('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
   cacheName: completable(
-    z
-      .string()
-      .optional()
-      .describe('Cache name from create_cache. Cannot be applied to an existing chat session.'),
+    cacheName(
+      'Cache name from create_cache. Cannot be applied to an existing chat session.',
+    ).optional(),
     completeCacheNames,
   ),
-  responseSchema: z
-    .record(z.string(), z.unknown())
-    .refine(
-      (s) =>
-        'type' in s ||
-        'properties' in s ||
-        'anyOf' in s ||
-        'oneOf' in s ||
-        'allOf' in s ||
-        '$ref' in s ||
-        'enum' in s ||
-        'items' in s,
-      {
-        error:
-          'responseSchema must contain at least one JSON Schema keyword (type, properties, anyOf, oneOf, allOf, $ref, enum, or items)',
-      },
-    )
-    .optional()
-    .describe(
-      'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking. Gemini 2.0 models may require a propertyOrdering array.',
-    ),
+  responseSchema: GeminiResponseSchema.optional().describe(
+    'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking. Gemini 2.0 models may require a propertyOrdering array.',
+  ),
   temperature: z
     .number()
     .min(0)
@@ -100,7 +82,7 @@ export const SearchInputSchema = z.object({
     .optional()
     .describe('Custom instructions for result format'),
   urls: z
-    .array(z.string().trim().min(1))
+    .array(publicHttpUrl('Public URL to analyze alongside search results'))
     .max(20)
     .optional()
     .describe('URLs to deeply analyze alongside search results (max 20). Enables URL Context.'),
@@ -135,7 +117,7 @@ export type AnalyzeFileInput = z.infer<typeof AnalyzeFileInputSchema>;
 
 export const AnalyzeUrlInputSchema = z.object({
   urls: z
-    .array(z.string().trim().min(1))
+    .array(publicHttpUrl('Public URL to analyze'))
     .min(1)
     .max(20)
     .describe('URLs to analyze (max 20). Must be publicly accessible.'),
@@ -150,21 +132,16 @@ export const AnalyzeUrlInputSchema = z.object({
 });
 export type AnalyzeUrlInput = z.infer<typeof AnalyzeUrlInputSchema>;
 
-export const AnalyzePrInputSchema = z.strictObject({
+export const AnalyzePrInputSchema = z.object({
   dryRun: z.boolean().optional().describe('Return diff content and stats without Gemini analysis.'),
-  cacheName: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe('Cache resource name to provide project context during review.'),
+  cacheName: cacheName('Cache resource name to provide project context during review.').optional(),
   thinkingLevel: thinkingLevelField,
   language: z.string().trim().min(1).optional().describe('Primary language for review context'),
 });
 export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
 
 export const CreateCacheInputSchema = z
-  .object({
+  .strictObject({
     filePaths: z
       .array(absolutePath('Absolute path to a file to cache'))
       .max(50)
@@ -184,9 +161,17 @@ export const CreateCacheInputSchema = z
       .optional()
       .describe('Human-readable label. Existing cache with same displayName is auto-replaced.'),
   })
-  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- LHS is boolean; ?? would not fall through on `false`
-  .refine((data) => (data.filePaths && data.filePaths.length > 0) || data.systemInstruction, {
-    error: 'At least one of filePaths or systemInstruction must be provided.',
+  .superRefine((data, ctx) => {
+    if ((data.filePaths?.length ?? 0) > 0 || data.systemInstruction) {
+      return;
+    }
+
+    ctx.addIssue({
+      code: 'custom',
+      message: 'At least one of filePaths or systemInstruction must be provided.',
+      path: ['filePaths'],
+      input: data.filePaths,
+    });
   })
   .describe(
     'Creates a Gemini API cache. Combined content (files + instructions) MUST exceed ~32,000 tokens.',
@@ -195,11 +180,7 @@ export type CreateCacheInput = z.infer<typeof CreateCacheInputSchema>;
 
 function createCacheNameSchema(action: 'delete' | 'update') {
   return completable(
-    z
-      .string()
-      .trim()
-      .min(1)
-      .describe(`Cache resource name to ${action} (e.g., "cachedContents/...")`),
+    cacheName(`Cache resource name to ${action} (e.g., "cachedContents/...")`),
     completeCacheNames,
   );
 }
@@ -239,16 +220,13 @@ export const ExplainErrorInputSchema = z.object({
     .optional()
     .describe('Enable Google Search to look up error messages in docs, issues, and forums.'),
   urls: z
-    .array(z.string().trim().min(1))
+    .array(publicHttpUrl('Public URL for additional context'))
     .max(20)
     .optional()
     .describe('URLs for additional context (docs, issues). Enables URL Context (max 20).'),
-  cacheName: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe('Cache resource name to provide project context during diagnosis.'),
+  cacheName: cacheName(
+    'Cache resource name to provide project context during diagnosis.',
+  ).optional(),
 });
 export type ExplainErrorInput = z.infer<typeof ExplainErrorInputSchema>;
 
@@ -266,17 +244,14 @@ export const CompareFilesInputSchema = z.object({
     .boolean()
     .optional()
     .describe('Enable Google Search for best practices or migration context.'),
-  cacheName: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe('Cache resource name to provide project context during comparison.'),
+  cacheName: cacheName(
+    'Cache resource name to provide project context during comparison.',
+  ).optional(),
 });
 export type CompareFilesInput = z.infer<typeof CompareFilesInputSchema>;
 
 export const GenerateDiagramInputSchema = z
-  .object({
+  .strictObject({
     description: requiredText('What to diagram: architecture, flow, sequence, etc.'),
     diagramType: z
       .enum(['mermaid', 'plantuml'])
@@ -297,18 +272,24 @@ export const GenerateDiagramInputSchema = z
       .boolean()
       .optional()
       .describe('Enable Google Search for diagram patterns or syntax reference.'),
-    cacheName: z
-      .string()
-      .trim()
-      .min(1)
-      .optional()
-      .describe('Cache resource name to provide project context for diagram generation.'),
+    cacheName: cacheName(
+      'Cache resource name to provide project context for diagram generation.',
+    ).optional(),
     validateSyntax: z
       .boolean()
       .optional()
       .describe('Validate generated diagram syntax via code execution sandbox.'),
   })
-  .refine((data) => !(data.sourceFilePath && data.sourceFilePaths), {
-    error: 'Provide sourceFilePath or sourceFilePaths, not both.',
+  .superRefine((data, ctx) => {
+    if (!(data.sourceFilePath && data.sourceFilePaths)) {
+      return;
+    }
+
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Provide sourceFilePath or sourceFilePaths, not both.',
+      path: ['sourceFilePaths'],
+      input: data.sourceFilePaths,
+    });
   });
 export type GenerateDiagramInput = z.infer<typeof GenerateDiagramInputSchema>;

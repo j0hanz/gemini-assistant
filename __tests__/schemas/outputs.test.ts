@@ -207,6 +207,14 @@ describe('SearchOutputSchema', () => {
     });
     assert.ok(result.success);
   });
+
+  it('rejects non-url source entries', () => {
+    const result = SearchOutputSchema.safeParse({
+      answer: 'Result',
+      sources: ['Example: https://example.com'],
+    });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('AnalyzeUrlOutputSchema', () => {
@@ -339,6 +347,14 @@ describe('ListCachesOutputSchema', () => {
 
   it('rejects negative count', () => {
     const result = ListCachesOutputSchema.safeParse({ caches: [], count: -1 });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects malformed timestamps and cache names', () => {
+    const result = ListCachesOutputSchema.safeParse({
+      caches: [{ name: 'bad-cache', expireTime: 'not-a-date' }],
+      count: 1,
+    });
     assert.strictEqual(result.success, false);
   });
 });

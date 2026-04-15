@@ -1,6 +1,6 @@
 import { z } from 'zod/v4';
 
-import { nonNegativeInt } from './shared.js';
+import { cacheName, nonNegativeInt, PublicHttpUrlSchema, timestamp } from './shared.js';
 
 export const UsageMetadataSchema = z.object({
   promptTokenCount: nonNegativeInt('Tokens in the prompt').optional(),
@@ -41,7 +41,7 @@ export const ExecuteCodeOutputSchema = z.object({
 });
 
 const UrlMetadataEntrySchema = z.object({
-  url: z.string().describe('Retrieved URL'),
+  url: PublicHttpUrlSchema.describe('Retrieved URL'),
   status: z.string().describe('Retrieval status (e.g. URL_RETRIEVAL_STATUS_SUCCESS)'),
 });
 
@@ -49,14 +49,14 @@ export type UrlMetadataEntry = z.infer<typeof UrlMetadataEntrySchema>;
 
 const SourceDetailSchema = z.object({
   title: z.string().optional().describe('Source title when Gemini provides one'),
-  url: z.string().describe('Source URL'),
+  url: PublicHttpUrlSchema.describe('Source URL'),
 });
 
 export type SourceDetail = z.infer<typeof SourceDetailSchema>;
 
 export const SearchOutputSchema = z.object({
   answer: z.string().describe('Grounded answer'),
-  sources: z.array(z.string()).describe('Source URLs from search'),
+  sources: z.array(PublicHttpUrlSchema).describe('Source URLs from search'),
   sourceDetails: z
     .array(SourceDetailSchema)
     .optional()
@@ -78,7 +78,7 @@ export const AnalyzeFileOutputSchema = z.object({
 
 export const AgenticSearchOutputSchema = z.object({
   report: z.string().describe('Compiled markdown research report'),
-  sources: z.array(z.string()).describe('Aggregated source URLs'),
+  sources: z.array(PublicHttpUrlSchema).describe('Aggregated source URLs'),
   sourceDetails: z
     .array(SourceDetailSchema)
     .optional()
@@ -121,20 +121,20 @@ export const AnalyzePrOutputSchema = z.object({
 });
 
 const CacheSummarySchema = z.object({
-  name: z.string().optional().describe('Cache resource name'),
+  name: cacheName('Cache resource name').optional(),
   displayName: z.string().optional().describe('Human-readable label'),
   model: z.string().optional().describe('Model used'),
-  expireTime: z.string().optional().describe('Expiration timestamp'),
-  createTime: z.string().optional().describe('Creation timestamp'),
-  updateTime: z.string().optional().describe('Last update timestamp'),
+  expireTime: timestamp('Expiration timestamp').optional(),
+  createTime: timestamp('Creation timestamp').optional(),
+  updateTime: timestamp('Last update timestamp').optional(),
   totalTokenCount: nonNegativeInt('Total cached tokens').optional(),
 });
 
 export const CreateCacheOutputSchema = z.object({
-  name: z.string().describe('Cache resource name'),
+  name: cacheName('Cache resource name'),
   displayName: z.string().optional().describe('Human-readable label'),
   model: z.string().optional().describe('Model used'),
-  expireTime: z.string().optional().describe('Expiration timestamp'),
+  expireTime: timestamp('Expiration timestamp').optional(),
 });
 
 export const ListCachesOutputSchema = z.object({
@@ -143,13 +143,13 @@ export const ListCachesOutputSchema = z.object({
 });
 
 export const DeleteCacheOutputSchema = z.object({
-  cacheName: z.string().describe('Cache resource name'),
+  cacheName: cacheName('Cache resource name'),
   deleted: z.boolean().describe('Whether deletion was performed'),
 });
 
 export const UpdateCacheOutputSchema = z.object({
-  cacheName: z.string().describe('Cache resource name'),
-  expireTime: z.string().optional().describe('New expiration timestamp'),
+  cacheName: cacheName('Cache resource name'),
+  expireTime: timestamp('New expiration timestamp').optional(),
 });
 
 export const ExplainErrorOutputSchema = z.object({

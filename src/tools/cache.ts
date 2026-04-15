@@ -161,7 +161,12 @@ async function cleanupOldCaches(
   }
 }
 
-async function confirmCacheDeletion(ctx: ServerContext, cacheName: string): Promise<boolean> {
+type CacheDeletionConfirmation = 'confirmed' | 'declined' | 'unsupported';
+
+async function confirmCacheDeletion(
+  ctx: ServerContext,
+  cacheName: string,
+): Promise<CacheDeletionConfirmation> {
   try {
     const confirmation = await ctx.mcpReq.elicitInput({
       mode: 'form',
@@ -175,11 +180,12 @@ async function confirmCacheDeletion(ctx: ServerContext, cacheName: string): Prom
       },
     });
 
-    return confirmation.action === 'accept' && confirmation.content?.confirm === true;
+    return confirmation.action === 'accept' && confirmation.content?.confirm === true
+      ? 'confirmed'
+      : 'declined';
   } catch {
-    // Client does not support elicitation — proceed without confirmation
-    void ctx.mcpReq.log('debug', `Elicitation not supported — proceeding with cache deletion`);
-    return true;
+    void ctx.mcpReq.log('debug', `Elicitation not supported for cache deletion`);
+    return 'unsupported';
   }
 }
 
@@ -313,6 +319,10 @@ export function registerCacheTools(server: McpServer): void {
       description: 'Delete a Gemini context cache by resource name.',
       inputSchema: z.object({
         cacheName: createCacheNameSchema('delete'),
+        confirm: z
+          .boolean()
+          .optional()
+          .describe('Required when the client cannot confirm deletion interactively.'),
       }),
       outputSchema: DeleteCacheOutputSchema,
       annotations: {
@@ -323,11 +333,27 @@ export function registerCacheTools(server: McpServer): void {
     withErrorLogging(
       'delete_cache',
       'Delete Cache',
-      async ({ cacheName }: { cacheName: string }, ctx: ServerContext) => {
-        if (!(await confirmCacheDeletion(ctx, cacheName))) {
+      async (
+        { cacheName, confirm }: { cacheName: string; confirm?: boolean | undefined },
+        ctx: ServerContext,
+      ) => {
+        const confirmation = await confirmCacheDeletion(ctx, cacheName);
+        if (confirmation === 'declined') {
           return {
             content: [{ type: 'text', text: 'Cache deletion cancelled.' }],
             structuredContent: { cacheName, deleted: false },
+          };
+        }
+
+        if (confirmation === 'unsupported' && confirm !== true) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'Interactive confirmation is unavailable. Re-run delete_cache with confirm=true to delete the cache.',
+              },
+            ],
+            isError: true,
           };
         }
 

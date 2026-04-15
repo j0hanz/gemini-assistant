@@ -5,13 +5,14 @@ import { describe, it } from 'node:test';
 process.env.API_KEY ??= 'test-key-for-pr';
 
 const {
+  budgetDiffUnits,
   buildAnalysisPrompt,
   buildGitDiffArgs,
   buildUntrackedFilePatch,
   computeDiffStats,
   formatGitError,
   matchesNoisyPath,
-  truncateDiff,
+  splitDiffUnits,
 } = await import('../../src/tools/pr.js');
 
 describe('computeDiffStats', () => {
@@ -100,26 +101,77 @@ describe('buildUntrackedFilePatch', () => {
   });
 });
 
-describe('truncateDiff', () => {
+describe('splitDiffUnits', () => {
+  it('splits a multi-file diff into whole-file units', () => {
+    const diff = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '+const a = 1;',
+      'diff --git a/src/b.ts b/src/b.ts',
+      '--- a/src/b.ts',
+      '+++ b/src/b.ts',
+      '-const b = 2;',
+    ].join('\n');
+
+    const units = splitDiffUnits(diff);
+
+    assert.strictEqual(units.length, 2);
+    assert.strictEqual(units[0]?.path, 'src/a.ts');
+    assert.strictEqual(units[1]?.path, 'src/b.ts');
+  });
+});
+
+describe('budgetDiffUnits', () => {
   it('returns original for short diffs', () => {
-    const result = truncateDiff('short diff');
-    assert.strictEqual(result.diff, 'short diff');
+    const units = splitDiffUnits(
+      ['diff --git a/src/a.ts b/src/a.ts', '--- a/src/a.ts', '+++ b/src/a.ts', '+ok'].join('\n'),
+    );
+    const result = budgetDiffUnits(units, 500_000);
+
     assert.strictEqual(result.truncated, false);
+    assert.match(result.diff, /diff --git a\/src\/a\.ts b\/src\/a\.ts/);
+    assert.deepStrictEqual(result.omittedPaths, []);
   });
 
-  it('truncates diffs exceeding 500k chars', () => {
-    const longDiff = 'x'.repeat(600_000);
-    const result = truncateDiff(longDiff);
+  it('omits whole-file units once the budget is exceeded', () => {
+    const diff = [
+      'diff --git a/src/large.ts b/src/large.ts',
+      '--- a/src/large.ts',
+      '+++ b/src/large.ts',
+      ...Array.from({ length: 30 }, (_, i) => `+line ${String(i)}`),
+      'diff --git a/src/small.ts b/src/small.ts',
+      '--- a/src/small.ts',
+      '+++ b/src/small.ts',
+      '+tiny',
+    ].join('\n');
+    const result = budgetDiffUnits(splitDiffUnits(diff), 250);
+
     assert.strictEqual(result.truncated, true);
-    assert.ok(result.diff.length < longDiff.length);
-    assert.ok(result.diff.includes('[... diff truncated due to size ...]'));
+    assert.match(result.diff, /src\/large\.ts/);
+    assert.doesNotMatch(result.diff, /src\/small\.ts/);
+    assert.deepStrictEqual(result.omittedPaths, ['src/small.ts']);
   });
 
-  it('does not truncate at exactly 500k chars', () => {
-    const exactDiff = 'x'.repeat(500_000);
-    const result = truncateDiff(exactDiff);
-    assert.strictEqual(result.truncated, false);
-    assert.strictEqual(result.diff, exactDiff);
+  it('keeps the highest-signal file first by change size', () => {
+    const diff = [
+      'diff --git a/src/small.ts b/src/small.ts',
+      '--- a/src/small.ts',
+      '+++ b/src/small.ts',
+      '+one',
+      'diff --git a/src/large.ts b/src/large.ts',
+      '--- a/src/large.ts',
+      '+++ b/src/large.ts',
+      '+one',
+      '+two',
+      '+three',
+      '+four',
+    ].join('\n');
+    const result = budgetDiffUnits(splitDiffUnits(diff), 120);
+
+    assert.match(result.diff, /src\/large\.ts/);
+    assert.doesNotMatch(result.diff, /src\/small\.ts/);
+    assert.deepStrictEqual(result.omittedPaths, ['src/small.ts']);
   });
 });
 
@@ -146,6 +198,7 @@ describe('buildAnalysisPrompt', () => {
       ['src/new-file.ts'],
       ['assets/logo.png'],
       ['fixtures/big.json'],
+      ['src/omitted.ts'],
       'TypeScript',
     );
     assert.ok(prompt.includes('Language: TypeScript'));
@@ -155,6 +208,8 @@ describe('buildAnalysisPrompt', () => {
     assert.ok(prompt.includes('- assets/logo.png'));
     assert.ok(prompt.includes('Skipped Large Untracked Files (> 1048576 bytes):'));
     assert.ok(prompt.includes('- fixtures/big.json'));
+    assert.ok(prompt.includes('Omitted From Gemini Review Budget:'));
+    assert.ok(prompt.includes('- src/omitted.ts'));
   });
 });
 

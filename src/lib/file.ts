@@ -97,11 +97,11 @@ export async function uploadFile(
     { signal },
   );
 
-  if (!uploaded.uri || !uploaded.mimeType) {
-    throw new Error(`File upload succeeded but returned no URI: ${validPath}`);
+  if (!uploaded.uri || !uploaded.mimeType || !uploaded.name) {
+    throw new Error(`File upload returned an incomplete file handle: ${validPath}`);
   }
 
-  return { name: uploaded.name ?? '', uri: uploaded.uri, mimeType: uploaded.mimeType };
+  return { name: uploaded.name, uri: uploaded.uri, mimeType: uploaded.mimeType };
 }
 
 export async function deleteUploadedFiles(

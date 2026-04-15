@@ -13,7 +13,7 @@ This document provides an overview of the Gemini Assistant project, including it
 
 ## Testing Strategy
 
-- Unit tests located in `__tests__/` directory, using Jest as the test runner and assertion library. Tests cover individual functions and modules to ensure correctness and reliability.
+- Unit tests live in `__tests__/` and run with Node's built-in test runner via `node --test` and `tsx`. Coverage focuses on schemas, helper modules, task/progress behavior, transport helpers, and tool registration.
 
 ## Commands
 
@@ -49,6 +49,7 @@ This document provides an overview of the Gemini Assistant project, including it
 
 - **Entry Points**: `package.json`, `README.md`, `src/index.ts`
 - **Key Configs**: `.prettierrc`, `eslint.config.js`, `tsconfig.json`
+- **Key Runtime Modules**: `src/transport.ts`, `src/server-content.ts`, `src/lib/task-utils.ts`, `src/lib/errors.ts`, `src/lib/validation.ts`
 
 ## Don'ts
 

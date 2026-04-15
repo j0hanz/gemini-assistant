@@ -75,9 +75,17 @@ type AnalyzePrStructuredContent = Record<string, unknown> & {
   includedUntracked: string[];
   skippedBinaryPaths: string[];
   skippedLargePaths: string[];
+  omittedPaths?: string[];
   empty: boolean;
   truncated?: boolean;
 };
+
+interface DiffUnit {
+  additions: number;
+  deletions: number;
+  path: string;
+  text: string;
+}
 
 export function matchesNoisyPath(filePath: string): boolean {
   const normalized = filePath.replaceAll('\\', '/');
@@ -290,11 +298,67 @@ async function buildUntrackedPatch(
   };
 }
 
-export function truncateDiff(diff: string): { diff: string; truncated: boolean } {
-  if (diff.length <= MAX_DIFF_CHARS) return { diff, truncated: false };
+function computeUnitStats(text: string): Pick<DiffUnit, 'additions' | 'deletions'> {
+  let additions = 0;
+  let deletions = 0;
+
+  for (const line of text.split('\n')) {
+    if (line.startsWith('+') && !line.startsWith('+++')) additions++;
+    if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+  }
+
+  return { additions, deletions };
+}
+
+export function splitDiffUnits(diff: string): DiffUnit[] {
+  if (!diff.trim()) return [];
+
+  return diff
+    .split(/(?=^diff --git )/m)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((text) => {
+      const header = text.split('\n', 1)[0] ?? text;
+      const match = /^diff --git (?:"a\/(.+?)"|a\/(.+?)) (?:"b\/(.+?)"|b\/(.+?))$/.exec(header);
+      const path = match ? (match[3] ?? match[4] ?? header) : header;
+      return {
+        path,
+        text,
+        ...computeUnitStats(text),
+      };
+    });
+}
+
+export function budgetDiffUnits(
+  units: DiffUnit[],
+  maxChars = MAX_DIFF_CHARS,
+): { diff: string; omittedPaths: string[]; truncated: boolean } {
+  const orderedUnits = [...units].sort((a, b) => {
+    const scoreDelta = b.additions + b.deletions - (a.additions + a.deletions);
+    return scoreDelta !== 0 ? scoreDelta : a.path.localeCompare(b.path);
+  });
+
+  const keptUnits: DiffUnit[] = [];
+  const omittedPaths: string[] = [];
+  let currentLength = 0;
+
+  for (const unit of orderedUnits) {
+    const separatorLength = keptUnits.length > 0 ? 1 : 0;
+    const nextLength = currentLength + separatorLength + unit.text.length;
+
+    if (keptUnits.length > 0 && nextLength > maxChars) {
+      omittedPaths.push(unit.path);
+      continue;
+    }
+
+    keptUnits.push(unit);
+    currentLength = nextLength;
+  }
+
   return {
-    diff: `${diff.slice(0, MAX_DIFF_CHARS)}\n\n[... diff truncated due to size ...]`,
-    truncated: true,
+    diff: keptUnits.map((unit) => unit.text).join('\n'),
+    ...(omittedPaths.length > 0 ? { omittedPaths: omittedPaths.sort() } : { omittedPaths: [] }),
+    truncated: omittedPaths.length > 0,
   };
 }
 
@@ -326,6 +390,7 @@ export function buildAnalysisPrompt(
   includedUntracked: string[],
   skippedBinaryPaths: string[],
   skippedLargePaths: string[],
+  omittedPaths: string[] = [],
   language?: string,
 ): string {
   const parts = [
@@ -354,6 +419,13 @@ export function buildAnalysisPrompt(
           '',
           `Skipped Large Untracked Files (> ${String(MAX_UNTRACKED_FILE_BYTES)} bytes):`,
           ...skippedLargePaths.map((filePath) => `- ${filePath}`),
+        ]
+      : []),
+    ...(omittedPaths.length > 0
+      ? [
+          '',
+          'Omitted From Gemini Review Budget:',
+          ...omittedPaths.map((filePath) => `- ${filePath}`),
         ]
       : []),
     '',
@@ -401,6 +473,7 @@ function summarizeUntrackedResults(untrackedResults: UntrackedPatchResult[]): {
 function buildStructuredContent(
   snapshot: LocalDiffSnapshot,
   analysis: string,
+  omittedPaths: string[] = [],
   truncated?: boolean,
 ): AnalyzePrStructuredContent {
   return {
@@ -410,6 +483,7 @@ function buildStructuredContent(
     includedUntracked: snapshot.includedUntracked,
     skippedBinaryPaths: snapshot.skippedBinaryPaths,
     skippedLargePaths: snapshot.skippedLargePaths,
+    ...(omittedPaths.length > 0 ? { omittedPaths } : {}),
     empty: snapshot.empty,
     ...(truncated ? { truncated } : {}),
   };
@@ -433,8 +507,8 @@ function buildNoChangesAnalysis(snapshot: LocalDiffSnapshot): string {
     : 'No local changes to review.';
 }
 
-function formatSnapshotSummary(stats: DiffStats): string {
-  return `${String(stats.files)} files (+${String(stats.additions)}, -${String(stats.deletions)})`;
+function formatSnapshotSummary(stats: DiffStats, omittedPaths: string[] = []): string {
+  return `${String(stats.files)} files (+${String(stats.additions)}, -${String(stats.deletions)})${omittedPaths.length > 0 ? `, omitted ${String(omittedPaths.length)}` : ''}`;
 }
 
 function buildModelPrompt(
@@ -503,7 +577,8 @@ async function analyzePrWork(
     };
   }
 
-  const snapshotSummary = formatSnapshotSummary(snapshot.stats);
+  const { diff, omittedPaths, truncated } = budgetDiffUnits(splitDiffUnits(snapshot.diff));
+  const snapshotSummary = formatSnapshotSummary(snapshot.stats, omittedPaths);
   await sendProgress(ctx, 1, 3, `${TOOL_LABEL}: ${snapshotSummary}`);
 
   if (snapshot.empty) {
@@ -515,13 +590,11 @@ async function analyzePrWork(
     };
   }
 
-  const { diff, truncated } = truncateDiff(snapshot.diff);
-
   if (dryRun) {
     await reportCompletion(ctx, TOOL_LABEL, 'snapshot ready');
     return {
       content: [{ type: 'text' as const, text: diff }],
-      structuredContent: buildStructuredContent(snapshot, diff, truncated),
+      structuredContent: buildStructuredContent(snapshot, diff, omittedPaths, truncated),
     };
   }
 
@@ -538,6 +611,7 @@ async function analyzePrWork(
     snapshot.includedUntracked,
     snapshot.skippedBinaryPaths,
     snapshot.skippedLargePaths,
+    omittedPaths,
     language,
   );
 
@@ -561,7 +635,12 @@ async function analyzePrWork(
         ),
       }),
     (_streamResult, textContent) => ({
-      structuredContent: buildStructuredContent(snapshot, textContent || '', truncated),
+      structuredContent: buildStructuredContent(
+        snapshot,
+        textContent || '',
+        omittedPaths,
+        truncated,
+      ),
       reportMessage: `${String(snapshot.stats.files)} files reviewed (+${String(snapshot.stats.additions)}, -${String(snapshot.stats.deletions)})`,
     }),
   );

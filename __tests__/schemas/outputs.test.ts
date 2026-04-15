@@ -70,6 +70,7 @@ describe('AnalyzePrOutputSchema', () => {
       includedUntracked: ['src/new-file.ts'],
       skippedBinaryPaths: ['assets/logo.png'],
       skippedLargePaths: ['fixtures/big.json'],
+      omittedPaths: ['src/overflow.ts'],
       empty: false,
     });
     assert.ok(result.success);
@@ -180,6 +181,7 @@ describe('SearchOutputSchema', () => {
     const result = SearchOutputSchema.safeParse({
       answer: 'Analysis result',
       sources: ['https://example.com'],
+      sourceDetails: [{ title: 'Example', url: 'https://example.com' }],
       urlMetadata: [{ url: 'https://example.com', status: 'URL_RETRIEVAL_STATUS_SUCCESS' }],
     });
     assert.ok(result.success);
@@ -371,6 +373,7 @@ describe('AgenticSearchOutputSchema', () => {
     const result = AgenticSearchOutputSchema.safeParse({
       report: '# Report\n\nFindings here.',
       sources: ['https://example.com/source1', 'https://example.com/source2'],
+      sourceDetails: [{ url: 'https://example.com/source1', title: 'Source 1' }],
     });
     assert.ok(result.success);
   });

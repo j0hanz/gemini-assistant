@@ -115,17 +115,21 @@ describe('InMemoryEventStore', () => {
     assert.equal(replayed[replayed.length - 1], eventIds[1001]);
   });
 
-  it('evicts oldest stream when max streams exceeded', async () => {
+  it('evicts the least recently active stream when max streams exceeded', async () => {
     const store = new InMemoryEventStore();
+    const firstEventIds = new Map<string, string>();
 
-    // Create 201 streams — stream "s-0" should be evicted
-    for (let i = 0; i <= 200; i++) {
-      await store.storeEvent(`s-${i}`, msg(i));
+    // Create 200 streams, then refresh s-0 so s-1 becomes the oldest active stream.
+    for (let i = 0; i < 200; i++) {
+      const streamId = `s-${i}`;
+      firstEventIds.set(streamId, await store.storeEvent(streamId, msg(i)));
     }
+    const refreshedEventId = await store.storeEvent('s-0', msg(999));
+    await store.storeEvent('s-200', msg(200));
 
-    // Event from first stream should be gone
-    const streamId = await store.getStreamIdForEventId('e-1');
-    assert.equal(streamId, undefined);
+    assert.equal(await store.getStreamIdForEventId(firstEventIds.get('s-1') ?? ''), undefined);
+    assert.equal(await store.getStreamIdForEventId(firstEventIds.get('s-0') ?? ''), 's-0');
+    assert.equal(await store.getStreamIdForEventId(refreshedEventId), 's-0');
   });
 
   it('cleanup clears all state', async () => {

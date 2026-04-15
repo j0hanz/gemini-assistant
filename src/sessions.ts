@@ -95,6 +95,10 @@ function evictExpiredSessions(): boolean {
   return evicted;
 }
 
+function hasExpired(entry: SessionEntry): boolean {
+  return now() - entry.lastAccess > SESSION_TTL_MS;
+}
+
 function startEvictionTimer(): void {
   if (evictionTimer) return;
   evictionTimer = setInterval(() => {
@@ -138,6 +142,11 @@ export function isEvicted(id: string): boolean {
 export function getSession(id: string, taskId?: string): Chat | undefined {
   const entry = sessions.get(id);
   if (!entry) return undefined;
+  if (hasExpired(entry)) {
+    removeSession(id, true);
+    notifyChange(taskId);
+    return undefined;
+  }
   const chat = updateSessionAccess(id, entry);
   notifyChange(taskId);
   return chat;

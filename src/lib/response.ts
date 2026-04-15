@@ -2,7 +2,7 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 
 import type { GenerateContentResponse, GroundingMetadata, UrlMetadata } from '@google/genai';
 
-import type { UrlMetadataEntry } from '../schemas/outputs.js';
+import type { SourceDetail, UrlMetadataEntry } from '../schemas/outputs.js';
 
 import { errorResult, finishReasonError } from './errors.js';
 
@@ -33,15 +33,23 @@ export function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlM
 }
 
 export function collectGroundedSources(groundingMetadata: GroundingMetadata | undefined): string[] {
+  return collectGroundedSourceDetails(groundingMetadata).map((source) =>
+    source.title ? `${source.title}: ${source.url}` : source.url,
+  );
+}
+
+export function collectGroundedSourceDetails(
+  groundingMetadata: GroundingMetadata | undefined,
+): SourceDetail[] {
   if (!groundingMetadata?.groundingChunks) return [];
 
-  const sources: string[] = [];
+  const sources: SourceDetail[] = [];
   for (const chunk of groundingMetadata.groundingChunks) {
     const uri = chunk.web?.uri;
     if (!uri) continue;
 
     const title = chunk.web?.title;
-    sources.push(title ? `${title}: ${uri}` : uri);
+    sources.push(title ? { title, url: uri } : { url: uri });
   }
 
   return sources;

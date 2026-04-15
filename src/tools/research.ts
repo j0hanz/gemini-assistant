@@ -6,6 +6,7 @@ import { sendProgress } from '../lib/errors.js';
 import {
   appendSources,
   appendUrlStatus,
+  collectGroundedSourceDetails,
   collectGroundedSources,
   collectUrlMetadata,
   formatCountLabel,
@@ -73,6 +74,7 @@ function buildSourceReportMessage(sourceCount: number): string {
 
 function buildSearchResult(streamResult: StreamResult, textContent: string) {
   const sources = collectGroundedSources(streamResult.groundingMetadata);
+  const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
   const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
   const contentAdditions: CallToolResult['content'] = [];
 
@@ -86,6 +88,7 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
     structuredContent: pickDefined({
       answer: textContent,
       sources,
+      sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
     }),
     reportMessage: buildSourceReportMessage(sources.length),
@@ -251,6 +254,7 @@ async function agenticSearchWork(
       }),
     (streamResult, textContent) => {
       const sources = collectGroundedSources(streamResult.groundingMetadata);
+      const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
       const contentAdditions: CallToolResult['content'] = [];
 
       appendSources(contentAdditions, sources);
@@ -262,6 +266,7 @@ async function agenticSearchWork(
         structuredContent: pickDefined({
           report: textContent,
           sources,
+          sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
           toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
           functionCalls:
             streamResult.functionCalls.length > 0 ? streamResult.functionCalls : undefined,

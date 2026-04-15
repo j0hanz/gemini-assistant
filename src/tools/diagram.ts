@@ -22,14 +22,14 @@ function buildSystemInstruction(diagramType: string, validateSyntax?: boolean): 
   return (
     `You are a diagramming expert. Generate a ${diagramType} diagram based on the user's description.\n\n` +
     'Rules:\n' +
-    `1. Output ONLY valid ${diagramType} syntax inside a single fenced code block.\n` +
+    `1. Output exactly one fenced \`\`\`${diagramType} code block containing valid ${diagramType} syntax.\n` +
     `2. Use \`\`\`${diagramType} to open the code block.\n` +
-    '3. After the code block, add a brief explanation of the diagram structure.\n' +
+    '3. After the code block, you may add a brief explanation of the diagram structure.\n' +
     '4. Keep diagrams clean and readable — avoid excessive detail.\n' +
     '5. Use meaningful node/edge labels.\n' +
     '6. If source code is provided, derive the diagram from actual code structure.' +
     (validateSyntax
-      ? `\n7. After generating, validate the ${diagramType} syntax by writing and executing a parser/checker script.`
+      ? `\n7. If asked to validate syntax, do a best-effort verification with code execution and mention any uncertainty rather than claiming parser-grade validation.`
       : '')
   );
 }

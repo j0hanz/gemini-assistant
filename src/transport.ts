@@ -1,29 +1,42 @@
 import { createMcpExpressApp } from '@modelcontextprotocol/express';
-import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
-import type { EventStore, McpServer } from '@modelcontextprotocol/server';
-import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server';
+import type { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
+import { NodeStreamableHTTPServerTransport as NodeHttpTransport } from '@modelcontextprotocol/node';
+import type {
+  EventStore,
+  McpServer,
+  WebStandardStreamableHTTPServerTransport,
+} from '@modelcontextprotocol/server';
+import { WebStandardStreamableHTTPServerTransport as WebHttpTransport } from '@modelcontextprotocol/server';
 
 import { randomUUID } from 'node:crypto';
-import type { Server } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 
 import { parseAllowedHosts, resolveAllowedHosts, validateHostHeader } from './lib/validation.js';
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_HOST = '127.0.0.1';
 
+interface BunServerHandle {
+  stop: () => void | Promise<void>;
+}
+
 interface BunRuntime {
   serve: (opts: {
     fetch: (req: Request) => Promise<Response>;
     port: number;
     hostname: string;
-  }) => void;
+  }) => BunServerHandle;
+}
+
+interface DenoServerHandle {
+  shutdown: () => void | Promise<void>;
 }
 
 interface DenoRuntime {
   serve: (
     handler: (req: Request) => Promise<Response>,
     opts: { port: number; hostname: string },
-  ) => void;
+  ) => DenoServerHandle;
 }
 
 interface RuntimeGlobals {
@@ -38,14 +51,31 @@ interface TransportConfig {
   isStateless: boolean;
 }
 
+interface CleanupEventStore extends EventStore {
+  cleanup?: () => void;
+}
+
+export interface ServerInstance {
+  server: McpServer;
+  close: () => Promise<void>;
+}
+
+export type ServerFactory = () => Promise<ServerInstance> | ServerInstance;
+export type EventStoreFactory = () => CleanupEventStore;
+
+interface ManagedPair<TTransport> {
+  eventStore?: CleanupEventStore;
+  instance: ServerInstance;
+  transport: TTransport;
+  close: () => Promise<void>;
+}
+
 export interface HttpTransportResult {
   httpServer: Server;
-  transport: NodeStreamableHTTPServerTransport;
   close: () => Promise<void>;
 }
 
 export interface WebStandardTransportResult {
-  transport: WebStandardStreamableHTTPServerTransport;
   handler: (req: Request) => Promise<Response>;
   close: () => Promise<void>;
 }
@@ -73,23 +103,120 @@ function logListening(host: string, port: number, runtime?: string): void {
   console.error(`listening on http://${host}:${port}/mcp${suffix}`);
 }
 
-function buildBaseTransportOptions(isStateless: boolean, eventStore?: EventStore) {
+function logSessionEvent(label: 'open' | 'closed', sessionId: string): void {
+  console.error(`session ${label}: ${sessionId}`);
+}
+
+function buildBaseTransportOptions(
+  isStateless: boolean,
+  eventStore?: EventStore,
+): ConstructorParameters<typeof WebHttpTransport>[0] {
   return {
     enableJsonResponse: isStateless,
     onsessioninitialized: (sessionId: string) => {
-      console.error(`session open: ${sessionId}`);
+      logSessionEvent('open', sessionId);
     },
     onsessionclosed: (sessionId: string) => {
-      console.error(`session closed: ${sessionId}`);
+      logSessionEvent('closed', sessionId);
     },
     ...(eventStore ? { eventStore } : {}),
-    ...(isStateless ? {} : { sessionIdGenerator: () => randomUUID() }),
+    ...(!isStateless ? { sessionIdGenerator: () => randomUUID() } : {}),
   };
 }
 
+function nodeErrorResponse(res: ServerResponse, status: number, message: string): void {
+  if (res.headersSent) return;
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(
+    JSON.stringify({
+      jsonrpc: '2.0',
+      error: { code: -32_603, message },
+      id: null,
+    }),
+  );
+}
+
+function responseError(status: number, message: string): Response {
+  return new Response(
+    JSON.stringify({
+      jsonrpc: '2.0',
+      error: { code: -32_603, message },
+      id: null,
+    }),
+    {
+      status,
+      headers: { 'content-type': 'application/json' },
+    },
+  );
+}
+
+function getNodeSessionId(req: IncomingMessage): string | undefined {
+  const header = req.headers['mcp-session-id'];
+  return typeof header === 'string' && header.trim() ? header : undefined;
+}
+
+function getRequestSessionId(req: Request): string | undefined {
+  const header = req.headers.get('mcp-session-id');
+  return header?.trim() ? header : undefined;
+}
+
+async function createNodePair(
+  createServer: ServerFactory,
+  isStateless: boolean,
+  createEventStore?: EventStoreFactory,
+): Promise<ManagedPair<NodeStreamableHTTPServerTransport>> {
+  const instance = await createServer();
+  const eventStore = isStateless ? undefined : createEventStore?.();
+  const transport = new NodeHttpTransport(buildBaseTransportOptions(isStateless, eventStore));
+  await instance.server.connect(transport);
+
+  let closed = false;
+  return {
+    instance,
+    transport,
+    ...(eventStore ? { eventStore } : {}),
+    close: async () => {
+      if (closed) return;
+      closed = true;
+      eventStore?.cleanup?.();
+      await instance.close();
+    },
+  };
+}
+
+async function createWebPair(
+  createServer: ServerFactory,
+  isStateless: boolean,
+  createEventStore?: EventStoreFactory,
+): Promise<ManagedPair<WebStandardStreamableHTTPServerTransport>> {
+  const instance = await createServer();
+  const eventStore = isStateless ? undefined : createEventStore?.();
+  const transport = new WebHttpTransport(buildBaseTransportOptions(isStateless, eventStore));
+  await instance.server.connect(transport);
+
+  let closed = false;
+  return {
+    instance,
+    transport,
+    ...(eventStore ? { eventStore } : {}),
+    close: async () => {
+      if (closed) return;
+      closed = true;
+      eventStore?.cleanup?.();
+      await instance.close();
+    },
+  };
+}
+
+function logRequestFailure(label: string, err: unknown): void {
+  const detail = err instanceof Error ? err.message : String(err);
+  console.error(`${label}: ${detail}`);
+}
+
 export async function startHttpTransport(
-  server: McpServer,
-  eventStore?: EventStore,
+  createServer: ServerFactory,
+  createEventStore?: EventStoreFactory,
 ): Promise<HttpTransportResult> {
   const { port, host, corsOrigin, isStateless } = resolveTransportConfig();
   const allowedHosts = parseAllowedHosts();
@@ -116,34 +243,54 @@ export async function startHttpTransport(
     });
   }
 
-  const transport = new NodeStreamableHTTPServerTransport(
-    buildBaseTransportOptions(isStateless, eventStore),
-  );
+  const statefulPairs = new Map<string, ManagedPair<NodeStreamableHTTPServerTransport>>();
 
   app.all('/mcp', async (req, res) => {
+    const sessionId = getNodeSessionId(req);
+    let pair: ManagedPair<NodeStreamableHTTPServerTransport> | undefined;
+    let shouldClosePair = false;
+
     try {
-      await transport.handleRequest(req, res, req.body);
+      if (isStateless) {
+        pair = await createNodePair(createServer, true);
+        shouldClosePair = true;
+      } else if (sessionId) {
+        pair = statefulPairs.get(sessionId);
+        if (!pair) {
+          nodeErrorResponse(res, 404, 'Session not found');
+          return;
+        }
+      } else {
+        pair = await createNodePair(createServer, false, createEventStore);
+        shouldClosePair = true;
+      }
+
+      await pair.transport.handleRequest(req, res, req.body);
+
+      if (isStateless) {
+        return;
+      }
+
+      if (req.method === 'DELETE') {
+        if (sessionId) {
+          statefulPairs.delete(sessionId);
+        }
+        shouldClosePair = true;
+        return;
+      }
+
+      const createdSessionId = pair.transport.sessionId;
+      if (!sessionId && createdSessionId) {
+        statefulPairs.set(createdSessionId, pair);
+        shouldClosePair = false;
+      }
     } catch (err: unknown) {
-      const detail = err instanceof Error ? err.message : String(err);
-      console.error(`request failed: ${detail}`);
-      if (server.isConnected()) {
-        void server.sendLoggingMessage({
-          level: 'error',
-          logger: 'http',
-          data: detail,
-        });
-      }
-      if (!res.headersSent) {
-        res.status(500).json({
-          jsonrpc: '2.0',
-          error: { code: -32_603, message: 'Internal Server Error' },
-          id: null,
-        });
-      }
+      logRequestFailure('request failed', err);
+      nodeErrorResponse(res, 500, 'Internal Server Error');
+    } finally {
+      if (shouldClosePair) await pair?.close();
     }
   });
-
-  await server.connect(transport);
 
   const httpServer = await new Promise<Server>((resolve) => {
     const srv = app.listen(port, host, () => {
@@ -153,16 +300,17 @@ export async function startHttpTransport(
   });
 
   const close = async () => {
+    await Promise.allSettled([...statefulPairs.values()].map((pair) => pair.close()));
+    statefulPairs.clear();
     await new Promise<void>((resolve, reject) => {
       httpServer.close((err) => {
         if (err) reject(err);
         else resolve();
       });
     });
-    await transport.close();
   };
 
-  return { httpServer, transport, close };
+  return { httpServer, close };
 }
 
 /**
@@ -172,20 +320,15 @@ export async function startHttpTransport(
  * runtime is detected. In other runtimes the caller must wire up `handler`
  * manually.
  */
-export async function startWebStandardTransport(
-  server: McpServer,
-  eventStore?: EventStore,
+export function startWebStandardTransport(
+  createServer: ServerFactory,
+  createEventStore?: EventStoreFactory,
 ): Promise<WebStandardTransportResult> {
   const { port, host, isStateless } = resolveTransportConfig();
-
-  const transport = new WebStandardStreamableHTTPServerTransport(
-    buildBaseTransportOptions(isStateless, eventStore),
-  );
-
-  await server.connect(transport);
-
   const allowedHosts = resolveAllowedHosts(host);
   warnIfUnprotected(host, !!allowedHosts);
+
+  const statefulPairs = new Map<string, ManagedPair<WebStandardStreamableHTTPServerTransport>>();
 
   const handler = async (req: Request): Promise<Response> => {
     if (allowedHosts && !validateHostHeader(req.headers.get('host'), allowedHosts)) {
@@ -193,18 +336,68 @@ export async function startWebStandardTransport(
     }
 
     const url = new URL(req.url);
-    if (url.pathname === '/mcp') {
-      return transport.handleRequest(req);
+    if (url.pathname !== '/mcp') {
+      return new Response('Not Found', { status: 404 });
     }
-    return new Response('Not Found', { status: 404 });
+
+    const sessionId = getRequestSessionId(req);
+    let pair: ManagedPair<WebStandardStreamableHTTPServerTransport> | undefined;
+    let shouldClosePair = false;
+
+    try {
+      if (isStateless) {
+        pair = await createWebPair(createServer, true);
+        shouldClosePair = true;
+      } else if (sessionId) {
+        pair = statefulPairs.get(sessionId);
+        if (!pair) {
+          return responseError(404, 'Session not found');
+        }
+      } else {
+        pair = await createWebPair(createServer, false, createEventStore);
+        shouldClosePair = true;
+      }
+
+      const response = await pair.transport.handleRequest(req);
+
+      if (!isStateless) {
+        if (req.method === 'DELETE') {
+          if (sessionId) {
+            statefulPairs.delete(sessionId);
+          }
+          shouldClosePair = true;
+        } else {
+          const createdSessionId = pair.transport.sessionId;
+          if (!sessionId && createdSessionId) {
+            statefulPairs.set(createdSessionId, pair);
+            shouldClosePair = false;
+          }
+        }
+      }
+
+      return response;
+    } catch (err: unknown) {
+      logRequestFailure('request failed', err);
+      return responseError(500, 'Internal Server Error');
+    } finally {
+      if (shouldClosePair) await pair?.close();
+    }
   };
 
   const runtimes = globalThis as unknown as RuntimeGlobals;
+  let runtimeClose: (() => Promise<void>) | undefined;
+
   if (runtimes.Bun) {
-    runtimes.Bun.serve({ fetch: handler, port, hostname: host });
+    const serverHandle = runtimes.Bun.serve({ fetch: handler, port, hostname: host });
+    runtimeClose = async () => {
+      await serverHandle.stop();
+    };
     logListening(host, port, 'Bun');
   } else if (runtimes.Deno) {
-    runtimes.Deno.serve(handler, { port, hostname: host });
+    const serverHandle = runtimes.Deno.serve(handler, { port, hostname: host });
+    runtimeClose = async () => {
+      await serverHandle.shutdown();
+    };
     logListening(host, port, 'Deno');
   } else {
     console.error(
@@ -213,8 +406,10 @@ export async function startWebStandardTransport(
   }
 
   const close = async () => {
-    await transport.close();
+    await Promise.allSettled([...statefulPairs.values()].map((pair) => pair.close()));
+    statefulPairs.clear();
+    await runtimeClose?.();
   };
 
-  return { transport, handler, close };
+  return Promise.resolve({ handler, close });
 }

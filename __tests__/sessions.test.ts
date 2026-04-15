@@ -186,4 +186,22 @@ describe('sessions', () => {
       assert.strictEqual(receivedTaskId, undefined);
     });
   });
+
+  describe('ttl enforcement', () => {
+    it('expires sessions on read before the sweep runs', async () => {
+      process.env.SESSION_TTL_MS = '1';
+      const fresh = (await import(
+        `../src/sessions.js?ttl-read=${Date.now()}`
+      )) as typeof import('../src/sessions.js');
+
+      const chat = mockChat('ttl-read');
+      fresh.setSession('sess-expire-on-read', chat as never);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      assert.strictEqual(fresh.getSession('sess-expire-on-read'), undefined);
+      assert.strictEqual(fresh.isEvicted('sess-expire-on-read'), true);
+
+      delete process.env.SESSION_TTL_MS;
+    });
+  });
 });

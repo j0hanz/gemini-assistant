@@ -8,6 +8,7 @@ import {
   resolveAllowedHosts,
   resolveAndValidatePath,
   validateHostHeader,
+  validateUrls,
 } from '../../src/lib/validation.js';
 
 // ── Host Validation ───────────────────────────────────────────────────
@@ -269,5 +270,27 @@ describe('isPathWithinRoot', () => {
       isPathWithinRoot(join(`${process.cwd()}-backup`, 'index.ts'), process.cwd()),
       false,
     );
+  });
+});
+
+describe('validateUrls', () => {
+  it('accepts public http and https URLs', () => {
+    assert.strictEqual(validateUrls(['https://example.com', 'http://example.org/path']), undefined);
+  });
+
+  it('rejects custom schemes', () => {
+    const result = validateUrls(['ftp://example.com/file.txt']);
+    assert.strictEqual(result?.isError, true);
+    assert.match(result?.content[0]?.text ?? '', /Only http:\/\/ and https:\/\//);
+  });
+
+  it('rejects localhost and private-network targets', () => {
+    const localhost = validateUrls(['https://localhost:3000']);
+    const privateNet = validateUrls(['http://192.168.1.10/dashboard']);
+
+    assert.strictEqual(localhost?.isError, true);
+    assert.strictEqual(privateNet?.isError, true);
+    assert.match(localhost?.content[0]?.text ?? '', /Private, loopback, and localhost URLs/);
+    assert.match(privateNet?.content[0]?.text ?? '', /Private, loopback, and localhost URLs/);
   });
 });

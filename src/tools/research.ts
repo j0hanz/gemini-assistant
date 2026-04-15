@@ -36,19 +36,18 @@ const SEARCH_TOOL_LABEL = 'Web Search';
 const ANALYZE_URL_TOOL_LABEL = 'Analyze URL';
 const AGENTIC_SEARCH_TOOL_LABEL = 'Agentic Search';
 
-const SEARCH_SYSTEM_INSTRUCTION =
-  'Answer directly from grounded search results. Be concise. Do not add unsupported claims.';
+const SEARCH_SYSTEM_INSTRUCTION = 'Answer from grounded search results only. Be concise.';
 
 const ANALYZE_URL_SYSTEM_INSTRUCTION =
-  'Answer from retrieved URL content only. Cite relevant sections, fields, or quotes. Use headings when useful.';
+  'Answer from retrieved URL content only. Cite relevant sections, fields, or short quotes.';
 
 const AGENT_SYSTEM_INSTRUCTION =
-  'Research the topic with Google Search and Code Execution.\n\n' +
+  'Research with Google Search and Code Execution.\n\n' +
   'Process:\n' +
-  '1. Break the topic into sub-questions.\n' +
+  '1. Split the topic into sub-questions.\n' +
   '2. Search multiple angles.\n' +
   '3. Use Code Execution for calculations, comparisons, rankings, and tables when useful.\n' +
-  '4. Synthesize a grounded Markdown report.\n' +
+  '4. Write a grounded Markdown report.\n' +
   '5. Include concrete numbers and dates when available.\n' +
   '6. Do not state unsupported claims.';
 
@@ -92,12 +91,12 @@ async function enrichTopicWithSampling(topic: string, ctx: ServerContext): Promi
           role: 'user',
           content: {
             type: 'text',
-            text: `I'm about to research the topic "${topic}". Could you provide a brief initial impression or related core keywords I should focus on?`,
+            text: `Topic: "${topic}"\nGive brief starting keywords or angles to research.`,
           },
         },
       ],
       maxTokens: 500,
-      systemPrompt: 'You are a helpful assistant helping an agent formulate research strategies.',
+      systemPrompt: 'Help an agent choose research angles.',
     });
 
     const sampledText = extractSampledText(samplingRes.content);
@@ -106,7 +105,7 @@ async function enrichTopicWithSampling(topic: string, ctx: ServerContext): Promi
     }
 
     await ctx.mcpReq.log('info', `Sampled context: ${sampledText}`);
-    return `${topic}\n\nAdditional related keywords/guidance: ${sampledText}`;
+    return `${topic}\n\nKeywords/angles:\n${sampledText}`;
   } catch (error) {
     await ctx.mcpReq.log('info', `requestSampling encountered an issue: ${String(error)}`);
     return topic;
@@ -115,14 +114,14 @@ async function enrichTopicWithSampling(topic: string, ctx: ServerContext): Promi
 
 function buildAgenticDepthInstruction(searchDepth: number): string {
   if (searchDepth <= 2) {
-    return 'Do a focused search covering 2-3 key aspects.';
+    return 'Focused: cover 2-3 key aspects.';
   }
 
   if (searchDepth <= 3) {
-    return 'Do a thorough search covering 4-5 key aspects.';
+    return 'Thorough: cover 4-5 key aspects.';
   }
 
-  return 'Do an exhaustive search covering as many aspects as possible.';
+  return 'Exhaustive: cover as many relevant aspects as possible.';
 }
 
 function buildAgenticSearchResult(streamResult: StreamResult, textContent: string) {
@@ -273,8 +272,8 @@ async function agenticSearchWork(
         model: MODEL,
         contents:
           `Topic: ${enrichedTopic}\n\n` +
-          `Depth: ${depthInstruction}\n\n` +
-          'Task: Research multiple aspects and produce a grounded report.',
+          `${depthInstruction}\n\n` +
+          'Task: research the topic and produce a grounded report.',
         config: buildGenerateContentConfig(
           {
             systemInstruction: AGENT_SYSTEM_INSTRUCTION,

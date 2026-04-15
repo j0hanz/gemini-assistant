@@ -37,14 +37,14 @@ const NOISY_EXCLUDE_PATHSPECS = [
 ];
 
 const SYSTEM_INSTRUCTION =
-  'Review the unified diff for behavior changes, regressions, and risk. Ignore formatting-only changes. ' +
+  'Review the unified diff for bugs, regressions, and behavior risk. Ignore formatting-only changes. ' +
   'Cite file paths and hunk context from the diff. Do not invent content or line numbers. ' +
-  'If the diff is clean, say so briefly.\n\n' +
+  'If clean, say so briefly.\n\n' +
   'Output:\n' +
   '## Findings\n' +
   'List issues by severity with file references.\n' +
   '## Fixes\n' +
-  'Give concise next steps.';
+  'Short next steps.';
 
 export interface DiffStats {
   files: number;
@@ -416,22 +416,22 @@ export function buildAnalysisPrompt(
   language?: string,
 ): string {
   const parts = [
-    '## Local Diff Snapshot',
+    '## Snapshot',
     `Files: ${String(stats.files)} | +${String(stats.additions)} -${String(stats.deletions)}`,
-    ...(language ? [`Language: ${language}`] : []),
+    ...(language ? [`Lang: ${language}`] : []),
     '',
-    'Reviewed Paths:',
+    'Paths:',
     ...reviewedPaths.map((filePath) => `- ${filePath}`),
   ];
 
-  appendPromptSection(parts, 'Included Untracked Text Files:', includedUntracked);
-  appendPromptSection(parts, 'Skipped Binary Untracked Files:', skippedBinaryPaths);
+  appendPromptSection(parts, 'Untracked:', includedUntracked);
+  appendPromptSection(parts, 'Skipped binary:', skippedBinaryPaths);
   appendPromptSection(
     parts,
-    `Skipped Large Untracked Files (> ${String(MAX_UNTRACKED_FILE_BYTES)} bytes):`,
+    `Skipped large (> ${String(MAX_UNTRACKED_FILE_BYTES)} bytes):`,
     skippedLargePaths,
   );
-  appendPromptSection(parts, 'Omitted From Gemini Review Budget:', omittedPaths);
+  appendPromptSection(parts, 'Omitted:', omittedPaths);
   parts.push('', '```diff', diff, '```');
 
   return parts.join('\n');

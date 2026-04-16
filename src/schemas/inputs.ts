@@ -45,7 +45,7 @@ export function createAskInputSchema(completeSessionIds: SessionIdCompleter = ()
       completeCacheNames,
     ),
     responseSchema: GeminiResponseSchema.optional().describe(
-      'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Disables thinking. Gemini 2.0 models may require a propertyOrdering array.',
+      'JSON Schema object (draft-compatible) for structured output. Gemini returns conforming JSON. Used for single-turn calls and brand-new sessions. Gemini 2.0 models may require a propertyOrdering array.',
     ),
     temperature: z
       .number()

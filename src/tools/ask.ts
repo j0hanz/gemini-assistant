@@ -78,8 +78,6 @@ interface AskExecutionResult {
 
 const ASK_TOOL_LABEL = 'Ask Gemini';
 const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
-const THINKING_SUPPRESSED_WARNING =
-  'thinkingLevel was ignored because responseSchema activates JSON mode (mutually exclusive)';
 const SCHEMA_COMPOSITION_KEYS = ['anyOf', 'oneOf', 'allOf', 'items', 'prefixItems'] as const;
 
 // ── Structured Output Validation ──────────────────────────────────────
@@ -217,7 +215,6 @@ export function formatStructuredResult(
   >,
   jsonMode?: boolean,
   responseSchema?: GeminiResponseSchema,
-  thinkingSuppressed?: boolean,
 ): CallToolResult {
   if (result.isError) return result;
   const structured = buildAskStructuredContent(
@@ -226,12 +223,6 @@ export function formatStructuredResult(
     jsonMode,
     responseSchema,
   );
-
-  if (thinkingSuppressed) {
-    const warnings = structured.schemaWarnings ?? [];
-    warnings.push(THINKING_SUPPRESSED_WARNING);
-    structured.schemaWarnings = warnings;
-  }
 
   return {
     ...result,
@@ -319,13 +310,9 @@ async function runAskStream(
   toolProfile: ToolProfile,
   urls: string[] | undefined,
   jsonMode = false,
-  thinkingSuppressed = false,
   responseSchema?: GeminiResponseSchema,
 ): Promise<AskExecutionResult> {
   await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Preparing`);
-  if (thinkingSuppressed) {
-    await ctx.mcpReq.log('debug', `ask: ${THINKING_SUPPRESSED_WARNING}`);
-  }
   if (responseSchema) {
     const unsupported = collectUnsupportedKeywords(responseSchema);
     if (unsupported.length > 0) {
@@ -345,13 +332,7 @@ async function runAskStream(
   const detail = hasThoughts ? 'completed with reasoning' : 'completed';
   await reportCompletion(ctx, ASK_TOOL_LABEL, detail);
   return {
-    result: formatStructuredResult(
-      result,
-      streamResult,
-      jsonMode,
-      responseSchema,
-      thinkingSuppressed,
-    ),
+    result: formatStructuredResult(result, streamResult, jsonMode, responseSchema),
     streamResult,
     toolProfile,
     ...(urls && urls.length > 0 ? { urls } : {}),
@@ -373,7 +354,6 @@ async function askWithoutSession(
 ): Promise<AskExecutionResult> {
   const { prompt, toolConfig, toolProfile, tools, urls, functionCallingMode } =
     resolveAskTooling(args);
-  const thinkingSuppressed = !!args.thinkingLevel && !!args.responseSchema;
   return await runAskStream(
     ctx,
     () =>
@@ -396,9 +376,65 @@ async function askWithoutSession(
     toolProfile,
     urls,
     !!args.responseSchema,
-    thinkingSuppressed,
     args.responseSchema,
   );
+}
+
+const SESSION_VALUE_MAX_STRING_LENGTH = 2000;
+const SESSION_VALUE_MAX_ARRAY_ITEMS = 20;
+const SESSION_VALUE_MAX_OBJECT_KEYS = 50;
+const SESSION_VALUE_TRUNCATION_SUFFIX = '... [truncated]';
+
+function sanitizeSessionValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    if (value.length <= SESSION_VALUE_MAX_STRING_LENGTH) {
+      return value;
+    }
+
+    const maxPrefixLength = Math.max(
+      SESSION_VALUE_MAX_STRING_LENGTH - SESSION_VALUE_TRUNCATION_SUFFIX.length,
+      0,
+    );
+    return `${value.slice(0, maxPrefixLength)}${SESSION_VALUE_TRUNCATION_SUFFIX}`;
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, SESSION_VALUE_MAX_ARRAY_ITEMS).map((item) => sanitizeSessionValue(item));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, SESSION_VALUE_MAX_OBJECT_KEYS)
+        .map(([key, nestedValue]) => [key, sanitizeSessionValue(nestedValue)]),
+    );
+  }
+
+  return value;
+}
+
+function sanitizeFunctionCalls(functionCalls: FunctionCallEntry[]): FunctionCallEntry[] {
+  return functionCalls.map((functionCall) => ({
+    ...functionCall,
+    ...(functionCall.args
+      ? { args: sanitizeSessionValue(functionCall.args) as Record<string, unknown> }
+      : {}),
+  }));
+}
+
+function sanitizeToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
+  return toolEvents.map((toolEvent) => ({
+    ...toolEvent,
+    ...(toolEvent.args
+      ? { args: sanitizeSessionValue(toolEvent.args) as Record<string, unknown> }
+      : {}),
+    ...(toolEvent.code ? { code: sanitizeSessionValue(toolEvent.code) as string } : {}),
+    ...(toolEvent.output ? { output: sanitizeSessionValue(toolEvent.output) as string } : {}),
+    ...(toolEvent.response
+      ? { response: sanitizeSessionValue(toolEvent.response) as Record<string, unknown> }
+      : {}),
+    ...(toolEvent.text ? { text: sanitizeSessionValue(toolEvent.text) as string } : {}),
+  }));
 }
 
 function appendTranscriptPair(
@@ -443,11 +479,13 @@ function appendSessionTurn(
     },
     response: {
       text: extractTextContent(askResult.result.content),
-      ...(structured?.data !== undefined ? { data: structured.data } : {}),
-      ...(structured?.functionCalls ? { functionCalls: structured.functionCalls } : {}),
+      ...(structured?.data !== undefined ? { data: sanitizeSessionValue(structured.data) } : {}),
+      ...(structured?.functionCalls
+        ? { functionCalls: sanitizeFunctionCalls(structured.functionCalls) }
+        : {}),
       ...(structured?.schemaWarnings ? { schemaWarnings: structured.schemaWarnings } : {}),
       ...(structured?.thoughts ? { thoughts: structured.thoughts } : {}),
-      ...(structured?.toolEvents ? { toolEvents: structured.toolEvents } : {}),
+      ...(structured?.toolEvents ? { toolEvents: sanitizeToolEvents(structured.toolEvents) } : {}),
       ...(structured?.usage ? { usage: structured.usage } : {}),
     },
     timestamp: deps.now(),

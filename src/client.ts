@@ -73,15 +73,17 @@ function buildResponseConfig(
   responseSchema: GeminiResponseSchema | undefined,
   thinkingLevel: AskThinkingLevel | undefined,
 ) {
+  const thinkingConfig = buildThinkingConfig(thinkingLevel);
   return {
     ...(cacheName ? { cachedContent: cacheName } : {}),
     ...(cacheName ? {} : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
+    ...(Object.keys(thinkingConfig).length > 0 ? { thinkingConfig } : {}),
     ...(isJson
       ? {
           responseMimeType: 'application/json',
-          ...(responseSchema ? { responseSchema } : {}),
+          ...(responseSchema ? { responseJsonSchema: responseSchema } : {}),
         }
-      : { thinkingConfig: buildThinkingConfig(thinkingLevel) }),
+      : {}),
   };
 }
 

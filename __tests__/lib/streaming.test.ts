@@ -29,6 +29,13 @@ function makeChunk(parts: Part[], finishReason?: FinishReason): GenerateContentR
   } as GenerateContentResponse;
 }
 
+function makePromptBlockedChunk(blockReason = 'SAFETY'): GenerateContentResponse {
+  return {
+    candidates: [],
+    promptFeedback: { blockReason } as GenerateContentResponse['promptFeedback'],
+  } as GenerateContentResponse;
+}
+
 async function* fakeStream(
   chunks: GenerateContentResponse[],
 ): AsyncGenerator<GenerateContentResponse> {
@@ -150,6 +157,14 @@ describe('consumeStreamWithProgress', () => {
     assert.ok(!messages.includes('Complete'));
   });
 
+  it('captures promptFeedback block reason when no candidates are returned', async () => {
+    const { ctx } = makeMockContext();
+    const result = await consumeStreamWithProgress(fakeStream([makePromptBlockedChunk()]), ctx);
+
+    assert.strictEqual(result.hadCandidate, false);
+    assert.strictEqual(result.promptBlockReason, 'SAFETY');
+  });
+
   it('captures finishReason from last chunk', async () => {
     const { ctx } = makeMockContext();
     const stream = fakeStream([
@@ -234,6 +249,7 @@ describe('consumeStreamWithProgress', () => {
     const result = await consumeStreamWithProgress(stream, ctx);
 
     assert.deepStrictEqual(result.toolsUsed, []);
+    assert.strictEqual(result.hadCandidate, true);
   });
 
   it('detects code execution parts and reports progress', async () => {
@@ -605,7 +621,12 @@ describe('consumeStreamWithProgress', () => {
 describe('validateStreamResult', () => {
   it('returns text for normal result', () => {
     const result = validateStreamResult(
-      { text: 'Hello', parts: [{ text: 'Hello' }], finishReason: FinishReason.STOP },
+      {
+        text: 'Hello',
+        parts: [{ text: 'Hello' }],
+        finishReason: FinishReason.STOP,
+        hadCandidate: true,
+      },
       'test',
     );
     assert.strictEqual(result.isError, undefined);
@@ -614,7 +635,7 @@ describe('validateStreamResult', () => {
 
   it('returns error for SAFETY finish reason', () => {
     const result = validateStreamResult(
-      { text: '', parts: [], finishReason: FinishReason.SAFETY },
+      { text: '', parts: [], finishReason: FinishReason.SAFETY, hadCandidate: true },
       'test',
     );
     assert.strictEqual(result.isError, true);
@@ -623,7 +644,7 @@ describe('validateStreamResult', () => {
 
   it('returns error for RECITATION finish reason', () => {
     const result = validateStreamResult(
-      { text: '', parts: [], finishReason: FinishReason.RECITATION },
+      { text: '', parts: [], finishReason: FinishReason.RECITATION, hadCandidate: true },
       'test',
     );
     assert.strictEqual(result.isError, true);
@@ -632,7 +653,7 @@ describe('validateStreamResult', () => {
 
   it('returns error for MAX_TOKENS with no text', () => {
     const result = validateStreamResult(
-      { text: '', parts: [], finishReason: FinishReason.MAX_TOKENS },
+      { text: '', parts: [], finishReason: FinishReason.MAX_TOKENS, hadCandidate: true },
       'test',
     );
     assert.strictEqual(result.isError, true);
@@ -641,22 +662,39 @@ describe('validateStreamResult', () => {
 
   it('returns text when MAX_TOKENS but text exists', () => {
     const result = validateStreamResult(
-      { text: 'partial', parts: [{ text: 'partial' }], finishReason: FinishReason.MAX_TOKENS },
+      {
+        text: 'partial',
+        parts: [{ text: 'partial' }],
+        finishReason: FinishReason.MAX_TOKENS,
+        hadCandidate: true,
+      },
       'test',
     );
     assert.strictEqual(result.isError, undefined);
     assert.strictEqual(result.content[0]?.text, 'partial');
   });
 
-  it('returns empty text for result with no finishReason', () => {
-    const result = validateStreamResult({ text: '', parts: [] } as StreamResult, 'test');
-    assert.strictEqual(result.isError, undefined);
-    assert.strictEqual(result.content[0]?.text, '');
+  it('returns error for candidate-less results', () => {
+    const result = validateStreamResult(
+      { text: '', parts: [], hadCandidate: false } as StreamResult,
+      'test',
+    );
+    assert.strictEqual(result.isError, true);
+    assert.match(result.content[0]?.text ?? '', /prompt blocked.*unknown/i);
+  });
+
+  it('returns error for prompt-blocked results', () => {
+    const result = validateStreamResult(
+      { text: '', parts: [], hadCandidate: false, promptBlockReason: 'SAFETY' } as StreamResult,
+      'test',
+    );
+    assert.strictEqual(result.isError, true);
+    assert.match(result.content[0]?.text ?? '', /prompt blocked.*SAFETY/);
   });
 
   it('includes tool name in error messages', () => {
     const result = validateStreamResult(
-      { text: '', parts: [], finishReason: FinishReason.SAFETY },
+      { text: '', parts: [], finishReason: FinishReason.SAFETY, hadCandidate: true },
       'my_tool',
     );
     assert.match(result.content[0]?.text ?? '', /my_tool/);
@@ -733,6 +771,22 @@ describe('handleToolExecution', () => {
       .map((call) => call.message);
     assert.deepStrictEqual(terminalMessages, [
       'Web Search: failed — search: response blocked by safety filter',
+    ]);
+  });
+
+  it('reports failure once for prompt-blocked streaming responses with no candidates', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+
+    const result = await handleToolExecution(ctx, 'search', 'Web Search', async () =>
+      fakeStream([makePromptBlockedChunk('SAFETY')]),
+    );
+
+    assert.strictEqual(result.isError, true);
+    const terminalMessages = progressCalls
+      .filter((call) => call.progress === PROGRESS_TOTAL)
+      .map((call) => call.message);
+    assert.deepStrictEqual(terminalMessages, [
+      'Web Search: failed — search: prompt blocked by safety filter (SAFETY)',
     ]);
   });
 });

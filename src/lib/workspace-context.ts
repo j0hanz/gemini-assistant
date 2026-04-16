@@ -192,7 +192,7 @@ class WorkspaceCacheManagerImpl {
   private estimatedTokens: number | undefined;
   private sources: string[] = [];
   private createdAt: number | undefined;
-  private creating = false;
+  private inflightCreation: Promise<string | undefined> | undefined;
   private lastHashCheck: number | undefined;
 
   async getOrCreateCache(roots: string[], signal?: AbortSignal): Promise<string | undefined> {
@@ -209,12 +209,22 @@ class WorkspaceCacheManagerImpl {
         return this.cacheName;
       }
       logger.info('workspace', 'Workspace content changed, recreating cache');
-      this.invalidate();
+      return await this.refreshCache(ctx, signal);
     }
 
-    if (this.creating) return undefined;
+    if (this.inflightCreation) {
+      return await this.inflightCreation;
+    }
 
-    return this.createCache(roots, signal);
+    const creation = this.createCache(roots, signal);
+    this.inflightCreation = creation;
+    try {
+      return await creation;
+    } finally {
+      if (this.inflightCreation === creation) {
+        this.inflightCreation = undefined;
+      }
+    }
   }
 
   getCacheStatus(): WorkspaceCacheStatus {
@@ -240,10 +250,58 @@ class WorkspaceCacheManagerImpl {
   }
 
   private async createCache(roots: string[], signal?: AbortSignal): Promise<string | undefined> {
-    this.creating = true;
-    try {
-      const ctx = await assembleWorkspaceContext(roots);
+    const ctx = await assembleWorkspaceContext(roots);
+    return await this.createCacheFromContext(ctx, signal);
+  }
 
+  private async refreshCache(
+    ctx: WorkspaceContextResult,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    if (this.inflightCreation) {
+      return await this.inflightCreation;
+    }
+
+    const refresh = (async () => {
+      const previousCacheName = this.cacheName;
+
+      if (ctx.estimatedTokens < MIN_CACHE_TOKENS) {
+        logger.warn(
+          'workspace',
+          `Workspace context too small for caching (${ctx.estimatedTokens} tokens, need ${MIN_CACHE_TOKENS})`,
+        );
+        this.invalidate();
+        if (previousCacheName) {
+          await this.deleteCacheBestEffort(previousCacheName, signal);
+        }
+        return undefined;
+      }
+
+      const replacementCacheName = await this.createCacheFromContext(ctx, signal);
+      if (!replacementCacheName) {
+        return previousCacheName;
+      }
+      if (replacementCacheName && previousCacheName && previousCacheName !== replacementCacheName) {
+        await this.deleteCacheBestEffort(previousCacheName, signal);
+      }
+      return replacementCacheName;
+    })();
+
+    this.inflightCreation = refresh;
+    try {
+      return await refresh;
+    } finally {
+      if (this.inflightCreation === refresh) {
+        this.inflightCreation = undefined;
+      }
+    }
+  }
+
+  private async createCacheFromContext(
+    ctx: WorkspaceContextResult,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    try {
       if (ctx.estimatedTokens < MIN_CACHE_TOKENS) {
         logger.warn(
           'workspace',
@@ -282,8 +340,17 @@ class WorkspaceCacheManagerImpl {
     } catch (err) {
       logger.error('workspace', `Failed to create workspace cache: ${String(err)}`);
       return undefined;
-    } finally {
-      this.creating = false;
+    }
+  }
+
+  private async deleteCacheBestEffort(cacheName: string, signal?: AbortSignal): Promise<void> {
+    try {
+      await getAI().caches.delete({
+        name: cacheName,
+        ...(signal ? { config: { abortSignal: signal } } : {}),
+      });
+    } catch (err) {
+      logger.warn('workspace', `Failed to delete workspace cache ${cacheName}: ${String(err)}`);
     }
   }
 

@@ -7,6 +7,7 @@ import type {
 
 import { FinishReason } from '@google/genai';
 import type {
+  BlockedReason,
   GenerateContentResponse,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
@@ -22,7 +23,7 @@ import {
   sendProgress,
   withRetry,
 } from './errors.js';
-import { extractTextContent, pickDefined } from './response.js';
+import { extractTextContent, pickDefined, promptBlockedError } from './response.js';
 
 export const PROGRESS_TOTAL = 100;
 const PROGRESS_STEP_FRACTION = 0.15;
@@ -66,8 +67,10 @@ export interface StreamResult {
   toolsUsed: string[];
   functionCalls: FunctionCallEntry[];
   toolEvents: ToolEvent[];
+  hadCandidate: boolean;
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
+  promptBlockReason?: BlockedReason;
   urlContextMetadata?: UrlContextMetadata;
   usageMetadata?: GenerateContentResponseUsageMetadata;
 }
@@ -141,6 +144,8 @@ async function emitThoughtHeaders(
 interface StreamMetadata {
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
+  hadCandidate: boolean;
+  promptBlockReason?: BlockedReason;
   urlContextMetadata?: UrlContextMetadata;
   usageMetadata?: GenerateContentResponseUsageMetadata;
 }
@@ -150,6 +155,7 @@ function updateStreamMetadata(
   candidate: NonNullable<GenerateContentResponse['candidates']>[number],
   metadata: StreamMetadata,
 ): void {
+  metadata.hadCandidate = true;
   if (candidate.finishReason) {
     metadata.finishReason = candidate.finishReason;
   }
@@ -173,6 +179,7 @@ function createStreamProcessingState(): StreamProcessingState {
     emittedCompiling: false,
     functionCalls: [],
     hadToolActivity: false,
+    hadCandidate: false,
     parts: [],
     phase: Phase.Waiting,
     text: '',
@@ -496,9 +503,11 @@ function finalizeStreamResult(state: StreamProcessingState): StreamResult {
     toolsUsed: [...state.toolsUsed],
     functionCalls: state.functionCalls,
     toolEvents: state.toolEvents,
+    hadCandidate: state.hadCandidate,
     ...pickDefined({
       finishReason: state.finishReason,
       groundingMetadata: state.groundingMetadata,
+      promptBlockReason: state.promptBlockReason,
       urlContextMetadata: state.urlContextMetadata,
       usageMetadata: state.usageMetadata,
     }),
@@ -518,6 +527,10 @@ export async function consumeStreamWithProgress(
   for await (const chunk of stream) {
     if (ctx.mcpReq.signal.aborted) break;
 
+    if (chunk.promptFeedback?.blockReason) {
+      state.promptBlockReason = chunk.promptFeedback.blockReason;
+    }
+
     const candidate = chunk.candidates?.[0];
     if (!candidate) continue;
 
@@ -534,6 +547,14 @@ export async function consumeStreamWithProgress(
 }
 
 export function validateStreamResult(result: StreamResult, toolName: string): CallToolResult {
+  if (result.promptBlockReason) {
+    return promptBlockedError(toolName, result.promptBlockReason);
+  }
+
+  if (!result.hadCandidate) {
+    return promptBlockedError(toolName);
+  }
+
   const errResult = finishReasonError(result.finishReason, result.text, toolName);
   if (errResult) return errResult;
 

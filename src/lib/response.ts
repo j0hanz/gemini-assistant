@@ -55,6 +55,10 @@ export function collectGroundedSourceDetails(
   return sources;
 }
 
+export function promptBlockedError(toolName: string, blockReason?: string): CallToolResult {
+  return errorResult(`${toolName}: prompt blocked by safety filter (${blockReason ?? 'unknown'})`);
+}
+
 function appendBulletListSection(
   content: CallToolResult['content'],
   heading: string,
@@ -115,8 +119,7 @@ export function extractTextOrError(
 
   // No candidates at all — prompt-level block
   if (!candidate) {
-    const blockReason = response.promptFeedback?.blockReason ?? 'unknown';
-    return errorResult(`${toolName}: prompt blocked by safety filter (${blockReason})`);
+    return promptBlockedError(toolName, response.promptFeedback?.blockReason);
   }
 
   const text = response.text ?? '';

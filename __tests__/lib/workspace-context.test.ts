@@ -4,12 +4,32 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
-import { DEFAULT_SYSTEM_INSTRUCTION } from '../../src/client.js';
+import { DEFAULT_SYSTEM_INSTRUCTION, getAI } from '../../src/client.js';
 import {
   assembleWorkspaceContext,
   estimateTokens,
   MIN_CACHE_TOKENS,
+  workspaceCacheManager,
 } from '../../src/lib/workspace-context.js';
+
+async function createWorkspaceFile(dirName: string, contents: string): Promise<string> {
+  const root = join(tmpdir(), dirName);
+  await mkdir(root, { recursive: true });
+  await writeFile(join(root, 'readme.md'), contents);
+  return root;
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  while (!predicate()) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+function resetWorkspaceCacheManager(): void {
+  workspaceCacheManager.invalidate();
+  const manager = workspaceCacheManager as unknown as Record<string, unknown>;
+  manager['inflightCreation'] = undefined;
+}
 
 describe('workspace-context', () => {
   describe('estimateTokens', () => {
@@ -167,6 +187,166 @@ describe('workspace-context', () => {
       assert.ok(!result.content.includes('semi'));
       assert.ok(!result.content.includes('rules'));
       await rm(testDir, { recursive: true, force: true });
+    });
+  });
+
+  describe('workspace cache manager', () => {
+    const originalEnv = { ...process.env };
+
+    afterEach(() => {
+      process.env = { ...originalEnv };
+      resetWorkspaceCacheManager();
+    });
+
+    it('shares one in-flight cache creation across concurrent callers', async () => {
+      process.env.WORKSPACE_CACHE_ENABLED = 'true';
+      process.env.WORKSPACE_AUTO_SCAN = 'true';
+      process.env.API_KEY = 'test-key';
+
+      const root = await createWorkspaceFile(
+        `ws-cache-concurrent-${Date.now()}`,
+        'a'.repeat(130_000),
+      );
+      const ai = getAI();
+      const originalCreate = ai.caches.create.bind(ai.caches);
+      let resolveCreate: ((value: { name: string }) => void) | undefined;
+      let createCalls = 0;
+
+      ai.caches.create = (async () => {
+        createCalls++;
+        return await new Promise<{ name: string }>((resolve) => {
+          resolveCreate = resolve;
+        });
+      }) as typeof ai.caches.create;
+
+      try {
+        const first = workspaceCacheManager.getOrCreateCache([root]);
+        const second = workspaceCacheManager.getOrCreateCache([root]);
+        await waitFor(() => resolveCreate !== undefined);
+        resolveCreate?.({ name: 'cachedContents/shared-cache' });
+
+        assert.strictEqual(await first, 'cachedContents/shared-cache');
+        assert.strictEqual(await second, 'cachedContents/shared-cache');
+        assert.strictEqual(createCalls, 1);
+      } finally {
+        ai.caches.create = originalCreate;
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('replaces stale caches and deletes the superseded remote cache after success', async () => {
+      process.env.WORKSPACE_CACHE_ENABLED = 'true';
+      process.env.WORKSPACE_AUTO_SCAN = 'true';
+      process.env.API_KEY = 'test-key';
+
+      const root = await createWorkspaceFile(`ws-cache-replace-${Date.now()}`, 'a'.repeat(130_000));
+      const ai = getAI();
+      const originalCreate = ai.caches.create.bind(ai.caches);
+      const originalDelete = ai.caches.delete.bind(ai.caches);
+      const createdNames = ['cachedContents/first-cache', 'cachedContents/second-cache'];
+      const deletedNames: string[] = [];
+
+      ai.caches.create = (async () => ({
+        name: createdNames.shift() ?? 'cachedContents/fallback',
+      })) as typeof ai.caches.create;
+      ai.caches.delete = (async ({ name }: { name: string }) => {
+        deletedNames.push(name);
+      }) as typeof ai.caches.delete;
+
+      try {
+        assert.strictEqual(
+          await workspaceCacheManager.getOrCreateCache([root]),
+          'cachedContents/first-cache',
+        );
+        await writeFile(join(root, 'readme.md'), 'b'.repeat(130_000));
+        (workspaceCacheManager as unknown as Record<string, unknown>)['lastHashCheck'] = 0;
+
+        assert.strictEqual(
+          await workspaceCacheManager.getOrCreateCache([root]),
+          'cachedContents/second-cache',
+        );
+        assert.deepStrictEqual(deletedNames, ['cachedContents/first-cache']);
+      } finally {
+        ai.caches.create = originalCreate;
+        ai.caches.delete = originalDelete;
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('retains the previous cache when replacement fails', async () => {
+      process.env.WORKSPACE_CACHE_ENABLED = 'true';
+      process.env.WORKSPACE_AUTO_SCAN = 'true';
+      process.env.API_KEY = 'test-key';
+
+      const root = await createWorkspaceFile(`ws-cache-fail-${Date.now()}`, 'a'.repeat(130_000));
+      const ai = getAI();
+      const originalCreate = ai.caches.create.bind(ai.caches);
+      let createCalls = 0;
+
+      ai.caches.create = (async () => {
+        createCalls++;
+        if (createCalls === 1) {
+          return { name: 'cachedContents/stable-cache' };
+        }
+        throw new Error('transient failure');
+      }) as typeof ai.caches.create;
+
+      try {
+        assert.strictEqual(
+          await workspaceCacheManager.getOrCreateCache([root]),
+          'cachedContents/stable-cache',
+        );
+        await writeFile(join(root, 'readme.md'), 'b'.repeat(130_000));
+        (workspaceCacheManager as unknown as Record<string, unknown>)['lastHashCheck'] = 0;
+
+        assert.strictEqual(
+          await workspaceCacheManager.getOrCreateCache([root]),
+          'cachedContents/stable-cache',
+        );
+        assert.strictEqual(
+          workspaceCacheManager.getCacheStatus().cacheName,
+          'cachedContents/stable-cache',
+        );
+      } finally {
+        ai.caches.create = originalCreate;
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('clears stale cache state when refreshed content falls below the minimum', async () => {
+      process.env.WORKSPACE_CACHE_ENABLED = 'true';
+      process.env.WORKSPACE_AUTO_SCAN = 'true';
+      process.env.API_KEY = 'test-key';
+
+      const root = await createWorkspaceFile(`ws-cache-small-${Date.now()}`, 'a'.repeat(130_000));
+      const ai = getAI();
+      const originalCreate = ai.caches.create.bind(ai.caches);
+      const originalDelete = ai.caches.delete.bind(ai.caches);
+      const deletedNames: string[] = [];
+
+      ai.caches.create = (async () => ({
+        name: 'cachedContents/to-delete',
+      })) as typeof ai.caches.create;
+      ai.caches.delete = (async ({ name }: { name: string }) => {
+        deletedNames.push(name);
+      }) as typeof ai.caches.delete;
+
+      try {
+        assert.strictEqual(
+          await workspaceCacheManager.getOrCreateCache([root]),
+          'cachedContents/to-delete',
+        );
+        await writeFile(join(root, 'readme.md'), 'too small');
+        (workspaceCacheManager as unknown as Record<string, unknown>)['lastHashCheck'] = 0;
+
+        assert.strictEqual(await workspaceCacheManager.getOrCreateCache([root]), undefined);
+        assert.strictEqual(workspaceCacheManager.getCacheStatus().cacheName, undefined);
+        assert.deepStrictEqual(deletedNames, ['cachedContents/to-delete']);
+      } finally {
+        ai.caches.create = originalCreate;
+        ai.caches.delete = originalDelete;
+        await rm(root, { recursive: true, force: true });
+      }
     });
   });
 });

@@ -120,6 +120,7 @@ const DISCOVERY_ENTRIES = [
       'Answer text, optional structured data, usage metadata, and a session resource link for new chats.',
     limitations: [
       'responseSchema is supported for single-turn calls and new sessions only, not existing sessions.',
+      'Large session event payloads may be truncated because sessions://{sessionId}/events is an inspection summary, not a replay-ready transcript.',
       'sessions://{sessionId}/events exposes a normalized inspection summary, not raw replay-ready Gemini history.',
       'Session and tool state are stored in memory only.',
     ],

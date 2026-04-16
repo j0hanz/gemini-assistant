@@ -162,9 +162,6 @@ describe('ask transcript capture', () => {
         structuredContent: {
           answer: '{\n  "status": "ok"\n}',
           data: { status: 'ok' },
-          schemaWarnings: [
-            'thinkingLevel was ignored because responseSchema activates JSON mode (mutually exclusive)',
-          ],
           thoughts: 'Reasoning summary',
           functionCalls: [{ name: 'lookupWeather', args: { city: 'Stockholm' } }],
           toolEvents: [{ kind: 'tool_call' as const, id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
@@ -199,9 +196,6 @@ describe('ask transcript capture', () => {
         response: {
           text: '{\n  "status": "ok"\n}',
           data: { status: 'ok' },
-          schemaWarnings: [
-            'thinkingLevel was ignored because responseSchema activates JSON mode (mutually exclusive)',
-          ],
           thoughts: 'Reasoning summary',
           functionCalls: [{ name: 'lookupWeather', args: { city: 'Stockholm' } }],
           toolEvents: [{ kind: 'tool_call', id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
@@ -211,5 +205,67 @@ describe('ask transcript capture', () => {
         taskId: 'task-structured',
       },
     ]);
+  });
+
+  it('truncates large structured payloads before persisting session events', async () => {
+    const harness = createHarness();
+    harness.sessions.set('sess-large', { events: [], transcript: [] });
+    harness.deps.runWithoutSession = async () => ({
+      result: {
+        content: [{ type: 'text' as const, text: 'Assistant answer' }],
+        structuredContent: {
+          answer: 'Assistant answer',
+          data: {
+            payload: 'x'.repeat(2500),
+            list: Array.from({ length: 25 }, (_, index) => `item-${index}`),
+            object: Object.fromEntries(
+              Array.from({ length: 60 }, (_, index) => [`key-${index}`, `value-${index}`]),
+            ),
+          },
+          functionCalls: [
+            {
+              name: 'lookupWeather',
+              args: { details: 'y'.repeat(2500) },
+            },
+          ],
+          toolEvents: [
+            {
+              kind: 'tool_response' as const,
+              response: { output: 'z'.repeat(2500) },
+              output: 'q'.repeat(2500),
+            },
+          ],
+        },
+      },
+      streamResult: {
+        functionCalls: [],
+        parts: [],
+        text: 'Assistant answer',
+        thoughtText: '',
+        toolEvents: [],
+        toolsUsed: [],
+        hadCandidate: true,
+      },
+      toolProfile: 'none' as const,
+    });
+
+    const askWork = createAskWork(harness.deps as never);
+    await askWork({ message: 'Store large payload', sessionId: 'sess-large' }, createContext());
+
+    const event = harness.sessions.get('sess-large')?.events[0];
+    const response = event?.['response'] as Record<string, unknown>;
+    const data = response['data'] as Record<string, unknown>;
+    const functionCalls = response['functionCalls'] as { args?: Record<string, unknown> }[];
+    const toolEvents = response['toolEvents'] as {
+      output?: string;
+      response?: Record<string, unknown>;
+    }[];
+
+    assert.match(String(data['payload']), /\.\.\. \[truncated\]$/);
+    assert.strictEqual((data['list'] as unknown[]).length, 20);
+    assert.strictEqual(Object.keys(data['object'] as Record<string, unknown>).length, 50);
+    assert.match(String(functionCalls[0]?.args?.['details']), /\.\.\. \[truncated\]$/);
+    assert.match(String(toolEvents[0]?.response?.['output']), /\.\.\. \[truncated\]$/);
+    assert.match(String(toolEvents[0]?.output), /\.\.\. \[truncated\]$/);
   });
 });

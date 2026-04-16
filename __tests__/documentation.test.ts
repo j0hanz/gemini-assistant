@@ -47,6 +47,7 @@ describe('documentation and package metadata', () => {
     assert.match(readme, /\|\s*Live API\s*\|\s*`unsupported`\s*\|/);
     assert.match(readme, /responseSchema.*single-turn calls and brand-new sessions/i);
     assert.match(readme, /inspection summary/i);
+    assert.match(readme, /truncated into previews/i);
     assert.match(
       readme,
       /`execute_code` uses Gemini's Python runtime; `language` is advisory only\./,

@@ -45,7 +45,7 @@ Key workflow prompts:
 
 Use sessions when the context is conversational and should evolve turn by turn. Sessions are created by `ask` with a `sessionId`, listed in `sessions://list`, and inspectable through `sessions://{sessionId}`, `sessions://{sessionId}/transcript`, and `sessions://{sessionId}/events`.
 
-If `ask` uses Gemini built-in tools, `sessions://{sessionId}/events` exposes a normalized tool/function inspection summary for that live session. It is not a raw replay-ready Gemini history. Tool-combination state is in-memory only and disappears when the session expires or is evicted.
+If `ask` uses Gemini built-in tools, `sessions://{sessionId}/events` exposes a normalized tool/function inspection summary for that live session. It is not a raw replay-ready Gemini history, and large tool payloads may be truncated into previews. Tool-combination state is in-memory only and disappears when the session expires or is evicted.
 
 `ask.responseSchema` is supported for single-turn calls and brand-new sessions. It cannot be applied to an existing session.
 

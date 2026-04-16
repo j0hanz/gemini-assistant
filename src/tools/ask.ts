@@ -4,6 +4,7 @@ import { Validator } from '@cfworker/json-schema';
 import type { Chat } from '@google/genai';
 
 import { errorResult, reportCompletion, sendProgress } from '../lib/errors.js';
+import { logger } from '../lib/logger.js';
 import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
 import { createResourceLink, extractTextContent } from '../lib/response.js';
 import {
@@ -453,10 +454,18 @@ async function resolveWorkspaceCacheName(
   args: AskArgs,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
-  if (args.cacheName || args.systemInstruction || !getWorkspaceCacheEnabled()) return undefined;
+  if (
+    args.cacheName ||
+    args.systemInstruction ||
+    args.temperature !== undefined ||
+    args.seed !== undefined ||
+    !getWorkspaceCacheEnabled()
+  )
+    return undefined;
   try {
     return await workspaceCacheManager.getOrCreateCache([process.cwd()], signal);
-  } catch {
+  } catch (err) {
+    logger.warn('workspace', `Failed to resolve workspace cache: ${String(err)}`);
     return undefined;
   }
 }

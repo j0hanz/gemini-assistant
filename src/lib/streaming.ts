@@ -23,7 +23,12 @@ import {
   sendProgress,
   withRetry,
 } from './errors.js';
-import { extractTextContent, pickDefined, promptBlockedError } from './response.js';
+import {
+  buildSharedStructuredMetadata,
+  extractTextContent,
+  pickDefined,
+  promptBlockedError,
+} from './response.js';
 
 export const PROGRESS_TOTAL = 100;
 const PROGRESS_STEP_FRACTION = 0.15;
@@ -643,11 +648,13 @@ export async function handleToolExecution<T extends Record<string, unknown>>(
     ...finalResult,
     structuredContent: {
       ...(built.structuredContent ?? {}),
-      ...(streamResult.toolEvents.length > 0 ? { toolEvents: streamResult.toolEvents } : {}),
-      ...(EXPOSE_THOUGHTS && streamResult.thoughtText
-        ? { thoughts: streamResult.thoughtText }
-        : {}),
-      ...(usage ? { usage } : {}),
+      ...buildSharedStructuredMetadata({
+        functionCalls: streamResult.functionCalls,
+        includeThoughts: EXPOSE_THOUGHTS,
+        thoughtText: streamResult.thoughtText,
+        toolEvents: streamResult.toolEvents,
+        usage,
+      }),
     },
   };
 }

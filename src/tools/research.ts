@@ -153,13 +153,12 @@ export function buildAgenticSearchResult(streamResult: StreamResult, textContent
       sources,
       sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
       toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
-      functionCalls: streamResult.functionCalls.length > 0 ? streamResult.functionCalls : undefined,
     }),
     reportMessage: buildSourceReportMessage(sources.length),
   };
 }
 
-function buildSearchResult(streamResult: StreamResult, textContent: string) {
+export function buildSearchResult(streamResult: StreamResult, textContent: string) {
   const sources = collectGroundedSources(streamResult.groundingMetadata);
   const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
   const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
@@ -182,7 +181,7 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
   };
 }
 
-function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) {
+export function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) {
   const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
   const contentAdditions: CallToolResult['content'] = [];
 

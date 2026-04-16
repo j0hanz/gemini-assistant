@@ -167,7 +167,7 @@ describe('cache tool registration contract', () => {
     }
   });
 
-  it('returns a clear error when elicitation is unavailable and confirm is not true', async () => {
+  it('returns a clear non-error result when elicitation is unavailable and confirm is not true', async () => {
     const handler = getDeleteCacheHandler();
     const store = makeMockStore();
     let deleteCalls = 0;
@@ -193,8 +193,13 @@ describe('cache tool registration contract', () => {
 
       assert.strictEqual(deleteCalls, 0);
       assert.strictEqual(store.stored.length, 1);
-      assert.strictEqual(store.stored[0]?.status, 'failed');
-      assert.strictEqual(store.stored[0]?.result.isError, true);
+      assert.strictEqual(store.stored[0]?.status, 'completed');
+      assert.strictEqual(store.stored[0]?.result.isError, undefined);
+      assert.deepStrictEqual(store.stored[0]?.result.structuredContent, {
+        cacheName: 'cachedContents/abc123',
+        deleted: false,
+        confirmationRequired: true,
+      });
       const firstContent = store.stored[0]?.result.content[0];
       assert.ok(firstContent);
       assert.strictEqual(firstContent.type, 'text');
@@ -202,6 +207,41 @@ describe('cache tool registration contract', () => {
         'text' in firstContent ? firstContent.text : '',
         /Interactive confirmation is unavailable\. Re-run delete_cache with confirm=true/i,
       );
+    } finally {
+      client.caches.delete = originalDelete;
+    }
+  });
+
+  it('returns deleted=false without confirmationRequired when the user declines deletion', async () => {
+    const handler = getDeleteCacheHandler();
+    const store = makeMockStore();
+    let deleteCalls = 0;
+    const client = getAI();
+    const originalDelete = client.caches.delete.bind(client.caches);
+
+    // @ts-expect-error test override
+    client.caches.delete = async () => {
+      deleteCalls += 1;
+    };
+
+    try {
+      await handler.createTask(
+        { cacheName: 'cachedContents/abc123' },
+        makeMockContext(store, {
+          elicitInput: async () => ({
+            action: 'decline',
+          }),
+        }),
+      );
+
+      await flushTaskWork();
+
+      assert.strictEqual(deleteCalls, 0);
+      assert.strictEqual(store.stored[0]?.status, 'completed');
+      assert.deepStrictEqual(store.stored[0]?.result.structuredContent, {
+        cacheName: 'cachedContents/abc123',
+        deleted: false,
+      });
     } finally {
       client.caches.delete = originalDelete;
     }

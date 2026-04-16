@@ -44,6 +44,17 @@ describe('AskOutputSchema', () => {
     assert.ok(result.success);
   });
 
+  it('accepts workspace cache metadata', () => {
+    const result = AskOutputSchema.safeParse({
+      answer: 'test',
+      workspaceCache: {
+        applied: true,
+        cacheName: 'cachedContents/workspace-1',
+      },
+    });
+    assert.ok(result.success);
+  });
+
   it('accepts normalized tool events', () => {
     const result = AskOutputSchema.safeParse({
       answer: 'test',
@@ -71,6 +82,17 @@ describe('AskOutputSchema', () => {
     const result = AskOutputSchema.safeParse({
       answer: 'test',
       schemaWarnings: 'not an array',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects malformed workspace cache metadata', () => {
+    const result = AskOutputSchema.safeParse({
+      answer: 'test',
+      workspaceCache: {
+        applied: false,
+        cacheName: 'workspace-1',
+      },
     });
     assert.strictEqual(result.success, false);
   });
@@ -437,6 +459,15 @@ describe('DeleteCacheOutputSchema', () => {
     assert.ok(result.success);
   });
 
+  it('accepts confirmation-required deletion', () => {
+    const result = DeleteCacheOutputSchema.safeParse({
+      cacheName: 'cachedContents/abc123',
+      deleted: false,
+      confirmationRequired: true,
+    });
+    assert.ok(result.success);
+  });
+
   it('rejects missing cacheName', () => {
     const result = DeleteCacheOutputSchema.safeParse({ deleted: true });
     assert.strictEqual(result.success, false);
@@ -444,6 +475,15 @@ describe('DeleteCacheOutputSchema', () => {
 
   it('rejects missing deleted', () => {
     const result = DeleteCacheOutputSchema.safeParse({ cacheName: 'cachedContents/abc123' });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects non-boolean confirmationRequired', () => {
+    const result = DeleteCacheOutputSchema.safeParse({
+      cacheName: 'cachedContents/abc123',
+      deleted: false,
+      confirmationRequired: 'yes',
+    });
     assert.strictEqual(result.success, false);
   });
 });

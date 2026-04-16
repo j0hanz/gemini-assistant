@@ -136,6 +136,40 @@ describe('closeStartedRuntime', () => {
 });
 
 describe('main', () => {
+  it('closes the stdio server instance when connect fails', async () => {
+    const processLike = createMockProcess();
+    let closeCalls = 0;
+    const deps: MainDependencies = {
+      createEventStore: createEventStoreStub,
+      createServerInstance: () =>
+        createStdioServerInstance({
+          connect: async () => {
+            throw new Error('connect failed');
+          },
+          close: async () => {
+            closeCalls++;
+          },
+        }),
+      createStdioTransport: createStdioTransportStub,
+      getTransportMode: () => 'stdio',
+      logger: {
+        info: () => undefined,
+        fatal: () => undefined,
+      },
+      process: processLike,
+      startHttpTransport: async () => {
+        throw new Error('not used');
+      },
+      startWebStandardTransport: async () => {
+        throw new Error('not used');
+      },
+    };
+
+    await assert.rejects(() => main(deps), /connect failed/);
+    assert.strictEqual(closeCalls, 1);
+    assert.deepStrictEqual(processLike.exitCodes, []);
+  });
+
   it('removes process handlers during shutdown so sequential startups do not accumulate listeners', async () => {
     const processLike = createMockProcess();
     const deps: MainDependencies = {

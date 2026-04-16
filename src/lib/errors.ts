@@ -192,6 +192,22 @@ export function errorResult(message: string): CallToolResult {
   };
 }
 
+export function responseBlockedMessage(toolName: string): string {
+  return `${toolName}: response blocked by safety filter`;
+}
+
+export function responseBlockedResult(toolName: string): CallToolResult {
+  return errorResult(responseBlockedMessage(toolName));
+}
+
+export function promptBlockedMessage(toolName: string, blockReason?: string): string {
+  return `${toolName}: prompt blocked by safety filter (${blockReason ?? 'unknown'})`;
+}
+
+export function promptBlockedResult(toolName: string, blockReason?: string): CallToolResult {
+  return errorResult(promptBlockedMessage(toolName, blockReason));
+}
+
 function hasHttpStatus(err: unknown): err is Error & { status: number } {
   return err instanceof Error && 'status' in err && typeof err.status === 'number';
 }
@@ -215,7 +231,7 @@ export function finishReasonError(
   toolName: string,
 ): CallToolResult | undefined {
   if (finishReason === FinishReason.SAFETY) {
-    return errorResult(`${toolName}: response blocked by safety filter`);
+    return responseBlockedResult(toolName);
   }
   if (finishReason === FinishReason.RECITATION) {
     return errorResult(`${toolName}: response blocked due to recitation policy`);
@@ -226,15 +242,19 @@ export function finishReasonError(
   return undefined;
 }
 
-export function geminiErrorResult(toolName: string, err: unknown): CallToolResult {
+export function formatGeminiErrorMessage(toolName: string, err: unknown): string {
   if (isAbortError(err)) {
-    return errorResult(`${toolName}: cancelled by client`);
+    return `${toolName}: cancelled by client`;
   }
   if (hasHttpStatus(err)) {
     const hint = STATUS_MESSAGES[err.status] ?? `HTTP ${err.status}`;
-    return errorResult(`${toolName} failed: ${hint} — ${err.message}`);
+    return `${toolName} failed: ${hint} — ${err.message}`;
   }
-  return errorResult(`${toolName} failed: ${formatError(err)}`);
+  return `${toolName} failed: ${formatError(err)}`;
+}
+
+export function geminiErrorResult(toolName: string, err: unknown): CallToolResult {
+  return errorResult(formatGeminiErrorMessage(toolName, err));
 }
 
 export async function handleToolError(
@@ -255,14 +275,7 @@ export function cleanupErrorLogger(ctx: ServerContext): (reason: unknown) => voi
 }
 
 function toErrorMessage(toolName: string, err: unknown): string {
-  if (isAbortError(err)) {
-    return `${toolName}: cancelled by client`;
-  }
-  if (hasHttpStatus(err)) {
-    const hint = STATUS_MESSAGES[err.status] ?? `HTTP ${err.status}`;
-    return `${toolName} failed: ${hint} — ${err.message}`;
-  }
-  return `${toolName} failed: ${formatError(err)}`;
+  return formatGeminiErrorMessage(toolName, err);
 }
 
 export function withErrorLogging<TArgs>(

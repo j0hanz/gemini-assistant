@@ -402,7 +402,11 @@ async function deleteCacheWork(
             text: 'Interactive confirmation is unavailable. Re-run delete_cache with confirm=true to delete the cache.',
           },
         ],
-        isError: true,
+        structuredContent: {
+          cacheName,
+          deleted: false,
+          confirmationRequired: true,
+        },
       };
     }
   }

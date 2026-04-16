@@ -12,7 +12,11 @@ import type { Chat } from '@google/genai';
 import { errorResult, reportCompletion, sendProgress } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
-import { createResourceLink, extractTextContent } from '../lib/response.js';
+import {
+  buildSharedStructuredMetadata,
+  createResourceLink,
+  extractTextContent,
+} from '../lib/response.js';
 import {
   executeToolStream,
   extractUsage,
@@ -28,7 +32,7 @@ import {
   type GeminiResponseSchema,
   isGeminiResponseSchemaKeyword,
 } from '../schemas/json-schema.js';
-import { AskOutputSchema } from '../schemas/outputs.js';
+import { AskOutputSchema, type UsageMetadata } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, EXPOSE_THOUGHTS } from '../client.js';
 import { getAI, MODEL } from '../client.js';
@@ -46,11 +50,17 @@ type AskArgs = AskInput;
 export interface AskStructuredContent extends Record<string, unknown> {
   answer: string;
   data?: unknown;
+  functionCalls?: FunctionCallEntry[];
   schemaWarnings?: string[];
   thoughts?: string;
   toolEvents?: ToolEvent[];
-  usage?: ReturnType<typeof extractUsage>;
-  functionCalls?: FunctionCallEntry[];
+  usage?: UsageMetadata;
+  workspaceCache?: WorkspaceCacheMetadata;
+}
+
+export interface WorkspaceCacheMetadata {
+  applied: true;
+  cacheName: string;
 }
 
 interface AskDependencies {
@@ -65,6 +75,7 @@ interface AskDependencies {
     args: AskArgs,
     ctx: ServerContext,
     chat?: Chat,
+    workspaceCache?: WorkspaceCacheMetadata,
   ) => Promise<AskExecutionResult>;
   setSession: (sessionId: string, chat: Chat) => void;
 }
@@ -190,20 +201,26 @@ export function buildAskStructuredContent(
   >,
   jsonMode?: boolean,
   responseSchema?: GeminiResponseSchema,
+  workspaceCache?: WorkspaceCacheMetadata,
 ): AskStructuredContent {
   const parsedData = jsonMode ? tryParseJsonResponse(text) : undefined;
   const answer = parsedData === undefined ? text : JSON.stringify(parsedData, null, 2);
   const usage = extractUsage(streamResult.usageMetadata);
   const warnings = buildAskWarnings(parsedData, jsonMode, responseSchema);
+  const sharedMetadata = buildSharedStructuredMetadata({
+    functionCalls: streamResult.functionCalls,
+    includeThoughts: EXPOSE_THOUGHTS,
+    thoughtText: streamResult.thoughtText,
+    toolEvents: streamResult.toolEvents,
+    usage,
+  });
 
   return {
     answer,
     ...(parsedData !== undefined ? { data: parsedData } : {}),
     ...(warnings.length > 0 ? { schemaWarnings: warnings } : {}),
-    ...(EXPOSE_THOUGHTS && streamResult.thoughtText ? { thoughts: streamResult.thoughtText } : {}),
-    ...(streamResult.toolEvents.length > 0 ? { toolEvents: streamResult.toolEvents } : {}),
-    ...(usage ? { usage } : {}),
-    ...(streamResult.functionCalls.length > 0 ? { functionCalls: streamResult.functionCalls } : {}),
+    ...sharedMetadata,
+    ...(workspaceCache ? { workspaceCache } : {}),
   };
 }
 
@@ -215,6 +232,7 @@ export function formatStructuredResult(
   >,
   jsonMode?: boolean,
   responseSchema?: GeminiResponseSchema,
+  workspaceCache?: WorkspaceCacheMetadata,
 ): CallToolResult {
   if (result.isError) return result;
   const structured = buildAskStructuredContent(
@@ -222,6 +240,7 @@ export function formatStructuredResult(
     streamResult,
     jsonMode,
     responseSchema,
+    workspaceCache,
   );
 
   return {
@@ -240,6 +259,27 @@ function getAskStructuredContent(result: CallToolResult): AskStructuredContent |
   }
 
   return result.structuredContent as unknown as AskStructuredContent;
+}
+
+function attachWorkspaceCacheMetadata(
+  result: CallToolResult,
+  workspaceCache?: WorkspaceCacheMetadata,
+): CallToolResult {
+  if (!workspaceCache || result.isError) {
+    return result;
+  }
+
+  const structured = getAskStructuredContent(result) ?? {
+    answer: extractTextContent(result.content),
+  };
+
+  return {
+    ...result,
+    structuredContent: {
+      ...structured,
+      workspaceCache,
+    },
+  };
 }
 
 function validateAskConflict(condition: boolean, message: string): CallToolResult | undefined {
@@ -311,6 +351,7 @@ async function runAskStream(
   urls: string[] | undefined,
   jsonMode = false,
   responseSchema?: GeminiResponseSchema,
+  workspaceCache?: WorkspaceCacheMetadata,
 ): Promise<AskExecutionResult> {
   await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Preparing`);
   if (responseSchema) {
@@ -332,7 +373,7 @@ async function runAskStream(
   const detail = hasThoughts ? 'completed with reasoning' : 'completed';
   await reportCompletion(ctx, ASK_TOOL_LABEL, detail);
   return {
-    result: formatStructuredResult(result, streamResult, jsonMode, responseSchema),
+    result: formatStructuredResult(result, streamResult, jsonMode, responseSchema, workspaceCache),
     streamResult,
     toolProfile,
     ...(urls && urls.length > 0 ? { urls } : {}),
@@ -351,6 +392,7 @@ async function askWithoutSession(
   args: AskArgs,
   ctx: ServerContext,
   chat?: Chat,
+  workspaceCache?: WorkspaceCacheMetadata,
 ): Promise<AskExecutionResult> {
   const { prompt, toolConfig, toolProfile, tools, urls, functionCallingMode } =
     resolveAskTooling(args);
@@ -377,6 +419,7 @@ async function askWithoutSession(
     urls,
     !!args.responseSchema,
     args.responseSchema,
+    workspaceCache,
   );
 }
 
@@ -445,17 +488,18 @@ function appendTranscriptPair(
   taskId?: string,
 ): void {
   if (result.isError) return;
+  const timestamp = deps.now();
 
   deps.appendSessionTranscript(sessionId, {
     role: 'user',
     text: message,
-    timestamp: deps.now(),
+    timestamp,
     ...(taskId ? { taskId } : {}),
   });
   deps.appendSessionTranscript(sessionId, {
     role: 'assistant',
     text: extractTextContent(result.content),
-    timestamp: deps.now(),
+    timestamp,
     ...(taskId ? { taskId } : {}),
   });
 }
@@ -487,6 +531,7 @@ function appendSessionTurn(
       ...(structured?.thoughts ? { thoughts: structured.thoughts } : {}),
       ...(structured?.toolEvents ? { toolEvents: sanitizeToolEvents(structured.toolEvents) } : {}),
       ...(structured?.usage ? { usage: structured.usage } : {}),
+      ...(structured?.workspaceCache ? { workspaceCache: structured.workspaceCache } : {}),
     },
     timestamp: deps.now(),
     ...(taskId ? { taskId } : {}),
@@ -537,13 +582,15 @@ async function askExistingSession(
   args: AskArgs & { sessionId: string },
   ctx: ServerContext,
   deps: AskDependencies,
+  workspaceCache?: WorkspaceCacheMetadata,
 ): Promise<CallToolResult | undefined> {
   const chat = deps.getSession(args.sessionId);
   if (!chat) return undefined;
 
   await ctx.mcpReq.log('debug', `Resuming session ${args.sessionId}`);
   await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Resuming session`);
-  const askResult = await deps.runWithoutSession(args, ctx, chat);
+  const askResult = await deps.runWithoutSession(args, ctx, chat, workspaceCache);
+  askResult.result = attachWorkspaceCacheMetadata(askResult.result, workspaceCache);
   appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id);
   return askResult.result;
 }
@@ -552,11 +599,13 @@ async function askNewSession(
   args: AskArgs & { sessionId: string },
   ctx: ServerContext,
   deps: AskDependencies,
+  workspaceCache?: WorkspaceCacheMetadata,
 ): Promise<CallToolResult> {
   await ctx.mcpReq.log('debug', `Creating session ${args.sessionId}`);
   const chat = deps.createChat(args);
 
-  const askResult = await deps.runWithoutSession(args, ctx, chat);
+  const askResult = await deps.runWithoutSession(args, ctx, chat, workspaceCache);
+  askResult.result = attachWorkspaceCacheMetadata(askResult.result, workspaceCache);
 
   if (!askResult.result.isError) {
     deps.setSession(args.sessionId, chat);
@@ -576,23 +625,35 @@ export function createAskWork(
     const validationError = validateAskRequest(args, deps);
     if (validationError) return validationError;
 
-    const workspaceCacheName = args.sessionId
-      ? undefined
-      : await resolveWorkspaceCacheName(args, ctx.mcpReq.signal);
+    const canUseWorkspaceCache =
+      !args.sessionId || deps.getSessionEntry(args.sessionId) === undefined;
+    const workspaceCacheName = canUseWorkspaceCache
+      ? await resolveWorkspaceCacheName(args, ctx.mcpReq.signal)
+      : undefined;
+    const workspaceCache = workspaceCacheName
+      ? ({ applied: true, cacheName: workspaceCacheName } as const)
+      : undefined;
     const effectiveArgs = workspaceCacheName ? { ...args, cacheName: workspaceCacheName } : args;
 
     if (!effectiveArgs.sessionId) {
-      return (await deps.runWithoutSession(effectiveArgs, ctx)).result;
+      const askResult = await deps.runWithoutSession(effectiveArgs, ctx, undefined, workspaceCache);
+      return attachWorkspaceCacheMetadata(askResult.result, workspaceCache);
     }
 
     const resumed = await askExistingSession(
       effectiveArgs as AskArgs & { sessionId: string },
       ctx,
       deps,
+      workspaceCache,
     );
     if (resumed) return resumed;
 
-    return await askNewSession(effectiveArgs as AskArgs & { sessionId: string }, ctx, deps);
+    return await askNewSession(
+      effectiveArgs as AskArgs & { sessionId: string },
+      ctx,
+      deps,
+      workspaceCache,
+    );
   };
 }
 

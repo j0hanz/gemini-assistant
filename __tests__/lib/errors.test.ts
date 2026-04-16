@@ -6,8 +6,13 @@ import { beforeEach, describe, it } from 'node:test';
 
 import {
   errorResult,
+  finishReasonError,
   geminiErrorResult,
+  promptBlockedMessage,
+  promptBlockedResult,
   resetProgressThrottle,
+  responseBlockedMessage,
+  responseBlockedResult,
   sendProgress,
   throwInvalidParams,
   withRetry,
@@ -132,6 +137,56 @@ describe('geminiErrorResult', () => {
     const result = geminiErrorResult('ask', err);
     assert.strictEqual(result.isError, true);
     assert.strictEqual(result.content[0]?.text, 'ask: cancelled by client');
+  });
+});
+
+describe('blocked-result helpers', () => {
+  it('formats response-blocked text exactly once from the shared helper', () => {
+    assert.strictEqual(
+      responseBlockedMessage('execute_code'),
+      'execute_code: response blocked by safety filter',
+    );
+    assert.deepStrictEqual(responseBlockedResult('execute_code'), {
+      content: [{ type: 'text', text: 'execute_code: response blocked by safety filter' }],
+      isError: true,
+    });
+  });
+
+  it('formats prompt-blocked text exactly once from the shared helper', () => {
+    assert.strictEqual(
+      promptBlockedMessage('ask', 'SAFETY'),
+      'ask: prompt blocked by safety filter (SAFETY)',
+    );
+    assert.deepStrictEqual(promptBlockedResult('ask', 'SAFETY'), {
+      content: [{ type: 'text', text: 'ask: prompt blocked by safety filter (SAFETY)' }],
+      isError: true,
+    });
+  });
+});
+
+describe('finishReasonError', () => {
+  it('normalizes safety finish reasons', () => {
+    assert.deepStrictEqual(finishReasonError(undefined, 'text', 'ask'), undefined);
+    assert.deepStrictEqual(finishReasonError('SAFETY' as never, '', 'execute_code'), {
+      content: [{ type: 'text', text: 'execute_code: response blocked by safety filter' }],
+      isError: true,
+    });
+  });
+
+  it('normalizes recitation and max-token edge cases', () => {
+    assert.deepStrictEqual(finishReasonError('RECITATION' as never, '', 'ask'), {
+      content: [{ type: 'text', text: 'ask: response blocked due to recitation policy' }],
+      isError: true,
+    });
+    assert.deepStrictEqual(finishReasonError('MAX_TOKENS' as never, '', 'search'), {
+      content: [
+        {
+          type: 'text',
+          text: 'search: response truncated — max tokens reached with no output',
+        },
+      ],
+      isError: true,
+    });
   });
 });
 

@@ -63,6 +63,11 @@ const baseOutputFields = {
     .describe('Normalized Gemini tool/function event stream captured during generation'),
 };
 
+const WorkspaceCacheSchema = z.strictObject({
+  applied: z.literal(true).describe('Whether the automatic workspace cache was applied'),
+  cacheName: cacheName('Automatically applied workspace cache resource name'),
+});
+
 export const AskOutputSchema = z.strictObject({
   answer: z.string().describe('Generated response'),
   data: z.unknown().describe('Parsed structured response when JSON mode is used').optional(),
@@ -70,6 +75,9 @@ export const AskOutputSchema = z.strictObject({
     .array(z.string())
     .optional()
     .describe('Warnings from structured output validation (parse failures, schema mismatches)'),
+  workspaceCache: WorkspaceCacheSchema.optional().describe(
+    'Metadata about an automatically applied workspace cache',
+  ),
   ...baseOutputFields,
 });
 
@@ -190,6 +198,12 @@ export const ListCachesOutputSchema = z.strictObject({
 export const DeleteCacheOutputSchema = z.strictObject({
   cacheName: cacheName('Cache resource name'),
   deleted: z.boolean().describe('Whether deletion was performed'),
+  confirmationRequired: z
+    .boolean()
+    .optional()
+    .describe(
+      'Whether the client must rerun with confirm=true because interactive confirmation was unavailable',
+    ),
 });
 
 export const UpdateCacheOutputSchema = z.strictObject({

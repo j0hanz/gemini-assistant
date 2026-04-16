@@ -789,4 +789,30 @@ describe('handleToolExecution', () => {
       'Web Search: failed — search: prompt blocked by safety filter (SAFETY)',
     ]);
   });
+
+  it('merges shared structured metadata including functionCalls', async () => {
+    const { ctx } = makeMockContext();
+
+    const result = await handleToolExecution(
+      ctx,
+      'search',
+      'Web Search',
+      async () =>
+        fakeStream([
+          makeChunk([{ functionCall: { name: 'lookupDocs', args: { topic: 'mcp' } } }]),
+          makeChunk([{ text: 'answer' }], FinishReason.STOP),
+        ]),
+      (_streamResult, text) => ({
+        structuredContent: {
+          answer: text,
+        },
+      }),
+    );
+
+    assert.deepStrictEqual(result.structuredContent, {
+      answer: 'answer',
+      functionCalls: [{ name: 'lookupDocs', args: { topic: 'mcp' } }],
+      toolEvents: [{ kind: 'function_call', name: 'lookupDocs', args: { topic: 'mcp' } }],
+    });
+  });
 });

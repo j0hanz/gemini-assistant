@@ -9,7 +9,12 @@ import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 import { createPartFromUri, Outcome } from '@google/genai';
 import type { Part } from '@google/genai';
 
-import { cleanupErrorLogger, errorResult, handleToolError, sendProgress } from '../lib/errors.js';
+import {
+  cleanupErrorLogger,
+  handleToolError,
+  responseBlockedResult,
+  sendProgress,
+} from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { handleToolExecution } from '../lib/streaming.js';
@@ -209,7 +214,7 @@ async function executeCodeWork(
     (streamResult) => {
       if (streamResult.parts.length === 0) {
         return {
-          resultMod: () => errorResult('prompt blocked by safety filter (unknown)'),
+          resultMod: () => responseBlockedResult('execute_code'),
         };
       }
 

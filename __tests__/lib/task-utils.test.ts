@@ -140,6 +140,28 @@ describe('runToolAsTask', () => {
     assert.strictEqual(entry.status, 'failed');
   });
 
+  it('stores completed status for non-error declined flows', async () => {
+    const store = makeMockStore();
+    const task = { taskId: 'task-soft-stop' } as Task;
+    const result: CallToolResult = {
+      content: [{ type: 'text', text: 'Interactive confirmation is unavailable.' }],
+      structuredContent: {
+        cacheName: 'cachedContents/abc123',
+        deleted: false,
+        confirmationRequired: true,
+      },
+    };
+
+    runToolAsTask(store, task, Promise.resolve(result));
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(store.stored.length, 1);
+    const entry = store.stored[0];
+    assert.ok(entry);
+    assert.strictEqual(entry.status, 'completed');
+    assert.strictEqual(entry.result.isError, undefined);
+  });
+
   it('stores error result when work promise rejects', async () => {
     const store = makeMockStore();
     const task = { taskId: 'task-throw' } as Task;

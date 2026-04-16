@@ -3,6 +3,7 @@ import type { ServerContext } from '@modelcontextprotocol/server';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { workspaceCacheManager } from '../../src/lib/workspace-context.js';
 import { createAskWork } from '../../src/tools/ask.js';
 
 function createContext(taskId?: string): ServerContext {
@@ -83,13 +84,13 @@ describe('ask transcript capture', () => {
     assert.strictEqual(result.isError, undefined);
     assert.deepStrictEqual(harness.sessions.get('sess-new')?.transcript, [
       { role: 'user', text: 'Hello', timestamp: 1, taskId: 'task-new' },
-      { role: 'assistant', text: 'Assistant answer', timestamp: 2, taskId: 'task-new' },
+      { role: 'assistant', text: 'Assistant answer', timestamp: 1, taskId: 'task-new' },
     ]);
     assert.deepStrictEqual(harness.sessions.get('sess-new')?.events, [
       {
         request: { message: 'Hello' },
         response: { text: 'Assistant answer' },
-        timestamp: 3,
+        timestamp: 2,
         taskId: 'task-new',
       },
     ]);
@@ -114,13 +115,13 @@ describe('ask transcript capture', () => {
 
     assert.deepStrictEqual(harness.sessions.get('sess-existing')?.transcript, [
       { role: 'user', text: 'Follow up', timestamp: 1, taskId: 'task-2' },
-      { role: 'assistant', text: 'Assistant answer', timestamp: 2, taskId: 'task-2' },
+      { role: 'assistant', text: 'Assistant answer', timestamp: 1, taskId: 'task-2' },
     ]);
     assert.deepStrictEqual(harness.sessions.get('sess-existing')?.events, [
       {
         request: { message: 'Follow up' },
         response: { text: 'Assistant answer' },
-        timestamp: 3,
+        timestamp: 2,
         taskId: 'task-2',
       },
     ]);
@@ -201,7 +202,7 @@ describe('ask transcript capture', () => {
           toolEvents: [{ kind: 'tool_call', id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
           usage: { totalTokenCount: 25 },
         },
-        timestamp: 3,
+        timestamp: 2,
         taskId: 'task-structured',
       },
     ]);
@@ -267,5 +268,48 @@ describe('ask transcript capture', () => {
     assert.match(String(functionCalls[0]?.args?.['details']), /\.\.\. \[truncated\]$/);
     assert.match(String(toolEvents[0]?.response?.['output']), /\.\.\. \[truncated\]$/);
     assert.match(String(toolEvents[0]?.output), /\.\.\. \[truncated\]$/);
+  });
+
+  it('persists automatic workspace-cache metadata on new sessions', async () => {
+    const originalEnabled = process.env.WORKSPACE_CACHE_ENABLED;
+    const originalGetOrCreateCache =
+      workspaceCacheManager.getOrCreateCache.bind(workspaceCacheManager);
+    process.env.WORKSPACE_CACHE_ENABLED = 'true';
+    workspaceCacheManager.getOrCreateCache = async () => 'cachedContents/workspace-1';
+
+    try {
+      const harness = createHarness();
+      const askWork = createAskWork(harness.deps as never);
+
+      const result = await askWork(
+        { message: 'Use workspace context', sessionId: 'sess-workspace' },
+        createContext('task-workspace'),
+      );
+
+      assert.deepStrictEqual(result.structuredContent, {
+        answer: 'Assistant answer',
+        workspaceCache: {
+          applied: true,
+          cacheName: 'cachedContents/workspace-1',
+        },
+      });
+      assert.deepStrictEqual(harness.sessions.get('sess-workspace')?.events, [
+        {
+          request: { message: 'Use workspace context' },
+          response: {
+            text: 'Assistant answer',
+            workspaceCache: {
+              applied: true,
+              cacheName: 'cachedContents/workspace-1',
+            },
+          },
+          timestamp: 2,
+          taskId: 'task-workspace',
+        },
+      ]);
+    } finally {
+      process.env.WORKSPACE_CACHE_ENABLED = originalEnabled;
+      workspaceCacheManager.getOrCreateCache = originalGetOrCreateCache;
+    }
   });
 });

@@ -2,9 +2,9 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 
 import type { GenerateContentResponse, GroundingMetadata, UrlMetadata } from '@google/genai';
 
-import type { SourceDetail, UrlMetadataEntry } from '../schemas/outputs.js';
+import type { SourceDetail, UrlMetadataEntry, UsageMetadata } from '../schemas/outputs.js';
 
-import { errorResult, finishReasonError } from './errors.js';
+import { finishReasonError, promptBlockedResult } from './errors.js';
 
 type PickDefined<T> = {
   [K in keyof T as undefined extends T[K] ? K : never]?: Exclude<T[K], undefined>;
@@ -54,7 +54,35 @@ export function collectGroundedSourceDetails(
 }
 
 export function promptBlockedError(toolName: string, blockReason?: string): CallToolResult {
-  return errorResult(`${toolName}: prompt blocked by safety filter (${blockReason ?? 'unknown'})`);
+  return promptBlockedResult(toolName, blockReason);
+}
+
+export interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
+  functionCalls?: TFunctionCall[];
+  thoughts?: string;
+  toolEvents?: TToolEvent[];
+  usage?: UsageMetadata;
+}
+
+export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
+  functionCalls,
+  includeThoughts = false,
+  thoughtText,
+  toolEvents,
+  usage,
+}: {
+  functionCalls?: readonly TFunctionCall[];
+  includeThoughts?: boolean;
+  thoughtText?: string;
+  toolEvents?: readonly TToolEvent[];
+  usage?: UsageMetadata | undefined;
+}): SharedStructuredMetadata<TFunctionCall, TToolEvent> {
+  return pickDefined({
+    functionCalls: functionCalls && functionCalls.length > 0 ? [...functionCalls] : undefined,
+    thoughts: includeThoughts && thoughtText ? thoughtText : undefined,
+    toolEvents: toolEvents && toolEvents.length > 0 ? [...toolEvents] : undefined,
+    usage,
+  });
 }
 
 function appendBulletListSection(

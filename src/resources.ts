@@ -2,6 +2,7 @@ import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server
 import { ResourceTemplate } from '@modelcontextprotocol/server';
 
 import { formatError } from './lib/errors.js';
+import { assembleWorkspaceContext, workspaceCacheManager } from './lib/workspace-context.js';
 
 import { listDiscoveryEntries, listWorkflowEntries } from './catalog.js';
 import { completeCacheNames, getCacheSummary, listCacheSummaries } from './client.js';
@@ -22,6 +23,8 @@ export const PUBLIC_RESOURCE_URIS = [
   'caches://{cacheName}',
   'tools://list',
   'workflows://list',
+  'workspace://context',
+  'workspace://cache',
 ] as const;
 
 interface ResourceListEntry {
@@ -60,6 +63,16 @@ const TOOLS_LIST_RESOURCE: ResourceListEntry = {
 const WORKFLOWS_LIST_RESOURCE: ResourceListEntry = {
   uri: 'workflows://list',
   name: 'Guided workflows for common gemini-assistant jobs',
+};
+
+const WORKSPACE_CONTEXT_RESOURCE: ResourceListEntry = {
+  uri: 'workspace://context',
+  name: 'Assembled workspace context for Gemini',
+};
+
+const WORKSPACE_CACHE_RESOURCE: ResourceListEntry = {
+  uri: 'workspace://cache',
+  name: 'Workspace cache lifecycle status',
 };
 
 function jsonResource(uri: string, data: unknown): ReadResourceResult {
@@ -332,8 +345,47 @@ function registerDiscoveryResources(server: McpServer): void {
   );
 }
 
+function registerWorkspaceResources(server: McpServer): void {
+  server.registerResource(
+    'workspace-context',
+    new ResourceTemplate('workspace://context', singleResource(WORKSPACE_CONTEXT_RESOURCE)),
+    {
+      title: 'Workspace Context',
+      description: 'Assembled project context from workspace files for Gemini.',
+      mimeType: 'text/markdown',
+      annotations: {
+        audience: ['assistant'],
+        priority: 1.0,
+      },
+    },
+    asyncJsonResource(
+      async () => {
+        const ctx = await assembleWorkspaceContext([process.cwd()]);
+        return { content: ctx.content, sources: ctx.sources, estimatedTokens: ctx.estimatedTokens };
+      },
+      (err) => ({ error: `Failed to assemble workspace context: ${formatError(err)}` }),
+    ),
+  );
+
+  server.registerResource(
+    'workspace-cache',
+    new ResourceTemplate('workspace://cache', singleResource(WORKSPACE_CACHE_RESOURCE)),
+    {
+      title: 'Workspace Cache Status',
+      description: 'Current status of the Gemini workspace context cache.',
+      mimeType: 'application/json',
+      annotations: {
+        audience: ['assistant'],
+        priority: 0.5,
+      },
+    },
+    (uri): ReadResourceResult => jsonResource(uri.href, workspaceCacheManager.getCacheStatus()),
+  );
+}
+
 export function registerResources(server: McpServer): void {
   registerSessionResources(server);
   registerCacheResources(server);
   registerDiscoveryResources(server);
+  registerWorkspaceResources(server);
 }

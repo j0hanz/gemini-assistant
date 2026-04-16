@@ -513,6 +513,26 @@ const DISCOVERY_ENTRIES = [
       { kind: 'prompt', name: 'getting-started' },
     ],
   },
+  {
+    name: 'workspace://context',
+    kind: 'resource',
+    title: 'Workspace Context',
+    bestFor: 'Viewing assembled workspace context for Gemini API calls.',
+    whenToUse: 'Read to inspect which project files and context are being sent to Gemini.',
+    inputs: [],
+    returns: 'Markdown content, sources list, estimated token count.',
+    related: [{ kind: 'resource', name: 'workspace://cache' }],
+  },
+  {
+    name: 'workspace://cache',
+    kind: 'resource',
+    title: 'Workspace Cache Status',
+    bestFor: 'Checking the status of the workspace context cache.',
+    whenToUse: 'Read to check if a Gemini context cache is active, its TTL, and content hash.',
+    inputs: [],
+    returns: 'Cache status: enabled, cacheName, contentHash, estimatedTokens, sources, ttl.',
+    related: [{ kind: 'resource', name: 'workspace://context' }],
+  },
 ] as const satisfies readonly DiscoveryEntry[];
 
 const WORKFLOWS = [

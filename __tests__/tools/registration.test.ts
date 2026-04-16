@@ -145,6 +145,8 @@ describe('tool registration', () => {
         'caches://{cacheName}',
         'tools://list',
         'workflows://list',
+        'workspace://context',
+        'workspace://cache',
       ],
     );
   });

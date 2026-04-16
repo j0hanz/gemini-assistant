@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { formatError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
+import { onWorkspaceCacheChange } from './lib/workspace-context.js';
 
 import { getTransportMode } from './config.js';
 import { registerPrompts } from './prompts.js';
@@ -135,6 +136,9 @@ onSessionChange(({ detailUris, eventUris, transcriptUris }: SessionChangeEvent) 
 });
 onCacheChange(({ detailUris }: CacheChangeEvent) => {
   sendResourceChanged('caches://list', detailUris);
+});
+onWorkspaceCacheChange(() => {
+  sendResourceChanged('workspace://cache');
 });
 
 const transportMode = getTransportMode();

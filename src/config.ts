@@ -54,3 +54,23 @@ export function getSessionLimits(): { ttlMs: number; maxSessions: number } {
     maxSessions: parseIntEnv('MAX_SESSIONS', DEFAULT_MAX_SESSIONS),
   };
 }
+
+// ── Workspace Cache ───────────────────────────────────────────────────
+
+const DEFAULT_WORKSPACE_CACHE_TTL = '3600s';
+
+export function getWorkspaceCacheEnabled(): boolean {
+  return process.env.WORKSPACE_CACHE_ENABLED === 'true';
+}
+
+export function getWorkspaceContextFile(): string | undefined {
+  return process.env.WORKSPACE_CONTEXT_FILE;
+}
+
+export function getWorkspaceCacheTtl(): string {
+  return process.env.WORKSPACE_CACHE_TTL ?? DEFAULT_WORKSPACE_CACHE_TTL;
+}
+
+export function getWorkspaceAutoScan(): boolean {
+  return process.env.WORKSPACE_AUTO_SCAN !== 'false';
+}

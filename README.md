@@ -70,6 +70,8 @@ Public resources:
 - `sessions://{sessionId}/events`
 - `caches://list`
 - `caches://{cacheName}`
+- `workspace://context`
+- `workspace://cache`
 
 `tools://list` returns a concise JSON catalog of tools, prompts, and resources. `workflows://list` returns opinionated starter workflows, with `getting-started` first.
 

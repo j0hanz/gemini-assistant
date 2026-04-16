@@ -366,8 +366,9 @@ function registerWorkspaceResources(server: McpServer): void {
         try {
           roots = await fetchRoots();
         } catch {
-          roots = [process.cwd()];
+          roots = [];
         }
+        if (roots.length === 0) roots = [process.cwd()];
         const ctx = await assembleWorkspaceContext(roots);
         return { content: ctx.content, sources: ctx.sources, estimatedTokens: ctx.estimatedTokens };
       },

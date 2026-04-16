@@ -233,7 +233,7 @@ npm run type-check
 npm run test
 ```
 
-`npm run test` includes an in-process MCP integration suite that connects a linked in-memory transport to the real server registry. Use that as the default end-to-end validation path instead of the legacy HTTP inspector script.
+`npm run test` includes an in-process MCP integration suite that connects a linked in-memory transport to the real server registry.
 
 Optional:
 

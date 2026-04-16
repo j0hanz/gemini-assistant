@@ -1,4 +1,10 @@
-import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
+import type {
+  CallToolResult,
+  McpServer,
+  ServerContext,
+  TaskMessageQueue,
+} from '@modelcontextprotocol/server';
+import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { createPartFromUri } from '@google/genai';
 import type { Part } from '@google/genai';
@@ -192,7 +198,10 @@ function createDiagramWork(rootsFetcher: RootsFetcher) {
   };
 }
 
-export function registerGenerateDiagramTool(server: McpServer): void {
+export function registerGenerateDiagramTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+): void {
   registerTaskTool(
     server,
     'generate_diagram',
@@ -207,6 +216,7 @@ export function registerGenerateDiagramTool(server: McpServer): void {
       outputSchema: GenerateDiagramOutputSchema,
       annotations: READONLY_ANNOTATIONS,
     },
+    taskMessageQueue,
     createDiagramWork(buildServerRootsFetcher(server)),
   );
 }

@@ -1,4 +1,10 @@
-import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
+import type {
+  CallToolResult,
+  McpServer,
+  ServerContext,
+  TaskMessageQueue,
+} from '@modelcontextprotocol/server';
+import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { createPartFromUri, Outcome } from '@google/genai';
 import type { Part } from '@google/genai';
@@ -232,7 +238,10 @@ async function executeCodeWork(
   );
 }
 
-export function registerAnalyzeFileTool(server: McpServer): void {
+export function registerAnalyzeFileTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+): void {
   registerTaskTool(
     server,
     'analyze_file',
@@ -245,11 +254,15 @@ export function registerAnalyzeFileTool(server: McpServer): void {
       outputSchema: AnalyzeFileOutputSchema,
       annotations: READONLY_ANNOTATIONS,
     },
+    taskMessageQueue,
     createAnalyzeFileWork(buildServerRootsFetcher(server)),
   );
 }
 
-export function registerExecuteCodeTool(server: McpServer): void {
+export function registerExecuteCodeTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+): void {
   registerTaskTool(
     server,
     'execute_code',
@@ -262,6 +275,7 @@ export function registerExecuteCodeTool(server: McpServer): void {
       outputSchema: ExecuteCodeOutputSchema,
       annotations: { ...MUTABLE_ANNOTATIONS, openWorldHint: false },
     },
+    taskMessageQueue,
     executeCodeWork,
   );
 }

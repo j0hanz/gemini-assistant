@@ -81,6 +81,17 @@ function jsonResource(uri: string, data: unknown): ReadResourceResult {
   };
 }
 
+function textResource(uri: string, text: string): ReadResourceResult {
+  return {
+    contents: [
+      {
+        uri,
+        text,
+      },
+    ],
+  };
+}
+
 function resourceList(resources: ResourceListEntry[]) {
   return {
     list: () => ({ resources }),
@@ -110,6 +121,40 @@ function asyncJsonResource(
 
 function toResourceUri(uri: URL | string): string {
   return typeof uri === 'string' ? uri : uri.href;
+}
+
+interface WorkspaceContextResourceData {
+  content: string;
+  estimatedTokens: number;
+  sources: string[];
+}
+
+export function renderWorkspaceContextMarkdown({
+  content,
+  estimatedTokens,
+  sources,
+}: WorkspaceContextResourceData): string {
+  const sections = [
+    '# Workspace Context',
+    '',
+    `Estimated tokens: ${estimatedTokens}`,
+    '',
+    '## Sources',
+    ...(sources.length > 0 ? sources.map((source) => `- ${source}`) : ['- None']),
+    '',
+    '## Content',
+    '',
+    content || '_No workspace context assembled._',
+  ];
+
+  return sections.join('\n');
+}
+
+export function readWorkspaceContextResource(
+  uri: URL | string,
+  data: WorkspaceContextResourceData,
+): ReadResourceResult {
+  return textResource(toResourceUri(uri), renderWorkspaceContextMarkdown(data));
 }
 
 function sessionDetailResources(sessionStore: SessionStore): ResourceListEntry[] {
@@ -359,8 +404,8 @@ function registerWorkspaceResources(server: McpServer): void {
         priority: 1.0,
       },
     },
-    asyncJsonResource(
-      async () => {
+    async (uri): Promise<ReadResourceResult> => {
+      try {
         const fetchRoots = buildServerRootsFetcher(server);
         let roots: string[];
         try {
@@ -370,10 +415,15 @@ function registerWorkspaceResources(server: McpServer): void {
         }
         if (roots.length === 0) roots = [process.cwd()];
         const ctx = await assembleWorkspaceContext(roots);
-        return { content: ctx.content, sources: ctx.sources, estimatedTokens: ctx.estimatedTokens };
-      },
-      (err) => ({ error: `Failed to assemble workspace context: ${formatError(err)}` }),
-    ),
+        return readWorkspaceContextResource(uri, {
+          content: ctx.content,
+          sources: ctx.sources,
+          estimatedTokens: ctx.estimatedTokens,
+        });
+      } catch (err) {
+        return textResource(uri.href, `# Workspace Context Error\n\n${formatError(err)}`);
+      }
+    },
   );
 
   server.registerResource(

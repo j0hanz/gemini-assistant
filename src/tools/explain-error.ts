@@ -1,4 +1,10 @@
-import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
+import type {
+  CallToolResult,
+  McpServer,
+  ServerContext,
+  TaskMessageQueue,
+} from '@modelcontextprotocol/server';
+import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { sendProgress } from '../lib/errors.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
@@ -104,7 +110,10 @@ async function explainErrorWork(
   );
 }
 
-export function registerExplainErrorTool(server: McpServer): void {
+export function registerExplainErrorTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+): void {
   registerTaskTool(
     server,
     'explain_error',
@@ -118,6 +127,7 @@ export function registerExplainErrorTool(server: McpServer): void {
       outputSchema: ExplainErrorOutputSchema,
       annotations: READONLY_ANNOTATIONS,
     },
+    taskMessageQueue,
     explainErrorWork,
   );
 }

@@ -1,11 +1,14 @@
-import { InMemoryTaskStore, McpServer } from '@modelcontextprotocol/server';
+import {
+  InMemoryTaskMessageQueue,
+  InMemoryTaskStore,
+  McpServer,
+} from '@modelcontextprotocol/server';
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
-import { globalTaskMessageQueue } from './lib/task-utils.js';
 import { onWorkspaceCacheChange } from './lib/workspace-context.js';
 
 import { registerPrompts } from './prompts.js';
@@ -33,43 +36,44 @@ const { version } = JSON.parse(
 const activeServers = new Set<McpServer>();
 interface ServerServices {
   sessionStore: SessionStore;
+  taskMessageQueue: InMemoryTaskMessageQueue;
 }
 
 type ServerRegistrar = (server: McpServer, services: ServerServices) => void;
 
 export const SERVER_TOOL_REGISTRARS = [
   (server, services) => {
-    registerAskTool(server, services.sessionStore);
+    registerAskTool(server, services.sessionStore, services.taskMessageQueue);
   },
-  (server) => {
-    registerExecuteCodeTool(server);
+  (server, services) => {
+    registerExecuteCodeTool(server, services.taskMessageQueue);
   },
-  (server) => {
-    registerSearchTool(server);
+  (server, services) => {
+    registerSearchTool(server, services.taskMessageQueue);
   },
-  (server) => {
-    registerAgenticSearchTool(server);
+  (server, services) => {
+    registerAgenticSearchTool(server, services.taskMessageQueue);
   },
-  (server) => {
-    registerAnalyzeFileTool(server);
+  (server, services) => {
+    registerAnalyzeFileTool(server, services.taskMessageQueue);
   },
-  (server) => {
-    registerAnalyzeUrlTool(server);
+  (server, services) => {
+    registerAnalyzeUrlTool(server, services.taskMessageQueue);
   },
-  (server) => {
-    registerAnalyzePrTool(server);
+  (server, services) => {
+    registerAnalyzePrTool(server, services.taskMessageQueue);
   },
-  (server) => {
-    registerExplainErrorTool(server);
+  (server, services) => {
+    registerExplainErrorTool(server, services.taskMessageQueue);
   },
-  (server) => {
-    registerCompareFilesTool(server);
+  (server, services) => {
+    registerCompareFilesTool(server, services.taskMessageQueue);
   },
-  (server) => {
-    registerGenerateDiagramTool(server);
+  (server, services) => {
+    registerGenerateDiagramTool(server, services.taskMessageQueue);
   },
-  (server) => {
-    registerCacheTools(server);
+  (server, services) => {
+    registerCacheTools(server, services.taskMessageQueue);
   },
 ] as const satisfies readonly ServerRegistrar[];
 
@@ -119,6 +123,7 @@ onWorkspaceCacheChange(() => {
 export function createServerInstance(): ServerInstance {
   const sessionStore = createSessionStore();
   const taskStore = new InMemoryTaskStore();
+  const taskMessageQueue = new InMemoryTaskMessageQueue();
   const server = new McpServer(
     {
       name: 'gemini-assistant',
@@ -134,7 +139,7 @@ export function createServerInstance(): ServerInstance {
         tasks: {
           requests: { tools: { call: {} } },
           taskStore,
-          taskMessageQueue: globalTaskMessageQueue,
+          taskMessageQueue,
         },
       },
       instructions: SERVER_INSTRUCTIONS,
@@ -154,7 +159,7 @@ export function createServerInstance(): ServerInstance {
   activeServers.add(server);
 
   for (const register of SERVER_TOOL_REGISTRARS) {
-    register(server, { sessionStore });
+    register(server, { sessionStore, taskMessageQueue });
   }
 
   logger.attachServer(server);

@@ -1,4 +1,10 @@
-import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
+import type {
+  CallToolResult,
+  McpServer,
+  ServerContext,
+  TaskMessageQueue,
+} from '@modelcontextprotocol/server';
+import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { sendProgress } from '../lib/errors.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
@@ -12,12 +18,7 @@ import {
   pickDefined,
 } from '../lib/response.js';
 import { handleToolExecution, type StreamResult } from '../lib/streaming.js';
-import {
-  elicitTaskInput,
-  ExtendedServerContext,
-  READONLY_ANNOTATIONS,
-  registerTaskTool,
-} from '../lib/task-utils.js';
+import { elicitTaskInput, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { validateUrls } from '../lib/validation.js';
 import {
   type AgenticSearchInput,
@@ -268,7 +269,7 @@ async function agenticSearchWork(
   if (searchDepth && searchDepth > 3) {
     try {
       const constraint = await elicitTaskInput(
-        ctx as ExtendedServerContext,
+        ctx,
         `High depth research requested (${searchDepth}). What specific aspect should the agent focus on? (Or reply 'none' to proceed)`,
         'Waiting for constraints for deep research',
       );
@@ -312,7 +313,10 @@ async function agenticSearchWork(
   );
 }
 
-export function registerSearchTool(server: McpServer): void {
+export function registerSearchTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+): void {
   registerTaskTool(
     server,
     'search',
@@ -325,11 +329,15 @@ export function registerSearchTool(server: McpServer): void {
       outputSchema: SearchOutputSchema,
       annotations: READONLY_ANNOTATIONS,
     },
+    taskMessageQueue,
     searchWork,
   );
 }
 
-export function registerAnalyzeUrlTool(server: McpServer): void {
+export function registerAnalyzeUrlTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+): void {
   registerTaskTool(
     server,
     'analyze_url',
@@ -342,11 +350,15 @@ export function registerAnalyzeUrlTool(server: McpServer): void {
       outputSchema: AnalyzeUrlOutputSchema,
       annotations: READONLY_ANNOTATIONS,
     },
+    taskMessageQueue,
     analyzeUrlWork,
   );
 }
 
-export function registerAgenticSearchTool(server: McpServer): void {
+export function registerAgenticSearchTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+): void {
   registerTaskTool(
     server,
     'agentic_search',
@@ -360,6 +372,7 @@ export function registerAgenticSearchTool(server: McpServer): void {
       outputSchema: AgenticSearchOutputSchema,
       annotations: READONLY_ANNOTATIONS,
     },
+    taskMessageQueue,
     agenticSearchWork,
   );
 }

@@ -9,6 +9,8 @@ import {
   readSessionTranscriptResource,
   readToolsListResource,
   readWorkflowsListResource,
+  readWorkspaceContextResource,
+  renderWorkspaceContextMarkdown,
 } from '../src/resources.js';
 import { createSessionStore, type SessionStore } from '../src/sessions.js';
 
@@ -36,6 +38,38 @@ describe('discovery resources', () => {
 
     assert.deepStrictEqual(data, listWorkflowEntries());
     assert.strictEqual(data[0]?.name, 'getting-started');
+  });
+});
+
+describe('workspace context resource', () => {
+  it('renders markdown with token count, sources, and content', () => {
+    const markdown = renderWorkspaceContextMarkdown({
+      content: '## Project\n\nSome assembled context.',
+      estimatedTokens: 123,
+      sources: ['C:/repo/README.md', 'C:/repo/src/index.ts'],
+    });
+
+    assert.match(markdown, /^# Workspace Context/m);
+    assert.match(markdown, /Estimated tokens: 123/);
+    assert.match(markdown, /## Sources/);
+    assert.match(markdown, /- C:\/repo\/README\.md/);
+    assert.match(markdown, /- C:\/repo\/src\/index\.ts/);
+    assert.match(markdown, /## Content/);
+    assert.match(markdown, /Some assembled context\./);
+  });
+
+  it('returns workspace context as markdown text content', () => {
+    const result = readWorkspaceContextResource('workspace://context', {
+      content: 'Workspace body',
+      estimatedTokens: 42,
+      sources: [],
+    });
+
+    assert.strictEqual(result.contents[0]?.uri, 'workspace://context');
+    assert.match(result.contents[0]?.text ?? '', /^# Workspace Context/m);
+    assert.throws(() => {
+      JSON.parse(result.contents[0]?.text ?? '');
+    });
   });
 });
 

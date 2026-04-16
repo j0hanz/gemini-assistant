@@ -3,12 +3,11 @@ import type {
   CreateTaskResult,
   GetTaskResult,
   McpServer,
-  QueuedMessage,
   RequestTaskStore,
   ServerContext,
   Task,
+  TaskMessageQueue,
 } from '@modelcontextprotocol/server';
-import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { withErrorLogging } from './errors.js';
 
@@ -28,12 +27,10 @@ export const MUTABLE_ANNOTATIONS = {
   openWorldHint: true,
 } as const;
 
-export const globalTaskMessageQueue = new InMemoryTaskMessageQueue();
-
 const TASK_EXECUTION = { taskSupport: 'optional' } as const;
 
 type TaskContext = NonNullable<ServerContext['task']>;
-export type ExtendedTaskContext = TaskContext & { queue: InMemoryTaskMessageQueue };
+export type ExtendedTaskContext = TaskContext & { queue: TaskMessageQueue };
 export type ExtendedServerContext = ServerContext & { task?: ExtendedTaskContext };
 
 export type TaskWork<TArgs> = (args: TArgs, ctx: ExtendedServerContext) => Promise<CallToolResult>;
@@ -49,7 +46,7 @@ type TaskToolConfig = Omit<Parameters<RegisterToolTask>[1], 'execution'>;
 type TaskToolHandler = Parameters<RegisterToolTask>[2];
 
 export async function elicitTaskInput(
-  ctx: ExtendedServerContext,
+  ctx: ServerContext,
   prompt: string,
   statusMessage = 'Waiting for user input',
 ): Promise<string | undefined> {
@@ -58,29 +55,38 @@ export async function elicitTaskInput(
 
   await taskContext.store.updateTaskStatus(taskContext.id, 'input_required', statusMessage);
 
-  // Enqueue an elicitation request to the side-channel message queue
-  const messageId = `elicit_${Date.now()}`;
-  void taskContext.queue.enqueue(taskContext.id, {
-    method: 'elicitation/create',
-    params: { prompt },
-    id: messageId,
-  } as unknown as QueuedMessage);
+  try {
+    const result = await ctx.mcpReq.elicitInput({
+      mode: 'form',
+      message: prompt,
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          text: {
+            type: 'string',
+            title: 'Response',
+          },
+        },
+        required: ['text'],
+      },
+    });
 
-  while (!ctx.mcpReq.signal.aborted) {
-    const msgs = await taskContext.queue.dequeueAll(taskContext.id);
-    for (const msg of msgs) {
-      if ('id' in msg && msg.id === messageId && 'result' in msg) {
-        await taskContext.store.updateTaskStatus(taskContext.id, 'working');
-        const resultPayload = (msg as unknown as { result?: { text?: string } | string }).result;
-        return typeof resultPayload === 'string'
-          ? resultPayload
-          : (resultPayload?.text ?? JSON.stringify(resultPayload));
-      }
+    await taskContext.store.updateTaskStatus(taskContext.id, 'working');
+
+    if (result.action !== 'accept') {
+      return undefined;
     }
-    // Briefly sleep to avoid hot-looping
-    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const text = typeof result.content?.text === 'string' ? result.content.text.trim() : '';
+    return text ? text : undefined;
+  } catch (error) {
+    try {
+      await taskContext.store.updateTaskStatus(taskContext.id, 'working');
+    } catch {
+      // Ignore if the task is already terminal or the transport is gone.
+    }
+    throw error;
   }
-  throw new Error('Task aborted during elicitation');
 }
 
 export function requireTaskContext(
@@ -164,7 +170,10 @@ export function taskTtl(requestedTtl: number | undefined): number {
   return requestedTtl ?? DEFAULT_TTL;
 }
 
-export function createToolTaskHandlers<TArgs>(work: TaskWork<TArgs>): ToolTaskHandlers<TArgs> {
+export function createToolTaskHandlers<TArgs>(
+  work: TaskWork<TArgs>,
+  taskMessageQueue: TaskMessageQueue,
+): ToolTaskHandlers<TArgs> {
   return {
     createTask: async (args, ctx) => {
       const taskContext = ctx.task;
@@ -175,7 +184,7 @@ export function createToolTaskHandlers<TArgs>(work: TaskWork<TArgs>): ToolTaskHa
         task: {
           ...taskContext,
           id: task.taskId,
-          queue: globalTaskMessageQueue,
+          queue: taskMessageQueue,
         },
       };
       runToolAsTask(taskContext.store, task, work(args, taskExecutionContext), (taskId, err) => {
@@ -201,6 +210,7 @@ export function registerTaskTool<TArgs>(
   server: McpServer,
   name: string,
   config: TaskToolConfig,
+  taskMessageQueue: TaskMessageQueue,
   work: TaskWork<TArgs>,
 ): void {
   const toolLabel = config.title ?? name;
@@ -210,6 +220,7 @@ export function registerTaskTool<TArgs>(
       toolLabel,
       work as unknown as (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
     ),
+    taskMessageQueue,
   ) as TaskToolHandler;
 
   server.experimental.tasks.registerToolTask(

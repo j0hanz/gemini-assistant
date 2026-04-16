@@ -4,11 +4,17 @@ import type {
   ServerContext,
   Task,
 } from '@modelcontextprotocol/server';
+import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createToolTaskHandlers, runToolAsTask, taskTtl } from '../../src/lib/task-utils.js';
+import {
+  createToolTaskHandlers,
+  elicitTaskInput,
+  runToolAsTask,
+  taskTtl,
+} from '../../src/lib/task-utils.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -41,6 +47,7 @@ function makeMockStore(overrides?: {
 }
 
 function makeMockContext(opts?: {
+  elicitInput?: ServerContext['mcpReq']['elicitInput'];
   taskStore?: RequestTaskStore;
   requestedTtl?: number;
   taskId?: string;
@@ -56,6 +63,12 @@ function makeMockContext(opts?: {
         warning: async () => {},
         error: async () => {},
       }),
+      elicitInput:
+        opts?.elicitInput ??
+        (async () => ({
+          action: 'accept',
+          content: { text: 'answer' },
+        })),
       notify: async () => {},
     },
     ...(opts?.taskStore
@@ -197,6 +210,7 @@ describe('createToolTaskHandlers', () => {
   it('createTask creates a task and schedules work', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store });
+    const queue = new InMemoryTaskMessageQueue();
     let observedTaskId: string | undefined;
 
     const work = async (args: { msg: string }, workCtx: ServerContext) => {
@@ -206,7 +220,7 @@ describe('createToolTaskHandlers', () => {
       };
     };
 
-    const handlers = createToolTaskHandlers(work);
+    const handlers = createToolTaskHandlers(work, queue);
     const result = await handlers.createTask({ msg: 'hello' }, ctx);
 
     assert.ok(result.task);
@@ -230,10 +244,14 @@ describe('createToolTaskHandlers', () => {
       },
     });
     const ctx = makeMockContext({ taskStore: store, requestedTtl: 120_000 });
+    const queue = new InMemoryTaskMessageQueue();
 
-    const handlers = createToolTaskHandlers(async () => ({
-      content: [{ type: 'text' as const, text: 'ok' }],
-    }));
+    const handlers = createToolTaskHandlers(
+      async () => ({
+        content: [{ type: 'text' as const, text: 'ok' }],
+      }),
+      queue,
+    );
 
     await handlers.createTask({}, ctx);
     assert.strictEqual(capturedTtl, 120_000);
@@ -241,10 +259,14 @@ describe('createToolTaskHandlers', () => {
 
   it('throws when task context is missing', async () => {
     const ctx = makeMockContext(); // no taskStore
+    const queue = new InMemoryTaskMessageQueue();
 
-    const handlers = createToolTaskHandlers(async () => ({
-      content: [{ type: 'text' as const, text: 'ok' }],
-    }));
+    const handlers = createToolTaskHandlers(
+      async () => ({
+        content: [{ type: 'text' as const, text: 'ok' }],
+      }),
+      queue,
+    );
 
     await assert.rejects(() => handlers.createTask({}, ctx), {
       message: /Task context is unavailable/,
@@ -254,10 +276,14 @@ describe('createToolTaskHandlers', () => {
   it('getTask retrieves task from store', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store, taskId: 'task-42' });
+    const queue = new InMemoryTaskMessageQueue();
 
-    const handlers = createToolTaskHandlers(async () => ({
-      content: [{ type: 'text' as const, text: 'ok' }],
-    }));
+    const handlers = createToolTaskHandlers(
+      async () => ({
+        content: [{ type: 'text' as const, text: 'ok' }],
+      }),
+      queue,
+    );
 
     const result = await handlers.getTask({}, ctx);
     assert.equal('task' in result, false);
@@ -267,10 +293,14 @@ describe('createToolTaskHandlers', () => {
   it('getTask throws when task ID is missing', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store }); // no taskId
+    const queue = new InMemoryTaskMessageQueue();
 
-    const handlers = createToolTaskHandlers(async () => ({
-      content: [{ type: 'text' as const, text: 'ok' }],
-    }));
+    const handlers = createToolTaskHandlers(
+      async () => ({
+        content: [{ type: 'text' as const, text: 'ok' }],
+      }),
+      queue,
+    );
 
     await assert.rejects(() => handlers.getTask({}, ctx), {
       message: /Task ID is unavailable/,
@@ -280,12 +310,101 @@ describe('createToolTaskHandlers', () => {
   it('getTaskResult retrieves result from store', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store, taskId: 'task-42' });
+    const queue = new InMemoryTaskMessageQueue();
 
-    const handlers = createToolTaskHandlers(async () => ({
-      content: [{ type: 'text' as const, text: 'ok' }],
-    }));
+    const handlers = createToolTaskHandlers(
+      async () => ({
+        content: [{ type: 'text' as const, text: 'ok' }],
+      }),
+      queue,
+    );
 
     const result = await handlers.getTaskResult({}, ctx);
     assert.deepStrictEqual(result.content, [{ type: 'text', text: 'ok' }]);
+  });
+});
+
+describe('elicitTaskInput', () => {
+  it('returns accepted text and restores working status', async () => {
+    const updates: { status: string; statusMessage?: string }[] = [];
+    const store = makeMockStore({
+      updateTaskStatus: async (_taskId, status, statusMessage) => {
+        updates.push({ status, ...(statusMessage ? { statusMessage } : {}) });
+      },
+    });
+
+    const result = await elicitTaskInput(
+      makeMockContext({
+        taskStore: store,
+        taskId: 'task-elicit',
+        elicitInput: async () => ({
+          action: 'accept',
+          content: { text: '  focus on pricing  ' },
+        }),
+      }),
+      'Question?',
+      'Waiting for input',
+    );
+
+    assert.strictEqual(result, 'focus on pricing');
+    assert.deepStrictEqual(updates, [
+      { status: 'input_required', statusMessage: 'Waiting for input' },
+      { status: 'working' },
+    ]);
+  });
+
+  it('returns undefined for declined elicitation and restores working status', async () => {
+    const updates: { status: string; statusMessage?: string }[] = [];
+    const store = makeMockStore({
+      updateTaskStatus: async (_taskId, status, statusMessage) => {
+        updates.push({ status, ...(statusMessage ? { statusMessage } : {}) });
+      },
+    });
+
+    const result = await elicitTaskInput(
+      makeMockContext({
+        taskStore: store,
+        taskId: 'task-elicit',
+        elicitInput: async () => ({
+          action: 'decline',
+        }),
+      }),
+      'Question?',
+    );
+
+    assert.strictEqual(result, undefined);
+    assert.deepStrictEqual(updates, [
+      { status: 'input_required', statusMessage: 'Waiting for user input' },
+      { status: 'working' },
+    ]);
+  });
+
+  it('surfaces elicitation errors after restoring working status', async () => {
+    const updates: { status: string; statusMessage?: string }[] = [];
+    const store = makeMockStore({
+      updateTaskStatus: async (_taskId, status, statusMessage) => {
+        updates.push({ status, ...(statusMessage ? { statusMessage } : {}) });
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        elicitTaskInput(
+          makeMockContext({
+            taskStore: store,
+            taskId: 'task-elicit',
+            elicitInput: async () => {
+              throw new Error('elicitation failed');
+            },
+          }),
+          'Question?',
+        ),
+      /elicitation failed/,
+    );
+
+    assert.deepStrictEqual(updates, [
+      { status: 'input_required', statusMessage: 'Waiting for user input' },
+      { status: 'working' },
+    ]);
   });
 });

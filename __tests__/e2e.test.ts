@@ -73,9 +73,9 @@ class JsonRpcTestClient {
     await this.transport.close();
   }
 
-  async initialize(): Promise<JsonRpcSuccess> {
+  async initialize(capabilities: Record<string, unknown> = { roots: {} }): Promise<JsonRpcSuccess> {
     const response = await this.request('initialize', {
-      capabilities: { roots: {} },
+      capabilities,
       clientInfo: { name: 'in-memory-e2e', version: '0.0.1' },
       protocolVersion: LATEST_PROTOCOL_VERSION,
     });
@@ -239,5 +239,25 @@ describe('in-memory MCP server e2e', () => {
     assert.equal(response.result.isError, true);
     const content = (response.result.content as { text?: string }[]) ?? [];
     assert.match(content[0]?.text ?? '', /query/i);
+  });
+
+  it('reads workspace://context as markdown through MCP', async () => {
+    const harness = await createHarness();
+    cleanupCallbacks.push(harness.close);
+
+    await harness.client.initialize({});
+    const response = await harness.client.request('resources/read', {
+      uri: 'workspace://context',
+    });
+
+    const text =
+      ((response.result.contents as { text?: string }[]) ?? []).find(
+        (entry) => typeof entry.text === 'string',
+      )?.text ?? '';
+
+    assert.match(text, /^# Workspace Context/m);
+    assert.match(text, /Estimated tokens:/);
+    assert.match(text, /## Sources/);
+    assert.match(text, /## Content/);
   });
 });

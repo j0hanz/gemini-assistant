@@ -1,4 +1,10 @@
-import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
+import type {
+  CallToolResult,
+  McpServer,
+  ServerContext,
+  TaskMessageQueue,
+} from '@modelcontextprotocol/server';
+import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { createPartFromUri } from '@google/genai';
 import { z } from 'zod/v4';
@@ -331,7 +337,11 @@ function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
   };
 }
 
-function registerCreateCacheTool(server: McpServer, rootsFetcher: RootsFetcher): void {
+function registerCreateCacheTool(
+  server: McpServer,
+  rootsFetcher: RootsFetcher,
+  taskMessageQueue: TaskMessageQueue,
+): void {
   registerTaskTool(
     server,
     'create_cache',
@@ -345,6 +355,7 @@ function registerCreateCacheTool(server: McpServer, rootsFetcher: RootsFetcher):
       outputSchema: CreateCacheOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
     },
+    taskMessageQueue,
     buildCreateCacheWork(rootsFetcher),
   );
 }
@@ -408,7 +419,7 @@ async function deleteCacheWork(
   };
 }
 
-function registerDeleteCacheTool(server: McpServer): void {
+function registerDeleteCacheTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
   registerTaskTool(
     server,
     'delete_cache',
@@ -422,6 +433,7 @@ function registerDeleteCacheTool(server: McpServer): void {
         destructiveHint: true,
       },
     },
+    taskMessageQueue,
     deleteCacheWork,
   );
 }
@@ -454,7 +466,7 @@ async function updateCacheWork(
   };
 }
 
-function registerUpdateCacheTool(server: McpServer): void {
+function registerUpdateCacheTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
   registerTaskTool(
     server,
     'update_cache',
@@ -465,14 +477,18 @@ function registerUpdateCacheTool(server: McpServer): void {
       outputSchema: UpdateCacheOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
     },
+    taskMessageQueue,
     updateCacheWork,
   );
 }
 
-export function registerCacheTools(server: McpServer): void {
+export function registerCacheTools(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+): void {
   const rootsFetcher = buildServerRootsFetcher(server);
-  registerCreateCacheTool(server, rootsFetcher);
+  registerCreateCacheTool(server, rootsFetcher, taskMessageQueue);
   registerListCachesTool(server);
-  registerDeleteCacheTool(server);
-  registerUpdateCacheTool(server);
+  registerDeleteCacheTool(server, taskMessageQueue);
+  registerUpdateCacheTool(server, taskMessageQueue);
 }

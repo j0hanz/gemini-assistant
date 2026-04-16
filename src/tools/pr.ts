@@ -1,4 +1,10 @@
-import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
+import type {
+  CallToolResult,
+  McpServer,
+  ServerContext,
+  TaskMessageQueue,
+} from '@modelcontextprotocol/server';
+import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { execFile } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
@@ -848,7 +854,10 @@ async function analyzePrWork(
   );
 }
 
-export function registerAnalyzePrTool(server: McpServer): void {
+export function registerAnalyzePrTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+): void {
   registerTaskTool(
     server,
     'analyze_pr',
@@ -862,6 +871,7 @@ export function registerAnalyzePrTool(server: McpServer): void {
       outputSchema: AnalyzePrOutputSchema,
       annotations: READONLY_ANNOTATIONS,
     },
+    taskMessageQueue,
     analyzePrWork,
   );
 }

@@ -1,4 +1,10 @@
-import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
+import type {
+  CallToolResult,
+  McpServer,
+  ServerContext,
+  TaskMessageQueue,
+} from '@modelcontextprotocol/server';
+import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { createPartFromUri } from '@google/genai';
 
@@ -89,7 +95,10 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
   };
 }
 
-export function registerCompareFilesTool(server: McpServer): void {
+export function registerCompareFilesTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+): void {
   registerTaskTool(
     server,
     'compare_files',
@@ -104,6 +113,7 @@ export function registerCompareFilesTool(server: McpServer): void {
       outputSchema: CompareFilesOutputSchema,
       annotations: READONLY_ANNOTATIONS,
     },
+    taskMessageQueue,
     createCompareFileWork(buildServerRootsFetcher(server)),
   );
 }

@@ -144,7 +144,7 @@ describe('extractTextOrError', () => {
 });
 
 describe('collectGroundedSources', () => {
-  it('collects titled and untitled grounded sources', () => {
+  it('collects grounded source URLs', () => {
     const sources = collectGroundedSources({
       groundingChunks: [
         { web: { title: 'Example', uri: 'https://example.com' } },
@@ -153,7 +153,7 @@ describe('collectGroundedSources', () => {
       ],
     } as never);
 
-    assert.deepStrictEqual(sources, ['Example: https://example.com', 'https://example.org']);
+    assert.deepStrictEqual(sources, ['https://example.com', 'https://example.org']);
   });
 
   it('returns an empty list when grounding metadata is missing', () => {

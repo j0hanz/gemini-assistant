@@ -96,11 +96,11 @@ describe('agentic_search result shaping', () => {
         ]),
       buildAgenticSearchResult,
     );
-    const structured = result.structuredContent as AgenticSearchStructuredContent;
+    const structured = result.structuredContent as unknown as AgenticSearchStructuredContent;
 
     assert.strictEqual(result.isError, undefined);
     assert.strictEqual(structured.report, 'Researching...# Report\n\nFinal answer');
-    assert.deepStrictEqual(structured.sources, ['Example: https://example.com']);
+    assert.deepStrictEqual(structured.sources, ['https://example.com']);
     assert.deepStrictEqual(structured.sourceDetails, [
       { title: 'Example', url: 'https://example.com' },
     ]);

@@ -33,9 +33,7 @@ export function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlM
 }
 
 export function collectGroundedSources(groundingMetadata: GroundingMetadata | undefined): string[] {
-  return collectGroundedSourceDetails(groundingMetadata).map((source) =>
-    source.title ? `${source.title}: ${source.url}` : source.url,
-  );
+  return collectGroundedSourceDetails(groundingMetadata).map((source) => source.url);
 }
 
 export function collectGroundedSourceDetails(

@@ -72,6 +72,14 @@ function buildSourceReportMessage(sourceCount: number): string {
   return sourceCount > 0 ? `${formatCountLabel(sourceCount, 'source')} found` : 'completed';
 }
 
+function formatSourceLabels(
+  sourceDetails: readonly { title?: string | undefined; url: string }[],
+): string[] {
+  return sourceDetails.map((source) =>
+    source.title ? `${source.title}: ${source.url}` : source.url,
+  );
+}
+
 function extractSampledText(content: unknown): string {
   if (Array.isArray(content)) {
     return content
@@ -134,7 +142,7 @@ export function buildAgenticSearchResult(streamResult: StreamResult, textContent
   const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
   const contentAdditions: CallToolResult['content'] = [];
 
-  appendSources(contentAdditions, sources);
+  appendSources(contentAdditions, formatSourceLabels(sourceDetails));
 
   return {
     resultMod: (result: CallToolResult) => ({
@@ -157,7 +165,7 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
   const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
   const contentAdditions: CallToolResult['content'] = [];
 
-  appendSources(contentAdditions, sources);
+  appendSources(contentAdditions, formatSourceLabels(sourceDetails));
   appendUrlStatus(contentAdditions, urlMetadata);
 
   return {

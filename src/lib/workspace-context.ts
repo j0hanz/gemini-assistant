@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
-import { getAI, MODEL } from '../client.js';
+import { DEFAULT_SYSTEM_INSTRUCTION, getAI, MODEL } from '../client.js';
 import {
   getWorkspaceAutoScan,
   getWorkspaceCacheEnabled,
@@ -239,8 +239,7 @@ class WorkspaceCacheManagerImpl {
             model: MODEL,
             config: {
               contents: [{ role: 'user' as const, parts: [{ text: ctx.content }] }],
-              systemInstruction:
-                'You have workspace context loaded. Use it to inform your responses about the project.',
+              systemInstruction: DEFAULT_SYSTEM_INSTRUCTION,
               displayName: WORKSPACE_CACHE_DISPLAY,
               ttl,
               ...(signal ? { abortSignal: signal } : {}),

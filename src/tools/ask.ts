@@ -15,6 +15,7 @@ import {
 } from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { validateUrls } from '../lib/validation.js';
+import { workspaceCacheManager } from '../lib/workspace-context.js';
 import { type AskInput, AskInputSchema } from '../schemas/inputs.js';
 import {
   type GeminiResponseSchema,
@@ -24,6 +25,7 @@ import { AskOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, EXPOSE_THOUGHTS } from '../client.js';
 import { getAI, MODEL } from '../client.js';
+import { getWorkspaceCacheEnabled } from '../config.js';
 import {
   appendSessionEvent,
   appendSessionTranscript,
@@ -447,6 +449,18 @@ function appendSessionTurn(
   });
 }
 
+async function resolveWorkspaceCacheName(
+  args: AskArgs,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  if (args.cacheName || args.systemInstruction || !getWorkspaceCacheEnabled()) return undefined;
+  try {
+    return await workspaceCacheManager.getOrCreateCache([process.cwd()], signal);
+  } catch {
+    return undefined;
+  }
+}
+
 function createDefaultAskDependencies(): AskDependencies {
   return {
     appendSessionEvent,
@@ -508,14 +522,23 @@ export function createAskWork(deps: AskDependencies = createDefaultAskDependenci
     const validationError = validateAskRequest(args, deps);
     if (validationError) return validationError;
 
-    if (!args.sessionId) {
-      return (await deps.runWithoutSession(args, ctx)).result;
+    const workspaceCacheName = args.sessionId
+      ? undefined
+      : await resolveWorkspaceCacheName(args, ctx.mcpReq.signal);
+    const effectiveArgs = workspaceCacheName ? { ...args, cacheName: workspaceCacheName } : args;
+
+    if (!effectiveArgs.sessionId) {
+      return (await deps.runWithoutSession(effectiveArgs, ctx)).result;
     }
 
-    const resumed = await askExistingSession(args as AskArgs & { sessionId: string }, ctx, deps);
+    const resumed = await askExistingSession(
+      effectiveArgs as AskArgs & { sessionId: string },
+      ctx,
+      deps,
+    );
     if (resumed) return resumed;
 
-    return await askNewSession(args as AskArgs & { sessionId: string }, ctx, deps);
+    return await askNewSession(effectiveArgs as AskArgs & { sessionId: string }, ctx, deps);
   };
 }
 

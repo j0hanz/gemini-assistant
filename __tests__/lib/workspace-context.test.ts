@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
+import { DEFAULT_SYSTEM_INSTRUCTION } from '../../src/client.js';
 import {
   assembleWorkspaceContext,
   estimateTokens,
@@ -27,6 +28,13 @@ describe('workspace-context', () => {
   describe('MIN_CACHE_TOKENS', () => {
     it('is 32000', () => {
       assert.strictEqual(MIN_CACHE_TOKENS, 32_000);
+    });
+  });
+
+  describe('DEFAULT_SYSTEM_INSTRUCTION', () => {
+    it('is exported and non-empty', () => {
+      assert.ok(DEFAULT_SYSTEM_INSTRUCTION.length > 0);
+      assert.ok(DEFAULT_SYSTEM_INSTRUCTION.includes('concise'));
     });
   });
 
@@ -78,6 +86,15 @@ describe('workspace-context', () => {
       assert.ok(result.content.includes('## Project Context'));
       assert.strictEqual(result.fileCount, 1);
       assert.ok(result.sources.includes('package.json'));
+    });
+
+    it('scans each root independently', async () => {
+      process.env.WORKSPACE_AUTO_SCAN = 'true';
+      delete process.env.WORKSPACE_CONTEXT_FILE;
+      const cwd = process.cwd();
+      const single = await assembleWorkspaceContext([cwd]);
+      const doubled = await assembleWorkspaceContext([cwd, cwd]);
+      assert.strictEqual(doubled.sources.length, single.sources.length * 2);
     });
   });
 });

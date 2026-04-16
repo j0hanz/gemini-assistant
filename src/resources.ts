@@ -2,6 +2,7 @@ import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server
 import { ResourceTemplate } from '@modelcontextprotocol/server';
 
 import { formatError } from './lib/errors.js';
+import { buildServerRootsFetcher } from './lib/validation.js';
 import { assembleWorkspaceContext, workspaceCacheManager } from './lib/workspace-context.js';
 
 import { listDiscoveryEntries, listWorkflowEntries } from './catalog.js';
@@ -360,7 +361,14 @@ function registerWorkspaceResources(server: McpServer): void {
     },
     asyncJsonResource(
       async () => {
-        const ctx = await assembleWorkspaceContext([process.cwd()]);
+        const fetchRoots = buildServerRootsFetcher(server);
+        let roots: string[];
+        try {
+          roots = await fetchRoots();
+        } catch {
+          roots = [process.cwd()];
+        }
+        const ctx = await assembleWorkspaceContext(roots);
         return { content: ctx.content, sources: ctx.sources, estimatedTokens: ctx.estimatedTokens };
       },
       (err) => ({ error: `Failed to assemble workspace context: ${formatError(err)}` }),

@@ -105,6 +105,10 @@ Useful optional variables:
 - `ALLOWED_FILE_ROOTS`: optional comma-separated absolute roots allowed for file tools
 - `SESSION_TTL_MS`: session idle TTL in milliseconds, default `1800000`
 - `MAX_SESSIONS`: max in-memory chat sessions before LRU eviction, default `50`
+- `WORKSPACE_CACHE_ENABLED`: enable automatic workspace context caching for `ask` calls when set to `true`, default `false`
+- `WORKSPACE_CONTEXT_FILE`: optional path to a custom context file to include in workspace context
+- `WORKSPACE_CACHE_TTL`: Gemini cache TTL for workspace context, default `3600s`
+- `WORKSPACE_AUTO_SCAN`: auto-scan workspace roots for known project files when set to `true` (default), set `false` to disable
 
 File path handling:
 

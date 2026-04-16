@@ -20,7 +20,8 @@ export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
 type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
 export const EXPOSE_THOUGHTS = getExposeThoughts();
 
-const DEFAULT_SYSTEM_INSTRUCTION = 'Be direct, accurate, and concise. Use Markdown when useful.';
+export const DEFAULT_SYSTEM_INSTRUCTION =
+  'Be direct, accurate, and concise. Use Markdown when useful.';
 
 interface ConfigBuilderOptions {
   systemInstruction?: string | undefined;

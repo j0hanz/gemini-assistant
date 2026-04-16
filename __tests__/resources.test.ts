@@ -10,13 +10,7 @@ import {
   readToolsListResource,
   readWorkflowsListResource,
 } from '../src/resources.js';
-import {
-  appendSessionEvent,
-  appendSessionTranscript,
-  listSessionEventEntries,
-  listSessionTranscriptEntries,
-  setSession,
-} from '../src/sessions.js';
+import { createSessionStore, type SessionStore } from '../src/sessions.js';
 
 function parseResourceText(result: { contents: { text: string }[] }) {
   return JSON.parse(result.contents[0]?.text ?? 'null') as unknown;
@@ -24,6 +18,10 @@ function parseResourceText(result: { contents: { text: string }[] }) {
 
 function mockChat(label = 'chat') {
   return { _label: label } as unknown as never;
+}
+
+function createStore(): SessionStore {
+  return createSessionStore();
 }
 
 describe('discovery resources', () => {
@@ -43,30 +41,33 @@ describe('discovery resources', () => {
 
 describe('session transcript resource', () => {
   it('reads transcript entries for an active session', () => {
-    setSession('sess-resource-transcript', mockChat('resource-transcript'));
-    appendSessionTranscript('sess-resource-transcript', {
+    const store = createStore();
+    store.setSession('sess-resource-transcript', mockChat('resource-transcript'));
+    store.appendSessionTranscript('sess-resource-transcript', {
       role: 'user',
       text: 'Hello',
       timestamp: 1,
     });
-    appendSessionTranscript('sess-resource-transcript', {
+    store.appendSessionTranscript('sess-resource-transcript', {
       role: 'assistant',
       text: 'Hi there',
       timestamp: 2,
     });
 
     const result = readSessionTranscriptResource(
+      store,
       'sessions://sess-resource-transcript/transcript',
       'sess-resource-transcript',
     );
     assert.deepStrictEqual(
       parseResourceText(result),
-      listSessionTranscriptEntries('sess-resource-transcript'),
+      store.listSessionTranscriptEntries('sess-resource-transcript'),
     );
   });
 
   it('returns a stable error payload for a missing session transcript', () => {
-    assert.deepStrictEqual(getSessionTranscriptResourceData('missing-session'), {
+    const store = createStore();
+    assert.deepStrictEqual(getSessionTranscriptResourceData(store, 'missing-session'), {
       error: 'Session not found',
     });
   });
@@ -74,8 +75,9 @@ describe('session transcript resource', () => {
 
 describe('session events resource', () => {
   it('reads event entries for an active session', () => {
-    setSession('sess-resource-events', mockChat('resource-events'));
-    appendSessionEvent('sess-resource-events', {
+    const store = createStore();
+    store.setSession('sess-resource-events', mockChat('resource-events'));
+    store.appendSessionEvent('sess-resource-events', {
       request: { message: 'Hello', toolProfile: 'search' },
       response: {
         text: 'Hi there',
@@ -89,17 +91,19 @@ describe('session events resource', () => {
     });
 
     const result = readSessionEventsResource(
+      store,
       'sessions://sess-resource-events/events',
       'sess-resource-events',
     );
     assert.deepStrictEqual(
       parseResourceText(result),
-      listSessionEventEntries('sess-resource-events'),
+      store.listSessionEventEntries('sess-resource-events'),
     );
   });
 
   it('returns a stable error payload for a missing session events resource', () => {
-    assert.deepStrictEqual(getSessionEventsResourceData('missing-session'), {
+    const store = createStore();
+    assert.deepStrictEqual(getSessionEventsResourceData(store, 'missing-session'), {
       error: 'Session not found',
     });
   });

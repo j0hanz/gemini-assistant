@@ -59,6 +59,7 @@ type ServerTransport = Parameters<McpServer['connect']>[0];
 interface ManagedPair<TTransport> {
   eventStore?: CleanupEventStore;
   instance: ServerInstance;
+  lastAccessAt: number;
   transport: TTransport;
   close: () => Promise<void>;
 }
@@ -72,6 +73,7 @@ type StatefulPairMap<TTransport> = Map<string, ManagedPair<TTransport>>;
 
 interface PairSelection<TTransport> {
   pair: ManagedPair<TTransport> | undefined;
+  releaseReservation?: () => void;
   shouldClosePair: boolean;
 }
 
@@ -80,11 +82,29 @@ interface ManagedRequestOptions<TTransport, TResult> {
   getSessionId: (transport: TTransport) => string | undefined;
   handlePair: (pair: ManagedPair<TTransport>) => Promise<TResult>;
   isStateless: boolean;
+  maxSessions: number;
   onError: (err: unknown) => TResult;
   onMissingPair: () => TResult;
   requestMethod: string;
+  sessionTtlMs: number;
   sessionId: string | undefined;
   statefulPairs: StatefulPairMap<TTransport>;
+  acquireStatefulCreationLock: () => Promise<() => void>;
+}
+
+function createAsyncLock(): () => Promise<() => void> {
+  let current = Promise.resolve();
+
+  return async (): Promise<() => void> => {
+    const previous = current;
+    let release!: () => void;
+    current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    await previous;
+    return release;
+  };
 }
 
 export interface HttpTransportResult {
@@ -113,6 +133,14 @@ function logListening(host: string, port: number, runtime?: string): void {
 
 function logSessionEvent(label: 'open' | 'closed', sessionId: string): void {
   console.error(`session ${label}: ${sessionId}`);
+}
+
+function logTransportSessionEviction(reason: 'capacity' | 'expired', sessionId: string): void {
+  console.error(`transport session ${reason}: ${sessionId}`);
+}
+
+function now(): number {
+  return Date.now();
 }
 
 function buildBaseTransportOptions(
@@ -173,11 +201,19 @@ async function createManagedPair<TTransport extends ServerTransport>(
   const instance = await createServer();
   const eventStore = isStateless ? undefined : createEventStore?.();
   const transport = new Transport(buildBaseTransportOptions(isStateless, eventStore));
-  await instance.server.connect(transport);
+
+  try {
+    await instance.server.connect(transport);
+  } catch (error) {
+    eventStore?.cleanup?.();
+    await instance.close();
+    throw error;
+  }
 
   let closed = false;
   return {
     instance,
+    lastAccessAt: now(),
     transport,
     ...(eventStore ? { eventStore } : {}),
     close: async () => {
@@ -210,21 +246,99 @@ function logRequestFailure(label: string, err: unknown): void {
   console.error(`${label}: ${detail}`);
 }
 
+function touchManagedPair<TTransport>(pair: ManagedPair<TTransport>): void {
+  pair.lastAccessAt = now();
+}
+
+async function evictStatefulPair<TTransport>(
+  statefulPairs: StatefulPairMap<TTransport>,
+  sessionId: string,
+  reason: 'capacity' | 'expired',
+): Promise<void> {
+  const pair = statefulPairs.get(sessionId);
+  if (!pair) return;
+
+  statefulPairs.delete(sessionId);
+  logTransportSessionEviction(reason, sessionId);
+  await pair.close();
+}
+
+async function evictExpiredStatefulPairs<TTransport>(
+  statefulPairs: StatefulPairMap<TTransport>,
+  sessionTtlMs: number,
+): Promise<void> {
+  const cutoff = now() - sessionTtlMs;
+  const expiredIds = [...statefulPairs.entries()]
+    .filter(([, pair]) => pair.lastAccessAt < cutoff)
+    .map(([sessionId]) => sessionId);
+
+  for (const sessionId of expiredIds) {
+    await evictStatefulPair(statefulPairs, sessionId, 'expired');
+  }
+}
+
+function oldestStatefulPairId<TTransport>(
+  statefulPairs: StatefulPairMap<TTransport>,
+): string | undefined {
+  let oldestId: string | undefined;
+  let oldestAccessAt = Number.POSITIVE_INFINITY;
+
+  for (const [sessionId, pair] of statefulPairs) {
+    if (pair.lastAccessAt < oldestAccessAt) {
+      oldestAccessAt = pair.lastAccessAt;
+      oldestId = sessionId;
+    }
+  }
+
+  return oldestId;
+}
+
+async function ensureStatefulPairCapacity<TTransport>(
+  statefulPairs: StatefulPairMap<TTransport>,
+  maxSessions: number,
+): Promise<void> {
+  while (statefulPairs.size >= maxSessions) {
+    const oldestId = oldestStatefulPairId(statefulPairs);
+    if (!oldestId) return;
+    await evictStatefulPair(statefulPairs, oldestId, 'capacity');
+  }
+}
+
 async function selectManagedPair<TTransport>(
   sessionId: string | undefined,
   statefulPairs: StatefulPairMap<TTransport>,
   isStateless: boolean,
+  maxSessions: number,
+  sessionTtlMs: number,
   createPair: (isStatelessTransport: boolean) => Promise<ManagedPair<TTransport>>,
+  acquireStatefulCreationLock: () => Promise<() => void>,
 ): Promise<PairSelection<TTransport>> {
   if (isStateless) {
     return { pair: await createPair(true), shouldClosePair: true };
   }
 
+  await evictExpiredStatefulPairs(statefulPairs, sessionTtlMs);
+
   if (sessionId) {
-    return { pair: statefulPairs.get(sessionId), shouldClosePair: false };
+    const pair = statefulPairs.get(sessionId);
+    if (pair) touchManagedPair(pair);
+    return { pair, shouldClosePair: false };
   }
 
-  return { pair: await createPair(false), shouldClosePair: true };
+  const releaseReservation = await acquireStatefulCreationLock();
+
+  try {
+    await evictExpiredStatefulPairs(statefulPairs, sessionTtlMs);
+    await ensureStatefulPairCapacity(statefulPairs, maxSessions);
+    return {
+      pair: await createPair(false),
+      releaseReservation,
+      shouldClosePair: true,
+    };
+  } catch (error) {
+    releaseReservation();
+    throw error;
+  }
 }
 
 function finalizeManagedPair<TTransport>(
@@ -236,6 +350,8 @@ function finalizeManagedPair<TTransport>(
   getSessionId: (transport: TTransport) => string | undefined,
   shouldClosePair: boolean,
 ): boolean {
+  touchManagedPair(pair);
+
   if (isStateless) {
     return true;
   }
@@ -268,21 +384,28 @@ async function handleManagedRequest<TTransport, TResult>({
   getSessionId,
   handlePair,
   isStateless,
+  maxSessions,
   onError,
   onMissingPair,
   requestMethod,
+  sessionTtlMs,
   sessionId,
   statefulPairs,
+  acquireStatefulCreationLock,
 }: ManagedRequestOptions<TTransport, TResult>): Promise<TResult> {
   let pair: ManagedPair<TTransport> | undefined;
+  let releaseReservation: (() => void) | undefined;
   let shouldClosePair = false;
 
   try {
-    ({ pair, shouldClosePair } = await selectManagedPair(
+    ({ pair, releaseReservation, shouldClosePair } = await selectManagedPair(
       sessionId,
       statefulPairs,
       isStateless,
+      maxSessions,
+      sessionTtlMs,
       createPair,
+      acquireStatefulCreationLock,
     ));
 
     if (!pair) {
@@ -304,6 +427,7 @@ async function handleManagedRequest<TTransport, TResult>({
     logRequestFailure('request failed', err);
     return onError(err);
   } finally {
+    releaseReservation?.();
     if (shouldClosePair) {
       await pair?.close();
     }
@@ -360,7 +484,7 @@ export async function startHttpTransport(
   createServer: ServerFactory,
   createEventStore?: EventStoreFactory,
 ): Promise<HttpTransportResult> {
-  const { port, host, corsOrigin, isStateless } = getTransportConfig();
+  const { port, host, corsOrigin, isStateless, maxSessions, sessionTtlMs } = getTransportConfig();
   const allowedHosts = parseAllowedHosts();
   warnIfUnprotected(host, !!allowedHosts);
 
@@ -371,6 +495,7 @@ export async function startHttpTransport(
   applyCors(app, corsOrigin);
 
   const statefulPairs = new Map<string, ManagedPair<NodeStreamableHTTPServerTransport>>();
+  const acquireStatefulCreationLock = createAsyncLock();
 
   app.all('/mcp', async (req, res) => {
     const sessionId = getNodeSessionId(req);
@@ -382,6 +507,7 @@ export async function startHttpTransport(
         await pair.transport.handleRequest(req, res, req.body);
       },
       isStateless,
+      maxSessions,
       onError: () => {
         nodeErrorResponse(res, 500, 'Internal Server Error');
       },
@@ -389,8 +515,10 @@ export async function startHttpTransport(
         nodeErrorResponse(res, 404, 'Session not found');
       },
       requestMethod: req.method,
+      sessionTtlMs,
       sessionId,
       statefulPairs,
+      acquireStatefulCreationLock,
     });
   });
 
@@ -425,11 +553,12 @@ export function startWebStandardTransport(
   createServer: ServerFactory,
   createEventStore?: EventStoreFactory,
 ): Promise<WebStandardTransportResult> {
-  const { port, host, isStateless } = getTransportConfig();
+  const { port, host, isStateless, maxSessions, sessionTtlMs } = getTransportConfig();
   const allowedHosts = resolveAllowedHosts(host);
   warnIfUnprotected(host, !!allowedHosts);
 
   const statefulPairs = new Map<string, ManagedPair<WebStandardStreamableHTTPServerTransport>>();
+  const acquireStatefulCreationLock = createAsyncLock();
 
   const handler = async (req: Request): Promise<Response> => {
     if (allowedHosts && !validateHostHeader(req.headers.get('host'), allowedHosts)) {
@@ -448,11 +577,14 @@ export function startWebStandardTransport(
       getSessionId: (transport) => transport.sessionId,
       handlePair: (pair) => pair.transport.handleRequest(req),
       isStateless,
+      maxSessions,
       onError: () => responseError(500, 'Internal Server Error'),
       onMissingPair: () => responseError(404, 'Session not found'),
       requestMethod: req.method,
+      sessionTtlMs,
       sessionId,
       statefulPairs,
+      acquireStatefulCreationLock,
     });
   };
 

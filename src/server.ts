@@ -10,7 +10,7 @@ import { onWorkspaceCacheChange } from './lib/workspace-context.js';
 
 import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
-import { onSessionChange, type SessionChangeEvent } from './sessions.js';
+import { createSessionStore, type SessionChangeEvent, type SessionStore } from './sessions.js';
 import { registerAskTool } from './tools/ask.js';
 import { type CacheChangeEvent, onCacheChange } from './tools/cache.js';
 import { registerCacheTools } from './tools/cache.js';
@@ -31,20 +31,46 @@ const { version } = JSON.parse(
 ) as { version: string };
 
 const activeServers = new Set<McpServer>();
-type ServerRegistrar = (server: McpServer) => void;
+interface ServerServices {
+  sessionStore: SessionStore;
+}
+
+type ServerRegistrar = (server: McpServer, services: ServerServices) => void;
 
 export const SERVER_TOOL_REGISTRARS = [
-  registerAskTool,
-  registerExecuteCodeTool,
-  registerSearchTool,
-  registerAgenticSearchTool,
-  registerAnalyzeFileTool,
-  registerAnalyzeUrlTool,
-  registerAnalyzePrTool,
-  registerExplainErrorTool,
-  registerCompareFilesTool,
-  registerGenerateDiagramTool,
-  registerCacheTools,
+  (server, services) => {
+    registerAskTool(server, services.sessionStore);
+  },
+  (server) => {
+    registerExecuteCodeTool(server);
+  },
+  (server) => {
+    registerSearchTool(server);
+  },
+  (server) => {
+    registerAgenticSearchTool(server);
+  },
+  (server) => {
+    registerAnalyzeFileTool(server);
+  },
+  (server) => {
+    registerAnalyzeUrlTool(server);
+  },
+  (server) => {
+    registerAnalyzePrTool(server);
+  },
+  (server) => {
+    registerExplainErrorTool(server);
+  },
+  (server) => {
+    registerCompareFilesTool(server);
+  },
+  (server) => {
+    registerGenerateDiagramTool(server);
+  },
+  (server) => {
+    registerCacheTools(server);
+  },
 ] as const satisfies readonly ServerRegistrar[];
 
 const SERVER_DESCRIPTION =
@@ -64,20 +90,25 @@ const SERVER_INSTRUCTIONS =
   'generate_diagram (create Mermaid/PlantUML diagrams from descriptions or code). ' +
   'Use cacheName with ask to attach cached context. displayName auto-replaces stale caches.';
 
-function sendResourceChanged(listUri: string, detailUris: readonly string[] = []): void {
-  for (const server of activeServers) {
-    if (!server.isConnected()) continue;
-    server.sendResourceListChanged();
-    void server.server.sendResourceUpdated({ uri: listUri });
-    for (const uri of detailUris) {
-      void server.server.sendResourceUpdated({ uri });
-    }
+function sendResourceChangedForServer(
+  server: McpServer,
+  listUri: string,
+  detailUris: readonly string[] = [],
+): void {
+  if (!server.isConnected()) return;
+  server.sendResourceListChanged();
+  void server.server.sendResourceUpdated({ uri: listUri });
+  for (const uri of detailUris) {
+    void server.server.sendResourceUpdated({ uri });
   }
 }
 
-onSessionChange(({ detailUris, eventUris, transcriptUris }: SessionChangeEvent) => {
-  sendResourceChanged('sessions://list', [...detailUris, ...transcriptUris, ...eventUris]);
-});
+function sendResourceChanged(listUri: string, detailUris: readonly string[] = []): void {
+  for (const server of activeServers) {
+    sendResourceChangedForServer(server, listUri, detailUris);
+  }
+}
+
 onCacheChange(({ detailUris }: CacheChangeEvent) => {
   sendResourceChanged('caches://list', detailUris);
 });
@@ -86,6 +117,7 @@ onWorkspaceCacheChange(() => {
 });
 
 export function createServerInstance(): ServerInstance {
+  const sessionStore = createSessionStore();
   const taskStore = new InMemoryTaskStore();
   const server = new McpServer(
     {
@@ -109,22 +141,33 @@ export function createServerInstance(): ServerInstance {
     },
   );
   let closed = false;
+  const unsubscribeSessionChange = sessionStore.subscribe(
+    ({ detailUris, eventUris, transcriptUris }: SessionChangeEvent) => {
+      sendResourceChangedForServer(server, 'sessions://list', [
+        ...detailUris,
+        ...transcriptUris,
+        ...eventUris,
+      ]);
+    },
+  );
 
   activeServers.add(server);
 
   for (const register of SERVER_TOOL_REGISTRARS) {
-    register(server);
+    register(server, { sessionStore });
   }
 
   logger.attachServer(server);
   registerPrompts(server);
-  registerResources(server);
+  registerResources(server, sessionStore);
 
   return {
     server,
     close: async () => {
       if (closed) return;
       closed = true;
+      unsubscribeSessionChange();
+      sessionStore.close();
       activeServers.delete(server);
       taskStore.cleanup();
       await server.close();

@@ -17,7 +17,7 @@ import {
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { validateUrls } from '../lib/validation.js';
 import { workspaceCacheManager } from '../lib/workspace-context.js';
-import { type AskInput, AskInputSchema } from '../schemas/inputs.js';
+import { type AskInput, createAskInputSchema } from '../schemas/inputs.js';
 import {
   type GeminiResponseSchema,
   isGeminiResponseSchemaKeyword,
@@ -28,12 +28,11 @@ import { buildGenerateContentConfig, EXPOSE_THOUGHTS } from '../client.js';
 import { getAI, MODEL } from '../client.js';
 import { getWorkspaceCacheEnabled } from '../config.js';
 import {
-  appendSessionEvent,
-  appendSessionTranscript,
-  getSession,
-  getSessionEntry,
-  isEvicted,
-  setSession,
+  createSessionStore,
+  type SessionEventEntry,
+  type SessionStore,
+  type SessionSummary,
+  type TranscriptEntry,
 } from '../sessions.js';
 
 type AskArgs = AskInput;
@@ -49,19 +48,19 @@ export interface AskStructuredContent extends Record<string, unknown> {
 }
 
 interface AskDependencies {
-  appendSessionEvent: typeof appendSessionEvent;
-  appendSessionTranscript: typeof appendSessionTranscript;
+  appendSessionEvent: (sessionId: string, item: SessionEventEntry) => boolean;
+  appendSessionTranscript: (sessionId: string, item: TranscriptEntry) => boolean;
   createChat: (args: AskArgs) => Chat;
-  getSession: typeof getSession;
-  getSessionEntry: typeof getSessionEntry;
-  isEvicted: typeof isEvicted;
+  getSession: (sessionId: string) => Chat | undefined;
+  getSessionEntry: (sessionId: string) => SessionSummary | undefined;
+  isEvicted: (sessionId: string) => boolean;
   now: () => number;
   runWithoutSession: (
     args: AskArgs,
     ctx: ServerContext,
     chat?: Chat,
   ) => Promise<AskExecutionResult>;
-  setSession: typeof setSession;
+  setSession: (sessionId: string, chat: Chat) => void;
 }
 
 interface AskExecutionResult {
@@ -470,10 +469,10 @@ async function resolveWorkspaceCacheName(
   }
 }
 
-function createDefaultAskDependencies(): AskDependencies {
+function createDefaultAskDependencies(sessionStore: SessionStore): AskDependencies {
   return {
-    appendSessionEvent,
-    appendSessionTranscript,
+    appendSessionEvent: sessionStore.appendSessionEvent.bind(sessionStore),
+    appendSessionTranscript: sessionStore.appendSessionTranscript.bind(sessionStore),
     createChat: (args) => {
       const { functionCallingMode, toolConfig, tools } = resolveAskTooling(args);
       return getAI().chats.create({
@@ -481,12 +480,12 @@ function createDefaultAskDependencies(): AskDependencies {
         config: buildGenerateContentConfig({ ...args, functionCallingMode, toolConfig, tools }),
       });
     },
-    getSession,
-    getSessionEntry,
-    isEvicted,
+    getSession: sessionStore.getSession.bind(sessionStore),
+    getSessionEntry: sessionStore.getSessionEntry.bind(sessionStore),
+    isEvicted: sessionStore.isEvicted.bind(sessionStore),
     now: () => Date.now(),
     runWithoutSession: askWithoutSession,
-    setSession,
+    setSession: sessionStore.setSession.bind(sessionStore),
   };
 }
 
@@ -526,7 +525,9 @@ async function askNewSession(
   return askResult.result;
 }
 
-export function createAskWork(deps: AskDependencies = createDefaultAskDependencies()) {
+export function createAskWork(
+  deps: AskDependencies = createDefaultAskDependencies(createSessionStore()),
+) {
   return async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
     const validationError = validateAskRequest(args, deps);
     if (validationError) return validationError;
@@ -551,16 +552,18 @@ export function createAskWork(deps: AskDependencies = createDefaultAskDependenci
   };
 }
 
-const askWork = createAskWork();
-
-export function registerAskTool(server: McpServer): void {
+export function registerAskTool(
+  server: McpServer,
+  sessionStore: SessionStore = createSessionStore(),
+): void {
+  const askWork = createAskWork(createDefaultAskDependencies(sessionStore));
   registerTaskTool(
     server,
     'ask',
     {
       title: 'Ask Gemini',
       description: 'Send a message to Gemini. Supports multi-turn chat via sessionId.',
-      inputSchema: AskInputSchema,
+      inputSchema: createAskInputSchema(sessionStore.completeSessionIds.bind(sessionStore)),
       outputSchema: AskOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
     },

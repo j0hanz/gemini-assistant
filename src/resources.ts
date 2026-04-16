@@ -7,13 +7,7 @@ import { assembleWorkspaceContext, workspaceCacheManager } from './lib/workspace
 
 import { listDiscoveryEntries, listWorkflowEntries } from './catalog.js';
 import { completeCacheNames, getCacheSummary, listCacheSummaries } from './client.js';
-import {
-  completeSessionIds,
-  getSessionEntry,
-  listSessionEntries,
-  listSessionEventEntries,
-  listSessionTranscriptEntries,
-} from './sessions.js';
+import { createSessionStore, type SessionStore } from './sessions.js';
 
 export const PUBLIC_RESOURCE_URIS = [
   'sessions://list',
@@ -43,7 +37,7 @@ type SessionTranscriptResourceData =
   | { error: 'Session not found' };
 
 type SessionEventsResourceData =
-  | Awaited<ReturnType<typeof listSessionEventEntries>>
+  | ReturnType<SessionStore['listSessionEventEntries']>
   | { error: 'Session not found' };
 
 const SESSION_LIST_RESOURCE: ResourceListEntry = {
@@ -118,22 +112,22 @@ function toResourceUri(uri: URL | string): string {
   return typeof uri === 'string' ? uri : uri.href;
 }
 
-function sessionDetailResources(): ResourceListEntry[] {
-  return listSessionEntries().map((session) => ({
+function sessionDetailResources(sessionStore: SessionStore): ResourceListEntry[] {
+  return sessionStore.listSessionEntries().map((session) => ({
     uri: `sessions://${session.id}`,
     name: `Session ${session.id}`,
   }));
 }
 
-function sessionTranscriptResources(): ResourceListEntry[] {
-  return listSessionEntries().map((session) => ({
+function sessionTranscriptResources(sessionStore: SessionStore): ResourceListEntry[] {
+  return sessionStore.listSessionEntries().map((session) => ({
     uri: `sessions://${session.id}/transcript`,
     name: `Transcript ${session.id}`,
   }));
 }
 
-function sessionEventResources(): ResourceListEntry[] {
-  return listSessionEntries().map((session) => ({
+function sessionEventResources(sessionStore: SessionStore): ResourceListEntry[] {
+  return sessionStore.listSessionEntries().map((session) => ({
     uri: `sessions://${session.id}/events`,
     name: `Events ${session.id}`,
   }));
@@ -163,48 +157,52 @@ export function readWorkflowsListResource(
 }
 
 export function getSessionTranscriptResourceData(
+  sessionStore: SessionStore,
   sessionId: string | undefined,
 ): SessionTranscriptResourceData {
   if (!sessionId) {
     return { error: 'Session not found' } as const;
   }
 
-  const transcript = listSessionTranscriptEntries(sessionId);
+  const transcript = sessionStore.listSessionTranscriptEntries(sessionId);
   return transcript ?? ({ error: 'Session not found' } as const);
 }
 
 export function getSessionEventsResourceData(
+  sessionStore: SessionStore,
   sessionId: string | undefined,
 ): SessionEventsResourceData {
   if (!sessionId) {
     return { error: 'Session not found' } as const;
   }
 
-  const events = listSessionEventEntries(sessionId);
+  const events = sessionStore.listSessionEventEntries(sessionId);
   return events ?? ({ error: 'Session not found' } as const);
 }
 
 export function readSessionTranscriptResource(
+  sessionStore: SessionStore,
   uri: URL | string,
   sessionId: string | string[] | undefined,
 ): ReadResourceResult {
   return jsonResource(
     toResourceUri(uri),
-    getSessionTranscriptResourceData(normalizeTemplateParam(sessionId)),
+    getSessionTranscriptResourceData(sessionStore, normalizeTemplateParam(sessionId)),
   );
 }
 
 export function readSessionEventsResource(
+  sessionStore: SessionStore,
   uri: URL | string,
   sessionId: string | string[] | undefined,
 ): ReadResourceResult {
   return jsonResource(
     toResourceUri(uri),
-    getSessionEventsResourceData(normalizeTemplateParam(sessionId)),
+    getSessionEventsResourceData(sessionStore, normalizeTemplateParam(sessionId)),
   );
 }
 
-function registerSessionResources(server: McpServer): void {
+function registerSessionResources(server: McpServer, sessionStore: SessionStore): void {
   server.registerResource(
     'sessions',
     new ResourceTemplate('sessions://list', singleResource(SESSION_LIST_RESOURCE)),
@@ -213,15 +211,15 @@ function registerSessionResources(server: McpServer): void {
       description: 'List of active multi-turn chat session IDs and their last access time.',
       mimeType: 'application/json',
     },
-    (uri): ReadResourceResult => jsonResource(uri.href, listSessionEntries()),
+    (uri): ReadResourceResult => jsonResource(uri.href, sessionStore.listSessionEntries()),
   );
 
   server.registerResource(
     'session-detail',
     new ResourceTemplate('sessions://{sessionId}', {
-      list: () => ({ resources: sessionDetailResources() }),
+      list: () => ({ resources: sessionDetailResources(sessionStore) }),
       complete: {
-        sessionId: completeSessionIds,
+        sessionId: sessionStore.completeSessionIds.bind(sessionStore),
       },
     }),
     {
@@ -231,7 +229,7 @@ function registerSessionResources(server: McpServer): void {
     },
     (uri, { sessionId }): ReadResourceResult => {
       const id = normalizeTemplateParam(sessionId);
-      const entry = id ? getSessionEntry(id) : undefined;
+      const entry = id ? sessionStore.getSessionEntry(id) : undefined;
       return jsonResource(uri.href, entry ?? { error: 'Session not found' });
     },
   );
@@ -239,9 +237,9 @@ function registerSessionResources(server: McpServer): void {
   server.registerResource(
     'session-transcript',
     new ResourceTemplate('sessions://{sessionId}/transcript', {
-      list: () => ({ resources: sessionTranscriptResources() }),
+      list: () => ({ resources: sessionTranscriptResources(sessionStore) }),
       complete: {
-        sessionId: completeSessionIds,
+        sessionId: sessionStore.completeSessionIds.bind(sessionStore),
       },
     }),
     {
@@ -249,15 +247,16 @@ function registerSessionResources(server: McpServer): void {
       description: 'Transcript entries for a single active chat session by ID.',
       mimeType: 'application/json',
     },
-    (uri, { sessionId }): ReadResourceResult => readSessionTranscriptResource(uri, sessionId),
+    (uri, { sessionId }): ReadResourceResult =>
+      readSessionTranscriptResource(sessionStore, uri, sessionId),
   );
 
   server.registerResource(
     'session-events',
     new ResourceTemplate('sessions://{sessionId}/events', {
-      list: () => ({ resources: sessionEventResources() }),
+      list: () => ({ resources: sessionEventResources(sessionStore) }),
       complete: {
-        sessionId: completeSessionIds,
+        sessionId: sessionStore.completeSessionIds.bind(sessionStore),
       },
     }),
     {
@@ -267,7 +266,8 @@ function registerSessionResources(server: McpServer): void {
         'This is a normalized view, not a raw replay-ready Gemini history.',
       mimeType: 'application/json',
     },
-    (uri, { sessionId }): ReadResourceResult => readSessionEventsResource(uri, sessionId),
+    (uri, { sessionId }): ReadResourceResult =>
+      readSessionEventsResource(sessionStore, uri, sessionId),
   );
 }
 
@@ -392,8 +392,11 @@ function registerWorkspaceResources(server: McpServer): void {
   );
 }
 
-export function registerResources(server: McpServer): void {
-  registerSessionResources(server);
+export function registerResources(
+  server: McpServer,
+  sessionStore: SessionStore = createSessionStore(),
+): void {
+  registerSessionResources(server, sessionStore);
   registerCacheResources(server);
   registerDiscoveryResources(server);
   registerWorkspaceResources(server);

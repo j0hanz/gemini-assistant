@@ -16,22 +16,29 @@ let httpResult: HttpTransportResult | undefined;
 let webStandardResult: WebStandardTransportResult | undefined;
 let stdioInstance: ServerInstance | undefined;
 
-if (transportMode === 'http') {
-  const { startHttpTransport } = await import('./transport.js');
-  httpResult = await startHttpTransport(createServerInstance, createEventStore);
-} else if (transportMode === 'web-standard') {
-  const { startWebStandardTransport } = await import('./transport.js');
-  webStandardResult = await startWebStandardTransport(createServerInstance, createEventStore);
-} else {
-  stdioInstance = createServerInstance();
-  const transport = new StdioServerTransport();
-  try {
-    await stdioInstance.server.connect(transport);
-    logger.info('system', 'MCP server running on stdio');
-  } catch (err) {
-    await stdioInstance.close();
-    logger.fatal('system', 'Failed to connect transport', { error: err });
-    process.exit(1);
+switch (transportMode) {
+  case 'http': {
+    const { startHttpTransport } = await import('./transport.js');
+    httpResult = await startHttpTransport(createServerInstance, createEventStore);
+    break;
+  }
+  case 'web-standard': {
+    const { startWebStandardTransport } = await import('./transport.js');
+    webStandardResult = await startWebStandardTransport(createServerInstance, createEventStore);
+    break;
+  }
+  case 'stdio': {
+    stdioInstance = createServerInstance();
+    const transport = new StdioServerTransport();
+    try {
+      await stdioInstance.server.connect(transport);
+      logger.info('system', 'MCP server running on stdio');
+    } catch (err) {
+      await stdioInstance.close();
+      logger.fatal('system', 'Failed to connect transport', { error: err });
+      process.exit(1);
+    }
+    break;
   }
 }
 

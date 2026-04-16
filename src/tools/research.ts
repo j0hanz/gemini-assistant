@@ -12,7 +12,12 @@ import {
   pickDefined,
 } from '../lib/response.js';
 import { handleToolExecution, type StreamResult } from '../lib/streaming.js';
-import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import {
+  elicitTaskInput,
+  ExtendedServerContext,
+  READONLY_ANNOTATIONS,
+  registerTaskTool,
+} from '../lib/task-utils.js';
 import { validateUrls } from '../lib/validation.js';
 import {
   type AgenticSearchInput,
@@ -260,6 +265,21 @@ async function agenticSearchWork(
   { topic, searchDepth, thinkingLevel }: AgenticSearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
+  if (searchDepth && searchDepth > 3) {
+    try {
+      const constraint = await elicitTaskInput(
+        ctx as ExtendedServerContext,
+        `High depth research requested (${searchDepth}). What specific aspect should the agent focus on? (Or reply 'none' to proceed)`,
+        'Waiting for constraints for deep research',
+      );
+      if (constraint && constraint.trim().toLowerCase() !== 'none') {
+        topic = `${topic}\n\nAdditional User Constraint: ${constraint}`;
+      }
+    } catch (err) {
+      await ctx.mcpReq.log('warning', `Elicitation skipped or failed: ${String(err)}`);
+    }
+  }
+
   await sendProgress(ctx, 0, undefined, `${AGENTIC_SEARCH_TOOL_LABEL}: Starting deep research`);
   await ctx.mcpReq.log('info', `Agentic search: ${topic}`);
   const enrichedTopic = await enrichTopicWithSampling(topic, ctx);

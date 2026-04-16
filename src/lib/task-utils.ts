@@ -3,10 +3,12 @@ import type {
   CreateTaskResult,
   GetTaskResult,
   McpServer,
+  QueuedMessage,
   RequestTaskStore,
   ServerContext,
   Task,
 } from '@modelcontextprotocol/server';
+import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { withErrorLogging } from './errors.js';
 
@@ -26,9 +28,15 @@ export const MUTABLE_ANNOTATIONS = {
   openWorldHint: true,
 } as const;
 
+export const globalTaskMessageQueue = new InMemoryTaskMessageQueue();
+
 const TASK_EXECUTION = { taskSupport: 'optional' } as const;
 
-type TaskWork<TArgs> = (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>;
+type TaskContext = NonNullable<ServerContext['task']>;
+export type ExtendedTaskContext = TaskContext & { queue: InMemoryTaskMessageQueue };
+export type ExtendedServerContext = ServerContext & { task?: ExtendedTaskContext };
+
+export type TaskWork<TArgs> = (args: TArgs, ctx: ExtendedServerContext) => Promise<CallToolResult>;
 
 interface ToolTaskHandlers<TArgs> {
   createTask: (args: TArgs, ctx: ServerContext) => Promise<CreateTaskResult>;
@@ -39,17 +47,53 @@ interface ToolTaskHandlers<TArgs> {
 type RegisterToolTask = McpServer['experimental']['tasks']['registerToolTask'];
 type TaskToolConfig = Omit<Parameters<RegisterToolTask>[1], 'execution'>;
 type TaskToolHandler = Parameters<RegisterToolTask>[2];
-type TaskContext = NonNullable<ServerContext['task']>;
 
-function requireTaskContext(ctx: ServerContext): TaskContext {
+export async function elicitTaskInput(
+  ctx: ExtendedServerContext,
+  prompt: string,
+  statusMessage = 'Waiting for user input',
+): Promise<string | undefined> {
+  const taskContext = ctx.task;
+  if (!taskContext?.id) throw new Error('Task context or ID is unavailable.');
+
+  await taskContext.store.updateTaskStatus(taskContext.id, 'input_required', statusMessage);
+
+  // Enqueue an elicitation request to the side-channel message queue
+  const messageId = `elicit_${Date.now()}`;
+  void taskContext.queue.enqueue(taskContext.id, {
+    method: 'elicitation/create',
+    params: { prompt },
+    id: messageId,
+  } as unknown as QueuedMessage);
+
+  while (!ctx.mcpReq.signal.aborted) {
+    const msgs = await taskContext.queue.dequeueAll(taskContext.id);
+    for (const msg of msgs) {
+      if ('id' in msg && msg.id === messageId && 'result' in msg) {
+        await taskContext.store.updateTaskStatus(taskContext.id, 'working');
+        const resultPayload = (msg as unknown as { result?: { text?: string } | string }).result;
+        return typeof resultPayload === 'string'
+          ? resultPayload
+          : (resultPayload?.text ?? JSON.stringify(resultPayload));
+      }
+    }
+    // Briefly sleep to avoid hot-looping
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error('Task aborted during elicitation');
+}
+
+export function requireTaskContext(
+  ctx: ServerContext | ExtendedServerContext,
+): ExtendedTaskContext {
   const taskContext = ctx.task;
   if (!taskContext) {
     throw new Error('Task context is unavailable for this tool execution.');
   }
-  return taskContext;
+  return taskContext as ExtendedTaskContext;
 }
 
-function requireTaskId(ctx: ServerContext): string {
+function requireTaskId(ctx: ServerContext | ExtendedServerContext): string {
   const taskId = requireTaskContext(ctx).id;
   if (!taskId) {
     throw new Error('Task ID is unavailable for this tool execution.');
@@ -123,13 +167,15 @@ export function taskTtl(requestedTtl: number | undefined): number {
 export function createToolTaskHandlers<TArgs>(work: TaskWork<TArgs>): ToolTaskHandlers<TArgs> {
   return {
     createTask: async (args, ctx) => {
-      const taskContext = requireTaskContext(ctx);
+      const taskContext = ctx.task;
+      if (!taskContext) throw new Error('Task context is unavailable.');
       const task = await taskContext.store.createTask({ ttl: taskTtl(taskContext.requestedTtl) });
-      const taskExecutionContext: ServerContext = {
+      const taskExecutionContext: ExtendedServerContext = {
         ...ctx,
         task: {
           ...taskContext,
           id: task.taskId,
+          queue: globalTaskMessageQueue,
         },
       };
       runToolAsTask(taskContext.store, task, work(args, taskExecutionContext), (taskId, err) => {
@@ -159,7 +205,11 @@ export function registerTaskTool<TArgs>(
 ): void {
   const toolLabel = config.title ?? name;
   const handler = createToolTaskHandlers(
-    withErrorLogging(name, toolLabel, work),
+    withErrorLogging<TArgs>(
+      name,
+      toolLabel,
+      work as unknown as (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
+    ),
   ) as TaskToolHandler;
 
   server.experimental.tasks.registerToolTask(

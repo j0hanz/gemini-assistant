@@ -1,9 +1,4 @@
-import {
-  InMemoryTaskMessageQueue,
-  InMemoryTaskStore,
-  McpServer,
-  StdioServerTransport,
-} from '@modelcontextprotocol/server';
+import { InMemoryTaskStore, McpServer, StdioServerTransport } from '@modelcontextprotocol/server';
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,6 +6,7 @@ import { join } from 'node:path';
 import { formatError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
+import { globalTaskMessageQueue } from './lib/task-utils.js';
 import { onWorkspaceCacheChange } from './lib/workspace-context.js';
 
 import { getTransportMode } from './config.js';
@@ -77,7 +73,7 @@ function createServerInstance(): ServerInstance {
         tasks: {
           requests: { tools: { call: {} } },
           taskStore,
-          taskMessageQueue: new InMemoryTaskMessageQueue(),
+          taskMessageQueue: globalTaskMessageQueue,
         },
       },
       instructions:

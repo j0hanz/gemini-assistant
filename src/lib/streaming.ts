@@ -1,4 +1,9 @@
-import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
+import type {
+  CallToolResult,
+  QueuedMessage,
+  ServerContext,
+  TaskMessageQueue,
+} from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
 import type {
@@ -466,6 +471,21 @@ async function handleStreamPart(
 
   await transitionToGenerating(ctx, state, msg);
   state.text += partText;
+
+  // Enqueue LLM token chunks via the experimental task queue for clients that support streaming
+  const taskContext = ctx.task as
+    | (NonNullable<ServerContext['task']> & { queue?: TaskMessageQueue })
+    | undefined;
+  if (taskContext?.queue && taskContext.id) {
+    try {
+      void taskContext.queue.enqueue(taskContext.id, {
+        method: 'notifications/message',
+        params: { content: partText },
+      } as unknown as QueuedMessage);
+    } catch {
+      // Ignore queue overflow or enqueue errors
+    }
+  }
 }
 
 function finalizeStreamResult(state: StreamProcessingState): StreamResult {

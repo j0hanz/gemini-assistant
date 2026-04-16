@@ -4,8 +4,13 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Writable } from 'node:stream';
+
+import { getVerbosePayloadLogging } from '../config.js';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'fatal';
+const MAX_SUMMARY_DEPTH = 2;
+const MAX_SUMMARY_KEYS = 20;
 
 interface LogEntry {
   timestamp: string;
@@ -18,20 +23,71 @@ interface LogEntry {
 
 const logContext = new AsyncLocalStorage<string>();
 
-class Logger {
-  private server: McpServer | null = null;
-  private logStream: ReturnType<typeof createWriteStream>;
+interface LoggerOptions {
+  logStream?: Pick<Writable, 'write'>;
+  verbosePayloads?: boolean;
+}
 
-  constructor() {
-    const logDir = join(process.cwd(), 'logs');
-    if (!existsSync(logDir)) {
-      mkdirSync(logDir, { recursive: true });
-    }
-    this.logStream = createWriteStream(join(logDir, 'app.log'), { flags: 'a' });
+export function summarizeLogValue(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') {
+    return { type: 'string', length: value.length };
   }
 
-  attachServer(server: McpServer) {
-    this.server = server;
+  if (
+    value === null ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'undefined'
+  ) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return { type: 'array', length: value.length };
+  }
+
+  if (typeof value === 'object') {
+    if (depth >= MAX_SUMMARY_DEPTH) {
+      return { type: 'truncated' };
+    }
+
+    return {
+      type: 'object',
+      keys: Object.keys(value).sort().slice(0, MAX_SUMMARY_KEYS),
+    };
+  }
+
+  return { type: typeof value };
+}
+
+function maybeSummarizePayload(value: unknown, verbosePayloads: boolean): unknown {
+  return verbosePayloads ? value : summarizeLogValue(value);
+}
+
+export class Logger {
+  private readonly attachedServers = new Set<McpServer>();
+  private readonly logStream: Pick<Writable, 'write'>;
+  private readonly verbosePayloads: boolean;
+
+  constructor(options: LoggerOptions = {}) {
+    this.verbosePayloads = options.verbosePayloads ?? getVerbosePayloadLogging();
+
+    if (options.logStream) {
+      this.logStream = options.logStream;
+    } else {
+      const logDir = join(process.cwd(), 'logs');
+      if (!existsSync(logDir)) {
+        mkdirSync(logDir, { recursive: true });
+      }
+      this.logStream = createWriteStream(join(logDir, 'app.log'), { flags: 'a' });
+    }
+  }
+
+  attachServer(server: McpServer): () => void {
+    this.attachedServers.add(server);
+    return () => {
+      this.attachedServers.delete(server);
+    };
   }
 
   private log(level: LogLevel, context: string, message: string, data?: unknown) {
@@ -50,8 +106,19 @@ class Logger {
     // Write to disk
     this.logStream.write(logString + '\n');
 
-    // Forward to MCP if server is attached
-    if (this.server) {
+    if (this.attachedServers.size > 0) {
+      const connectedServers = [...this.attachedServers].filter((server) => {
+        const connected = server.isConnected();
+        if (!connected) {
+          this.attachedServers.delete(server);
+        }
+        return connected;
+      });
+
+      if (connectedServers.length === 0) {
+        return;
+      }
+
       let mcpLevel:
         | 'debug'
         | 'info'
@@ -79,16 +146,20 @@ class Logger {
           break;
       }
 
-      this.server
-        .sendLoggingMessage({
-          level: mcpLevel,
-          logger: context,
-          data: entry,
-        })
-        .catch(() => {
-          // Ignore errors sending to client to prevent infinite loops
-        });
+      void Promise.allSettled(
+        connectedServers.map((server) =>
+          server.sendLoggingMessage({
+            level: mcpLevel,
+            logger: context,
+            data: entry,
+          }),
+        ),
+      );
     }
+  }
+
+  getVerbosePayloads(): boolean {
+    return this.verbosePayloads;
   }
 
   debug(context: string, message: string, data?: unknown) {
@@ -117,26 +188,35 @@ export const logger = new Logger();
 export function withToolLogging<TArgs, TResult>(
   toolName: string,
   handler: (args: TArgs) => Promise<TResult>,
+  options: { loggerInstance?: Logger } = {},
 ): (args: TArgs) => Promise<TResult> {
+  const loggerInstance = options.loggerInstance ?? logger;
+
   return async (args: TArgs): Promise<TResult> => {
     const traceId = randomUUID();
     return logContext.run(traceId, async () => {
-      logger.info(toolName, 'Execution started', { args });
+      loggerInstance.info(toolName, 'Execution started', {
+        args: maybeSummarizePayload(args, loggerInstance.getVerbosePayloads()),
+      });
       const startTime = performance.now();
 
       try {
         const result = await handler(args);
         const durationMs = performance.now() - startTime;
-        logger.info(toolName, 'Execution completed successfully', { durationMs, result });
+        loggerInstance.info(toolName, 'Execution completed successfully', {
+          durationMs,
+          result: maybeSummarizePayload(result, loggerInstance.getVerbosePayloads()),
+        });
         return result;
       } catch (error) {
         const durationMs = performance.now() - startTime;
         const errorMessage = error instanceof Error ? error.message : String(error);
         const errorStack = error instanceof Error ? error.stack : undefined;
-        logger.error(toolName, 'Execution failed', {
+        loggerInstance.error(toolName, 'Execution failed', {
           durationMs,
           error: errorMessage,
           stack: errorStack,
+          args: maybeSummarizePayload(args, loggerInstance.getVerbosePayloads()),
         });
         throw error; // Rethrow to let MCP framework handle the tool error
       }

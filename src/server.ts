@@ -146,6 +146,7 @@ export function createServerInstance(): ServerInstance {
     },
   );
   let closed = false;
+  const detachLogger = logger.attachServer(server);
   const unsubscribeSessionChange = sessionStore.subscribe(
     ({ detailUris, eventUris, transcriptUris }: SessionChangeEvent) => {
       sendResourceChangedForServer(server, 'sessions://list', [
@@ -162,7 +163,6 @@ export function createServerInstance(): ServerInstance {
     register(server, { sessionStore, taskMessageQueue });
   }
 
-  logger.attachServer(server);
   registerPrompts(server);
   registerResources(server, sessionStore);
 
@@ -174,6 +174,7 @@ export function createServerInstance(): ServerInstance {
       unsubscribeSessionChange();
       sessionStore.close();
       activeServers.delete(server);
+      detachLogger();
       taskStore.cleanup();
       await server.close();
     },

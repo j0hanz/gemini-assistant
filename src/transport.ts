@@ -522,11 +522,27 @@ export async function startHttpTransport(
     });
   });
 
-  const httpServer = await new Promise<Server>((resolve) => {
-    const srv = app.listen(port, host, () => {
+  const httpServer = await new Promise<Server>((resolve, reject) => {
+    let srv: Server;
+    const onError = (err: Error) => {
+      srv.off('listening', onListening);
+      reject(err);
+    };
+    const onListening = () => {
+      srv.off('error', onError);
       logListening(host, port);
       resolve(srv);
-    });
+    };
+
+    try {
+      srv = app.listen(port, host);
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+
+    srv.once('error', onError);
+    srv.once('listening', onListening);
   });
 
   const close = async () => {

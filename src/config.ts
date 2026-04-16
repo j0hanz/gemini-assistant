@@ -81,6 +81,10 @@ export function getExposeThoughts(): boolean {
   return process.env.GEMINI_EXPOSE_THOUGHTS === 'true';
 }
 
+export function getVerbosePayloadLogging(): boolean {
+  return parseBooleanEnv('LOG_VERBOSE_PAYLOADS', false);
+}
+
 export function getTransportMode(): TransportMode {
   return parseTransportModeEnv();
 }

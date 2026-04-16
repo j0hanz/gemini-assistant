@@ -6,9 +6,10 @@ import {
 } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
+import { createServer as createNodeServer } from 'node:http';
 import { afterEach, describe, it } from 'node:test';
 
-import { startWebStandardTransport } from '../src/transport.js';
+import { startHttpTransport, startWebStandardTransport } from '../src/transport.js';
 
 interface ServerInstanceOptions {
   connectDelayMs?: number;
@@ -267,5 +268,37 @@ describe('startWebStandardTransport', () => {
     await transport.close();
 
     assert.strictEqual(stopCalls, 1);
+  });
+});
+
+describe('startHttpTransport', () => {
+  it('rejects bind conflicts during startup', async () => {
+    const occupiedServer = createNodeServer();
+    await new Promise<void>((resolve, reject) => {
+      occupiedServer.once('error', reject);
+      occupiedServer.listen(0, '127.0.0.1', () => resolve());
+    });
+
+    const address = occupiedServer.address();
+    assert.ok(address && typeof address === 'object');
+    process.env.MCP_HTTP_HOST = '127.0.0.1';
+    process.env.MCP_HTTP_PORT = String(address.port);
+
+    try {
+      await assert.rejects(
+        () => startHttpTransport(() => createServerInstance()),
+        (err: unknown) =>
+          err instanceof Error && ('code' in err || /listen|EADDRINUSE/i.test(err.message)),
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        occupiedServer.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      delete process.env.MCP_HTTP_HOST;
+      delete process.env.MCP_HTTP_PORT;
+    }
   });
 });

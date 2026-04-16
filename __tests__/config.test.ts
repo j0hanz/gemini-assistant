@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
-import { getSessionLimits, getTransportConfig, getTransportMode } from '../src/config.js';
+import {
+  getSessionLimits,
+  getTransportConfig,
+  getTransportMode,
+  getVerbosePayloadLogging,
+} from '../src/config.js';
 
 afterEach(() => {
+  delete process.env.LOG_VERBOSE_PAYLOADS;
   delete process.env.MAX_SESSIONS;
   delete process.env.MAX_SESSION_EVENT_ENTRIES;
   delete process.env.MAX_SESSION_TRANSCRIPT_ENTRIES;
@@ -35,6 +41,11 @@ describe('config parsing', () => {
   it('rejects invalid stateless flags', () => {
     process.env.MCP_STATELESS = 'yes';
     assert.throws(() => getTransportConfig(), /MCP_STATELESS/);
+  });
+
+  it('rejects invalid verbose payload logging flags', () => {
+    process.env.LOG_VERBOSE_PAYLOADS = 'yes';
+    assert.throws(() => getVerbosePayloadLogging(), /LOG_VERBOSE_PAYLOADS/);
   });
 
   it('rejects invalid session ttl values', () => {
@@ -90,5 +101,14 @@ describe('config parsing', () => {
       maxTranscriptEntries: 50,
       ttlMs: 1000,
     });
+  });
+
+  it('defaults verbose payload logging to false', () => {
+    assert.strictEqual(getVerbosePayloadLogging(), false);
+  });
+
+  it('returns validated verbose payload logging values', () => {
+    process.env.LOG_VERBOSE_PAYLOADS = 'true';
+    assert.strictEqual(getVerbosePayloadLogging(), true);
   });
 });

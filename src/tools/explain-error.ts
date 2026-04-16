@@ -14,7 +14,13 @@ import { getAI, MODEL } from '../client.js';
 const TOOL_LABEL = 'Explain Error';
 
 const SYSTEM_INSTRUCTION =
-  'Debug the provided error. Base conclusions on the provided context and grounded tool results. ' +
+  'You are an expert debugging assistant. Diagnose the provided error.\n\n' +
+  'RESEARCH & SEARCH STRATEGY:\n' +
+  '1. If Google Search is available, DO NOT search the entire stack trace or combined text.\n' +
+  '2. Extract specific, distinct error codes, exception names, or key error messages.\n' +
+  '3. Output these extracted targets inside <search_queries> tags (e.g., `<search_queries>\\n- ENOSPC\\n- "No space left on device"\\n</search_queries>`).\n' +
+  '4. Use the Google Search tool to search for EACH of these targets individually to find the most relevant documentation, issues, or solutions.\n\n' +
+  'Base your conclusions on the provided context and grounded tool results. ' +
   'Reference relevant symbols, files, lines, or snippets. If a language is given, use its norms.\n\n' +
   'Output:\n' +
   '## Cause\n' +

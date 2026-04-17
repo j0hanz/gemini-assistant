@@ -81,7 +81,7 @@ const toolSchemas = new Map<string, string[]>([
 ]);
 
 const promptSchemas = new Map(
-  createPromptDefinitions(async () => []).map((definition) => [
+  createPromptDefinitions().map((definition) => [
     definition.name,
     definition.argsSchema ? schemaInputs(definition.argsSchema) : [],
   ]),

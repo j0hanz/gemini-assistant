@@ -46,6 +46,8 @@ interface SessionEntry {
 export interface SessionSummary {
   id: string;
   lastAccess: number;
+  transcriptCount: number;
+  eventCount: number;
 }
 
 export interface SessionChangeEvent {
@@ -66,15 +68,15 @@ export interface SessionStoreOptions {
 type SessionChangeSubscriber = (event: SessionChangeEvent) => void;
 
 function sessionDetailUri(id: string): string {
-  return `memory://sessions/${id}`;
+  return `memory://sessions/${encodeURIComponent(id)}`;
 }
 
 function sessionTranscriptUri(id: string): string {
-  return `memory://sessions/${id}/transcript`;
+  return `memory://sessions/${encodeURIComponent(id)}/transcript`;
 }
 
 function sessionEventsUri(id: string): string {
-  return `memory://sessions/${id}/events`;
+  return `memory://sessions/${encodeURIComponent(id)}/events`;
 }
 
 function cloneValue<T>(value: T): T {
@@ -109,7 +111,12 @@ function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
 }
 
 function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {
-  return { id, lastAccess: entry.lastAccess };
+  return {
+    id,
+    lastAccess: entry.lastAccess,
+    transcriptCount: entry.transcript.length,
+    eventCount: entry.events.length,
+  };
 }
 
 export class SessionStore {
@@ -161,11 +168,9 @@ export class SessionStore {
   }
 
   listSessionEntries(): SessionSummary[] {
-    const evictedIds = this.evictExpiredSessions();
-    if (evictedIds.length > 0) {
-      this.notifyChange(evictedIds);
-    }
-
+    // Read-only: TTL eviction broadcasting is handled by the periodic sweep
+    // (startEvictionTimer) and by getActiveSessionEntry. This method must not
+    // produce notification side effects on every read.
     return Array.from(this.sessions, ([id, entry]) => toSessionSummary(id, entry));
   }
 
@@ -200,9 +205,10 @@ export class SessionStore {
   }
 
   completeSessionIds(prefix?: string): string[] {
+    const lowered = (prefix ?? '').toLowerCase();
     return this.listSessionEntries()
       .map((session) => session.id)
-      .filter((id) => id.startsWith(prefix ?? ''));
+      .filter((id) => id.toLowerCase().startsWith(lowered));
   }
 
   getSessionEntry(id: string): SessionSummary | undefined {

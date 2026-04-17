@@ -17,6 +17,7 @@ import {
   withRetry,
 } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
+import { logger } from '../lib/logger.js';
 import { buildBaseStructuredOutput, createResourceLink } from '../lib/response.js';
 import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from '../lib/validation.js';
@@ -52,16 +53,29 @@ export interface CacheChangeEvent {
   detailUris: string[];
 }
 
-let changeCallback: ((event: CacheChangeEvent) => void) | undefined;
+type CacheChangeSubscriber = (event: CacheChangeEvent) => void;
 
-export function onCacheChange(cb: (event: CacheChangeEvent) => void): void {
-  changeCallback = cb;
+const cacheChangeSubscribers = new Set<CacheChangeSubscriber>();
+
+export function subscribeCacheChange(cb: CacheChangeSubscriber): () => void {
+  cacheChangeSubscribers.add(cb);
+  return () => {
+    cacheChangeSubscribers.delete(cb);
+  };
 }
 
 function notifyCacheChange(cacheNames: string[] = []): void {
-  changeCallback?.({
+  if (cacheChangeSubscribers.size === 0) return;
+  const event: CacheChangeEvent = {
     detailUris: cacheNames.map((cacheName) => `memory://caches/${encodeURIComponent(cacheName)}`),
-  });
+  };
+  for (const subscriber of cacheChangeSubscribers) {
+    try {
+      subscriber(event);
+    } catch (err) {
+      logger.warn('memory', `Cache change subscriber threw: ${String(err)}`);
+    }
+  }
 }
 
 function formatCacheListMarkdown(caches: CacheSummary[]): string {

@@ -14,7 +14,7 @@ import {
   ReviewPromptSchema,
 } from '../src/prompts.js';
 
-const promptDefinitions = createPromptDefinitions(async () => []);
+const promptDefinitions = createPromptDefinitions();
 
 describe('prompt definitions', () => {
   it('exports the full public prompt surface', () => {

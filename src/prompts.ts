@@ -1,12 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/server';
+import { completable } from '@modelcontextprotocol/server';
 
 import { z } from 'zod/v4';
 
-import { buildServerRootsFetcher, type RootsFetcher } from './lib/validation.js';
 import { goalText, optionalText, PublicJobNameSchema } from './schemas/shared.js';
 
 import { findWorkflowEntry } from './catalog.js';
-import type { PublicPromptName } from './public-contract.js';
+import type { PublicPromptName, PublicWorkflowName } from './public-contract.js';
 
 export { PUBLIC_PROMPT_NAMES } from './public-contract.js';
 
@@ -63,7 +63,7 @@ function userPromptMessage(text: string) {
   };
 }
 
-function renderWorkflowSection(name: string): string {
+function renderWorkflowSection(name: PublicWorkflowName): string {
   const workflow = findWorkflowEntry(name);
   if (!workflow) {
     throw new Error(`Unknown workflow: ${name}`);
@@ -80,40 +80,64 @@ function renderWorkflowSection(name: string): string {
   ].join('\n\n');
 }
 
-export const DiscoverPromptSchema = z.strictObject({
-  job: PublicJobNameSchema.optional(),
-  goal: optionalText('Optional user goal to narrow the recommendation'),
-});
+const RESEARCH_MODE_OPTIONS = ['quick', 'deep'] as const;
+const REVIEW_SUBJECT_OPTIONS = ['diff', 'comparison', 'failure'] as const;
+const MEMORY_ACTION_OPTIONS = [
+  'sessions.list',
+  'sessions.get',
+  'sessions.transcript',
+  'sessions.events',
+  'caches.list',
+  'caches.get',
+  'caches.create',
+  'caches.update',
+  'caches.delete',
+  'workspace.context',
+  'workspace.cache',
+] as const;
 
-export const ResearchPromptSchema = z.strictObject({
-  goal: goalText('Research goal or question'),
-  mode: z.enum(['quick', 'deep']).optional(),
-  deliverable: optionalText('Optional requested deliverable'),
-});
+function filterByPrefix<T extends string>(values: readonly T[], prefix: string): T[] {
+  if (!prefix) return [...values];
+  const lowered = prefix.toLowerCase();
+  return values.filter((value) => value.toLowerCase().startsWith(lowered));
+}
 
-export const ReviewPromptSchema = z.strictObject({
-  subject: z.enum(['diff', 'comparison', 'failure']).optional(),
-  focus: optionalText('Optional review focus'),
-});
+export const DiscoverPromptSchema = z
+  .strictObject({
+    job: completable(PublicJobNameSchema.optional(), (value) =>
+      filterByPrefix(['chat', 'research', 'analyze', 'review', 'memory', 'discover'], value ?? ''),
+    ),
+    goal: optionalText('Optional user goal to narrow the recommendation'),
+  })
+  .describe('Guide a client to the best public job, prompt, and resource.');
 
-export const MemoryPromptSchema = z.strictObject({
-  action: z
-    .enum([
-      'sessions.list',
-      'sessions.get',
-      'sessions.transcript',
-      'sessions.events',
-      'caches.list',
-      'caches.get',
-      'caches.create',
-      'caches.update',
-      'caches.delete',
-      'workspace.context',
-      'workspace.cache',
-    ])
-    .optional(),
-  task: optionalText('Optional task or context that should shape the memory advice'),
-});
+export const ResearchPromptSchema = z
+  .strictObject({
+    goal: goalText('Research goal or question'),
+    mode: completable(z.enum(RESEARCH_MODE_OPTIONS).optional(), (value) =>
+      filterByPrefix(RESEARCH_MODE_OPTIONS, value ?? ''),
+    ),
+    deliverable: optionalText('Optional requested deliverable'),
+  })
+  .describe('Explain the quick-versus-deep research decision flow.');
+
+export const ReviewPromptSchema = z
+  .strictObject({
+    subject: completable(z.enum(REVIEW_SUBJECT_OPTIONS).optional(), (value) =>
+      filterByPrefix(REVIEW_SUBJECT_OPTIONS, value ?? ''),
+    ),
+    focus: optionalText('Optional review focus'),
+  })
+  .describe('Guide diff review, file comparison, or failure triage.');
+
+export const MemoryPromptSchema = z
+  .strictObject({
+    action: completable(z.enum(MEMORY_ACTION_OPTIONS).optional(), (value) =>
+      filterByPrefix(MEMORY_ACTION_OPTIONS, value ?? ''),
+    ),
+    task: optionalText('Optional task or context that should shape the memory advice'),
+  })
+  .describe('Explain how sessions, caches, and workspace memory fit together.');
 
 export function buildDiscoverPrompt(args: z.infer<typeof DiscoverPromptSchema>) {
   return userPromptMessage(
@@ -160,7 +184,7 @@ export function buildMemoryPrompt(args: z.infer<typeof MemoryPromptSchema>) {
   );
 }
 
-export function createPromptDefinitions(_rootsFetcher: RootsFetcher): PromptDefinition[] {
+export function createPromptDefinitions(): PromptDefinition[] {
   return [
     definePrompt({
       name: 'discover',
@@ -193,10 +217,8 @@ export function createPromptDefinitions(_rootsFetcher: RootsFetcher): PromptDefi
   ];
 }
 
-export function registerPrompts(server: McpServer, rootsFetcher?: RootsFetcher): void {
-  const fetcher = rootsFetcher ?? buildServerRootsFetcher(server);
-
-  for (const definition of createPromptDefinitions(fetcher)) {
+export function registerPrompts(server: McpServer): void {
+  for (const definition of createPromptDefinitions()) {
     server.registerPrompt(
       definition.name,
       {
@@ -204,7 +226,13 @@ export function registerPrompts(server: McpServer, rootsFetcher?: RootsFetcher):
         description: definition.description,
         ...(definition.argsSchema ? { argsSchema: definition.argsSchema } : {}),
       },
-      (args) => definition.buildMessage((args ?? {}) as Record<string, unknown>),
+      async (args) => {
+        const built = await definition.buildMessage((args ?? {}) as Record<string, unknown>);
+        return {
+          description: definition.description,
+          ...built,
+        };
+      },
     );
   }
 }

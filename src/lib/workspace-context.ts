@@ -186,10 +186,23 @@ export async function assembleWorkspaceContext(roots: string[]): Promise<Workspa
 
 // ── Cache Lifecycle Manager ───────────────────────────────────────────
 
-let onChangeCallback: CacheChangeCallback | undefined;
+const workspaceCacheChangeSubscribers = new Set<CacheChangeCallback>();
 
-export function onWorkspaceCacheChange(callback: CacheChangeCallback): void {
-  onChangeCallback = callback;
+export function subscribeWorkspaceCacheChange(callback: CacheChangeCallback): () => void {
+  workspaceCacheChangeSubscribers.add(callback);
+  return () => {
+    workspaceCacheChangeSubscribers.delete(callback);
+  };
+}
+
+function emitWorkspaceCacheChange(status: WorkspaceCacheStatus): void {
+  for (const subscriber of workspaceCacheChangeSubscribers) {
+    try {
+      subscriber(status);
+    } catch (err) {
+      logger.warn('workspace', `Workspace cache change subscriber threw: ${String(err)}`);
+    }
+  }
 }
 
 class WorkspaceCacheManagerImpl {
@@ -200,6 +213,7 @@ class WorkspaceCacheManagerImpl {
   private createdAt: number | undefined;
   private inflightCreation: Promise<string | undefined> | undefined;
   private lastHashCheck: number | undefined;
+  private generation = 0;
 
   async getOrCreateCache(roots: string[], signal?: AbortSignal): Promise<string | undefined> {
     if (!getWorkspaceCacheEnabled()) return undefined;
@@ -246,6 +260,7 @@ class WorkspaceCacheManagerImpl {
   }
 
   invalidate(): void {
+    this.generation++;
     this.cacheName = undefined;
     this.contentHash = undefined;
     this.estimatedTokens = undefined;
@@ -307,6 +322,7 @@ class WorkspaceCacheManagerImpl {
     ctx: WorkspaceContextResult,
     signal?: AbortSignal,
   ): Promise<string | undefined> {
+    const gen = this.generation;
     try {
       if (ctx.estimatedTokens < MIN_CACHE_TOKENS) {
         logger.warn(
@@ -332,6 +348,12 @@ class WorkspaceCacheManagerImpl {
           }),
         ...(signal ? [{ signal }] : []),
       );
+
+      if (gen !== this.generation) {
+        logger.info('workspace', 'Cache creation completed but invalidated mid-flight, discarding');
+        await this.deleteCacheBestEffort(cache.name ?? '', signal);
+        return undefined;
+      }
 
       this.cacheName = cache.name;
       this.contentHash = hashContent(ctx.content);
@@ -361,7 +383,7 @@ class WorkspaceCacheManagerImpl {
   }
 
   private emitChange(): void {
-    onChangeCallback?.(this.getCacheStatus());
+    emitWorkspaceCacheChange(this.getCacheStatus());
   }
 }
 

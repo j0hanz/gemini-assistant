@@ -97,7 +97,7 @@ describe('tool registration', () => {
 
   it('keeps the exported prompt and resource surface aligned with discoverability docs', () => {
     assert.deepStrictEqual(
-      createPromptDefinitions(async () => []).map((definition) => definition.name),
+      createPromptDefinitions().map((definition) => definition.name),
       [...PUBLIC_PROMPT_NAMES],
     );
     assert.deepStrictEqual(

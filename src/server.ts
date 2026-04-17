@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
 import { buildServerRootsFetcher } from './lib/validation.js';
-import { onWorkspaceCacheChange } from './lib/workspace-context.js';
+import { subscribeWorkspaceCacheChange } from './lib/workspace-context.js';
 
 import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
@@ -19,7 +19,7 @@ import { registerAnalyzeTool } from './tools/analyze.js';
 import { registerChatTool } from './tools/chat.js';
 import { registerDiscoverTool } from './tools/discover.js';
 import { registerMemoryTool } from './tools/memory.js';
-import { type CacheChangeEvent, onCacheChange } from './tools/memory.js';
+import { type CacheChangeEvent, subscribeCacheChange } from './tools/memory.js';
 import { registerResearchTool } from './tools/research-job.js';
 import { registerReviewTool } from './tools/review.js';
 import type { ServerInstance } from './transport.js';
@@ -70,15 +70,29 @@ const SERVER_INSTRUCTIONS =
   'discover (guidance, workflows, prompts, resources, and limitation notes). ' +
   'Use discover://catalog and discover://workflows for the canonical public surface.';
 
+const ALLOWED_URI_SCHEMES = ['memory://', 'discover://'];
+
+function isAllowedResourceUri(uri: string): boolean {
+  return ALLOWED_URI_SCHEMES.some((scheme) => uri.startsWith(scheme));
+}
+
 function sendResourceChangedForServer(
   server: McpServer,
   listUri: string,
   detailUris: readonly string[] = [],
 ): void {
   if (!server.isConnected()) return;
+  if (!isAllowedResourceUri(listUri)) {
+    logger.warn('server', `Blocked resource notification with unexpected URI: ${listUri}`);
+    return;
+  }
   server.sendResourceListChanged();
   void server.server.sendResourceUpdated({ uri: listUri });
   for (const uri of detailUris) {
+    if (!isAllowedResourceUri(uri)) {
+      logger.warn('server', `Blocked resource notification with unexpected URI: ${uri}`);
+      continue;
+    }
     void server.server.sendResourceUpdated({ uri });
   }
 }
@@ -89,12 +103,13 @@ function sendResourceChanged(listUri: string, detailUris: readonly string[] = []
   }
 }
 
-onCacheChange(({ detailUris }: CacheChangeEvent) => {
+function handleCacheChange({ detailUris }: CacheChangeEvent): void {
   sendResourceChanged('memory://caches', detailUris);
-});
-onWorkspaceCacheChange(() => {
+}
+
+function handleWorkspaceCacheChange(): void {
   sendResourceChanged('memory://workspace/cache');
-});
+}
 
 export function createServerInstance(): ServerInstance {
   const sessionStore = createSessionStore();
@@ -132,6 +147,8 @@ export function createServerInstance(): ServerInstance {
       ]);
     },
   );
+  const unsubscribeCacheChange = subscribeCacheChange(handleCacheChange);
+  const unsubscribeWorkspaceCacheChange = subscribeWorkspaceCacheChange(handleWorkspaceCacheChange);
 
   activeServers.add(server);
 
@@ -140,7 +157,7 @@ export function createServerInstance(): ServerInstance {
   }
 
   const rootsFetcher = buildServerRootsFetcher(server);
-  registerPrompts(server, rootsFetcher);
+  registerPrompts(server);
   registerResources(server, sessionStore, rootsFetcher);
 
   return {
@@ -148,12 +165,31 @@ export function createServerInstance(): ServerInstance {
     close: async () => {
       if (closed) return;
       closed = true;
-      unsubscribeSessionChange();
-      sessionStore.close();
-      activeServers.delete(server);
-      detachLogger();
-      taskStore.cleanup();
-      await server.close();
+      const safeRun = (label: string, fn: () => void): void => {
+        try {
+          fn();
+        } catch (err) {
+          logger.warn('server', `close: ${label} failed: ${String(err)}`);
+        }
+      };
+      safeRun('unsubscribeSessionChange', unsubscribeSessionChange);
+      safeRun('unsubscribeCacheChange', unsubscribeCacheChange);
+      safeRun('unsubscribeWorkspaceCacheChange', unsubscribeWorkspaceCacheChange);
+      safeRun('sessionStore.close', () => {
+        sessionStore.close();
+      });
+      safeRun('activeServers.delete', () => {
+        activeServers.delete(server);
+      });
+      safeRun('detachLogger', detachLogger);
+      safeRun('taskStore.cleanup', () => {
+        taskStore.cleanup();
+      });
+      try {
+        await server.close();
+      } catch (err) {
+        logger.warn('server', `close: server.close failed: ${String(err)}`);
+      }
     },
   };
 }

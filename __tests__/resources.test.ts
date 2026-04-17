@@ -115,23 +115,18 @@ describe('session transcript resource', () => {
     assert.match(result.contents[1]?.text ?? '', /## assistant/);
   });
 
-  it('renders a not-found markdown body for a missing session transcript', () => {
+  it('renders a not-found error for a missing session transcript', () => {
     const store = createStore();
-    const result = readSessionTranscriptResource(
-      store,
-      'memory://sessions/missing/transcript',
-      'missing',
+    assert.throws(
+      () => readSessionTranscriptResource(store, 'memory://sessions/missing/transcript', 'missing'),
+      { message: /not found/i },
     );
-    assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
-    assert.match(result.contents[1]?.text ?? '', /Session not found/);
   });
 
-  it('returns a stable error payload for a missing session transcript', () => {
+  it('throws ProtocolError for a missing session transcript', () => {
     const store = createStore();
-    assert.deepStrictEqual(getSessionTranscriptResourceData(store, 'missing-session'), {
-      status: 'error',
-      code: 'session_not_found',
-      message: 'Session not found',
+    assert.throws(() => getSessionTranscriptResourceData(store, 'missing-session'), {
+      message: /not found/i,
     });
   });
 });
@@ -171,19 +166,18 @@ describe('session events resource', () => {
     assert.match(result.contents[1]?.text ?? '', /- tool_call \(GOOGLE_SEARCH_WEB\)/);
   });
 
-  it('renders a not-found markdown body for a missing session events resource', () => {
+  it('throws ProtocolError for a missing session events resource', () => {
     const store = createStore();
-    const result = readSessionEventsResource(store, 'memory://sessions/missing/events', 'missing');
-    assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
-    assert.match(result.contents[1]?.text ?? '', /Session not found/);
+    assert.throws(
+      () => readSessionEventsResource(store, 'memory://sessions/missing/events', 'missing'),
+      { message: /not found/i },
+    );
   });
 
-  it('returns a stable error payload for a missing session events resource', () => {
+  it('throws ProtocolError for a missing session events data', () => {
     const store = createStore();
-    assert.deepStrictEqual(getSessionEventsResourceData(store, 'missing-session'), {
-      status: 'error',
-      code: 'session_not_found',
-      message: 'Session not found',
+    assert.throws(() => getSessionEventsResourceData(store, 'missing-session'), {
+      message: /not found/i,
     });
   });
 });

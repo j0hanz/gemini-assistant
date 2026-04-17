@@ -36,7 +36,7 @@
     "type-check": "tsc --noEmit",
     "knip": "knip",
     "check": "tsc && eslint . && prettier --check . && knip",
-    "test": "node --import tsx/esm --test --no-warnings __tests__/**/*.test.ts __tests__/**/**/*.test.ts",
+    "test": "node --import tsx/esm --env-file=.env --test --no-warnings __tests__/**/*.test.ts __tests__/**/**/*.test.ts",
     "inspector": "npm run build && npx -y @modelcontextprotocol/inspector node --env-file=.env dist/index.js"
   },
   "engines": {

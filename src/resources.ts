@@ -1,7 +1,8 @@
 import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server';
-import { ResourceTemplate } from '@modelcontextprotocol/server';
+import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontextprotocol/server';
 
 import { formatError } from './lib/errors.js';
+import { logger } from './lib/logger.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from './lib/validation.js';
 import { assembleWorkspaceContext, workspaceCacheManager } from './lib/workspace-context.js';
 
@@ -21,33 +22,14 @@ interface ResourceListEntry {
   name: string;
 }
 
-export interface ResourceErrorEnvelope {
-  status: 'error';
-  code: string;
-  message: string;
-}
+type SessionTranscriptResourceData = {
+  role: 'user' | 'assistant';
+  text: string;
+  timestamp: number;
+  taskId?: string;
+}[];
 
-function resourceError(code: string, message: string): ResourceErrorEnvelope {
-  return { status: 'error', code, message };
-}
-
-const SESSION_NOT_FOUND_ERROR: ResourceErrorEnvelope = resourceError(
-  'session_not_found',
-  'Session not found',
-);
-
-type SessionTranscriptResourceData =
-  | {
-      role: 'user' | 'assistant';
-      text: string;
-      timestamp: number;
-      taskId?: string;
-    }[]
-  | ResourceErrorEnvelope;
-
-type SessionEventsResourceData =
-  | ReturnType<SessionStore['listSessionEventEntries']>
-  | ResourceErrorEnvelope;
+type SessionEventsResourceData = NonNullable<ReturnType<SessionStore['listSessionEventEntries']>>;
 
 const DISCOVER_CATALOG_RESOURCE: ResourceListEntry = {
   uri: 'discover://catalog',
@@ -101,19 +83,6 @@ function textResource(uri: string, text: string): ReadResourceResult {
 
 function normalizeTemplateParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
-}
-
-function asyncJsonResource(
-  load: () => Promise<unknown>,
-  mapError: (err: unknown) => unknown,
-): (uri: URL) => Promise<ReadResourceResult> {
-  return async (uri) => {
-    try {
-      return jsonResource(uri.href, await load());
-    } catch (err) {
-      return jsonResource(uri.href, mapError(err));
-    }
-  };
 }
 
 function toResourceUri(uri: URL | string): string {
@@ -206,10 +175,6 @@ export function renderSessionTranscriptMarkdown(
 ): string {
   const header = sessionId ? `# Session Transcript \`${sessionId}\`` : '# Session Transcript';
 
-  if (!Array.isArray(data)) {
-    return [header, '', '_Session not found._', ''].join('\n');
-  }
-
   if (data.length === 0) {
     return [header, '', '_No transcript entries yet._', ''].join('\n');
   }
@@ -228,11 +193,14 @@ export function getSessionTranscriptResourceData(
   sessionId: string | undefined,
 ): SessionTranscriptResourceData {
   if (!sessionId) {
-    return SESSION_NOT_FOUND_ERROR;
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Session ID required');
   }
 
   const transcript = sessionStore.listSessionTranscriptEntries(sessionId);
-  return transcript ?? SESSION_NOT_FOUND_ERROR;
+  if (!transcript) {
+    throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Session '${sessionId}' not found`);
+  }
+  return transcript;
 }
 
 export function getSessionEventsResourceData(
@@ -240,11 +208,14 @@ export function getSessionEventsResourceData(
   sessionId: string | undefined,
 ): SessionEventsResourceData {
   if (!sessionId) {
-    return SESSION_NOT_FOUND_ERROR;
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Session ID required');
   }
 
   const events = sessionStore.listSessionEventEntries(sessionId);
-  return events ?? SESSION_NOT_FOUND_ERROR;
+  if (!events) {
+    throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Session '${sessionId}' not found`);
+  }
+  return events;
 }
 
 export function readSessionTranscriptResource(
@@ -262,10 +233,6 @@ export function renderSessionEventsMarkdown(
   data: SessionEventsResourceData,
 ): string {
   const header = sessionId ? `# Session Events \`${sessionId}\`` : '# Session Events';
-
-  if (!Array.isArray(data)) {
-    return [header, '', '_Session not found._', ''].join('\n');
-  }
 
   if (data.length === 0) {
     return [header, '', '_No events yet._', ''].join('\n');
@@ -317,6 +284,10 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
       title: 'Active Chat Sessions',
       description: 'List of active server-managed chat sessions and their last access time.',
       mimeType: 'application/json',
+      annotations: {
+        audience: ['assistant'],
+        priority: 0.7,
+      },
     },
     (uri): ReadResourceResult => jsonResource(uri.href, sessionStore.listSessionEntries()),
   );
@@ -333,11 +304,21 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
       title: 'Chat Session Detail',
       description: 'Metadata for a single server-managed chat session by ID.',
       mimeType: 'application/json',
+      annotations: {
+        audience: ['assistant'],
+        priority: 0.7,
+      },
     },
     (uri, { sessionId }): ReadResourceResult => {
       const id = normalizeTemplateParam(sessionId);
-      const entry = id ? sessionStore.getSessionEntry(id) : undefined;
-      return jsonResource(uri.href, entry ?? SESSION_NOT_FOUND_ERROR);
+      if (!id) {
+        throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Session ID required');
+      }
+      const entry = sessionStore.getSessionEntry(id);
+      if (!entry) {
+        throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Session '${id}' not found`);
+      }
+      return jsonResource(uri.href, entry);
     },
   );
 
@@ -397,23 +378,25 @@ function registerCacheResources(server: McpServer): void {
       title: 'Gemini Context Caches',
       description: 'List of active Gemini context caches with name, model, and expiry.',
       mimeType: 'application/json',
+      annotations: {
+        audience: ['assistant'],
+        priority: 0.7,
+      },
     },
-    asyncJsonResource(
-      () => listCacheSummaries(),
-      (err) => resourceError('cache_list_failed', `Failed to list caches: ${formatError(err)}`),
-    ),
+    async (uri): Promise<ReadResourceResult> => {
+      try {
+        return jsonResource(uri.href, await listCacheSummaries());
+      } catch (err) {
+        logger.error('resources', `Failed to list caches: ${formatError(err)}`);
+        throw new ProtocolError(ProtocolErrorCode.InternalError, 'Failed to list caches');
+      }
+    },
   );
 
   server.registerResource(
     'memory-cache-detail',
     new ResourceTemplate('memory://caches/{cacheName}', {
-      list: async () => {
-        try {
-          return { resources: cacheDetailResources(await listCacheSummaries()) };
-        } catch {
-          return { resources: [] };
-        }
-      },
+      list: async () => ({ resources: cacheDetailResources(await listCacheSummaries()) }),
       complete: {
         cacheName: completeCacheNames,
       },
@@ -422,19 +405,22 @@ function registerCacheResources(server: McpServer): void {
       title: 'Cache Detail',
       description: 'Full detail for a single Gemini context cache including token count.',
       mimeType: 'application/json',
+      annotations: {
+        audience: ['assistant'],
+        priority: 0.7,
+      },
     },
     async (uri, { cacheName }) => {
       const name = normalizeTemplateParam(cacheName);
-      if (!name)
-        return jsonResource(uri.href, resourceError('cache_name_required', 'Cache name required'));
+      if (!name) {
+        throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Cache name required');
+      }
       const decoded = decodeURIComponent(name);
       try {
         return jsonResource(uri.href, await getCacheSummary(decoded));
       } catch (err) {
-        return jsonResource(
-          uri.href,
-          resourceError('cache_get_failed', `Failed to get cache: ${formatError(err)}`),
-        );
+        logger.error('resources', `Failed to get cache '${decoded}': ${formatError(err)}`);
+        throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Cache '${decoded}' not found`);
       }
     },
   );
@@ -499,7 +485,11 @@ function registerWorkspaceResources(server: McpServer, rootsFetcher: RootsFetche
           estimatedTokens: ctx.estimatedTokens,
         });
       } catch (err) {
-        return textResource(uri.href, `# Workspace Context Error\n\n${formatError(err)}`);
+        logger.error('resources', `Failed to assemble workspace context: ${formatError(err)}`);
+        throw new ProtocolError(
+          ProtocolErrorCode.InternalError,
+          'Failed to assemble workspace context',
+        );
       }
     },
   );

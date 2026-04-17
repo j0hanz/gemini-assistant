@@ -1,9 +1,10 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { completable } from '@modelcontextprotocol/server';
 
-import { readdir } from 'node:fs/promises';
+import { stat as fsStat, readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 
+import ignore, { type Ignore } from 'ignore';
 import { z } from 'zod/v4';
 
 import {
@@ -20,7 +21,7 @@ import {
   workspacePath,
 } from './schemas/shared.js';
 
-import { findWorkflowEntry } from './catalog.js';
+import { findWorkflowEntry, type WorkflowName } from './catalog.js';
 
 const MAX_PROMPT_TEXT_LENGTH = 100_000;
 const MAX_CONTEXT_TEXT_LENGTH = 10_000;
@@ -57,15 +58,43 @@ export const PUBLIC_PROMPT_NAMES = [
 
 type SummaryStyle = (typeof SUMMARY_STYLES)[number];
 type PromptName = (typeof PUBLIC_PROMPT_NAMES)[number];
+type PromptMessageResult = ReturnType<typeof userPromptMessage>;
+type BuildMessageResult = PromptMessageResult | Promise<PromptMessageResult>;
 
 interface PromptDefinition {
   name: PromptName;
   title: string;
   description: string;
   argsSchema?: z.ZodType;
-  buildMessage:
-    | ((args: Record<string, unknown>) => ReturnType<typeof userPromptMessage>)
-    | ((args: Record<string, unknown>) => Promise<ReturnType<typeof userPromptMessage>>);
+  buildMessage: (args: Record<string, unknown>) => BuildMessageResult;
+}
+
+function definePrompt<Schema extends z.ZodType>(config: {
+  name: PromptName;
+  title: string;
+  description: string;
+  argsSchema: Schema;
+  buildMessage: (args: z.infer<Schema>) => BuildMessageResult;
+}): PromptDefinition;
+function definePrompt(config: {
+  name: PromptName;
+  title: string;
+  description: string;
+  buildMessage: () => BuildMessageResult;
+}): PromptDefinition;
+function definePrompt(config: {
+  name: PromptName;
+  title: string;
+  description: string;
+  argsSchema?: z.ZodType;
+  buildMessage: (args: never) => BuildMessageResult;
+}): PromptDefinition {
+  const { argsSchema, buildMessage, ...rest } = config;
+  return {
+    ...rest,
+    ...(argsSchema ? { argsSchema } : {}),
+    buildMessage: (args) => buildMessage(args as never),
+  };
 }
 
 function promptText(description: string) {
@@ -119,7 +148,7 @@ function summarizeConstraint(style: SummaryStyle | undefined): string {
   }
 }
 
-function renderWorkflowSection(name: string): string {
+function renderWorkflowSection(name: WorkflowName): string {
   const workflow = findWorkflowEntry(name);
   if (!workflow) {
     throw new Error(`Unknown workflow: ${name}`);
@@ -150,12 +179,7 @@ export function createAnalyzeFilePromptSchema(rootsFetcher: RootsFetcher) {
 }
 
 export const CodeReviewPromptSchema = z.strictObject({
-  code: z
-    .string()
-    .min(1)
-    .max(MAX_PROMPT_TEXT_LENGTH)
-    .refine((val) => val.trim().length > 0, { error: 'Code must not be blank' })
-    .describe('The code to review'),
+  code: promptText('The code to review'),
   language: completable(optionalPromptText('Programming language of the code'), completeLanguage),
 });
 
@@ -168,19 +192,8 @@ export const SummarizePromptSchema = z.strictObject({
 });
 
 export const ExplainErrorPromptSchema = z.strictObject({
-  error: z
-    .string()
-    .min(1)
-    .max(MAX_PROMPT_TEXT_LENGTH)
-    .refine((val) => val.trim().length > 0, { error: 'Error must not be blank' })
-    .describe('The error message or stack trace'),
-  context: z
-    .string()
-    .min(1)
-    .max(MAX_CONTEXT_TEXT_LENGTH)
-    .refine((val) => val.trim().length > 0, { error: 'Context must not be blank' })
-    .optional()
-    .describe('Additional context about what was being done'),
+  error: promptText('The error message or stack trace'),
+  context: optionalText('Additional context about what was being done', MAX_CONTEXT_TEXT_LENGTH),
 });
 
 export const GettingStartedPromptSchema = z.strictObject({});
@@ -273,69 +286,62 @@ export function createPromptDefinitions(rootsFetcher: RootsFetcher): PromptDefin
   const analyzeFileSchema = createAnalyzeFilePromptSchema(rootsFetcher);
 
   return [
-    {
+    definePrompt({
       name: 'analyze-file',
       title: 'Analyze File',
       description: withCurrentWorkspaceRoot('Analyze a specific file with a custom question.'),
       argsSchema: analyzeFileSchema,
-      buildMessage: (args) =>
-        buildAnalyzeFilePrompt(
-          args as z.infer<ReturnType<typeof createAnalyzeFilePromptSchema>>,
-          rootsFetcher,
-        ),
-    },
-    {
+      buildMessage: (args) => buildAnalyzeFilePrompt(args, rootsFetcher),
+    }),
+    definePrompt({
       name: 'code-review',
       title: 'Code Review',
       description: 'Review code for bugs, best practices, and potential improvements.',
       argsSchema: CodeReviewPromptSchema,
-      buildMessage: (args) => buildCodeReviewPrompt(args as z.infer<typeof CodeReviewPromptSchema>),
-    },
-    {
+      buildMessage: buildCodeReviewPrompt,
+    }),
+    definePrompt({
       name: 'summarize',
       title: 'Summarize Text',
       description: 'Condense text into a concise summary.',
       argsSchema: SummarizePromptSchema,
-      buildMessage: (args) => buildSummarizePrompt(args as z.infer<typeof SummarizePromptSchema>),
-    },
-    {
+      buildMessage: buildSummarizePrompt,
+    }),
+    definePrompt({
       name: 'explain-error',
       title: 'Explain Error',
       description: 'Explain an error message and suggest fixes.',
       argsSchema: ExplainErrorPromptSchema,
-      buildMessage: (args) =>
-        buildExplainErrorPrompt(args as z.infer<typeof ExplainErrorPromptSchema>),
-    },
-    {
+      buildMessage: buildExplainErrorPrompt,
+    }),
+    definePrompt({
       name: 'getting-started',
       title: 'Getting Started',
       description: 'Guide a first-time user through the recommended MCP onboarding path.',
       argsSchema: GettingStartedPromptSchema,
       buildMessage: () => buildGettingStartedPrompt(),
-    },
-    {
+    }),
+    definePrompt({
       name: 'deep-research',
       title: 'Deep Research',
       description: 'Guide a grounded research workflow with the recommended tools and resources.',
       argsSchema: DeepResearchPromptSchema,
-      buildMessage: (args) =>
-        buildDeepResearchPrompt(args as z.infer<typeof DeepResearchPromptSchema>),
-    },
-    {
+      buildMessage: buildDeepResearchPrompt,
+    }),
+    definePrompt({
       name: 'project-memory',
       title: 'Project Memory',
       description: 'Explain when to use sessions, caches, and transcript inspection together.',
       argsSchema: ProjectMemoryPromptSchema,
-      buildMessage: (args) =>
-        buildProjectMemoryPrompt(args as z.infer<typeof ProjectMemoryPromptSchema>),
-    },
-    {
+      buildMessage: buildProjectMemoryPrompt,
+    }),
+    definePrompt({
       name: 'diff-review',
       title: 'Diff Review',
       description: 'Guide a local diff review workflow without adding remote integrations.',
       argsSchema: DiffReviewPromptSchema,
-      buildMessage: (args) => buildDiffReviewPrompt(args as z.infer<typeof DiffReviewPromptSchema>),
-    },
+      buildMessage: buildDiffReviewPrompt,
+    }),
   ];
 }
 
@@ -356,7 +362,7 @@ function buildPathAcFetcher(rootsFetcher: RootsFetcher) {
       }
 
       if (isAbsolute(rawValue)) {
-        return await collectAbsolutePathSuggestions(rawValue, allowedRoots);
+        return await collectAbsolutePathSuggestions(rawValue, allowedRoots, workspaceRoots);
       }
 
       return await collectRelativePathSuggestions(rawValue, workspaceRoots, allowedRoots);
@@ -366,9 +372,45 @@ function buildPathAcFetcher(rootsFetcher: RootsFetcher) {
   };
 }
 
+interface GitignoreCacheEntry {
+  matcher: Ignore | null;
+  mtimeMs: number;
+}
+
+const gitignoreCache = new Map<string, GitignoreCacheEntry>();
+
+async function loadGitignoreMatcher(root: string): Promise<Ignore | null> {
+  const gitignorePath = join(root, '.gitignore');
+  try {
+    const info = await fsStat(gitignorePath);
+    const cached = gitignoreCache.get(root);
+    if (cached?.mtimeMs === info.mtimeMs) return cached.matcher;
+    const content = await readFile(gitignorePath, 'utf-8');
+    const matcher = ignore().add(content).add('.git');
+    gitignoreCache.set(root, { matcher, mtimeMs: info.mtimeMs });
+    return matcher;
+  } catch {
+    gitignoreCache.set(root, { matcher: null, mtimeMs: 0 });
+    return null;
+  }
+}
+
+function isIgnored(matcher: Ignore | null, relativePath: string, isDirectory: boolean): boolean {
+  if (!matcher || !relativePath) return false;
+  // `ignore` requires a trailing slash hint for directories so rules like
+  // `node_modules/` match correctly.
+  const candidate = isDirectory ? `${relativePath}/` : relativePath;
+  return matcher.ignores(candidate);
+}
+
+function pickContainingRoot(target: string, roots: readonly string[]): string | undefined {
+  return roots.find((root) => isPathWithinRoot(target, root));
+}
+
 async function collectAbsolutePathSuggestions(
   rawValue: string,
   allowedRoots: string[],
+  workspaceRoots: readonly string[],
 ): Promise<string[]> {
   const normalized = normalize(rawValue);
   const targetDir =
@@ -383,16 +425,27 @@ async function collectAbsolutePathSuggestions(
       .map(toPortablePath);
   }
 
+  const containingWorkspaceRoot = pickContainingRoot(targetDir, workspaceRoots);
+  const matcher = containingWorkspaceRoot
+    ? await loadGitignoreMatcher(containingWorkspaceRoot)
+    : null;
+
   try {
     const entries = await readdir(targetDir, { withFileTypes: true });
-    return entries
-      .filter(
-        (entry) => !targetPrefix || entry.name.toLowerCase().startsWith(targetPrefix.toLowerCase()),
-      )
-      .map(
-        (entry) => toPortablePath(join(targetDir, entry.name)) + (entry.isDirectory() ? '/' : ''),
-      )
-      .slice(0, 50);
+    const results: string[] = [];
+    for (const entry of entries) {
+      if (targetPrefix && !entry.name.toLowerCase().startsWith(targetPrefix.toLowerCase())) {
+        continue;
+      }
+      const absolutePath = join(targetDir, entry.name);
+      if (containingWorkspaceRoot) {
+        const relativePath = toPortablePath(relative(containingWorkspaceRoot, absolutePath));
+        if (isIgnored(matcher, relativePath, entry.isDirectory())) continue;
+      }
+      results.push(toPortablePath(absolutePath) + (entry.isDirectory() ? '/' : ''));
+      if (results.length >= 50) break;
+    }
+    return results;
   } catch {
     return allowedRoots
       .filter((root) => root.toLowerCase().startsWith(normalized.toLowerCase()))
@@ -425,6 +478,8 @@ async function collectRelativePathSuggestions(
     if (!isPathWithinRoot(targetDir, workspaceRoot)) continue;
     if (!allowedRoots.some((root) => isPathWithinRoot(targetDir, root))) continue;
 
+    const matcher = await loadGitignoreMatcher(workspaceRoot);
+
     try {
       const entries = await readdir(targetDir, { withFileTypes: true });
       for (const entry of entries) {
@@ -433,6 +488,7 @@ async function collectRelativePathSuggestions(
         }
 
         const relativePath = toPortablePath(relative(workspaceRoot, join(targetDir, entry.name)));
+        if (isIgnored(matcher, relativePath, entry.isDirectory())) continue;
         suggestions.add(relativePath + (entry.isDirectory() ? '/' : ''));
         if (suggestions.size >= 50) {
           return [...suggestions];
@@ -446,10 +502,10 @@ async function collectRelativePathSuggestions(
   return [...suggestions];
 }
 
-export function registerPrompts(server: McpServer): void {
-  const rootsFetcher = buildServerRootsFetcher(server);
+export function registerPrompts(server: McpServer, rootsFetcher?: RootsFetcher): void {
+  const fetcher = rootsFetcher ?? buildServerRootsFetcher(server);
 
-  for (const definition of createPromptDefinitions(rootsFetcher)) {
+  for (const definition of createPromptDefinitions(fetcher)) {
     server.registerPrompt(
       definition.name,
       {

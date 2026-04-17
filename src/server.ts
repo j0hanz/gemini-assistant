@@ -9,6 +9,7 @@ import { join } from 'node:path';
 
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
+import { buildServerRootsFetcher } from './lib/validation.js';
 import { onWorkspaceCacheChange } from './lib/workspace-context.js';
 
 import { registerPrompts } from './prompts.js';
@@ -163,8 +164,9 @@ export function createServerInstance(): ServerInstance {
     register(server, { sessionStore, taskMessageQueue });
   }
 
-  registerPrompts(server);
-  registerResources(server, sessionStore);
+  const rootsFetcher = buildServerRootsFetcher(server);
+  registerPrompts(server, rootsFetcher);
+  registerResources(server, sessionStore, rootsFetcher);
 
   return {
     server,

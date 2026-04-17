@@ -2,7 +2,7 @@ import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server
 import { ResourceTemplate } from '@modelcontextprotocol/server';
 
 import { formatError } from './lib/errors.js';
-import { buildServerRootsFetcher, getAllowedRoots } from './lib/validation.js';
+import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from './lib/validation.js';
 import { assembleWorkspaceContext, workspaceCacheManager } from './lib/workspace-context.js';
 
 import {
@@ -32,6 +32,28 @@ interface ResourceListEntry {
   name: string;
 }
 
+/**
+ * Unified error envelope returned by resource data producers and inline
+ * `jsonResource` responses. Consumers may branch on `status === 'error'` or
+ * a literal `code` to distinguish well-known failure modes from transport
+ * errors. The shape is kept flat so downstream MCP clients can render it
+ * without additional schema work.
+ */
+export interface ResourceErrorEnvelope {
+  status: 'error';
+  code: string;
+  message: string;
+}
+
+function resourceError(code: string, message: string): ResourceErrorEnvelope {
+  return { status: 'error', code, message };
+}
+
+const SESSION_NOT_FOUND_ERROR: ResourceErrorEnvelope = resourceError(
+  'session_not_found',
+  'Session not found',
+);
+
 type SessionTranscriptResourceData =
   | {
       role: 'user' | 'assistant';
@@ -39,11 +61,11 @@ type SessionTranscriptResourceData =
       timestamp: number;
       taskId?: string;
     }[]
-  | { error: 'Session not found' };
+  | ResourceErrorEnvelope;
 
 type SessionEventsResourceData =
   | ReturnType<SessionStore['listSessionEventEntries']>
-  | { error: 'Session not found' };
+  | ResourceErrorEnvelope;
 
 const TOOLS_LIST_RESOURCE: ResourceListEntry = {
   uri: 'tools://list',
@@ -224,11 +246,11 @@ export function getSessionTranscriptResourceData(
   sessionId: string | undefined,
 ): SessionTranscriptResourceData {
   if (!sessionId) {
-    return { error: 'Session not found' } as const;
+    return SESSION_NOT_FOUND_ERROR;
   }
 
   const transcript = sessionStore.listSessionTranscriptEntries(sessionId);
-  return transcript ?? ({ error: 'Session not found' } as const);
+  return transcript ?? SESSION_NOT_FOUND_ERROR;
 }
 
 export function getSessionEventsResourceData(
@@ -236,11 +258,11 @@ export function getSessionEventsResourceData(
   sessionId: string | undefined,
 ): SessionEventsResourceData {
   if (!sessionId) {
-    return { error: 'Session not found' } as const;
+    return SESSION_NOT_FOUND_ERROR;
   }
 
   const events = sessionStore.listSessionEventEntries(sessionId);
-  return events ?? ({ error: 'Session not found' } as const);
+  return events ?? SESSION_NOT_FOUND_ERROR;
 }
 
 export function readSessionTranscriptResource(
@@ -253,15 +275,56 @@ export function readSessionTranscriptResource(
   return dualContentResource(toResourceUri(uri), data, renderSessionTranscriptMarkdown(id, data));
 }
 
+export function renderSessionEventsMarkdown(
+  sessionId: string | undefined,
+  data: SessionEventsResourceData,
+): string {
+  const header = sessionId ? `# Session Events \`${sessionId}\`` : '# Session Events';
+
+  if (!Array.isArray(data)) {
+    return [header, '', '_Session not found._', ''].join('\n');
+  }
+
+  if (data.length === 0) {
+    return [header, '', '_No events yet._', ''].join('\n');
+  }
+
+  const lines: string[] = [header, ''];
+  for (const entry of data) {
+    const ts = new Date(entry.timestamp).toISOString();
+    const taskSuffix = entry.taskId ? ` · task \`${entry.taskId}\`` : '';
+    lines.push(`## ${ts}${taskSuffix}`, '');
+    lines.push(`- Message: ${entry.request.message}`);
+    if (entry.request.toolProfile) {
+      lines.push(`- Tool profile: \`${entry.request.toolProfile}\``);
+    }
+    if (entry.request.urls && entry.request.urls.length > 0) {
+      lines.push(`- URLs: ${entry.request.urls.join(', ')}`);
+    }
+    if (entry.response.text) {
+      lines.push('', '### Response', '', entry.response.text);
+    }
+    const toolEvents = entry.response.toolEvents;
+    if (toolEvents && toolEvents.length > 0) {
+      lines.push('', '### Tool events', '');
+      for (const toolEvent of toolEvents) {
+        const suffix = toolEvent.toolType ? ` (${toolEvent.toolType})` : '';
+        lines.push(`- ${toolEvent.kind}${suffix}`);
+      }
+    }
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd() + '\n';
+}
+
 export function readSessionEventsResource(
   sessionStore: SessionStore,
   uri: URL | string,
   sessionId: string | string[] | undefined,
 ): ReadResourceResult {
-  return jsonResource(
-    toResourceUri(uri),
-    getSessionEventsResourceData(sessionStore, normalizeTemplateParam(sessionId)),
-  );
+  const id = normalizeTemplateParam(sessionId);
+  const data = getSessionEventsResourceData(sessionStore, id);
+  return dualContentResource(toResourceUri(uri), data, renderSessionEventsMarkdown(id, data));
 }
 
 function registerSessionResources(server: McpServer, sessionStore: SessionStore): void {
@@ -292,7 +355,7 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
     (uri, { sessionId }): ReadResourceResult => {
       const id = normalizeTemplateParam(sessionId);
       const entry = id ? sessionStore.getSessionEntry(id) : undefined;
-      return jsonResource(uri.href, entry ?? { error: 'Session not found' });
+      return jsonResource(uri.href, entry ?? SESSION_NOT_FOUND_ERROR);
     },
   );
 
@@ -331,8 +394,13 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
       title: 'Chat Session Events',
       description:
         'Structured Gemini tool and function inspection summary for a single active chat session. ' +
-        'This is a normalized view, not a raw replay-ready Gemini history. Large payloads may be truncated.',
+        'This is a normalized view, not a raw replay-ready Gemini history. Large payloads may be truncated. ' +
+        'Served as application/json with a secondary text/markdown rendering.',
       mimeType: 'application/json',
+      annotations: {
+        audience: ['assistant'],
+        priority: 0.7,
+      },
     },
     (uri, { sessionId }): ReadResourceResult =>
       readSessionEventsResource(sessionStore, uri, sessionId),
@@ -350,9 +418,7 @@ function registerCacheResources(server: McpServer): void {
     },
     asyncJsonResource(
       () => listCacheSummaries(),
-      (err) => ({
-        error: `Failed to list caches: ${formatError(err)}`,
-      }),
+      (err) => resourceError('cache_list_failed', `Failed to list caches: ${formatError(err)}`),
     ),
   );
 
@@ -377,14 +443,16 @@ function registerCacheResources(server: McpServer): void {
     },
     async (uri, { cacheName }) => {
       const name = normalizeTemplateParam(cacheName);
-      if (!name) return jsonResource(uri.href, { error: 'Cache name required' });
+      if (!name)
+        return jsonResource(uri.href, resourceError('cache_name_required', 'Cache name required'));
       const decoded = decodeURIComponent(name);
       try {
         return jsonResource(uri.href, await getCacheSummary(decoded));
       } catch (err) {
-        return jsonResource(uri.href, {
-          error: `Failed to get cache: ${formatError(err)}`,
-        });
+        return jsonResource(
+          uri.href,
+          resourceError('cache_get_failed', `Failed to get cache: ${formatError(err)}`),
+        );
       }
     },
   );
@@ -426,7 +494,7 @@ function registerDiscoveryResources(server: McpServer): void {
   );
 }
 
-function registerWorkspaceResources(server: McpServer): void {
+function registerWorkspaceResources(server: McpServer, rootsFetcher: RootsFetcher): void {
   server.registerResource(
     'workspace-context',
     'workspace://context',
@@ -441,7 +509,7 @@ function registerWorkspaceResources(server: McpServer): void {
     },
     async (uri): Promise<ReadResourceResult> => {
       try {
-        const roots = await getAllowedRoots(buildServerRootsFetcher(server));
+        const roots = await getAllowedRoots(rootsFetcher);
         const ctx = await assembleWorkspaceContext(roots);
         return readWorkspaceContextResource(uri, {
           content: ctx.content,
@@ -473,9 +541,10 @@ function registerWorkspaceResources(server: McpServer): void {
 export function registerResources(
   server: McpServer,
   sessionStore: SessionStore = createSessionStore(),
+  rootsFetcher: RootsFetcher = buildServerRootsFetcher(server),
 ): void {
   registerSessionResources(server, sessionStore);
   registerCacheResources(server);
   registerDiscoveryResources(server);
-  registerWorkspaceResources(server);
+  registerWorkspaceResources(server, rootsFetcher);
 }

@@ -125,13 +125,15 @@ describe('session transcript resource', () => {
   it('returns a stable error payload for a missing session transcript', () => {
     const store = createStore();
     assert.deepStrictEqual(getSessionTranscriptResourceData(store, 'missing-session'), {
-      error: 'Session not found',
+      status: 'error',
+      code: 'session_not_found',
+      message: 'Session not found',
     });
   });
 });
 
 describe('session events resource', () => {
-  it('reads event entries for an active session', () => {
+  it('reads event entries for an active session with JSON and markdown renderings', () => {
     const store = createStore();
     store.setSession('sess-resource-events', mockChat('resource-events'));
     store.appendSessionEvent('sess-resource-events', {
@@ -152,16 +154,32 @@ describe('session events resource', () => {
       'sessions://sess-resource-events/events',
       'sess-resource-events',
     );
+    assert.strictEqual(result.contents.length, 2);
+    assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
     assert.deepStrictEqual(
       parseResourceText(result),
       store.listSessionEventEntries('sess-resource-events'),
     );
+    assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
+    assert.match(result.contents[1]?.text ?? '', /# Session Events `sess-resource-events`/);
+    assert.match(result.contents[1]?.text ?? '', /- Message: Hello/);
+    assert.match(result.contents[1]?.text ?? '', /### Response/);
+    assert.match(result.contents[1]?.text ?? '', /- tool_call \(GOOGLE_SEARCH_WEB\)/);
+  });
+
+  it('renders a not-found markdown body for a missing session events resource', () => {
+    const store = createStore();
+    const result = readSessionEventsResource(store, 'sessions://missing/events', 'missing');
+    assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
+    assert.match(result.contents[1]?.text ?? '', /Session not found/);
   });
 
   it('returns a stable error payload for a missing session events resource', () => {
     const store = createStore();
     assert.deepStrictEqual(getSessionEventsResourceData(store, 'missing-session'), {
-      error: 'Session not found',
+      status: 'error',
+      code: 'session_not_found',
+      message: 'Session not found',
     });
   });
 });

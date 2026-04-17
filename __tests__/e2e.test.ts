@@ -9,6 +9,7 @@ import { afterEach, describe, it } from 'node:test';
 import { InMemoryTransport } from './lib/in-memory-transport.js';
 
 import { PUBLIC_PROMPT_NAMES } from '../src/prompts.js';
+import { PUBLIC_RESOURCE_URIS } from '../src/resources.js';
 import { createServerInstance } from '../src/server.js';
 
 process.env.API_KEY ??= 'test-key-for-e2e';
@@ -173,6 +174,7 @@ describe('in-memory MCP server e2e', () => {
     const initialize = await harness.client.initialize();
     const tools = await harness.client.request('tools/list');
     const resources = await harness.client.request('resources/list');
+    const resourceTemplates = await harness.client.request('resources/templates/list');
     const prompts = await harness.client.request('prompts/list');
     const discoveryCatalog = await harness.client.request('resources/read', {
       uri: 'tools://list',
@@ -196,6 +198,16 @@ describe('in-memory MCP server e2e', () => {
     );
     assert.ok(resourceUris.includes('tools://list'));
     assert.ok(resourceUris.includes('workspace://context'));
+
+    const templateUris = (
+      (resourceTemplates.result.resourceTemplates as { uriTemplate: string }[]) ?? []
+    ).map((template) => template.uriTemplate);
+    const advertisedUris = new Set<string>([...resourceUris, ...templateUris]);
+    assert.deepStrictEqual(
+      [...advertisedUris].sort(),
+      [...PUBLIC_RESOURCE_URIS].sort(),
+      'PUBLIC_RESOURCE_URIS must match the union of resources/list and resources/templates/list',
+    );
 
     const promptNames = ((prompts.result.prompts as { name: string }[]) ?? []).map(
       (prompt) => prompt.name,

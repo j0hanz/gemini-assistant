@@ -319,8 +319,10 @@ export class SessionStore {
     if (!entry) return undefined;
     if (!this.hasExpired(entry)) return entry;
 
+    // Read-path eviction: remove silently. The periodic sweep is responsible
+    // for broadcasting eviction notifications so we do not amplify per-read
+    // TTL expirations into notification storms across connected clients.
     this.removeSession(id, true);
-    this.notifyChange([id]);
     return undefined;
   }
 

@@ -620,6 +620,8 @@ const WORKFLOWS = [
   },
 ] as const satisfies readonly WorkflowEntry[];
 
+export type WorkflowName = (typeof WORKFLOWS)[number]['name'];
+
 function compareDiscoveryEntries(left: DiscoveryEntry, right: DiscoveryEntry): number {
   const kindOrder = DISCOVERY_KIND_ORDER[left.kind] - DISCOVERY_KIND_ORDER[right.kind];
   if (kindOrder !== 0) return kindOrder;

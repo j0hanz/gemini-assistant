@@ -49,6 +49,7 @@
     "@modelcontextprotocol/node": "2.0.0-alpha.2",
     "@modelcontextprotocol/server": "2.0.0-alpha.2",
     "express": "^5.2.1",
+    "ignore": "^7.0.5",
     "zod": "^4"
   },
   "devDependencies": {

@@ -11,6 +11,7 @@ import { WebStandardStreamableHTTPServerTransport as WebHttpTransport } from '@m
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 
+import { logger } from './lib/logger.js';
 import { parseAllowedHosts, resolveAllowedHosts, validateHostHeader } from './lib/validation.js';
 
 import { getTransportConfig } from './config.js';
@@ -119,7 +120,8 @@ export interface WebStandardTransportResult {
 
 function warnIfUnprotected(host: string, hasProtection: boolean): void {
   if (!hasProtection && (host === '0.0.0.0' || host === '::')) {
-    console.error(
+    logger.warn(
+      'transport',
       `SECURITY: bound to ${host} without DNS rebinding protection. ` +
         'Set MCP_ALLOWED_HOSTS=hostname1,hostname2 to restrict accepted Host headers.',
     );
@@ -128,15 +130,15 @@ function warnIfUnprotected(host: string, hasProtection: boolean): void {
 
 function logListening(host: string, port: number, runtime?: string): void {
   const suffix = runtime ? ` (${runtime})` : '';
-  console.error(`listening on http://${host}:${port}/mcp${suffix}`);
+  logger.info('transport', `listening on http://${host}:${port}/mcp${suffix}`);
 }
 
 function logSessionEvent(label: 'open' | 'closed', sessionId: string): void {
-  console.error(`session ${label}: ${sessionId}`);
+  logger.info('transport', `session ${label}: ${sessionId}`);
 }
 
 function logTransportSessionEviction(reason: 'capacity' | 'expired', sessionId: string): void {
-  console.error(`transport session ${reason}: ${sessionId}`);
+  logger.info('transport', `transport session ${reason}: ${sessionId}`);
 }
 
 function now(): number {
@@ -243,7 +245,7 @@ async function createWebPair(
 
 function logRequestFailure(label: string, err: unknown): void {
   const detail = err instanceof Error ? err.message : String(err);
-  console.error(`${label}: ${detail}`);
+  logger.error('transport', `${label}: ${detail}`);
 }
 
 function touchManagedPair<TTransport>(pair: ManagedPair<TTransport>): void {
@@ -476,7 +478,10 @@ function startDetectedRuntime(
     };
   }
 
-  console.error('no auto-serve runtime detected (Bun/Deno) — wire the exported handler manually.');
+  logger.warn(
+    'transport',
+    'no auto-serve runtime detected (Bun/Deno) — wire the exported handler manually.',
+  );
   return undefined;
 }
 

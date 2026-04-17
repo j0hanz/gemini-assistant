@@ -161,7 +161,7 @@ export const AnalyzeUrlInputSchema = z.strictObject({
 });
 export type AnalyzeUrlInput = z.infer<typeof AnalyzeUrlInputSchema>;
 
-export const AnalyzePrInputSchema = z.object({
+export const AnalyzePrInputSchema = z.strictObject({
   dryRun: z.boolean().describe('Return diff content and stats without Gemini analysis.').optional(),
   cacheName: cacheName('Cache resource name to provide project context during review.').optional(),
   thinkingLevel: thinkingLevelField,

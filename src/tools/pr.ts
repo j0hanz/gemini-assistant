@@ -4,7 +4,6 @@ import type {
   ServerContext,
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
-import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { execFile } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
@@ -854,10 +853,7 @@ async function analyzePrWork(
   );
 }
 
-export function registerAnalyzePrTool(
-  server: McpServer,
-  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
-): void {
+export function registerAnalyzePrTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
   registerTaskTool(
     server,
     'analyze_pr',

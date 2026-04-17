@@ -89,14 +89,12 @@ export async function elicitTaskInput(
   }
 }
 
-export function requireTaskContext(
-  ctx: ServerContext | ExtendedServerContext,
-): ExtendedTaskContext {
+export function requireTaskContext(ctx: ServerContext | ExtendedServerContext): TaskContext {
   const taskContext = ctx.task;
   if (!taskContext) {
     throw new Error('Task context is unavailable for this tool execution.');
   }
-  return taskContext as ExtendedTaskContext;
+  return taskContext;
 }
 
 function requireTaskId(ctx: ServerContext | ExtendedServerContext): string {
@@ -132,29 +130,12 @@ export function runToolAsTask(
       if (await isTaskCancelled(store, task.taskId)) return;
 
       const status = result.isError ? 'failed' : 'completed';
-
-      if (result.isError) {
-        const errorText = result.content.find((c) => c.type === 'text');
-        if (errorText && 'text' in errorText) {
-          try {
-            await store.updateTaskStatus(task.taskId, 'working', errorText.text);
-          } catch {
-            // Ignore if status update fails
-          }
-        }
-      }
-
       await store.storeTaskResult(task.taskId, status, result);
     })
     .catch(async (err: unknown) => {
       if (await isTaskCancelled(store, task.taskId)) return;
 
       const errorMessage = err instanceof Error ? err.message : String(err);
-      try {
-        await store.updateTaskStatus(task.taskId, 'working', errorMessage);
-      } catch {
-        // Ignore
-      }
       try {
         await store.storeTaskResult(task.taskId, 'failed', {
           content: [{ type: 'text' as const, text: errorMessage }],

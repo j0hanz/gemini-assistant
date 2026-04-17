@@ -449,19 +449,19 @@ describe('AnalyzePrInputSchema', () => {
     assert.ok(result.success);
   });
 
-  it('ignores removed mode field', () => {
+  it('rejects removed mode field', () => {
     const result = AnalyzePrInputSchema.safeParse({ mode: 'unstaged' });
-    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.success, false);
   });
 
-  it('ignores removed base field', () => {
+  it('rejects removed base field', () => {
     const result = AnalyzePrInputSchema.safeParse({ base: 'origin/main' });
-    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.success, false);
   });
 
-  it('ignores removed paths field', () => {
+  it('rejects removed paths field', () => {
     const result = AnalyzePrInputSchema.safeParse({ paths: ['src/'] });
-    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.success, false);
   });
 });
 

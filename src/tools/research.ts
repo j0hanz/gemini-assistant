@@ -4,7 +4,6 @@ import type {
   ServerContext,
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
-import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { sendProgress } from '../lib/errors.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
@@ -320,10 +319,7 @@ async function agenticSearchWork(
   );
 }
 
-export function registerSearchTool(
-  server: McpServer,
-  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
-): void {
+export function registerSearchTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
   registerTaskTool(
     server,
     'search',
@@ -343,7 +339,7 @@ export function registerSearchTool(
 
 export function registerAnalyzeUrlTool(
   server: McpServer,
-  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+  taskMessageQueue: TaskMessageQueue,
 ): void {
   registerTaskTool(
     server,
@@ -364,7 +360,7 @@ export function registerAnalyzeUrlTool(
 
 export function registerAgenticSearchTool(
   server: McpServer,
-  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+  taskMessageQueue: TaskMessageQueue,
 ): void {
   registerTaskTool(
     server,

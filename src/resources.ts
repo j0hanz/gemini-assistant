@@ -40,16 +40,6 @@ type SessionEventsResourceData =
   | ReturnType<SessionStore['listSessionEventEntries']>
   | { error: 'Session not found' };
 
-const SESSION_LIST_RESOURCE: ResourceListEntry = {
-  uri: 'sessions://list',
-  name: 'List of active multi-turn chat session IDs',
-};
-
-const CACHE_LIST_RESOURCE: ResourceListEntry = {
-  uri: 'caches://list',
-  name: 'List of active Gemini context caches',
-};
-
 const TOOLS_LIST_RESOURCE: ResourceListEntry = {
   uri: 'tools://list',
   name: 'Discovery catalog for tools, prompts, and resources',
@@ -58,16 +48,6 @@ const TOOLS_LIST_RESOURCE: ResourceListEntry = {
 const WORKFLOWS_LIST_RESOURCE: ResourceListEntry = {
   uri: 'workflows://list',
   name: 'Guided workflows for common gemini-assistant jobs',
-};
-
-const WORKSPACE_CONTEXT_RESOURCE: ResourceListEntry = {
-  uri: 'workspace://context',
-  name: 'Assembled workspace context for Gemini',
-};
-
-const WORKSPACE_CACHE_RESOURCE: ResourceListEntry = {
-  uri: 'workspace://cache',
-  name: 'Workspace cache lifecycle status',
 };
 
 function jsonResource(uri: string, data: unknown): ReadResourceResult {
@@ -90,16 +70,6 @@ function textResource(uri: string, text: string): ReadResourceResult {
       },
     ],
   };
-}
-
-function resourceList(resources: ResourceListEntry[]) {
-  return {
-    list: () => ({ resources }),
-  };
-}
-
-function singleResource(resource: ResourceListEntry) {
-  return resourceList([resource]);
 }
 
 function normalizeTemplateParam(value: string | string[] | undefined): string | undefined {
@@ -250,7 +220,7 @@ export function readSessionEventsResource(
 function registerSessionResources(server: McpServer, sessionStore: SessionStore): void {
   server.registerResource(
     'sessions',
-    new ResourceTemplate('sessions://list', singleResource(SESSION_LIST_RESOURCE)),
+    'sessions://list',
     {
       title: 'Active Chat Sessions',
       description: 'List of active multi-turn chat session IDs and their last access time.',
@@ -319,7 +289,7 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
 function registerCacheResources(server: McpServer): void {
   server.registerResource(
     'caches',
-    new ResourceTemplate('caches://list', singleResource(CACHE_LIST_RESOURCE)),
+    'caches://list',
     {
       title: 'Gemini Context Caches',
       description: 'List of active Gemini context caches with name, model, and expiry.',
@@ -370,7 +340,7 @@ function registerCacheResources(server: McpServer): void {
 function registerDiscoveryResources(server: McpServer): void {
   server.registerResource(
     'tools-list',
-    new ResourceTemplate('tools://list', singleResource(TOOLS_LIST_RESOURCE)),
+    'tools://list',
     {
       title: 'Discovery Catalog',
       description: 'Machine-readable catalog of public tools, prompts, and resources.',
@@ -381,7 +351,7 @@ function registerDiscoveryResources(server: McpServer): void {
 
   server.registerResource(
     'workflows-list',
-    new ResourceTemplate('workflows://list', singleResource(WORKFLOWS_LIST_RESOURCE)),
+    'workflows://list',
     {
       title: 'Workflow Catalog',
       description: 'Machine-readable catalog of guided workflows for gemini-assistant.',
@@ -394,7 +364,7 @@ function registerDiscoveryResources(server: McpServer): void {
 function registerWorkspaceResources(server: McpServer): void {
   server.registerResource(
     'workspace-context',
-    new ResourceTemplate('workspace://context', singleResource(WORKSPACE_CONTEXT_RESOURCE)),
+    'workspace://context',
     {
       title: 'Workspace Context',
       description: 'Assembled project context from workspace files for Gemini.',
@@ -421,7 +391,7 @@ function registerWorkspaceResources(server: McpServer): void {
 
   server.registerResource(
     'workspace-cache',
-    new ResourceTemplate('workspace://cache', singleResource(WORKSPACE_CACHE_RESOURCE)),
+    'workspace://cache',
     {
       title: 'Workspace Cache Status',
       description: 'Current status of the Gemini workspace context cache.',

@@ -4,7 +4,6 @@ import type {
   ServerContext,
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
-import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { Validator } from '@cfworker/json-schema';
 import type { Chat } from '@google/genai';
@@ -663,8 +662,8 @@ export function createAskWork(
 
 export function registerAskTool(
   server: McpServer,
-  sessionStore: SessionStore = createSessionStore(),
-  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+  sessionStore: SessionStore,
+  taskMessageQueue: TaskMessageQueue,
 ): void {
   const askWork = createAskWork(createDefaultAskDependencies(sessionStore));
   registerTaskTool(

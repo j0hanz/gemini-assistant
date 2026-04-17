@@ -4,7 +4,6 @@ import type {
   ServerContext,
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
-import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { createPartFromUri } from '@google/genai';
 import { z } from 'zod/v4';
@@ -486,10 +485,7 @@ function registerUpdateCacheTool(server: McpServer, taskMessageQueue: TaskMessag
   );
 }
 
-export function registerCacheTools(
-  server: McpServer,
-  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
-): void {
+export function registerCacheTools(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
   const rootsFetcher = buildServerRootsFetcher(server);
   registerCreateCacheTool(server, rootsFetcher, taskMessageQueue);
   registerListCachesTool(server);

@@ -4,7 +4,6 @@ import type {
   ServerContext,
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
-import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { sendProgress } from '../lib/errors.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
@@ -112,7 +111,7 @@ async function explainErrorWork(
 
 export function registerExplainErrorTool(
   server: McpServer,
-  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+  taskMessageQueue: TaskMessageQueue,
 ): void {
   registerTaskTool(
     server,

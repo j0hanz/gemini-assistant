@@ -4,7 +4,6 @@ import type {
   ServerContext,
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
-import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { createPartFromUri } from '@google/genai';
 import type { Part } from '@google/genai';
@@ -200,7 +199,7 @@ function createDiagramWork(rootsFetcher: RootsFetcher) {
 
 export function registerGenerateDiagramTool(
   server: McpServer,
-  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+  taskMessageQueue: TaskMessageQueue,
 ): void {
   registerTaskTool(
     server,

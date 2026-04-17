@@ -4,7 +4,6 @@ import type {
   ServerContext,
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
-import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { createPartFromUri, Outcome } from '@google/genai';
 import type { Part } from '@google/genai';
@@ -245,7 +244,7 @@ async function executeCodeWork(
 
 export function registerAnalyzeFileTool(
   server: McpServer,
-  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+  taskMessageQueue: TaskMessageQueue,
 ): void {
   registerTaskTool(
     server,
@@ -266,7 +265,7 @@ export function registerAnalyzeFileTool(
 
 export function registerExecuteCodeTool(
   server: McpServer,
-  taskMessageQueue: TaskMessageQueue = new InMemoryTaskMessageQueue(),
+  taskMessageQueue: TaskMessageQueue,
 ): void {
   registerTaskTool(
     server,

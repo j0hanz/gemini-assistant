@@ -11,6 +11,7 @@ import { describe, it } from 'node:test';
 process.env.API_KEY ??= 'test-key-for-registration';
 
 const { registerAskTool } = await import('../../src/tools/ask.js');
+const { createSessionStore } = await import('../../src/sessions.js');
 const { registerCacheTools } = await import('../../src/tools/cache.js');
 const { registerAnalyzeFileTool, registerExecuteCodeTool } =
   await import('../../src/tools/execution.js');
@@ -40,40 +41,43 @@ function createServer(): McpServer {
   );
 }
 
+const queue = new InMemoryTaskMessageQueue();
+const sessionStore = createSessionStore();
+
 describe('tool registration', () => {
   it('registers ask tool without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerAskTool(server));
+    assert.doesNotThrow(() => registerAskTool(server, sessionStore, queue));
   });
 
   it('registers search tool without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerSearchTool(server));
+    assert.doesNotThrow(() => registerSearchTool(server, queue));
   });
 
   it('registers execute_code tool without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerExecuteCodeTool(server));
+    assert.doesNotThrow(() => registerExecuteCodeTool(server, queue));
   });
 
   it('registers analyze_file tool without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerAnalyzeFileTool(server));
+    assert.doesNotThrow(() => registerAnalyzeFileTool(server, queue));
   });
 
   it('registers analyze_url tool without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerAnalyzeUrlTool(server));
+    assert.doesNotThrow(() => registerAnalyzeUrlTool(server, queue));
   });
 
   it('registers analyze_pr tool without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerAnalyzePrTool(server));
+    assert.doesNotThrow(() => registerAnalyzePrTool(server, queue));
   });
 
   it('registers cache tools (create, list, delete) without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerCacheTools(server));
+    assert.doesNotThrow(() => registerCacheTools(server, queue));
   });
 
   it('registers resources without error', () => {
@@ -88,44 +92,40 @@ describe('tool registration', () => {
 
   it('registers agentic_search tool without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerAgenticSearchTool(server));
+    assert.doesNotThrow(() => registerAgenticSearchTool(server, queue));
   });
 
   it('registers explain_error tool without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerExplainErrorTool(server));
+    assert.doesNotThrow(() => registerExplainErrorTool(server, queue));
   });
 
   it('registers compare_files tool without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerCompareFilesTool(server));
+    assert.doesNotThrow(() => registerCompareFilesTool(server, queue));
   });
 
   it('registers generate_diagram tool without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerGenerateDiagramTool(server));
+    assert.doesNotThrow(() => registerGenerateDiagramTool(server, queue));
   });
 
   it('registers all tools, prompts, and resources on the same server', () => {
     const server = createServer();
     assert.doesNotThrow(() => {
-      for (const register of [
-        registerAskTool,
-        registerExecuteCodeTool,
-        registerSearchTool,
-        registerAgenticSearchTool,
-        registerAnalyzeFileTool,
-        registerAnalyzeUrlTool,
-        registerAnalyzePrTool,
-        registerExplainErrorTool,
-        registerCompareFilesTool,
-        registerGenerateDiagramTool,
-        registerCacheTools,
-        registerPrompts,
-        registerResources,
-      ]) {
-        register(server);
-      }
+      registerAskTool(server, sessionStore, queue);
+      registerExecuteCodeTool(server, queue);
+      registerSearchTool(server, queue);
+      registerAgenticSearchTool(server, queue);
+      registerAnalyzeFileTool(server, queue);
+      registerAnalyzeUrlTool(server, queue);
+      registerAnalyzePrTool(server, queue);
+      registerExplainErrorTool(server, queue);
+      registerCompareFilesTool(server, queue);
+      registerGenerateDiagramTool(server, queue);
+      registerCacheTools(server, queue);
+      registerPrompts(server);
+      registerResources(server);
     });
   });
 

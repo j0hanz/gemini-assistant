@@ -1,155 +1,43 @@
-import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/server';
-
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { pathToFileURL } from 'node:url';
 
 import { FinishReason } from '@google/genai';
-import type { GenerateContentResponse, Part } from '@google/genai';
 
-import { InMemoryTransport } from './lib/in-memory-transport.js';
+import {
+  assertAdvertisedOutputSchema,
+  assertRequestValidationFailure,
+  schemaRequiresField,
+} from './lib/mcp-contract-assertions.js';
+import {
+  createServerHarness,
+  type JsonRpcTestClient,
+  type ToolAnnotations,
+  type ToolCallResult,
+  type ToolInfo,
+} from './lib/mcp-contract-client.js';
+import { makeChunk, MockGeminiEnvironment } from './lib/mock-gemini-environment.js';
 
-import { getAI } from '../src/client.js';
 import { createServerInstance } from '../src/server.js';
 
 process.env.API_KEY ??= 'test-key-for-mcp-tools';
 
-interface JsonRpcNotification {
-  jsonrpc: '2.0';
-  method: string;
-  params?: Record<string, unknown>;
-}
+const DISCOVER_ANNOTATIONS = {
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+  readOnlyHint: true,
+} as const;
 
-interface JsonRpcRequest extends JsonRpcNotification {
-  id: number;
-}
-
-interface JsonRpcSuccess {
-  id: number;
-  jsonrpc: '2.0';
-  result: Record<string, unknown>;
-}
-
-interface JsonRpcFailure {
-  error: { code: number; message: string };
-  id: number | null;
-  jsonrpc: '2.0';
-}
-
-type JsonRpcResponse = JsonRpcSuccess | JsonRpcFailure;
-
-interface JsonSchemaLike {
-  allOf?: JsonSchemaLike[];
-  anyOf?: JsonSchemaLike[];
-  oneOf?: JsonSchemaLike[];
-  properties?: Record<string, unknown>;
-  required?: string[];
-  [key: string]: unknown;
-}
-
-interface ToolAnnotations {
-  destructiveHint?: boolean;
-  idempotentHint?: boolean;
-  openWorldHint?: boolean;
-  readOnlyHint?: boolean;
-}
-
-interface ToolInfo {
-  annotations?: ToolAnnotations;
-  execution?: { taskSupport?: string };
-  inputSchema?: JsonSchemaLike;
-  name: string;
-  outputSchema?: JsonSchemaLike;
-  title?: string;
-}
-
-interface ToolCallResult {
-  content: { name?: string; text?: string; type: string; uri?: string }[];
-  isError?: boolean;
-  structuredContent?: Record<string, unknown>;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function isJsonRpcResponse(message: unknown): message is JsonRpcResponse {
-  return (
-    isRecord(message) && message.jsonrpc === '2.0' && 'id' in message && !('method' in message)
-  );
-}
-
-function isJsonRpcServerRequest(message: unknown): message is JsonRpcRequest {
-  return isRecord(message) && message.jsonrpc === '2.0' && 'id' in message && 'method' in message;
-}
-
-function isJsonRpcFailure(message: JsonRpcResponse): message is JsonRpcFailure {
-  return 'error' in message;
-}
-
-function schemaRequiresField(schema: JsonSchemaLike | undefined, field: string): boolean {
-  if (!schema) {
-    return false;
-  }
-
-  if (schema.required?.includes(field)) {
-    return true;
-  }
-
-  for (const key of ['allOf', 'anyOf', 'oneOf'] as const) {
-    const nested = schema[key];
-    if (Array.isArray(nested) && nested.some((entry) => schemaRequiresField(entry, field))) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-class JsonRpcTestClient {
-  private nextId = 0;
-  private readonly notifications: JsonRpcNotification[] = [];
-  private readonly pending = new Map<number, (message: JsonRpcResponse) => void>();
-  private readonly serverRequestMethods: string[] = [];
-  private readonly unexpectedServerRequests: string[] = [];
-
-  constructor(private readonly transport: InMemoryTransport) {
-    this.transport.onmessage = (message) => {
-      if (isJsonRpcServerRequest(message)) {
-        void this.handleServerRequest(message);
-        return;
-      }
-
-      if (isJsonRpcResponse(message)) {
-        this.pending.get(message.id ?? -1)?.(message);
-        if (typeof message.id === 'number') {
-          this.pending.delete(message.id);
-        }
-        return;
-      }
-
-      this.notifications.push(message as JsonRpcNotification);
-    };
-  }
-
-  private async handleServerRequest(request: JsonRpcRequest): Promise<void> {
-    this.serverRequestMethods.push(request.method);
-
-    switch (request.method) {
-      case 'roots/list':
-        await this.transport.send({
-          jsonrpc: '2.0',
-          id: request.id,
-          result: {
-            roots: [{ uri: pathToFileURL(process.cwd()).href, name: 'workspace' }],
-          },
-        });
-        return;
-
-      case 'sampling/createMessage':
-        await this.transport.send({
-          jsonrpc: '2.0',
-          id: request.id,
+async function createHarness() {
+  return await createServerHarness(
+    createServerInstance,
+    {
+      capabilities: {
+        roots: {},
+        sampling: {},
+      },
+      serverRequestHandlers: {
+        'sampling/createMessage': async () => ({
           result: {
             content: {
               type: 'text',
@@ -159,270 +47,15 @@ class JsonRpcTestClient {
             role: 'assistant',
             stopReason: 'endTurn',
           },
-        });
-        return;
-
-      default:
-        this.unexpectedServerRequests.push(request.method);
-        await this.transport.send({
-          jsonrpc: '2.0',
-          id: request.id,
-          error: {
-            code: -32601,
-            message: `Unhandled server request: ${request.method}`,
-          },
-        });
-    }
-  }
-
-  async start(): Promise<void> {
-    await this.transport.start();
-  }
-
-  async close(): Promise<void> {
-    this.pending.clear();
-    await this.transport.close();
-  }
-
-  async initialize(): Promise<void> {
-    await this.request('initialize', {
-      capabilities: {
-        roots: {},
-        sampling: {},
+        }),
       },
-      clientInfo: { name: 'mcp-tool-smoke', version: '0.0.1' },
-      protocolVersion: LATEST_PROTOCOL_VERSION,
-    });
-    await this.notify('notifications/initialized');
-  }
-
-  async request(method: string, params?: Record<string, unknown>): Promise<JsonRpcSuccess> {
-    const response = await this.requestRaw(method, params);
-
-    if (isJsonRpcFailure(response)) {
-      throw new Error(`JSON-RPC ${response.error.code}: ${response.error.message}`);
-    }
-
-    return response;
-  }
-
-  async requestRaw(method: string, params?: Record<string, unknown>): Promise<JsonRpcResponse> {
-    const id = ++this.nextId;
-    const request: JsonRpcRequest = {
-      id,
-      jsonrpc: '2.0',
-      method,
-      ...(params ? { params } : {}),
-    };
-
-    return await new Promise<JsonRpcResponse>((resolve) => {
-      this.pending.set(id, resolve);
-      void this.transport.send(request);
-    });
-  }
-
-  async notify(method: string, params?: Record<string, unknown>): Promise<void> {
-    await this.transport.send({
-      jsonrpc: '2.0',
-      method,
-      ...(params ? { params } : {}),
-    });
-  }
-
-  getServerRequestMethods(): string[] {
-    return [...this.serverRequestMethods];
-  }
-
-  getUnexpectedServerRequests(): string[] {
-    return [...this.unexpectedServerRequests];
-  }
-}
-
-interface ServerHarness {
-  client: JsonRpcTestClient;
-  close: () => Promise<void>;
-}
-
-async function flushEventLoop(turns = 2): Promise<void> {
-  for (let index = 0; index < turns; index += 1) {
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-}
-
-async function createHarness(): Promise<ServerHarness> {
-  const instance = createServerInstance();
-  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
-  const client = new JsonRpcTestClient(clientTransport);
-
-  await client.start();
-  await instance.server.connect(serverTransport);
-  await client.initialize();
-
-  return {
-    client,
-    close: async () => {
-      await flushEventLoop();
-      await instance.close();
-      await flushEventLoop();
-      await client.close();
     },
-  };
-}
-
-function makeChunk(
-  parts: Part[],
-  finishReason?: FinishReason,
-  candidateExtras?: Record<string, unknown>,
-): GenerateContentResponse {
-  return {
-    candidates: [
-      {
-        content: { parts },
-        ...(finishReason ? { finishReason } : {}),
-        ...(candidateExtras ?? {}),
-      },
-    ],
-  } as GenerateContentResponse;
-}
-
-async function* fakeStream(
-  chunks: readonly GenerateContentResponse[],
-): AsyncGenerator<GenerateContentResponse> {
-  for (const chunk of chunks) {
-    yield chunk;
-  }
-}
-
-function ttlToExpireTime(ttl?: string): string {
-  if (!ttl) {
-    return '2099-01-01T00:00:00.000Z';
-  }
-
-  const seconds = Number.parseInt(ttl.replace(/s$/, ''), 10);
-  if (Number.isNaN(seconds)) {
-    return '2099-01-01T00:00:00.000Z';
-  }
-
-  return new Date(Date.parse('2099-01-01T00:00:00.000Z') + seconds * 1000).toISOString();
-}
-
-class MockGeminiEnvironment {
-  private readonly client = getAI();
-  private readonly originalCreateCache = this.client.caches.create.bind(this.client.caches);
-  private readonly originalDeleteCache = this.client.caches.delete.bind(this.client.caches);
-  private readonly originalDeleteFile = this.client.files.delete.bind(this.client.files);
-  private readonly originalGenerateContentStream = this.client.models.generateContentStream.bind(
-    this.client.models,
+    {
+      autoInitialize: true,
+      flushAfterServerClose: 2,
+      flushBeforeClose: 2,
+    },
   );
-  private readonly originalGetCache = this.client.caches.get.bind(this.client.caches);
-  private readonly originalListCaches = this.client.caches.list.bind(this.client.caches);
-  private readonly originalUpdateCache = this.client.caches.update.bind(this.client.caches);
-  private readonly originalUpload = this.client.files.upload.bind(this.client.files);
-  private readonly cacheStore = new Map<
-    string,
-    { displayName?: string; expireTime: string; model: string; name: string }
-  >();
-  private readonly streamQueue: AsyncGenerator<GenerateContentResponse>[] = [];
-  private uploadCounter = 0;
-  readonly deletedUploads: string[] = [];
-
-  install(): void {
-    const cacheStore = this.cacheStore;
-    const deletedUploads = this.deletedUploads;
-
-    this.client.models.generateContentStream = (async () => {
-      const next = this.streamQueue.shift();
-      if (!next) {
-        throw new Error('No mocked Gemini stream queued for generateContentStream');
-      }
-
-      return next;
-    }) as unknown as typeof this.client.models.generateContentStream;
-
-    this.client.files.upload = (async (opts: { file: string }) => {
-      this.uploadCounter += 1;
-      const fileName = opts.file.split(/[\\/]/).pop() ?? `upload-${String(this.uploadCounter)}`;
-      return {
-        mimeType: 'text/plain',
-        name: `uploaded-${String(this.uploadCounter)}`,
-        uri: `gs://mock/${fileName}`,
-      };
-    }) as typeof this.client.files.upload;
-
-    this.client.files.delete = (async (opts: { name: string }) => {
-      deletedUploads.push(opts.name);
-      return {};
-    }) as unknown as typeof this.client.files.delete;
-
-    this.client.caches.create = (async (opts: {
-      config?: { displayName?: string };
-      model?: string;
-    }) => {
-      const name = `cachedContents/mock-${String(cacheStore.size + 1)}`;
-      const cache = {
-        expireTime: '2099-01-01T00:00:00.000Z',
-        model: opts.model ?? 'models/mock-gemini',
-        name,
-        ...(opts.config?.displayName ? { displayName: opts.config.displayName } : {}),
-      };
-      cacheStore.set(name, cache);
-      return cache;
-    }) as typeof this.client.caches.create;
-
-    this.client.caches.get = (async (opts: { name: string }) => {
-      const cache = cacheStore.get(opts.name);
-      if (!cache) {
-        throw new Error(`Missing cache ${opts.name}`);
-      }
-      return cache;
-    }) as typeof this.client.caches.get;
-
-    this.client.caches.list = (async () => ({
-      async *[Symbol.asyncIterator]() {
-        for (const cache of cacheStore.values()) {
-          yield cache;
-        }
-      },
-    })) as unknown as typeof this.client.caches.list;
-
-    this.client.caches.update = (async (opts: { config?: { ttl?: string }; name: string }) => {
-      const existing = cacheStore.get(opts.name) ?? {
-        expireTime: '2099-01-01T00:00:00.000Z',
-        model: 'models/mock-gemini',
-        name: opts.name,
-      };
-      const updated = {
-        ...existing,
-        expireTime: ttlToExpireTime(opts.config?.ttl),
-      };
-      cacheStore.set(opts.name, updated);
-      return updated;
-    }) as typeof this.client.caches.update;
-
-    this.client.caches.delete = (async (opts: { name: string }) => {
-      cacheStore.delete(opts.name);
-      return {};
-    }) as unknown as typeof this.client.caches.delete;
-  }
-
-  restore(): void {
-    this.client.models.generateContentStream = this.originalGenerateContentStream;
-    this.client.files.upload = this.originalUpload;
-    this.client.files.delete = this.originalDeleteFile;
-    this.client.caches.create = this.originalCreateCache;
-    this.client.caches.get = this.originalGetCache;
-    this.client.caches.list = this.originalListCaches;
-    this.client.caches.delete = this.originalDeleteCache;
-    this.client.caches.update = this.originalUpdateCache;
-    this.streamQueue.length = 0;
-    this.cacheStore.clear();
-    this.deletedUploads.length = 0;
-    this.uploadCounter = 0;
-  }
-
-  queueStream(...chunks: GenerateContentResponse[]): void {
-    this.streamQueue.push(fakeStream(chunks));
-  }
 }
 
 async function listTools(client: JsonRpcTestClient): Promise<ToolInfo[]> {
@@ -446,24 +79,12 @@ function expectSuccess(result: ToolCallResult): asserts result is ToolCallResult
   assert.ok(result.structuredContent, 'Expected structuredContent to be present');
 }
 
-function assertValidationFailure(response: JsonRpcResponse, messagePattern: RegExp): void {
-  if (isJsonRpcFailure(response)) {
-    assert.equal(response.error.code, -32602);
-    assert.match(response.error.message, messagePattern);
-    return;
-  }
-
-  assert.equal(response.result.isError, true);
-  const content = (response.result.content as { text?: string }[]) ?? [];
-  assert.match(content[0]?.text ?? '', messagePattern);
-}
-
 function assertToolContract(
   tool: ToolInfo | undefined,
   expected: {
     annotations: Required<ToolAnnotations>;
-    requiredInput?: string[];
-    requiredOutput: string[];
+    requiredInput?: readonly string[];
+    requiredOutput: readonly string[];
     taskSupport?: string;
     title: string;
   },
@@ -520,7 +141,7 @@ const EXPECTED_TOOL_CONTRACTS = {
     title: 'Chat',
   },
   discover: {
-    annotations: READONLY_ANNOTATIONS,
+    annotations: DISCOVER_ANNOTATIONS,
     requiredOutput: [
       'status',
       'summary',
@@ -574,8 +195,8 @@ describe('MCP tool smoke coverage', () => {
       const toolMap = new Map(tools.map((tool) => [tool.name, tool]));
 
       assert.deepStrictEqual(
-        [...toolMap.keys()].sort(),
-        Object.keys(EXPECTED_TOOL_CONTRACTS).sort(),
+        [...toolMap.keys()],
+        ['chat', 'research', 'analyze', 'review', 'memory', 'discover'],
       );
 
       for (const [toolName, contract] of Object.entries(EXPECTED_TOOL_CONTRACTS)) {
@@ -592,6 +213,8 @@ describe('MCP tool smoke coverage', () => {
     const harness = await createHarness();
 
     try {
+      const toolMap = new Map((await listTools(harness.client)).map((tool) => [tool.name, tool]));
+
       env.queueStream(makeChunk([{ text: '{"status":"ok","count":2}' }], FinishReason.STOP));
 
       const chatResult = await callTool(harness.client, 'chat', {
@@ -609,6 +232,9 @@ describe('MCP tool smoke coverage', () => {
       expectSuccess(chatResult);
       assert.deepStrictEqual(chatResult.structuredContent.data, { count: 2, status: 'ok' });
       assert.equal(chatResult.structuredContent.status, 'completed');
+      const chatTool = toolMap.get('chat');
+      assert.ok(chatTool);
+      assertAdvertisedOutputSchema(chatTool, chatResult);
 
       env.queueStream(
         makeChunk([{ text: 'Search answer' }], FinishReason.STOP, {
@@ -626,6 +252,9 @@ describe('MCP tool smoke coverage', () => {
       assert.strictEqual(researchResult.structuredContent.mode, 'quick');
       assert.strictEqual(researchResult.structuredContent.summary, 'Search answer');
       assert.deepStrictEqual(researchResult.structuredContent.sources, ['https://example.com']);
+      const researchTool = toolMap.get('research');
+      assert.ok(researchTool);
+      assertAdvertisedOutputSchema(researchTool, researchResult);
 
       env.queueStream(
         makeChunk(
@@ -644,6 +273,9 @@ describe('MCP tool smoke coverage', () => {
       expectSuccess(analyzeResult);
       assert.strictEqual(analyzeResult.structuredContent.targetKind, 'file');
       assert.match(String(analyzeResult.structuredContent.summary), /Gemini client factory/);
+      const analyzeTool = toolMap.get('analyze');
+      assert.ok(analyzeTool);
+      assertAdvertisedOutputSchema(analyzeTool, analyzeResult);
 
       env.queueStream(
         makeChunk(
@@ -666,6 +298,9 @@ describe('MCP tool smoke coverage', () => {
       expectSuccess(reviewResult);
       assert.strictEqual(reviewResult.structuredContent.subjectKind, 'failure');
       assert.match(String(reviewResult.structuredContent.summary), /Validate the input/);
+      const reviewTool = toolMap.get('review');
+      assert.ok(reviewTool);
+      assertAdvertisedOutputSchema(reviewTool, reviewResult);
 
       const discoverResult = await callTool(harness.client, 'discover', {
         goal: 'I need to inspect reusable state',
@@ -674,6 +309,9 @@ describe('MCP tool smoke coverage', () => {
       expectSuccess(discoverResult);
       assert.strictEqual(discoverResult.structuredContent.job, 'memory');
       assert.ok(Array.isArray(discoverResult.structuredContent.relatedResources));
+      const discoverTool = toolMap.get('discover');
+      assert.ok(discoverTool);
+      assertAdvertisedOutputSchema(discoverTool, discoverResult);
 
       const sessionListResult = await callTool(harness.client, 'memory', {
         action: 'sessions.list',
@@ -681,6 +319,9 @@ describe('MCP tool smoke coverage', () => {
       expectSuccess(sessionListResult);
       assert.strictEqual(sessionListResult.structuredContent.action, 'sessions.list');
       assert.ok(Array.isArray(sessionListResult.structuredContent.sessions));
+      const memoryTool = toolMap.get('memory');
+      assert.ok(memoryTool);
+      assertAdvertisedOutputSchema(memoryTool, sessionListResult);
 
       const createCacheResult = await callTool(harness.client, 'memory', {
         action: 'caches.create',
@@ -689,6 +330,7 @@ describe('MCP tool smoke coverage', () => {
       });
       expectSuccess(createCacheResult);
       assert.strictEqual(createCacheResult.structuredContent.action, 'caches.create');
+      assertAdvertisedOutputSchema(memoryTool, createCacheResult);
 
       const listCachesResult = await callTool(harness.client, 'memory', {
         action: 'caches.list',
@@ -696,6 +338,7 @@ describe('MCP tool smoke coverage', () => {
       expectSuccess(listCachesResult);
       assert.strictEqual(listCachesResult.structuredContent.action, 'caches.list');
       assert.ok(Array.isArray(listCachesResult.structuredContent.caches));
+      assertAdvertisedOutputSchema(memoryTool, listCachesResult);
 
       const serverRequestMethods = harness.client.getServerRequestMethods();
       assert.ok(serverRequestMethods.includes('roots/list'));
@@ -705,7 +348,7 @@ describe('MCP tool smoke coverage', () => {
     }
   });
 
-  it('surfaces validation and security failures through the protocol layer', async () => {
+  it('surfaces invalid public tool payloads through the request boundary', async () => {
     const harness = await createHarness();
 
     try {
@@ -713,7 +356,7 @@ describe('MCP tool smoke coverage', () => {
         arguments: { goal: 'Tell me something current' },
         name: 'research',
       });
-      assertValidationFailure(missingResearchMode, /mode/i);
+      assertRequestValidationFailure(missingResearchMode, -32602, /mode/i);
 
       const invalidAnalyzeTargets = await harness.client.requestRaw('tools/call', {
         arguments: {
@@ -725,7 +368,33 @@ describe('MCP tool smoke coverage', () => {
         },
         name: 'analyze',
       });
-      assertValidationFailure(invalidAnalyzeTargets, /public http:\/\/ or https:\/\//i);
+      assertRequestValidationFailure(
+        invalidAnalyzeTargets,
+        -32602,
+        /public http:\/\/ or https:\/\//i,
+      );
+
+      const invalidMemoryAction = await harness.client.requestRaw('tools/call', {
+        arguments: {
+          action: 'caches.create',
+        },
+        name: 'memory',
+      });
+      assertRequestValidationFailure(invalidMemoryAction, -32602, /filePaths|systemInstruction/i);
+
+      const invalidChatSchema = await harness.client.requestRaw('tools/call', {
+        arguments: {
+          goal: 'Return JSON',
+          responseSchema: {
+            properties: {
+              ok: { type: 42 },
+            },
+            type: 'object',
+          },
+        },
+        name: 'chat',
+      });
+      assertRequestValidationFailure(invalidChatSchema, -32602, /responseSchema|type/i);
 
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);
     } finally {

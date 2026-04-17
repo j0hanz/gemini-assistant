@@ -26,7 +26,7 @@ export function registerDiscoverTool(server: McpServer): void {
       description: 'Get guided entry points, workflows, related resources, and limitation notes.',
       inputSchema: DiscoverInputSchema,
       outputSchema: DiscoverOutputSchema,
-      annotations: READONLY_ANNOTATIONS,
+      annotations: { ...READONLY_ANNOTATIONS, openWorldHint: false },
     },
     async (args: DiscoverInput, ctx) =>
       await executor.run(ctx, 'discover', 'Discover', args, async (innerArgs, innerCtx) => {

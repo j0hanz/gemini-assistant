@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { listDiscoveryEntries, listWorkflowEntries } from '../src/catalog.js';
+import { PUBLIC_RESOURCE_URIS, PUBLIC_WORKFLOW_NAMES } from '../src/public-contract.js';
 import {
   getSessionEventsResourceData,
   getSessionTranscriptResourceData,
@@ -29,9 +30,36 @@ function createStore(): SessionStore {
 describe('discovery resources', () => {
   it('reads discover://catalog with deterministic catalog contents and markdown rendering', () => {
     const result = readDiscoverCatalogResource('discover://catalog');
+    const data = parseResourceText(result) as ReturnType<typeof listDiscoveryEntries>;
+
     assert.strictEqual(result.contents.length, 2);
     assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
-    assert.deepStrictEqual(parseResourceText(result), listDiscoveryEntries());
+    assert.deepStrictEqual(data, listDiscoveryEntries());
+    assert.deepStrictEqual(
+      data.map((entry) => `${entry.kind}:${entry.name}`),
+      [
+        'tool:analyze',
+        'tool:chat',
+        'tool:discover',
+        'tool:memory',
+        'tool:research',
+        'tool:review',
+        'prompt:discover',
+        'prompt:memory',
+        'prompt:research',
+        'prompt:review',
+        'resource:discover://catalog',
+        'resource:discover://workflows',
+        'resource:memory://caches',
+        'resource:memory://caches/{cacheName}',
+        'resource:memory://sessions',
+        'resource:memory://sessions/{sessionId}',
+        'resource:memory://sessions/{sessionId}/events',
+        'resource:memory://sessions/{sessionId}/transcript',
+        'resource:memory://workspace/cache',
+        'resource:memory://workspace/context',
+      ],
+    );
     assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
     assert.match(result.contents[1]?.text ?? '', /^# Discovery Catalog/m);
     assert.match(result.contents[1]?.text ?? '', /## Tools/);
@@ -44,10 +72,36 @@ describe('discovery resources', () => {
     assert.strictEqual(result.contents.length, 2);
     assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
     assert.deepStrictEqual(data, listWorkflowEntries());
-    assert.strictEqual(data[0]?.name, 'start-here');
+    assert.deepStrictEqual(
+      data.map((entry) => entry.name),
+      [...PUBLIC_WORKFLOW_NAMES],
+    );
     assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
     assert.match(result.contents[1]?.text ?? '', /^# Workflow Catalog/m);
     assert.match(result.contents[1]?.text ?? '', /### start-here/);
+  });
+
+  it('keeps the concrete and templated resource URI ordering stable', () => {
+    assert.deepStrictEqual(
+      [...PUBLIC_RESOURCE_URIS].filter((uri) => !uri.includes('{')),
+      [
+        'discover://catalog',
+        'discover://workflows',
+        'memory://sessions',
+        'memory://caches',
+        'memory://workspace/context',
+        'memory://workspace/cache',
+      ],
+    );
+    assert.deepStrictEqual(
+      [...PUBLIC_RESOURCE_URIS].filter((uri) => uri.includes('{')),
+      [
+        'memory://sessions/{sessionId}',
+        'memory://sessions/{sessionId}/transcript',
+        'memory://sessions/{sessionId}/events',
+        'memory://caches/{cacheName}',
+      ],
+    );
   });
 });
 

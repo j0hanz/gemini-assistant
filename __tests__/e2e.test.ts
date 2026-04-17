@@ -1,4 +1,4 @@
-import { LATEST_PROTOCOL_VERSION, type McpServer } from '@modelcontextprotocol/server';
+import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -6,7 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
-import { InMemoryTransport } from './lib/in-memory-transport.js';
+import {
+  assertRequestValidationFailure,
+  assertStablePublicSurface,
+} from './lib/mcp-contract-assertions.js';
+import { createServerHarness } from './lib/mcp-contract-client.js';
 
 import {
   PUBLIC_PROMPT_NAMES,
@@ -17,150 +21,6 @@ import { createServerInstance } from '../src/server.js';
 
 process.env.API_KEY ??= 'test-key-for-e2e';
 
-interface JsonRpcRequest {
-  id: number;
-  jsonrpc: '2.0';
-  method: string;
-  params?: Record<string, unknown>;
-}
-
-interface JsonRpcNotification {
-  jsonrpc: '2.0';
-  method: string;
-  params?: Record<string, unknown>;
-}
-
-interface JsonRpcSuccess {
-  id: number;
-  jsonrpc: '2.0';
-  result: Record<string, unknown>;
-}
-
-interface JsonRpcFailure {
-  error: { code: number; message: string };
-  id: number | null;
-  jsonrpc: '2.0';
-}
-
-type JsonRpcResponse = JsonRpcSuccess | JsonRpcFailure;
-
-function isJsonRpcResponse(message: unknown): message is JsonRpcResponse {
-  return typeof message === 'object' && message !== null && 'jsonrpc' in message && 'id' in message;
-}
-
-function isJsonRpcFailure(message: JsonRpcResponse): message is JsonRpcFailure {
-  return 'error' in message;
-}
-
-class JsonRpcTestClient {
-  private readonly notifications: JsonRpcNotification[] = [];
-  private nextId = 0;
-  private readonly pending = new Map<number, (message: JsonRpcResponse) => void>();
-
-  constructor(private readonly transport: InMemoryTransport) {
-    this.transport.onmessage = (message) => {
-      if (isJsonRpcResponse(message)) {
-        this.pending.get(message.id ?? -1)?.(message);
-        if (typeof message.id === 'number') {
-          this.pending.delete(message.id);
-        }
-        return;
-      }
-
-      this.notifications.push(message as JsonRpcNotification);
-    };
-  }
-
-  async start(): Promise<void> {
-    await this.transport.start();
-  }
-
-  async close(): Promise<void> {
-    this.pending.clear();
-    await this.transport.close();
-  }
-
-  async initialize(capabilities: Record<string, unknown> = { roots: {} }): Promise<JsonRpcSuccess> {
-    const response = await this.request('initialize', {
-      capabilities,
-      clientInfo: { name: 'in-memory-e2e', version: '0.0.1' },
-      protocolVersion: LATEST_PROTOCOL_VERSION,
-    });
-    await this.notify('notifications/initialized');
-    return response;
-  }
-
-  async request(method: string, params?: Record<string, unknown>): Promise<JsonRpcSuccess> {
-    const id = ++this.nextId;
-    const request: JsonRpcRequest = {
-      id,
-      jsonrpc: '2.0',
-      method,
-      ...(params ? { params } : {}),
-    };
-
-    const response = await new Promise<JsonRpcResponse>((resolve) => {
-      this.pending.set(id, resolve);
-      void this.transport.send(request);
-    });
-
-    if (isJsonRpcFailure(response)) {
-      throw new Error(`JSON-RPC ${response.error.code}: ${response.error.message}`);
-    }
-
-    return response;
-  }
-
-  async requestRaw(method: string, params?: Record<string, unknown>): Promise<JsonRpcResponse> {
-    const id = ++this.nextId;
-    const request: JsonRpcRequest = {
-      id,
-      jsonrpc: '2.0',
-      method,
-      ...(params ? { params } : {}),
-    };
-
-    return await new Promise<JsonRpcResponse>((resolve) => {
-      this.pending.set(id, resolve);
-      void this.transport.send(request);
-    });
-  }
-
-  async notify(method: string, params?: Record<string, unknown>): Promise<void> {
-    await this.transport.send({
-      jsonrpc: '2.0',
-      method,
-      ...(params ? { params } : {}),
-    });
-  }
-
-  getNotifications(): JsonRpcNotification[] {
-    return [...this.notifications];
-  }
-}
-
-interface ServerHarness {
-  client: JsonRpcTestClient;
-  close: () => Promise<void>;
-}
-
-async function createHarness(): Promise<ServerHarness> {
-  const instance = createServerInstance();
-  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
-  const client = new JsonRpcTestClient(clientTransport);
-
-  await client.start();
-  await instance.server.connect(serverTransport as Parameters<McpServer['connect']>[0]);
-
-  return {
-    client,
-    close: async () => {
-      await client.close();
-      await instance.close();
-    },
-  };
-}
-
 const cleanupCallbacks: (() => Promise<void>)[] = [];
 
 afterEach(async () => {
@@ -169,9 +29,26 @@ afterEach(async () => {
   }
 });
 
+function expectedConcreteResourceUris(): string[] {
+  return [
+    'memory://sessions',
+    'memory://caches',
+    'discover://catalog',
+    'discover://workflows',
+    'memory://workspace/context',
+    'memory://workspace/cache',
+  ];
+}
+
+function expectedTemplateResourceUris(): string[] {
+  return [...PUBLIC_RESOURCE_URIS].filter((uri) => uri.includes('{'));
+}
+
 describe('in-memory MCP server e2e', () => {
   it('completes initialization and exposes the discovery surface', async () => {
-    const harness = await createHarness();
+    const harness = await createServerHarness(createServerInstance, {
+      capabilities: { roots: {} },
+    });
     cleanupCallbacks.push(harness.close);
 
     const initialize = await harness.client.initialize();
@@ -191,22 +68,24 @@ describe('in-memory MCP server e2e', () => {
     assert.equal((initialize.result.serverInfo as { name: string }).name, 'gemini-assistant');
     assert.equal(typeof initialize.result.instructions, 'string');
 
-    const toolNames = ((tools.result.tools as { name: string }[]) ?? []).map((tool) => tool.name);
-    assert.deepStrictEqual(toolNames.sort(), [...PUBLIC_TOOL_NAMES].sort());
-
-    const resourceUris = ((resources.result.resources as { uri: string }[]) ?? []).map(
-      (resource) => resource.uri,
+    assertStablePublicSurface(
+      ((tools.result.tools as { name: string }[]) ?? []).map((tool) => tool.name),
+      [...PUBLIC_TOOL_NAMES],
     );
-    const templateUris = (
-      (resourceTemplates.result.resourceTemplates as { uriTemplate: string }[]) ?? []
-    ).map((template) => template.uriTemplate);
-    const advertisedUris = new Set<string>([...resourceUris, ...templateUris]);
-    assert.deepStrictEqual([...advertisedUris].sort(), [...PUBLIC_RESOURCE_URIS].sort());
-
-    const promptNames = ((prompts.result.prompts as { name: string }[]) ?? []).map(
-      (prompt) => prompt.name,
+    assertStablePublicSurface(
+      ((resources.result.resources as { uri: string }[]) ?? []).map((resource) => resource.uri),
+      expectedConcreteResourceUris(),
     );
-    assert.deepStrictEqual(promptNames, [...PUBLIC_PROMPT_NAMES]);
+    assertStablePublicSurface(
+      ((resourceTemplates.result.resourceTemplates as { uriTemplate: string }[]) ?? []).map(
+        (resource) => resource.uriTemplate,
+      ),
+      expectedTemplateResourceUris(),
+    );
+    assertStablePublicSurface(
+      ((prompts.result.prompts as { name: string }[]) ?? []).map((prompt) => prompt.name),
+      [...PUBLIC_PROMPT_NAMES],
+    );
 
     const discoveryText =
       ((discoveryCatalog.result.contents as { text?: string }[]) ?? []).find(
@@ -227,34 +106,45 @@ describe('in-memory MCP server e2e', () => {
       'discover://catalog',
     );
     assert.equal(harness.client.getNotifications().length, 0);
+    assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);
   });
 
-  it('surfaces tool input validation through the protocol layer', async () => {
-    const harness = await createHarness();
+  it('surfaces request-shape validation as JSON-RPC protocol errors', async () => {
+    const harness = await createServerHarness(createServerInstance, {
+      capabilities: { roots: {} },
+    });
     cleanupCallbacks.push(harness.close);
 
     await harness.client.initialize();
-    const response = await harness.client.requestRaw('tools/call', {
-      arguments: {},
+
+    const missingResearchMode = await harness.client.requestRaw('tools/call', {
+      arguments: { goal: 'Tell me something current' },
       name: 'research',
     });
+    assertRequestValidationFailure(missingResearchMode, -32602, /mode/i);
 
-    if (isJsonRpcFailure(response)) {
-      assert.equal(response.error.code, -32602);
-      assert.match(response.error.message, /mode/i);
-      return;
-    }
-
-    assert.equal(response.result.isError, true);
-    const content = (response.result.content as { text?: string }[]) ?? [];
-    assert.match(content[0]?.text ?? '', /mode/i);
+    const invalidChatSchema = await harness.client.requestRaw('tools/call', {
+      arguments: {
+        goal: 'Return JSON',
+        responseSchema: {
+          properties: {
+            status: { type: 123 },
+          },
+          type: 'object',
+        },
+      },
+      name: 'chat',
+    });
+    assertRequestValidationFailure(invalidChatSchema, -32602, /responseSchema|type/i);
   });
 
   it('reads memory://workspace/context as markdown through MCP', async () => {
-    const harness = await createHarness();
+    const harness = await createServerHarness(createServerInstance, {
+      capabilities: { roots: {} },
+    });
     cleanupCallbacks.push(harness.close);
 
-    await harness.client.initialize({});
+    await harness.client.initialize();
     const response = await harness.client.request('resources/read', {
       uri: 'memory://workspace/context',
     });
@@ -277,11 +167,13 @@ describe('in-memory MCP server e2e', () => {
     process.env.ALLOWED_FILE_ROOTS = restrictedRoot;
     process.env.WORKSPACE_CONTEXT_FILE = join(process.cwd(), 'package.json');
 
-    const harness = await createHarness();
+    const harness = await createServerHarness(createServerInstance, {
+      capabilities: { roots: {} },
+    });
     cleanupCallbacks.push(harness.close);
 
     try {
-      await harness.client.initialize({});
+      await harness.client.initialize();
       const response = await harness.client.request('resources/read', {
         uri: 'memory://workspace/context',
       });

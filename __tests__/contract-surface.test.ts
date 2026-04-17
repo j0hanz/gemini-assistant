@@ -1,0 +1,77 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { describe, it } from 'node:test';
+
+import { listDiscoveryEntries, listWorkflowEntries } from '../src/catalog.js';
+import {
+  DISCOVERY_ENTRIES,
+  JOB_METADATA,
+  PUBLIC_PROMPT_NAMES,
+  PUBLIC_RESOURCE_URIS,
+  PUBLIC_TOOL_NAMES,
+  PUBLIC_WORKFLOW_NAMES,
+} from '../src/public-contract.js';
+
+const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+
+describe('contract surface invariants', () => {
+  it('keeps discovery metadata aligned with the public tool, prompt, and resource constants', () => {
+    const discoveryEntries = listDiscoveryEntries();
+
+    assert.deepStrictEqual(
+      discoveryEntries.filter((entry) => entry.kind === 'tool').map((entry) => entry.name),
+      [...PUBLIC_TOOL_NAMES].sort(),
+    );
+    assert.deepStrictEqual(
+      discoveryEntries.filter((entry) => entry.kind === 'prompt').map((entry) => entry.name),
+      [...PUBLIC_PROMPT_NAMES].sort(),
+    );
+    assert.deepStrictEqual(
+      discoveryEntries.filter((entry) => entry.kind === 'resource').map((entry) => entry.name),
+      [...PUBLIC_RESOURCE_URIS].sort(),
+    );
+    assert.deepStrictEqual(
+      DISCOVERY_ENTRIES.filter((entry) => entry.kind === 'tool').map((entry) => entry.name),
+      [...PUBLIC_TOOL_NAMES],
+    );
+    assert.deepStrictEqual(
+      JOB_METADATA.map((entry) => entry.name),
+      [...PUBLIC_TOOL_NAMES],
+    );
+  });
+
+  it('keeps workflow references within the public contract and README', () => {
+    const workflows = listWorkflowEntries();
+
+    assert.deepStrictEqual(
+      workflows.map((workflow) => workflow.name),
+      [...PUBLIC_WORKFLOW_NAMES],
+    );
+
+    for (const workflow of workflows) {
+      for (const toolName of workflow.recommendedTools) {
+        assert.ok(PUBLIC_TOOL_NAMES.includes(toolName));
+      }
+      for (const promptName of workflow.recommendedPrompts) {
+        assert.ok(PUBLIC_PROMPT_NAMES.includes(promptName));
+      }
+      for (const resourceUri of workflow.relatedResources) {
+        assert.ok(PUBLIC_RESOURCE_URIS.includes(resourceUri));
+      }
+
+      assert.match(readme, new RegExp(workflow.name.replace('-', '\\-')));
+    }
+  });
+
+  it('mentions every public contract entry in the README', () => {
+    for (const toolName of PUBLIC_TOOL_NAMES) {
+      assert.match(readme, new RegExp(toolName));
+    }
+    for (const promptName of PUBLIC_PROMPT_NAMES) {
+      assert.match(readme, new RegExp(promptName));
+    }
+    for (const resourceUri of PUBLIC_RESOURCE_URIS) {
+      assert.match(readme, new RegExp(resourceUri.replace(/[{}]/g, '\\$&')));
+    }
+  });
+});

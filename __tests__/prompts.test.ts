@@ -23,6 +23,13 @@ describe('prompt definitions', () => {
       [...PUBLIC_PROMPT_NAMES],
     );
   });
+
+  it('keeps prompt titles aligned with stable prompt ordering', () => {
+    assert.deepStrictEqual(
+      promptDefinitions.map((definition) => definition.title),
+      ['Discover', 'Research', 'Review', 'Memory'],
+    );
+  });
 });
 
 describe('discover prompt', () => {

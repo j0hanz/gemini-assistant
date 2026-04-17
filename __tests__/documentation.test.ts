@@ -7,6 +7,7 @@ import {
   PUBLIC_PROMPT_NAMES,
   PUBLIC_RESOURCE_URIS,
   PUBLIC_TOOL_NAMES,
+  PUBLIC_WORKFLOW_NAMES,
 } from '../src/public-contract.js';
 
 const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
@@ -37,6 +38,11 @@ describe('documentation and package metadata', () => {
   });
 
   it('mentions the workflow catalog in the README', () => {
+    assert.deepStrictEqual(
+      listWorkflowEntries().map((workflow) => workflow.name),
+      [...PUBLIC_WORKFLOW_NAMES],
+    );
+
     for (const workflow of listWorkflowEntries()) {
       assert.match(readme, new RegExp(workflow.name.replace('-', '\\-')));
     }

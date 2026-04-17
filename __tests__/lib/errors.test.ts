@@ -257,22 +257,27 @@ describe('sendProgress', () => {
     assert.strictEqual(capturedMessage, 'Analyzing files');
   });
 
-  it('does not bridge to task status on terminal progress', async () => {
-    let updateCalled = false;
+  it('bridges to task status on terminal progress with a message', async () => {
+    let capturedStatus: string | undefined;
+    let capturedMessage: string | undefined;
     const ctx = makeMockContext({ progressToken: 'tok-term' });
     (ctx as unknown as Record<string, unknown>).task = {
       id: 'task-2',
       store: {
-        updateTaskStatus: async () => {
-          updateCalled = true;
+        updateTaskStatus: async (_id: string, status: string, message: string) => {
+          capturedStatus = status;
+          capturedMessage = message;
         },
       },
     };
     (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async () => {};
 
-    await sendProgress(ctx, 100, 100, 'Done');
+    await sendProgress(ctx, 100, 100, 'failed — boom');
 
-    assert.strictEqual(updateCalled, false);
+    // Terminal progress must surface the final message to task statusMessage
+    // so clients see the real outcome rather than the last in-progress step label.
+    assert.strictEqual(capturedStatus, 'working');
+    assert.strictEqual(capturedMessage, 'failed — boom');
   });
 
   it('does not bridge when message is empty', async () => {

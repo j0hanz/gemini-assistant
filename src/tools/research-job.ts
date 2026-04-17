@@ -163,10 +163,21 @@ export function buildAgenticSearchResult(streamResult: StreamResult, textContent
 }
 
 export function buildSearchResult(streamResult: StreamResult, textContent: string) {
-  const sources = collectGroundedSources(streamResult.groundingMetadata);
+  const groundedSources = collectGroundedSources(streamResult.groundingMetadata);
   const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
   const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
   const contentAdditions: CallToolResult['content'] = [];
+
+  // Fallback: when grounding metadata is empty but URL-context succeeded,
+  // surface the retrieved URLs as sources so the response is transparent
+  // about what was consumed.
+  const urlFallbackSources =
+    groundedSources.length === 0
+      ? urlMetadata
+          .filter((entry) => entry.status === 'URL_RETRIEVAL_STATUS_SUCCESS')
+          .map((entry) => entry.url)
+      : [];
+  const sources = groundedSources.length > 0 ? groundedSources : urlFallbackSources;
 
   appendSources(contentAdditions, formatSourceLabels(sourceDetails));
   appendUrlStatus(contentAdditions, urlMetadata);

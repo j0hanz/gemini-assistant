@@ -467,16 +467,24 @@ async function handleStreamPart(
   await transitionToGenerating(ctx, state, msg);
   state.text += partText;
 
-  // Enqueue LLM token chunks via the experimental task queue for clients that support streaming
+  // Stream LLM token chunks to task-aware clients via the task message queue.
+  // The SDK drains this queue and forwards each entry to `transport.send`, so the
+  // `message` field must be a fully-formed JSON-RPC notification envelope;
+  // otherwise `JSON.stringify(undefined)` ends up on stdout as "undefined\n".
   const taskContext = ctx.task as
     | (NonNullable<ServerContext['task']> & { queue?: TaskMessageQueue })
     | undefined;
   if (taskContext?.queue && taskContext.id) {
     try {
       void taskContext.queue.enqueue(taskContext.id, {
-        method: 'notifications/message',
-        params: { content: partText },
-      } as unknown as QueuedMessage);
+        type: 'notification',
+        message: {
+          jsonrpc: '2.0',
+          method: 'notifications/message',
+          params: { level: 'info', logger: 'stream', data: partText },
+        },
+        timestamp: Date.now(),
+      } satisfies QueuedMessage);
     } catch {
       // Ignore queue overflow or enqueue errors
     }

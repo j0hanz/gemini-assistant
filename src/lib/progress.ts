@@ -38,13 +38,19 @@ export function resetProgressThrottle(): void {
 
 // ── Internals ─────────────────────────────────────────────────────────
 
-async function bridgeProgressToTask(ctx: ServerContext, message: string): Promise<void> {
+async function bridgeProgressToTask(
+  ctx: ServerContext,
+  message: string,
+  { force = false }: { force?: boolean } = {},
+): Promise<void> {
   const task = ctx.task;
   if (!task?.id) return;
 
   const now = Date.now();
-  const lastUpdate = lastTaskStatusTime.get(task.id) ?? 0;
-  if (now - lastUpdate < TASK_STATUS_INTERVAL_MS) return;
+  if (!force) {
+    const lastUpdate = lastTaskStatusTime.get(task.id) ?? 0;
+    if (now - lastUpdate < TASK_STATUS_INTERVAL_MS) return;
+  }
   lastTaskStatusTime.set(task.id, now);
 
   try {
@@ -156,6 +162,10 @@ export async function sendProgress(
 
   if (!isTerminal && message) {
     await bridgeProgressToTask(ctx, message);
+  } else if (isTerminal && message) {
+    // Ensure the final status message reflects terminal state (completion or failure)
+    // so clients reading task.statusMessage see the real outcome, not the last step label.
+    await bridgeProgressToTask(ctx, message, { force: true });
   }
 }
 

@@ -512,7 +512,19 @@ async function memoryWork(
     }
 
     case 'caches.get': {
-      const cache = await getCacheSummary(args.cacheName, ctx.mcpReq.signal);
+      let cache: CacheSummary;
+      try {
+        cache = await getCacheSummary(args.cacheName, ctx.mcpReq.signal);
+      } catch (err) {
+        const raw = err instanceof Error ? err.message : String(err);
+        if (/not found|404/i.test(raw)) {
+          return new AppError(
+            'memory',
+            `memory: Cache '${args.cacheName}' not found.`,
+          ).toToolResult();
+        }
+        throw err;
+      }
       return {
         content: [
           { type: 'text', text: `Cache ${args.cacheName} loaded.` },

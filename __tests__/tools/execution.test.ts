@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 
 import { getAI } from '../../src/client.js';
 import { ExecuteCodeOutputSchema } from '../../src/schemas/outputs.js';
-import { registerExecuteCodeTool } from '../../src/tools/execution.js';
+import { registerExecuteCodeTool } from '../../src/tools/diagram.js';
 
 process.env.API_KEY ??= 'test-key-for-execution-tools';
 

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { workspaceCacheManager } from '../../src/lib/workspace-context.js';
-import { createAskWork } from '../../src/tools/ask.js';
+import { createAskWork } from '../../src/tools/chat.js';
 
 function createContext(taskId?: string): ServerContext {
   return {
@@ -96,12 +96,12 @@ describe('ask transcript capture', () => {
     ]);
     assert.ok(
       result.content.some(
-        (item) => item.type === 'resource_link' && item.uri === 'sessions://sess-new',
+        (item) => item.type === 'resource_link' && item.uri === 'memory://sessions/sess-new',
       ),
     );
     assert.ok(
       result.content.some(
-        (item) => item.type === 'resource_link' && item.uri === 'sessions://sess-new/events',
+        (item) => item.type === 'resource_link' && item.uri === 'memory://sessions/sess-new/events',
       ),
     );
   });

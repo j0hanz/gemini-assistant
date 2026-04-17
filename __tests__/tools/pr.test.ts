@@ -19,7 +19,7 @@ const {
   matchesNoisyPath,
   scoreDiffUnitRisk,
   splitDiffUnits,
-} = await import('../../src/tools/pr.js');
+} = await import('../../src/tools/review.js');
 
 function runGit(cwd: string, args: string[]) {
   execFileSync('git', args, { cwd, stdio: 'pipe' });

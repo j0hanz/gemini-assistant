@@ -10,20 +10,24 @@ import { z } from 'zod/v4';
 
 import {
   cleanupErrorLogger,
+  errorResult,
   reportCompletion,
   sendProgress,
   withErrorLogging,
   withRetry,
 } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
-import { createResourceLink } from '../lib/response.js';
+import { buildBaseStructuredOutput, createResourceLink } from '../lib/response.js';
 import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
-import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
+import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from '../lib/validation.js';
+import { assembleWorkspaceContext, workspaceCacheManager } from '../lib/workspace-context.js';
 import {
   type CreateCacheInput,
   CreateCacheInputSchema,
+  createMemoryInputSchema,
   type DeleteCacheInput,
   DeleteCacheInputSchema,
+  type MemoryInput,
   type UpdateCacheInput,
   UpdateCacheInputSchema,
 } from '../schemas/inputs.js';
@@ -31,11 +35,13 @@ import {
   CreateCacheOutputSchema,
   DeleteCacheOutputSchema,
   ListCachesOutputSchema,
+  MemoryOutputSchema,
   UpdateCacheOutputSchema,
 } from '../schemas/outputs.js';
 import { withCurrentWorkspaceRoot } from '../schemas/shared.js';
 
-import { type CacheSummary, getAI, listCacheSummaries, MODEL } from '../client.js';
+import { type CacheSummary, getAI, getCacheSummary, listCacheSummaries, MODEL } from '../client.js';
+import type { SessionStore } from '../sessions.js';
 
 type CachePart = ReturnType<typeof createPartFromUri>;
 
@@ -54,24 +60,26 @@ export function onCacheChange(cb: (event: CacheChangeEvent) => void): void {
 
 function notifyCacheChange(cacheNames: string[] = []): void {
   changeCallback?.({
-    detailUris: cacheNames.map((cacheName) => `caches://${encodeURIComponent(cacheName)}`),
+    detailUris: cacheNames.map((cacheName) => `memory://caches/${encodeURIComponent(cacheName)}`),
   });
 }
 
 function formatCacheListMarkdown(caches: CacheSummary[]): string {
   if (caches.length === 0) return 'No active caches found.';
-  const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v : fallback);
-  const num = (v: unknown): string => (typeof v === 'number' ? String(v) : 'N/A');
+  const str = (value: unknown, fallback: string): string =>
+    typeof value === 'string' ? value : fallback;
+  const num = (value: unknown): string => (typeof value === 'number' ? String(value) : 'N/A');
+
   return (
     `**Active Caches (${String(caches.length)})**\n\n` +
     caches
       .map(
-        (c, i) =>
-          `${String(i + 1)}. **${str(c.displayName, 'Untitled')}**\n` +
-          `   - Name: \`${str(c.name, 'N/A')}\`\n` +
-          `   - Model: ${str(c.model, 'N/A')}\n` +
-          `   - Tokens: ${num(c.totalTokenCount)}\n` +
-          `   - Expires: ${str(c.expireTime, 'N/A')}`,
+        (cache, index) =>
+          `${String(index + 1)}. **${str(cache.displayName, 'Untitled')}**\n` +
+          `   - Name: \`${str(cache.name, 'N/A')}\`\n` +
+          `   - Model: ${str(cache.model, 'N/A')}\n` +
+          `   - Tokens: ${num(cache.totalTokenCount)}\n` +
+          `   - Expires: ${str(cache.expireTime, 'N/A')}`,
       )
       .join('\n')
   );
@@ -83,13 +91,13 @@ function truncateName(name: string, maxLen = 10): string {
 
 function cacheResourceLink(cacheName: string, displayName?: string) {
   return createResourceLink(
-    `caches://${encodeURIComponent(cacheName)}`,
+    `memory://caches/${encodeURIComponent(cacheName)}`,
     displayName ?? `Cache ${truncateName(cacheName)}`,
   );
 }
 
 function cacheListResourceLink() {
-  return createResourceLink('caches://list', 'Active Caches');
+  return createResourceLink('memory://caches', 'Active Caches');
 }
 
 function cacheSummaryResourceLinks(caches: CacheSummary[]) {
@@ -124,10 +132,10 @@ async function uploadCacheParts(
   const parts: CachePart[] = [];
   let filesUploaded = 0;
 
-  for (let i = 0; i < filePaths.length; i += CACHE_UPLOAD_CHUNK_SIZE) {
+  for (let index = 0; index < filePaths.length; index += CACHE_UPLOAD_CHUNK_SIZE) {
     if (ctx.mcpReq.signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
-    const chunk = filePaths.slice(i, i + CACHE_UPLOAD_CHUNK_SIZE);
+    const chunk = filePaths.slice(index, index + CACHE_UPLOAD_CHUNK_SIZE);
     const chunkParts = await Promise.all(
       chunk.map(async (filePath) => {
         const uploadedFile = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
@@ -157,12 +165,14 @@ async function cleanupOldCaches(
   try {
     const existing = await listCacheSummaries(signal);
     const stale = existing.filter(
-      (c): c is CacheSummary & { name: string } =>
-        typeof c.name === 'string' && c.displayName === displayName && c.name !== keepName,
+      (cache): cache is CacheSummary & { name: string } =>
+        typeof cache.name === 'string' &&
+        cache.displayName === displayName &&
+        cache.name !== keepName,
     );
-    await Promise.allSettled(stale.map((c) => getAI().caches.delete({ name: c.name })));
+    await Promise.allSettled(stale.map((cache) => getAI().caches.delete({ name: cache.name })));
   } catch {
-    // Best-effort cleanup — failures are non-fatal
+    // Best-effort cleanup — failures are non-fatal.
   }
 }
 
@@ -189,7 +199,7 @@ async function confirmCacheDeletion(
       ? 'confirmed'
       : 'declined';
   } catch {
-    void ctx.mcpReq.log('debug', `Elicitation not supported for cache deletion`);
+    void ctx.mcpReq.log('debug', 'Elicitation not supported for cache deletion');
     return 'unsupported';
   }
 }
@@ -292,7 +302,7 @@ function buildCreateCacheResult(cache: {
   };
 }
 
-function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
+export function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
   return async function createCacheWork(
     { filePaths, systemInstruction, ttl, displayName }: CreateCacheInput,
     ctx: ServerContext,
@@ -380,7 +390,7 @@ function registerListCachesTool(server: McpServer): void {
   );
 }
 
-async function deleteCacheWork(
+export async function deleteCacheWork(
   { cacheName, confirm }: DeleteCacheInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -441,7 +451,7 @@ function registerDeleteCacheTool(server: McpServer, taskMessageQueue: TaskMessag
   );
 }
 
-async function updateCacheWork(
+export async function updateCacheWork(
   { cacheName, ttl }: UpdateCacheInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -491,4 +501,287 @@ export function registerCacheTools(server: McpServer, taskMessageQueue: TaskMess
   registerListCachesTool(server);
   registerDeleteCacheTool(server, taskMessageQueue);
   registerUpdateCacheTool(server, taskMessageQueue);
+}
+
+function sessionUris(sessionId: string): string[] {
+  return [
+    `memory://sessions/${sessionId}`,
+    `memory://sessions/${sessionId}/transcript`,
+    `memory://sessions/${sessionId}/events`,
+  ];
+}
+
+async function memoryWork(
+  sessionStore: SessionStore,
+  rootsFetcher: RootsFetcher,
+  createCacheWork: ReturnType<typeof buildCreateCacheWork>,
+  args: MemoryInput,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const base = buildBaseStructuredOutput(ctx.task?.id);
+
+  switch (args.action) {
+    case 'sessions.list': {
+      const sessions = sessionStore.listSessionEntries();
+      return {
+        content: [
+          { type: 'text', text: `Found ${String(sessions.length)} active session(s).` },
+          createResourceLink('memory://sessions', 'Chat Sessions'),
+        ],
+        structuredContent: {
+          ...base,
+          action: args.action,
+          summary: `Found ${String(sessions.length)} active session(s).`,
+          sessions,
+          resourceUris: ['memory://sessions'],
+        },
+      };
+    }
+
+    case 'sessions.get': {
+      const session = sessionStore.getSessionEntry(args.sessionId);
+      if (!session) {
+        return errorResult(`memory: Session '${args.sessionId}' not found.`);
+      }
+      return {
+        content: [
+          { type: 'text', text: `Session ${args.sessionId} is active.` },
+          ...sessionUris(args.sessionId).map((uri, index) =>
+            createResourceLink(uri, ['Session', 'Transcript', 'Events'][index] ?? uri),
+          ),
+        ],
+        structuredContent: {
+          ...base,
+          action: args.action,
+          summary: `Session ${args.sessionId} is active.`,
+          session,
+          resourceUris: sessionUris(args.sessionId),
+        },
+      };
+    }
+
+    case 'sessions.transcript': {
+      const transcript = sessionStore.listSessionTranscriptEntries(args.sessionId);
+      if (!transcript) {
+        return errorResult(`memory: Session '${args.sessionId}' not found.`);
+      }
+      return {
+        content: [
+          { type: 'text', text: `Transcript entries: ${String(transcript.length)}.` },
+          createResourceLink(
+            `memory://sessions/${args.sessionId}/transcript`,
+            `Transcript ${args.sessionId}`,
+          ),
+        ],
+        structuredContent: {
+          ...base,
+          action: args.action,
+          summary: `Transcript entries: ${String(transcript.length)}.`,
+          transcript,
+          resourceUris: [`memory://sessions/${args.sessionId}/transcript`],
+        },
+      };
+    }
+
+    case 'sessions.events': {
+      const events = sessionStore.listSessionEventEntries(args.sessionId);
+      if (!events) {
+        return errorResult(`memory: Session '${args.sessionId}' not found.`);
+      }
+      return {
+        content: [
+          { type: 'text', text: `Event entries: ${String(events.length)}.` },
+          createResourceLink(
+            `memory://sessions/${args.sessionId}/events`,
+            `Events ${args.sessionId}`,
+          ),
+        ],
+        structuredContent: {
+          ...base,
+          action: args.action,
+          summary: `Event entries: ${String(events.length)}.`,
+          events,
+          resourceUris: [`memory://sessions/${args.sessionId}/events`],
+        },
+      };
+    }
+
+    case 'caches.list': {
+      const caches = await listCacheSummaries(ctx.mcpReq.signal);
+      return {
+        content: [
+          { type: 'text', text: `Found ${String(caches.length)} active cache(s).` },
+          createResourceLink('memory://caches', 'Caches'),
+        ],
+        structuredContent: {
+          ...base,
+          action: args.action,
+          summary: `Found ${String(caches.length)} active cache(s).`,
+          caches,
+          resourceUris: ['memory://caches'],
+        },
+      };
+    }
+
+    case 'caches.get': {
+      const cache = await getCacheSummary(args.cacheName, ctx.mcpReq.signal);
+      return {
+        content: [
+          { type: 'text', text: `Cache ${args.cacheName} loaded.` },
+          createResourceLink(
+            `memory://caches/${encodeURIComponent(args.cacheName)}`,
+            args.cacheName,
+          ),
+        ],
+        structuredContent: {
+          ...base,
+          action: args.action,
+          summary: `Cache ${args.cacheName} loaded.`,
+          cache,
+          resourceUris: [`memory://caches/${encodeURIComponent(args.cacheName)}`],
+        },
+      };
+    }
+
+    case 'caches.create': {
+      const createArgs =
+        args.systemInstruction !== undefined
+          ? {
+              displayName: args.displayName,
+              filePaths: args.filePaths,
+              systemInstruction: args.systemInstruction,
+              ttl: args.ttl,
+            }
+          : {
+              displayName: args.displayName,
+              filePaths: args.filePaths ?? [],
+              ttl: args.ttl,
+            };
+      const result = await createCacheWork(createArgs, ctx);
+      if (result.isError) return result;
+      const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+      const resourceUris =
+        typeof structured.name === 'string'
+          ? ['memory://caches', `memory://caches/${encodeURIComponent(structured.name)}`]
+          : ['memory://caches'];
+      return {
+        ...result,
+        structuredContent: {
+          ...base,
+          action: args.action,
+          summary:
+            typeof structured.name === 'string'
+              ? `Created cache ${structured.name}.`
+              : 'Created cache.',
+          cache: structured,
+          resourceUris,
+        },
+      };
+    }
+
+    case 'caches.update': {
+      const result = await updateCacheWork({ cacheName: args.cacheName, ttl: args.ttl }, ctx);
+      if (result.isError) return result;
+      const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+      return {
+        ...result,
+        structuredContent: {
+          ...base,
+          action: args.action,
+          summary: `Updated cache ${args.cacheName}.`,
+          cache: structured,
+          resourceUris: [`memory://caches/${encodeURIComponent(args.cacheName)}`],
+        },
+      };
+    }
+
+    case 'caches.delete': {
+      const result = await deleteCacheWork(
+        { cacheName: args.cacheName, confirm: args.confirm },
+        ctx,
+      );
+      if (result.isError) return result;
+      const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+      return {
+        ...result,
+        structuredContent: {
+          ...base,
+          action: args.action,
+          summary:
+            structured.deleted === true
+              ? `Deleted cache ${args.cacheName}.`
+              : structured.confirmationRequired === true
+                ? `Deletion for ${args.cacheName} requires confirmation.`
+                : `Did not delete cache ${args.cacheName}.`,
+          deleted: structured.deleted,
+          confirmationRequired: structured.confirmationRequired,
+          resourceUris: ['memory://caches'],
+        },
+      };
+    }
+
+    case 'workspace.context': {
+      const roots = await getAllowedRoots(rootsFetcher);
+      const workspaceContext = await assembleWorkspaceContext(roots);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Workspace context assembled from ${String(workspaceContext.sources.length)} source(s).`,
+          },
+          createResourceLink('memory://workspace/context', 'Workspace Context', 'text/markdown'),
+        ],
+        structuredContent: {
+          ...base,
+          action: args.action,
+          summary: `Workspace context assembled from ${String(workspaceContext.sources.length)} source(s).`,
+          workspaceContext,
+          resourceUris: ['memory://workspace/context'],
+        },
+      };
+    }
+
+    case 'workspace.cache': {
+      const workspaceCache = workspaceCacheManager.getCacheStatus();
+      return {
+        content: [
+          { type: 'text', text: 'Workspace cache status loaded.' },
+          createResourceLink('memory://workspace/cache', 'Workspace Cache'),
+        ],
+        structuredContent: {
+          ...base,
+          action: args.action,
+          summary: 'Workspace cache status loaded.',
+          workspaceCache,
+          resourceUris: ['memory://workspace/cache'],
+        },
+      };
+    }
+  }
+
+  return errorResult(`memory: Unsupported action ${(args as { action?: string }).action ?? ''}.`);
+}
+
+export function registerMemoryTool(
+  server: McpServer,
+  sessionStore: SessionStore,
+  taskMessageQueue: TaskMessageQueue,
+): void {
+  const rootsFetcher = buildServerRootsFetcher(server);
+  const createCacheWork = buildCreateCacheWork(rootsFetcher);
+
+  registerTaskTool(
+    server,
+    'memory',
+    {
+      title: 'Memory',
+      description: 'Inspect and manage sessions, caches, and workspace memory state.',
+      inputSchema: createMemoryInputSchema(sessionStore.completeSessionIds.bind(sessionStore)),
+      outputSchema: MemoryOutputSchema,
+      annotations: MUTABLE_ANNOTATIONS,
+    },
+    taskMessageQueue,
+    (args: MemoryInput, ctx: ServerContext) =>
+      memoryWork(sessionStore, rootsFetcher, createCacheWork, args, ctx),
+  );
 }

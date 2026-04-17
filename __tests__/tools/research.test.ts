@@ -9,7 +9,7 @@ import {
   registerAgenticSearchTool,
   registerAnalyzeUrlTool,
   registerSearchTool,
-} from '../../src/tools/research.js';
+} from '../../src/tools/research-job.js';
 
 process.env.API_KEY ??= 'test-key-for-research-tools';
 

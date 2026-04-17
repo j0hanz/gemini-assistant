@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { getAI } from '../../src/client.js';
-import { registerCacheTools } from '../../src/tools/cache.js';
+import { registerCacheTools } from '../../src/tools/memory.js';
 
 process.env.API_KEY ??= 'test-key-for-cache-tools';
 

@@ -11,6 +11,8 @@ export const UsageMetadataSchema = z.strictObject({
 
 export type UsageMetadata = z.infer<typeof UsageMetadataSchema>;
 
+export const PublicOutputStatusSchema = z.literal('completed');
+
 const FunctionCallEntrySchema = z.strictObject({
   name: z.string().describe('Function/tool name'),
   args: z.record(z.string(), z.unknown()).describe('Function call arguments').optional(),
@@ -50,7 +52,7 @@ const ToolEventSchema = z.strictObject({
     .describe('Part text when a signature-bearing part has no tool payload'),
 });
 
-const baseOutputFields = {
+const streamMetadataOutputFields = {
   thoughts: z.string().describe('Internal model reasoning/thinking process').optional(),
   usage: UsageMetadataSchema.describe('Token usage').optional(),
   functionCalls: z
@@ -62,6 +64,15 @@ const baseOutputFields = {
     .optional()
     .describe('Normalized Gemini tool/function event stream captured during generation'),
 };
+
+const publicBaseOutputFields = {
+  status: PublicOutputStatusSchema.describe('Stable status for successful tool executions'),
+  requestId: z.string().describe('Server-side request or task identifier').optional(),
+  warnings: z.array(z.string()).describe('Non-fatal warnings for the result').optional(),
+  ...streamMetadataOutputFields,
+};
+
+export const PublicBaseOutputSchema = z.strictObject(publicBaseOutputFields);
 
 const WorkspaceCacheSchema = z.strictObject({
   applied: z.literal(true).describe('Whether the automatic workspace cache was applied'),
@@ -78,7 +89,7 @@ export const AskOutputSchema = z.strictObject({
   workspaceCache: WorkspaceCacheSchema.optional().describe(
     'Metadata about an automatically applied workspace cache',
   ),
-  ...baseOutputFields,
+  ...streamMetadataOutputFields,
 });
 
 export const ExecuteCodeOutputSchema = z.strictObject({
@@ -90,7 +101,7 @@ export const ExecuteCodeOutputSchema = z.strictObject({
     .string()
     .optional()
     .describe('Requested language hint when the caller supplied one'),
-  ...baseOutputFields,
+  ...streamMetadataOutputFields,
 });
 
 const UrlMetadataEntrySchema = z.strictObject({
@@ -115,18 +126,18 @@ export const SearchOutputSchema = z.strictObject({
     .optional()
     .describe('Structured grounded source entries for client consumption'),
   urlMetadata: z.array(UrlMetadataEntrySchema).describe('URL retrieval status').optional(),
-  ...baseOutputFields,
+  ...streamMetadataOutputFields,
 });
 
 export const AnalyzeUrlOutputSchema = z.strictObject({
   answer: z.string().describe('URL content analysis'),
   urlMetadata: z.array(UrlMetadataEntrySchema).describe('Retrieval status per URL').optional(),
-  ...baseOutputFields,
+  ...streamMetadataOutputFields,
 });
 
 export const AnalyzeFileOutputSchema = z.strictObject({
   analysis: z.string().describe('File analysis result'),
-  ...baseOutputFields,
+  ...streamMetadataOutputFields,
 });
 
 export const AgenticSearchOutputSchema = z.strictObject({
@@ -140,7 +151,7 @@ export const AgenticSearchOutputSchema = z.strictObject({
     .array(z.string())
     .optional()
     .describe('Tools invoked during research (e.g. googleSearch, codeExecution)'),
-  ...baseOutputFields,
+  ...streamMetadataOutputFields,
 });
 
 export const AnalyzePrOutputSchema = z.strictObject({
@@ -170,7 +181,7 @@ export const AnalyzePrOutputSchema = z.strictObject({
     .describe('Relative diff paths omitted from Gemini review because of the review budget'),
   empty: z.boolean().describe('Whether there were any local changes to review'),
   truncated: z.boolean().describe('Whether the diff was truncated due to size').optional(),
-  ...baseOutputFields,
+  ...streamMetadataOutputFields,
 });
 
 const CacheSummarySchema = z.strictObject({
@@ -215,17 +226,190 @@ export const ExplainErrorOutputSchema = z.strictObject({
   explanation: z
     .string()
     .describe('Structured error diagnosis with root cause, explanation, and suggested fix'),
-  ...baseOutputFields,
+  ...streamMetadataOutputFields,
 });
 
 export const CompareFilesOutputSchema = z.strictObject({
   comparison: z.string().describe('Structured comparison analysis'),
-  ...baseOutputFields,
+  ...streamMetadataOutputFields,
 });
 
 export const GenerateDiagramOutputSchema = z.strictObject({
   diagram: z.string().describe('Generated diagram markup (Mermaid or PlantUML)'),
   diagramType: z.enum(['mermaid', 'plantuml']).describe('Diagram format used'),
   explanation: z.string().describe('Brief explanation of the diagram structure').optional(),
-  ...baseOutputFields,
+  ...streamMetadataOutputFields,
+});
+
+const SessionResourceLinksSchema = z.strictObject({
+  detail: z.string().describe('Session detail resource URI'),
+  events: z.string().describe('Session events resource URI'),
+  transcript: z.string().describe('Session transcript resource URI'),
+});
+
+export const ChatOutputSchema = z.strictObject({
+  ...publicBaseOutputFields,
+  answer: z.string().describe('Chat response text'),
+  data: z.unknown().describe('Structured response payload when JSON mode is used').optional(),
+  session: z
+    .strictObject({
+      id: z.string().describe('Server-managed in-memory session identifier'),
+      resources: SessionResourceLinksSchema,
+    })
+    .optional()
+    .describe('Session metadata for new or resumed chat sessions.'),
+  workspaceCache: WorkspaceCacheSchema.optional().describe(
+    'Metadata about an automatically applied workspace cache',
+  ),
+});
+
+export const ResearchOutputSchema = z.strictObject({
+  ...publicBaseOutputFields,
+  mode: z.enum(['quick', 'deep']).describe('Research mode that handled the request'),
+  summary: z.string().describe('Grounded research summary'),
+  sources: z.array(PublicHttpUrlSchema).describe('Grounded source URLs'),
+  sourceDetails: z
+    .array(SourceDetailSchema)
+    .optional()
+    .describe('Structured source entries for client consumption'),
+  urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
+  toolsUsed: z.array(z.string()).optional().describe('Tools invoked during deep research'),
+});
+
+export const AnalyzeOutputSchema = z.strictObject({
+  ...publicBaseOutputFields,
+  targetKind: z.enum(['file', 'url', 'multi']).describe('Analyze target discriminator'),
+  summary: z.string().describe('Grounded analysis summary'),
+  urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
+  analyzedPaths: z.array(z.string()).optional().describe('Local files included in the analysis'),
+});
+
+export const ReviewOutputSchema = z.strictObject({
+  ...publicBaseOutputFields,
+  subjectKind: z.enum(['diff', 'comparison', 'failure']).describe('Review subject discriminator'),
+  summary: z.string().describe('Review result summary'),
+  stats: z
+    .strictObject({
+      files: nonNegativeInt('Files changed'),
+      additions: nonNegativeInt('Lines added'),
+      deletions: nonNegativeInt('Lines deleted'),
+    })
+    .optional()
+    .describe('Diff statistics when review.subject.kind=diff'),
+  reviewedPaths: z.array(z.string()).optional().describe('Paths included in a diff review'),
+  includedUntracked: z.array(z.string()).optional().describe('Included untracked text files'),
+  skippedBinaryPaths: z.array(z.string()).optional().describe('Skipped untracked binary files'),
+  skippedLargePaths: z.array(z.string()).optional().describe('Skipped large untracked files'),
+  omittedPaths: z.array(z.string()).optional().describe('Diff paths omitted due to budget'),
+  empty: z.boolean().optional().describe('Whether there were any local changes to review'),
+  truncated: z.boolean().optional().describe('Whether the diff review was truncated'),
+});
+
+const CacheListEntrySchema = z.strictObject({
+  name: cacheName('Cache resource name').optional(),
+  displayName: z.string().describe('Human-readable label').optional(),
+  model: z.string().describe('Model used').optional(),
+  expireTime: timestamp('Expiration timestamp').optional(),
+  createTime: timestamp('Creation timestamp').optional(),
+  updateTime: timestamp('Last update timestamp').optional(),
+  totalTokenCount: nonNegativeInt('Total cached tokens').optional(),
+});
+
+const SessionSummarySchema = z.strictObject({
+  id: z.string().describe('Server-managed session identifier'),
+  lastAccess: z.number().describe('Last access timestamp in epoch milliseconds'),
+});
+
+const SessionTranscriptEntrySchema = z.strictObject({
+  role: z.enum(['user', 'assistant']),
+  text: z.string(),
+  timestamp: z.number(),
+  taskId: z.string().optional(),
+});
+
+const SessionEventSummarySchema = z.strictObject({
+  request: z.strictObject({
+    message: z.string(),
+    toolProfile: z.string().optional(),
+    urls: z.array(z.string()).optional(),
+  }),
+  response: z.strictObject({
+    data: z.unknown().optional(),
+    functionCalls: z.array(FunctionCallEntrySchema).optional(),
+    schemaWarnings: z.array(z.string()).optional(),
+    thoughts: z.string().optional(),
+    text: z.string(),
+    toolEvents: z.array(ToolEventSchema).optional(),
+    usage: UsageMetadataSchema.optional(),
+  }),
+  timestamp: z.number(),
+  taskId: z.string().optional(),
+});
+
+export const MemoryOutputSchema = z.strictObject({
+  ...publicBaseOutputFields,
+  action: z
+    .enum([
+      'sessions.list',
+      'sessions.get',
+      'sessions.transcript',
+      'sessions.events',
+      'caches.list',
+      'caches.get',
+      'caches.create',
+      'caches.update',
+      'caches.delete',
+      'workspace.context',
+      'workspace.cache',
+    ])
+    .describe('Memory action that handled the request'),
+  summary: z.string().describe('High-level result summary'),
+  sessions: z.array(SessionSummarySchema).optional(),
+  session: SessionSummarySchema.optional(),
+  transcript: z.array(SessionTranscriptEntrySchema).optional(),
+  events: z.array(SessionEventSummarySchema).optional(),
+  caches: z.array(CacheListEntrySchema).optional(),
+  cache: CacheListEntrySchema.optional(),
+  deleted: z.boolean().optional(),
+  confirmationRequired: z.boolean().optional(),
+  workspaceContext: z
+    .strictObject({
+      content: z.string(),
+      estimatedTokens: nonNegativeInt('Estimated token count'),
+      sources: z.array(z.string()),
+    })
+    .optional(),
+  workspaceCache: z.record(z.string(), z.unknown()).optional(),
+  resourceUris: z.array(z.string()).optional(),
+});
+
+const DiscoverCatalogEntrySchema = z.strictObject({
+  kind: z.enum(['tool', 'prompt', 'resource']),
+  name: z.string(),
+  title: z.string(),
+});
+
+const DiscoverWorkflowEntrySchema = z.strictObject({
+  name: z.string(),
+  goal: z.string(),
+  whenToUse: z.string(),
+});
+
+export const DiscoverOutputSchema = z.strictObject({
+  ...publicBaseOutputFields,
+  summary: z.string().describe('Discovery guidance summary'),
+  job: z
+    .enum(['chat', 'research', 'analyze', 'review', 'memory', 'discover'])
+    .optional()
+    .describe('Requested job focus when supplied'),
+  recommendedTools: z
+    .array(z.enum(['chat', 'research', 'analyze', 'review', 'memory', 'discover']))
+    .describe('Recommended public jobs to call next'),
+  recommendedPrompts: z
+    .array(z.enum(['discover', 'research', 'review', 'memory']))
+    .describe('Related public prompts'),
+  relatedResources: z.array(z.string()).describe('Related public resource URIs'),
+  limitations: z.array(z.string()).optional().describe('Contract-aware limitation notes'),
+  catalog: z.array(DiscoverCatalogEntrySchema).optional(),
+  workflows: z.array(DiscoverWorkflowEntrySchema).optional(),
 });

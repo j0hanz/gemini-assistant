@@ -3,7 +3,7 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { buildAskStructuredContent, formatStructuredResult } from '../../src/tools/ask.js';
+import { buildAskStructuredContent, formatStructuredResult } from '../../src/tools/chat.js';
 
 function makeBaseResult(text: string): CallToolResult {
   return {

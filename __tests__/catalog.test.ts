@@ -8,21 +8,14 @@ import {
   listWorkflowEntries,
 } from '../src/catalog.js';
 import { createPromptDefinitions } from '../src/prompts.js';
-import { PUBLIC_RESOURCE_URIS } from '../src/resources.js';
+import { PUBLIC_RESOURCE_URIS, PUBLIC_TOOL_NAMES } from '../src/public-contract.js';
 import {
-  AgenticSearchInputSchema,
-  AnalyzeFileInputSchema,
-  AnalyzePrInputSchema,
-  AnalyzeUrlInputSchema,
-  AskInputSchema,
-  CompareFilesInputSchema,
-  CreateCacheInputSchema,
-  DeleteCacheInputSchema,
-  ExecuteCodeInputSchema,
-  ExplainErrorInputSchema,
-  GenerateDiagramInputSchema,
-  SearchInputSchema,
-  UpdateCacheInputSchema,
+  AnalyzeInputSchema,
+  ChatInputSchema,
+  createMemoryInputSchema,
+  DiscoverInputSchema,
+  ResearchInputSchema,
+  ReviewInputSchema,
 } from '../src/schemas/inputs.js';
 
 interface ObjectLikeSchema {
@@ -79,24 +72,16 @@ function resourceInputs(uri: string): string[] {
 }
 
 const toolSchemas = new Map<string, string[]>([
-  ['ask', schemaInputs(AskInputSchema)],
-  ['execute_code', schemaInputs(ExecuteCodeInputSchema)],
-  ['search', schemaInputs(SearchInputSchema)],
-  ['agentic_search', schemaInputs(AgenticSearchInputSchema)],
-  ['analyze_file', schemaInputs(AnalyzeFileInputSchema)],
-  ['analyze_url', schemaInputs(AnalyzeUrlInputSchema)],
-  ['analyze_pr', schemaInputs(AnalyzePrInputSchema)],
-  ['explain_error', schemaInputs(ExplainErrorInputSchema)],
-  ['compare_files', schemaInputs(CompareFilesInputSchema)],
-  ['generate_diagram', schemaInputs(GenerateDiagramInputSchema)],
-  ['create_cache', schemaInputs(CreateCacheInputSchema)],
-  ['list_caches', []],
-  ['delete_cache', schemaInputs(DeleteCacheInputSchema)],
-  ['update_cache', schemaInputs(UpdateCacheInputSchema)],
+  ['chat', schemaInputs(ChatInputSchema)],
+  ['research', schemaInputs(ResearchInputSchema)],
+  ['analyze', schemaInputs(AnalyzeInputSchema)],
+  ['review', schemaInputs(ReviewInputSchema)],
+  ['memory', schemaInputs(createMemoryInputSchema(() => []))],
+  ['discover', schemaInputs(DiscoverInputSchema)],
 ]);
 
 const promptSchemas = new Map(
-  createPromptDefinitions(async () => ['C:\\workspace']).map((definition) => [
+  createPromptDefinitions(async () => []).map((definition) => [
     definition.name,
     definition.argsSchema ? schemaInputs(definition.argsSchema) : [],
   ]),
@@ -137,9 +122,9 @@ describe('catalog', () => {
     }
   });
 
-  it('keeps workflows ordered with getting-started first', () => {
+  it('keeps workflows ordered with start-here first', () => {
     const workflows = listWorkflowEntries();
-    assert.strictEqual(workflows[0]?.name, 'getting-started');
+    assert.strictEqual(workflows[0]?.name, 'start-here');
   });
 
   it('keeps workflow references valid', () => {
@@ -198,16 +183,18 @@ describe('catalog', () => {
     }
   });
 
-  it('documents limitations for contract-sensitive tools', () => {
-    const expectedLimitedTools = ['ask', 'execute_code', 'search', 'agentic_search', 'analyze_url'];
-
-    for (const toolName of expectedLimitedTools) {
+  it('documents limitations for contract-sensitive jobs', () => {
+    for (const toolName of ['chat', 'research', 'analyze', 'review', 'memory', 'discover']) {
       const entry = findDiscoveryEntry('tool', toolName);
       assert.ok(entry, `Missing tool entry for ${toolName}`);
-      assert.ok(
-        entry?.limitations && entry.limitations.length > 0,
-        `${toolName} should document limitations`,
-      );
+      assert.ok(entry?.limitations && entry.limitations.length > 0);
     }
+  });
+
+  it('keeps the tool catalog aligned with the public job list', () => {
+    const toolNames = listDiscoveryEntries()
+      .filter((entry) => entry.kind === 'tool')
+      .map((entry) => entry.name);
+    assert.deepStrictEqual(toolNames, [...PUBLIC_TOOL_NAMES].sort());
   });
 });

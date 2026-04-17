@@ -14,31 +14,13 @@ import {
 import { completeCacheNames, getCacheSummary, listCacheSummaries } from './client.js';
 import { createSessionStore, type SessionStore } from './sessions.js';
 
-export const PUBLIC_RESOURCE_URIS = [
-  'sessions://list',
-  'sessions://{sessionId}',
-  'sessions://{sessionId}/transcript',
-  'sessions://{sessionId}/events',
-  'caches://list',
-  'caches://{cacheName}',
-  'tools://list',
-  'workflows://list',
-  'workspace://context',
-  'workspace://cache',
-] as const;
+export { PUBLIC_RESOURCE_URIS } from './public-contract.js';
 
 interface ResourceListEntry {
   uri: string;
   name: string;
 }
 
-/**
- * Unified error envelope returned by resource data producers and inline
- * `jsonResource` responses. Consumers may branch on `status === 'error'` or
- * a literal `code` to distinguish well-known failure modes from transport
- * errors. The shape is kept flat so downstream MCP clients can render it
- * without additional schema work.
- */
 export interface ResourceErrorEnvelope {
   status: 'error';
   code: string;
@@ -67,13 +49,13 @@ type SessionEventsResourceData =
   | ReturnType<SessionStore['listSessionEventEntries']>
   | ResourceErrorEnvelope;
 
-const TOOLS_LIST_RESOURCE: ResourceListEntry = {
-  uri: 'tools://list',
+const DISCOVER_CATALOG_RESOURCE: ResourceListEntry = {
+  uri: 'discover://catalog',
   name: 'Discovery catalog for tools, prompts, and resources',
 };
 
-const WORKFLOWS_LIST_RESOURCE: ResourceListEntry = {
-  uri: 'workflows://list',
+const DISCOVER_WORKFLOWS_RESOURCE: ResourceListEntry = {
+  uri: 'discover://workflows',
   name: 'Guided workflows for common gemini-assistant jobs',
 };
 
@@ -174,21 +156,21 @@ export function readWorkspaceContextResource(
 
 function sessionDetailResources(sessionStore: SessionStore): ResourceListEntry[] {
   return sessionStore.listSessionEntries().map((session) => ({
-    uri: `sessions://${session.id}`,
+    uri: `memory://sessions/${session.id}`,
     name: `Session ${session.id}`,
   }));
 }
 
 function sessionTranscriptResources(sessionStore: SessionStore): ResourceListEntry[] {
   return sessionStore.listSessionEntries().map((session) => ({
-    uri: `sessions://${session.id}/transcript`,
+    uri: `memory://sessions/${session.id}/transcript`,
     name: `Transcript ${session.id}`,
   }));
 }
 
 function sessionEventResources(sessionStore: SessionStore): ResourceListEntry[] {
   return sessionStore.listSessionEntries().map((session) => ({
-    uri: `sessions://${session.id}/events`,
+    uri: `memory://sessions/${session.id}/events`,
     name: `Events ${session.id}`,
   }));
 }
@@ -199,20 +181,20 @@ function cacheDetailResources(
   return caches
     .filter((cache): cache is typeof cache & { name: string } => typeof cache.name === 'string')
     .map((cache) => ({
-      uri: `caches://${encodeURIComponent(cache.name)}`,
+      uri: `memory://caches/${encodeURIComponent(cache.name)}`,
       name: cache.displayName ?? cache.name,
     }));
 }
 
-export function readToolsListResource(
-  uri: URL | string = TOOLS_LIST_RESOURCE.uri,
+export function readDiscoverCatalogResource(
+  uri: URL | string = DISCOVER_CATALOG_RESOURCE.uri,
 ): ReadResourceResult {
   const entries = listDiscoveryEntries();
   return dualContentResource(toResourceUri(uri), entries, renderDiscoveryCatalogMarkdown(entries));
 }
 
-export function readWorkflowsListResource(
-  uri: URL | string = WORKFLOWS_LIST_RESOURCE.uri,
+export function readDiscoverWorkflowsResource(
+  uri: URL | string = DISCOVER_WORKFLOWS_RESOURCE.uri,
 ): ReadResourceResult {
   const entries = listWorkflowEntries();
   return dualContentResource(toResourceUri(uri), entries, renderWorkflowCatalogMarkdown(entries));
@@ -329,19 +311,19 @@ export function readSessionEventsResource(
 
 function registerSessionResources(server: McpServer, sessionStore: SessionStore): void {
   server.registerResource(
-    'sessions',
-    'sessions://list',
+    'memory-sessions',
+    'memory://sessions',
     {
       title: 'Active Chat Sessions',
-      description: 'List of active multi-turn chat session IDs and their last access time.',
+      description: 'List of active server-managed chat sessions and their last access time.',
       mimeType: 'application/json',
     },
     (uri): ReadResourceResult => jsonResource(uri.href, sessionStore.listSessionEntries()),
   );
 
   server.registerResource(
-    'session-detail',
-    new ResourceTemplate('sessions://{sessionId}', {
+    'memory-session-detail',
+    new ResourceTemplate('memory://sessions/{sessionId}', {
       list: () => ({ resources: sessionDetailResources(sessionStore) }),
       complete: {
         sessionId: sessionStore.completeSessionIds.bind(sessionStore),
@@ -349,7 +331,7 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
     }),
     {
       title: 'Chat Session Detail',
-      description: 'Metadata for a single chat session by ID.',
+      description: 'Metadata for a single server-managed chat session by ID.',
       mimeType: 'application/json',
     },
     (uri, { sessionId }): ReadResourceResult => {
@@ -360,8 +342,8 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
   );
 
   server.registerResource(
-    'session-transcript',
-    new ResourceTemplate('sessions://{sessionId}/transcript', {
+    'memory-session-transcript',
+    new ResourceTemplate('memory://sessions/{sessionId}/transcript', {
       list: () => ({ resources: sessionTranscriptResources(sessionStore) }),
       complete: {
         sessionId: sessionStore.completeSessionIds.bind(sessionStore),
@@ -383,8 +365,8 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
   );
 
   server.registerResource(
-    'session-events',
-    new ResourceTemplate('sessions://{sessionId}/events', {
+    'memory-session-events',
+    new ResourceTemplate('memory://sessions/{sessionId}/events', {
       list: () => ({ resources: sessionEventResources(sessionStore) }),
       complete: {
         sessionId: sessionStore.completeSessionIds.bind(sessionStore),
@@ -409,8 +391,8 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
 
 function registerCacheResources(server: McpServer): void {
   server.registerResource(
-    'caches',
-    'caches://list',
+    'memory-caches',
+    'memory://caches',
     {
       title: 'Gemini Context Caches',
       description: 'List of active Gemini context caches with name, model, and expiry.',
@@ -423,8 +405,8 @@ function registerCacheResources(server: McpServer): void {
   );
 
   server.registerResource(
-    'cache-detail',
-    new ResourceTemplate('caches://{cacheName}', {
+    'memory-cache-detail',
+    new ResourceTemplate('memory://caches/{cacheName}', {
       list: async () => {
         try {
           return { resources: cacheDetailResources(await listCacheSummaries()) };
@@ -460,8 +442,8 @@ function registerCacheResources(server: McpServer): void {
 
 function registerDiscoveryResources(server: McpServer): void {
   server.registerResource(
-    'tools-list',
-    'tools://list',
+    'discover-catalog',
+    'discover://catalog',
     {
       title: 'Discovery Catalog',
       description:
@@ -473,12 +455,12 @@ function registerDiscoveryResources(server: McpServer): void {
         priority: 0.8,
       },
     },
-    (uri): ReadResourceResult => readToolsListResource(uri),
+    (uri): ReadResourceResult => readDiscoverCatalogResource(uri),
   );
 
   server.registerResource(
-    'workflows-list',
-    'workflows://list',
+    'discover-workflows',
+    'discover://workflows',
     {
       title: 'Workflow Catalog',
       description:
@@ -490,14 +472,14 @@ function registerDiscoveryResources(server: McpServer): void {
         priority: 0.8,
       },
     },
-    (uri): ReadResourceResult => readWorkflowsListResource(uri),
+    (uri): ReadResourceResult => readDiscoverWorkflowsResource(uri),
   );
 }
 
 function registerWorkspaceResources(server: McpServer, rootsFetcher: RootsFetcher): void {
   server.registerResource(
-    'workspace-context',
-    'workspace://context',
+    'memory-workspace-context',
+    'memory://workspace/context',
     {
       title: 'Workspace Context',
       description: 'Assembled project context from workspace files for Gemini.',
@@ -523,8 +505,8 @@ function registerWorkspaceResources(server: McpServer, rootsFetcher: RootsFetche
   );
 
   server.registerResource(
-    'workspace-cache',
-    'workspace://cache',
+    'memory-workspace-cache',
+    'memory://workspace/cache',
     {
       title: 'Workspace Cache Status',
       description: 'Current status of the Gemini workspace context cache.',

@@ -7,23 +7,19 @@ import {
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-// Set dummy API key so client.ts doesn't exit
 process.env.API_KEY ??= 'test-key-for-registration';
 
-const { registerAskTool } = await import('../../src/tools/ask.js');
-const { createSessionStore } = await import('../../src/sessions.js');
-const { registerCacheTools } = await import('../../src/tools/cache.js');
-const { registerAnalyzeFileTool, registerExecuteCodeTool } =
-  await import('../../src/tools/execution.js');
-const { registerAnalyzePrTool } = await import('../../src/tools/pr.js');
-const { registerAgenticSearchTool, registerAnalyzeUrlTool, registerSearchTool } =
-  await import('../../src/tools/research.js');
+const { registerAnalyzeTool } = await import('../../src/tools/analyze.js');
+const { registerChatTool } = await import('../../src/tools/chat.js');
+const { registerDiscoverTool } = await import('../../src/tools/discover.js');
+const { registerMemoryTool } = await import('../../src/tools/memory.js');
+const { registerResearchTool } = await import('../../src/tools/research-job.js');
+const { registerReviewTool } = await import('../../src/tools/review.js');
 const { createPromptDefinitions, PUBLIC_PROMPT_NAMES, registerPrompts } =
   await import('../../src/prompts.js');
 const { PUBLIC_RESOURCE_URIS, registerResources } = await import('../../src/resources.js');
-const { registerCompareFilesTool } = await import('../../src/tools/compare.js');
-const { registerGenerateDiagramTool } = await import('../../src/tools/diagram.js');
-const { registerExplainErrorTool } = await import('../../src/tools/explain-error.js');
+const { createSessionStore } = await import('../../src/sessions.js');
+const { PUBLIC_TOOL_NAMES } = await import('../../src/public-contract.js');
 
 function createServer(): McpServer {
   return new McpServer(
@@ -45,39 +41,34 @@ const queue = new InMemoryTaskMessageQueue();
 const sessionStore = createSessionStore();
 
 describe('tool registration', () => {
-  it('registers ask tool without error', () => {
+  it('registers chat without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerAskTool(server, sessionStore, queue));
+    assert.doesNotThrow(() => registerChatTool(server, sessionStore, queue));
   });
 
-  it('registers search tool without error', () => {
+  it('registers research without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerSearchTool(server, queue));
+    assert.doesNotThrow(() => registerResearchTool(server, queue));
   });
 
-  it('registers execute_code tool without error', () => {
+  it('registers analyze without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerExecuteCodeTool(server, queue));
+    assert.doesNotThrow(() => registerAnalyzeTool(server, queue));
   });
 
-  it('registers analyze_file tool without error', () => {
+  it('registers review without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerAnalyzeFileTool(server, queue));
+    assert.doesNotThrow(() => registerReviewTool(server, queue));
   });
 
-  it('registers analyze_url tool without error', () => {
+  it('registers memory without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerAnalyzeUrlTool(server, queue));
+    assert.doesNotThrow(() => registerMemoryTool(server, sessionStore, queue));
   });
 
-  it('registers analyze_pr tool without error', () => {
+  it('registers discover without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerAnalyzePrTool(server, queue));
-  });
-
-  it('registers cache tools (create, list, delete) without error', () => {
-    const server = createServer();
-    assert.doesNotThrow(() => registerCacheTools(server, queue));
+    assert.doesNotThrow(() => registerDiscoverTool(server));
   });
 
   it('registers resources without error', () => {
@@ -90,40 +81,15 @@ describe('tool registration', () => {
     assert.doesNotThrow(() => registerPrompts(server));
   });
 
-  it('registers agentic_search tool without error', () => {
-    const server = createServer();
-    assert.doesNotThrow(() => registerAgenticSearchTool(server, queue));
-  });
-
-  it('registers explain_error tool without error', () => {
-    const server = createServer();
-    assert.doesNotThrow(() => registerExplainErrorTool(server, queue));
-  });
-
-  it('registers compare_files tool without error', () => {
-    const server = createServer();
-    assert.doesNotThrow(() => registerCompareFilesTool(server, queue));
-  });
-
-  it('registers generate_diagram tool without error', () => {
-    const server = createServer();
-    assert.doesNotThrow(() => registerGenerateDiagramTool(server, queue));
-  });
-
-  it('registers all tools, prompts, and resources on the same server', () => {
+  it('registers all public tools, prompts, and resources on the same server', () => {
     const server = createServer();
     assert.doesNotThrow(() => {
-      registerAskTool(server, sessionStore, queue);
-      registerExecuteCodeTool(server, queue);
-      registerSearchTool(server, queue);
-      registerAgenticSearchTool(server, queue);
-      registerAnalyzeFileTool(server, queue);
-      registerAnalyzeUrlTool(server, queue);
-      registerAnalyzePrTool(server, queue);
-      registerExplainErrorTool(server, queue);
-      registerCompareFilesTool(server, queue);
-      registerGenerateDiagramTool(server, queue);
-      registerCacheTools(server, queue);
+      registerChatTool(server, sessionStore, queue);
+      registerResearchTool(server, queue);
+      registerAnalyzeTool(server, queue);
+      registerReviewTool(server, queue);
+      registerMemoryTool(server, sessionStore, queue);
+      registerDiscoverTool(server);
       registerPrompts(server);
       registerResources(server);
     });
@@ -137,17 +103,21 @@ describe('tool registration', () => {
     assert.deepStrictEqual(
       [...PUBLIC_RESOURCE_URIS],
       [
-        'sessions://list',
-        'sessions://{sessionId}',
-        'sessions://{sessionId}/transcript',
-        'sessions://{sessionId}/events',
-        'caches://list',
-        'caches://{cacheName}',
-        'tools://list',
-        'workflows://list',
-        'workspace://context',
-        'workspace://cache',
+        'discover://catalog',
+        'discover://workflows',
+        'memory://sessions',
+        'memory://sessions/{sessionId}',
+        'memory://sessions/{sessionId}/transcript',
+        'memory://sessions/{sessionId}/events',
+        'memory://caches',
+        'memory://caches/{cacheName}',
+        'memory://workspace/context',
+        'memory://workspace/cache',
       ],
+    );
+    assert.deepStrictEqual(
+      [...PUBLIC_TOOL_NAMES],
+      ['chat', 'research', 'analyze', 'review', 'memory', 'discover'],
     );
   });
 });

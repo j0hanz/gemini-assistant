@@ -85,6 +85,21 @@ export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
   });
 }
 
+export function buildBaseStructuredOutput(
+  requestId?: string,
+  warnings?: readonly string[],
+): {
+  requestId?: string;
+  status: 'completed';
+  warnings?: string[];
+} {
+  return pickDefined({
+    status: 'completed' as const,
+    requestId,
+    warnings: warnings && warnings.length > 0 ? [...warnings] : undefined,
+  });
+}
+
 function appendBulletListSection(
   content: CallToolResult['content'],
   heading: string,

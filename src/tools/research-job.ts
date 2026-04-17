@@ -10,6 +10,7 @@ import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import {
   appendSources,
   appendUrlStatus,
+  buildBaseStructuredOutput,
   collectGroundedSourceDetails,
   collectGroundedSources,
   collectUrlMetadata,
@@ -24,12 +25,15 @@ import {
   AgenticSearchInputSchema,
   type AnalyzeUrlInput,
   AnalyzeUrlInputSchema,
+  type ResearchInput,
+  ResearchInputSchema,
   type SearchInput,
   SearchInputSchema,
 } from '../schemas/inputs.js';
 import {
   AgenticSearchOutputSchema,
   AnalyzeUrlOutputSchema,
+  ResearchOutputSchema,
   SearchOutputSchema,
 } from '../schemas/outputs.js';
 
@@ -198,7 +202,7 @@ export function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: s
   };
 }
 
-async function searchWork(
+export async function searchWork(
   { query, systemInstruction, urls, thinkingLevel }: SearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -236,7 +240,7 @@ async function searchWork(
   );
 }
 
-async function analyzeUrlWork(
+export async function analyzeUrlWork(
   { urls, question, systemInstruction, thinkingLevel }: AnalyzeUrlInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -268,7 +272,7 @@ async function analyzeUrlWork(
   );
 }
 
-async function agenticSearchWork(
+export async function agenticSearchWork(
   { topic, searchDepth, thinkingLevel }: AgenticSearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -316,6 +320,75 @@ async function agenticSearchWork(
         ),
       }),
     buildAgenticSearchResult,
+  );
+}
+
+async function researchWork(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {
+  const result =
+    args.mode === 'quick'
+      ? await searchWork(
+          {
+            query: args.goal,
+            systemInstruction: args.systemInstruction,
+            thinkingLevel: args.thinkingLevel,
+            urls: args.urls,
+          },
+          ctx,
+        )
+      : await agenticSearchWork(
+          {
+            topic: args.deliverable
+              ? `${args.goal}\n\nRequested deliverable: ${args.deliverable}`
+              : args.goal,
+            searchDepth: args.searchDepth,
+            thinkingLevel: args.thinkingLevel,
+          },
+          ctx,
+        );
+
+  if (result.isError) {
+    return result;
+  }
+
+  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const summary =
+    typeof structured.answer === 'string'
+      ? structured.answer
+      : typeof structured.report === 'string'
+        ? structured.report
+        : '';
+
+  return {
+    ...result,
+    structuredContent: {
+      ...buildBaseStructuredOutput(ctx.task?.id),
+      mode: args.mode,
+      summary,
+      sources: Array.isArray(structured.sources) ? structured.sources : [],
+      ...(structured.sourceDetails ? { sourceDetails: structured.sourceDetails } : {}),
+      ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
+      ...(structured.toolsUsed ? { toolsUsed: structured.toolsUsed } : {}),
+      ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
+      ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
+      ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
+      ...(structured.usage ? { usage: structured.usage } : {}),
+    },
+  };
+}
+
+export function registerResearchTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
+  registerTaskTool(
+    server,
+    'research',
+    {
+      title: 'Research',
+      description: 'Quick grounded lookup or deeper multi-step research with an explicit mode.',
+      inputSchema: ResearchInputSchema,
+      outputSchema: ResearchOutputSchema,
+      annotations: READONLY_ANNOTATIONS,
+    },
+    taskMessageQueue,
+    researchWork,
   );
 }
 

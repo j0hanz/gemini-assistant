@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { FinishReason, Outcome } from '@google/genai';
+import { FinishReason } from '@google/genai';
 import type { GenerateContentResponse, Part } from '@google/genai';
 
 import { InMemoryTransport } from './lib/in-memory-transport.js';
@@ -229,10 +229,6 @@ class JsonRpcTestClient {
     });
   }
 
-  getNotifications(): JsonRpcNotification[] {
-    return [...this.notifications];
-  }
-
   getServerRequestMethods(): string[] {
     return [...this.serverRequestMethods];
   }
@@ -318,6 +314,7 @@ class MockGeminiEnvironment {
   private readonly originalGenerateContentStream = this.client.models.generateContentStream.bind(
     this.client.models,
   );
+  private readonly originalGetCache = this.client.caches.get.bind(this.client.caches);
   private readonly originalListCaches = this.client.caches.list.bind(this.client.caches);
   private readonly originalUpdateCache = this.client.caches.update.bind(this.client.caches);
   private readonly originalUpload = this.client.files.upload.bind(this.client.files);
@@ -372,6 +369,14 @@ class MockGeminiEnvironment {
       return cache;
     }) as typeof this.client.caches.create;
 
+    this.client.caches.get = (async (opts: { name: string }) => {
+      const cache = cacheStore.get(opts.name);
+      if (!cache) {
+        throw new Error(`Missing cache ${opts.name}`);
+      }
+      return cache;
+    }) as typeof this.client.caches.get;
+
     this.client.caches.list = (async () => ({
       async *[Symbol.asyncIterator]() {
         for (const cache of cacheStore.values()) {
@@ -405,6 +410,7 @@ class MockGeminiEnvironment {
     this.client.files.upload = this.originalUpload;
     this.client.files.delete = this.originalDeleteFile;
     this.client.caches.create = this.originalCreateCache;
+    this.client.caches.get = this.originalGetCache;
     this.client.caches.list = this.originalListCaches;
     this.client.caches.delete = this.originalDeleteCache;
     this.client.caches.update = this.originalUpdateCache;
@@ -458,7 +464,7 @@ function assertToolContract(
     annotations: Required<ToolAnnotations>;
     requiredInput?: string[];
     requiredOutput: string[];
-    taskSupport: string;
+    taskSupport?: string;
     title: string;
   },
 ): void {
@@ -499,119 +505,54 @@ const MUTABLE_ANNOTATIONS = {
 } as const;
 
 const EXPECTED_TOOL_CONTRACTS = {
-  agentic_search: {
+  analyze: {
     annotations: READONLY_ANNOTATIONS,
-    requiredInput: ['topic'],
-    requiredOutput: ['report', 'sources'],
+    requiredInput: ['goal', 'targets'],
+    requiredOutput: ['status', 'targetKind', 'summary'],
     taskSupport: 'optional',
-    title: 'Agentic Search',
+    title: 'Analyze',
   },
-  analyze_file: {
-    annotations: READONLY_ANNOTATIONS,
-    requiredInput: ['filePath', 'question'],
-    requiredOutput: ['analysis'],
+  chat: {
+    annotations: MUTABLE_ANNOTATIONS,
+    requiredInput: ['goal'],
+    requiredOutput: ['status', 'answer'],
     taskSupport: 'optional',
-    title: 'Analyze File',
+    title: 'Chat',
   },
-  analyze_pr: {
+  discover: {
     annotations: READONLY_ANNOTATIONS,
     requiredOutput: [
-      'analysis',
-      'stats',
-      'reviewedPaths',
-      'includedUntracked',
-      'skippedBinaryPaths',
-      'skippedLargePaths',
-      'empty',
+      'status',
+      'summary',
+      'recommendedTools',
+      'recommendedPrompts',
+      'relatedResources',
     ],
-    taskSupport: 'optional',
-    title: 'Analyze PR',
-  },
-  analyze_url: {
-    annotations: READONLY_ANNOTATIONS,
-    requiredInput: ['urls', 'question'],
-    requiredOutput: ['answer'],
-    taskSupport: 'optional',
-    title: 'Analyze URL',
-  },
-  ask: {
-    annotations: MUTABLE_ANNOTATIONS,
-    requiredInput: ['message'],
-    requiredOutput: ['answer'],
-    taskSupport: 'optional',
-    title: 'Ask Gemini',
-  },
-  compare_files: {
-    annotations: READONLY_ANNOTATIONS,
-    requiredInput: ['filePathA', 'filePathB'],
-    requiredOutput: ['comparison'],
-    taskSupport: 'optional',
-    title: 'Compare Files',
-  },
-  create_cache: {
-    annotations: MUTABLE_ANNOTATIONS,
-    requiredOutput: ['name'],
-    taskSupport: 'optional',
-    title: 'Create Cache',
-  },
-  delete_cache: {
-    annotations: { ...MUTABLE_ANNOTATIONS, destructiveHint: true },
-    requiredInput: ['cacheName'],
-    requiredOutput: ['cacheName', 'deleted'],
-    taskSupport: 'optional',
-    title: 'Delete Cache',
-  },
-  execute_code: {
-    annotations: { ...MUTABLE_ANNOTATIONS, openWorldHint: false },
-    requiredInput: ['task'],
-    requiredOutput: ['code', 'output', 'explanation', 'runtime'],
-    taskSupport: 'optional',
-    title: 'Execute Code',
-  },
-  explain_error: {
-    annotations: READONLY_ANNOTATIONS,
-    requiredInput: ['error'],
-    requiredOutput: ['explanation'],
-    taskSupport: 'optional',
-    title: 'Explain Error',
-  },
-  generate_diagram: {
-    annotations: READONLY_ANNOTATIONS,
-    requiredInput: ['description'],
-    requiredOutput: ['diagram', 'diagramType'],
-    taskSupport: 'optional',
-    title: 'Generate Diagram',
-  },
-  list_caches: {
-    annotations: READONLY_ANNOTATIONS,
-    requiredOutput: ['caches', 'count'],
     taskSupport: 'forbidden',
-    title: 'List Caches',
+    title: 'Discover',
   },
-  search: {
-    annotations: READONLY_ANNOTATIONS,
-    requiredInput: ['query'],
-    requiredOutput: ['answer', 'sources'],
-    taskSupport: 'optional',
-    title: 'Web Search',
-  },
-  update_cache: {
+  memory: {
     annotations: MUTABLE_ANNOTATIONS,
-    requiredInput: ['cacheName', 'ttl'],
-    requiredOutput: ['cacheName'],
+    requiredInput: ['action'],
+    requiredOutput: ['status', 'action', 'summary'],
     taskSupport: 'optional',
-    title: 'Update Cache',
+    title: 'Memory',
   },
-} as const satisfies Record<
-  string,
-  {
-    annotations: Required<ToolAnnotations>;
-    requiredInput?: string[];
-    requiredOutput: string[];
-    taskSupport: string;
-    title: string;
-  }
->;
+  research: {
+    annotations: READONLY_ANNOTATIONS,
+    requiredInput: ['mode', 'goal'],
+    requiredOutput: ['status', 'mode', 'summary', 'sources'],
+    taskSupport: 'optional',
+    title: 'Research',
+  },
+  review: {
+    annotations: READONLY_ANNOTATIONS,
+    requiredInput: ['subject'],
+    requiredOutput: ['status', 'subjectKind', 'summary'],
+    taskSupport: 'optional',
+    title: 'Review',
+  },
+} as const;
 
 let env: MockGeminiEnvironment;
 
@@ -653,8 +594,8 @@ describe('MCP tool smoke coverage', () => {
     try {
       env.queueStream(makeChunk([{ text: '{"status":"ok","count":2}' }], FinishReason.STOP));
 
-      const askResult = await callTool(harness.client, 'ask', {
-        message: 'Return JSON',
+      const chatResult = await callTool(harness.client, 'chat', {
+        goal: 'Return JSON',
         responseSchema: {
           properties: {
             count: { type: 'integer' },
@@ -665,12 +606,9 @@ describe('MCP tool smoke coverage', () => {
         },
         systemInstruction: 'Return only the requested JSON object.',
       });
-      expectSuccess(askResult);
-      assert.deepStrictEqual(askResult.structuredContent.data, { count: 2, status: 'ok' });
-      assert.strictEqual(
-        askResult.structuredContent.answer,
-        '{\n  "status": "ok",\n  "count": 2\n}',
-      );
+      expectSuccess(chatResult);
+      assert.deepStrictEqual(chatResult.structuredContent.data, { count: 2, status: 'ok' });
+      assert.equal(chatResult.structuredContent.status, 'completed');
 
       env.queueStream(
         makeChunk([{ text: 'Search answer' }], FinishReason.STOP, {
@@ -680,71 +618,14 @@ describe('MCP tool smoke coverage', () => {
         }),
       );
 
-      const searchResult = await callTool(harness.client, 'search', {
-        query: 'What is in the example source?',
-      });
-      expectSuccess(searchResult);
-      assert.strictEqual(searchResult.structuredContent.answer, 'Search answer');
-      assert.deepStrictEqual(searchResult.structuredContent.sources, ['https://example.com']);
-      assert.deepStrictEqual(searchResult.structuredContent.sourceDetails, [
-        { title: 'Example', url: 'https://example.com' },
-      ]);
-
-      env.queueStream(
-        makeChunk([{ text: 'Research notes. ' }], undefined, {
-          groundingMetadata: {
-            groundingChunks: [
-              { web: { title: 'Research Doc', uri: 'https://example.com/research' } },
-            ],
-          },
-        }),
-        makeChunk([{ executableCode: { code: 'print(2 + 2)' } }]),
-        makeChunk([{ codeExecutionResult: { output: '4', outcome: Outcome.OUTCOME_OK } }]),
-        makeChunk([{ text: '# Report\n\nFinal research summary' }], FinishReason.STOP),
-      );
-
-      const researchResult = await callTool(harness.client, 'agentic_search', {
-        searchDepth: 2,
-        topic: 'Summarize the topic',
+      const researchResult = await callTool(harness.client, 'research', {
+        goal: 'What is in the example source?',
+        mode: 'quick',
       });
       expectSuccess(researchResult);
-      assert.match(String(researchResult.structuredContent.report), /Final research summary/);
-      assert.deepStrictEqual(researchResult.structuredContent.sources, [
-        'https://example.com/research',
-      ]);
-      assert.deepStrictEqual(researchResult.structuredContent.sourceDetails, [
-        { title: 'Research Doc', url: 'https://example.com/research' },
-      ]);
-      assert.deepStrictEqual(researchResult.structuredContent.toolsUsed, [
-        'googleSearch',
-        'codeExecution',
-      ]);
-
-      env.queueStream(
-        makeChunk([{ text: 'URL-grounded answer' }], FinishReason.STOP, {
-          urlContextMetadata: {
-            urlMetadata: [
-              {
-                retrievedUrl: 'https://example.com',
-                urlRetrievalStatus: 'URL_RETRIEVAL_STATUS_SUCCESS',
-              },
-            ],
-          },
-        }),
-      );
-
-      const analyzeUrlResult = await callTool(harness.client, 'analyze_url', {
-        question: 'Summarize the page',
-        urls: ['https://example.com'],
-      });
-      expectSuccess(analyzeUrlResult);
-      assert.strictEqual(analyzeUrlResult.structuredContent.answer, 'URL-grounded answer');
-      assert.deepStrictEqual(analyzeUrlResult.structuredContent.urlMetadata, [
-        {
-          status: 'URL_RETRIEVAL_STATUS_SUCCESS',
-          url: 'https://example.com',
-        },
-      ]);
+      assert.strictEqual(researchResult.structuredContent.mode, 'quick');
+      assert.strictEqual(researchResult.structuredContent.summary, 'Search answer');
+      assert.deepStrictEqual(researchResult.structuredContent.sources, ['https://example.com']);
 
       env.queueStream(
         makeChunk(
@@ -753,34 +634,16 @@ describe('MCP tool smoke coverage', () => {
         ),
       );
 
-      const analyzeFileResult = await callTool(harness.client, 'analyze_file', {
-        filePath: 'src/client.ts',
-        question: 'What does this file expose?',
+      const analyzeResult = await callTool(harness.client, 'analyze', {
+        goal: 'What does this file expose?',
+        targets: {
+          filePath: 'src/client.ts',
+          kind: 'file',
+        },
       });
-      expectSuccess(analyzeFileResult);
-      assert.match(String(analyzeFileResult.structuredContent.analysis), /Gemini client factory/);
-
-      env.queueStream(
-        makeChunk(
-          [
-            {
-              text: '## Summary\npackage.json defines scripts and dependencies, while README.md documents usage.',
-            },
-          ],
-          FinishReason.STOP,
-        ),
-      );
-
-      const compareResult = await callTool(harness.client, 'compare_files', {
-        filePathA: 'package.json',
-        filePathB: 'README.md',
-        question: 'How do these files differ in purpose?',
-      });
-      expectSuccess(compareResult);
-      assert.match(
-        String(compareResult.structuredContent.comparison),
-        /package\.json defines scripts/,
-      );
+      expectSuccess(analyzeResult);
+      assert.strictEqual(analyzeResult.structuredContent.targetKind, 'file');
+      assert.match(String(analyzeResult.structuredContent.summary), /Gemini client factory/);
 
       env.queueStream(
         makeChunk(
@@ -793,101 +656,48 @@ describe('MCP tool smoke coverage', () => {
         ),
       );
 
-      const explainErrorResult = await callTool(harness.client, 'explain_error', {
-        codeContext: 'const value = input.trim();',
-        error: 'TypeError: Cannot read properties of undefined (reading trim)',
-        language: 'typescript',
+      const reviewResult = await callTool(harness.client, 'review', {
+        subject: {
+          error: 'TypeError: Cannot read properties of undefined (reading trim)',
+          kind: 'failure',
+          language: 'typescript',
+        },
       });
-      expectSuccess(explainErrorResult);
-      assert.match(String(explainErrorResult.structuredContent.explanation), /Validate the input/);
+      expectSuccess(reviewResult);
+      assert.strictEqual(reviewResult.structuredContent.subjectKind, 'failure');
+      assert.match(String(reviewResult.structuredContent.summary), /Validate the input/);
 
-      env.queueStream(
-        makeChunk([{ executableCode: { code: 'print([0, 1, 1, 2, 3, 5, 8, 13, 21, 34])' } }]),
-        makeChunk([
-          {
-            codeExecutionResult: {
-              outcome: Outcome.OUTCOME_OK,
-              output: '[0, 1, 1, 2, 3, 5, 8, 13, 21, 34]',
-            },
-          },
-        ]),
-        makeChunk([{ text: 'Computed the first 10 Fibonacci numbers.' }], FinishReason.STOP),
-      );
-
-      const executeCodeResult = await callTool(harness.client, 'execute_code', {
-        language: 'typescript',
-        task: 'Print the first 10 Fibonacci numbers.',
+      const discoverResult = await callTool(harness.client, 'discover', {
+        goal: 'I need to inspect reusable state',
+        job: 'memory',
       });
-      expectSuccess(executeCodeResult);
-      assert.strictEqual(executeCodeResult.structuredContent.runtime, 'python');
-      assert.strictEqual(executeCodeResult.structuredContent.requestedLanguage, 'typescript');
-      assert.strictEqual(
-        executeCodeResult.structuredContent.output,
-        '[0, 1, 1, 2, 3, 5, 8, 13, 21, 34]',
-      );
-      assert.match(String(executeCodeResult.structuredContent.code), /print/);
+      expectSuccess(discoverResult);
+      assert.strictEqual(discoverResult.structuredContent.job, 'memory');
+      assert.ok(Array.isArray(discoverResult.structuredContent.relatedResources));
 
-      env.queueStream(
-        makeChunk(
-          [
-            {
-              text: '```mermaid\nflowchart TD\n  A[Client] --> B[Server]\n```\n\nGenerated from the server entrypoint.',
-            },
-          ],
-          FinishReason.STOP,
-        ),
-      );
-
-      const diagramResult = await callTool(harness.client, 'generate_diagram', {
-        description: 'Show a minimal server flow.',
-        diagramType: 'mermaid',
-        sourceFilePath: 'src/server.ts',
-        validateSyntax: true,
+      const sessionListResult = await callTool(harness.client, 'memory', {
+        action: 'sessions.list',
       });
-      expectSuccess(diagramResult);
-      assert.strictEqual(diagramResult.structuredContent.diagramType, 'mermaid');
-      assert.match(String(diagramResult.structuredContent.diagram), /flowchart TD/);
-      assert.match(String(diagramResult.structuredContent.explanation), /server entrypoint/);
+      expectSuccess(sessionListResult);
+      assert.strictEqual(sessionListResult.structuredContent.action, 'sessions.list');
+      assert.ok(Array.isArray(sessionListResult.structuredContent.sessions));
 
-      const createResult = await callTool(harness.client, 'create_cache', {
+      const createCacheResult = await callTool(harness.client, 'memory', {
+        action: 'caches.create',
         filePaths: ['package.json'],
         systemInstruction: 'Cache this package metadata for later questions.',
       });
-      expectSuccess(createResult);
-      const createdName = String(createResult.structuredContent.name);
-      assert.match(createdName, /^cachedContents\/mock-1$/);
-      assert.ok(env.deletedUploads.length >= 1);
+      expectSuccess(createCacheResult);
+      assert.strictEqual(createCacheResult.structuredContent.action, 'caches.create');
 
-      const listResult = await callTool(harness.client, 'list_caches', {});
-      expectSuccess(listResult);
-      assert.strictEqual(listResult.structuredContent.count, 1);
-      assert.ok(Array.isArray(listResult.structuredContent.caches));
-
-      const updateResult = await callTool(harness.client, 'update_cache', {
-        cacheName: createdName,
-        ttl: '7200s',
+      const listCachesResult = await callTool(harness.client, 'memory', {
+        action: 'caches.list',
       });
-      expectSuccess(updateResult);
-      assert.strictEqual(updateResult.structuredContent.cacheName, createdName);
-      assert.strictEqual(updateResult.structuredContent.expireTime, '2099-01-01T02:00:00.000Z');
-
-      const deleteResult = await callTool(harness.client, 'delete_cache', {
-        cacheName: createdName,
-        confirm: true,
-      });
-      expectSuccess(deleteResult);
-      assert.deepStrictEqual(deleteResult.structuredContent, {
-        cacheName: createdName,
-        deleted: true,
-      });
-
-      const emptyListResult = await callTool(harness.client, 'list_caches', {});
-      expectSuccess(emptyListResult);
-      assert.strictEqual(emptyListResult.structuredContent.count, 0);
-      assert.deepStrictEqual(emptyListResult.structuredContent.caches, []);
+      expectSuccess(listCachesResult);
+      assert.strictEqual(listCachesResult.structuredContent.action, 'caches.list');
+      assert.ok(Array.isArray(listCachesResult.structuredContent.caches));
 
       const serverRequestMethods = harness.client.getServerRequestMethods();
-      assert.ok(serverRequestMethods.includes('sampling/createMessage'));
       assert.ok(serverRequestMethods.includes('roots/list'));
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);
     } finally {
@@ -899,31 +709,23 @@ describe('MCP tool smoke coverage', () => {
     const harness = await createHarness();
 
     try {
-      const missingSearchQuery = await harness.client.requestRaw('tools/call', {
-        arguments: {},
-        name: 'search',
+      const missingResearchMode = await harness.client.requestRaw('tools/call', {
+        arguments: { goal: 'Tell me something current' },
+        name: 'research',
       });
-      assertValidationFailure(missingSearchQuery, /query/i);
+      assertValidationFailure(missingResearchMode, /mode/i);
 
-      const invalidDiagramSources = await harness.client.requestRaw('tools/call', {
+      const invalidAnalyzeTargets = await harness.client.requestRaw('tools/call', {
         arguments: {
-          description: 'Diagram this file',
-          sourceFilePath: 'src/server.ts',
-          sourceFilePaths: ['src/client.ts'],
+          goal: 'Inspect this',
+          targets: {
+            kind: 'url',
+            urls: ['http://localhost/private'],
+          },
         },
-        name: 'generate_diagram',
+        name: 'analyze',
       });
-      assertValidationFailure(invalidDiagramSources, /sourceFilePath or sourceFilePaths/i);
-
-      const analyzeUrlResult = await callTool(harness.client, 'analyze_url', {
-        question: 'Summarize the page',
-        urls: ['http://localhost/private'],
-      });
-      assert.equal(analyzeUrlResult.isError, true);
-      assert.match(
-        analyzeUrlResult.content[0]?.text ?? '',
-        /valid public http:\/\/ or https:\/\//i,
-      );
+      assertValidationFailure(invalidAnalyzeTargets, /public http:\/\/ or https:\/\//i);
 
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);
     } finally {

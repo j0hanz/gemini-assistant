@@ -4,6 +4,8 @@ import { z } from 'zod/v4';
 
 import { isPublicHttpUrl } from '../lib/validation.js';
 
+import { PUBLIC_TOOL_NAMES } from '../public-contract.js';
+
 const CACHE_NAME_PATTERN = /^cachedContents\/.+$/;
 const TTL_SECONDS_PATTERN = /^[1-9]\d*s$/;
 const PUBLIC_HTTP_URL_ERROR = 'URL must be a valid public http:// or https:// URL';
@@ -21,6 +23,32 @@ export function requiredText(description: string, maxLength?: number) {
 export function optionalText(description: string, maxLength?: number) {
   return requiredText(description, maxLength).optional();
 }
+
+export const PublicJobNameSchema = z.enum(PUBLIC_TOOL_NAMES);
+
+export function goalText(description = 'User goal or requested outcome', maxLength = 100_000) {
+  return requiredText(description, maxLength);
+}
+
+export const MemoryRefSchema = z
+  .strictObject({
+    cacheName: cacheName('Gemini cache resource name to attach as reusable context').optional(),
+  })
+  .optional()
+  .describe('Reusable memory inputs for the current request.');
+
+export const SessionRefSchema = z
+  .strictObject({
+    id: z
+      .string()
+      .trim()
+      .min(1)
+      .max(256)
+      .optional()
+      .describe('Server-managed in-memory session identifier.'),
+  })
+  .optional()
+  .describe('Optional server-managed chat session reference.');
 
 function escapesRelativeRoot(value: string): boolean {
   const normalized = normalize(value);

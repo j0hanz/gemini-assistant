@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { workspaceCacheManager } from '../../src/lib/workspace-context.js';
-import { createAskWork } from '../../src/tools/ask.js';
+import { createAskWork } from '../../src/tools/chat.js';
 
 function createContext(): ServerContext {
   return {

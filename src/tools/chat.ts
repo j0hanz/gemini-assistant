@@ -12,6 +12,7 @@ import { errorResult, reportCompletion, sendProgress } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
 import {
+  buildBaseStructuredOutput,
   buildSharedStructuredMetadata,
   createResourceLink,
   extractTextContent,
@@ -26,15 +27,19 @@ import {
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { getAllowedRoots, validateUrls } from '../lib/validation.js';
 import { workspaceCacheManager } from '../lib/workspace-context.js';
-import { type AskInput, createAskInputSchema } from '../schemas/inputs.js';
+import {
+  type AskInput,
+  type ChatInput,
+  createAskInputSchema,
+  createChatInputSchema,
+} from '../schemas/inputs.js';
 import {
   type GeminiResponseSchema,
   isGeminiResponseSchemaKeyword,
 } from '../schemas/json-schema.js';
-import { AskOutputSchema, type UsageMetadata } from '../schemas/outputs.js';
+import { AskOutputSchema, ChatOutputSchema, type UsageMetadata } from '../schemas/outputs.js';
 
-import { buildGenerateContentConfig, EXPOSE_THOUGHTS } from '../client.js';
-import { getAI, MODEL } from '../client.js';
+import { buildGenerateContentConfig, EXPOSE_THOUGHTS, getAI, MODEL } from '../client.js';
 import { getWorkspaceCacheEnabled } from '../config.js';
 import {
   createSessionStore,
@@ -89,8 +94,6 @@ interface AskExecutionResult {
 const ASK_TOOL_LABEL = 'Ask Gemini';
 const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
 const SCHEMA_COMPOSITION_KEYS = ['anyOf', 'oneOf', 'allOf', 'items', 'prefixItems'] as const;
-
-// ── Structured Output Validation ──────────────────────────────────────
 
 function visitNestedSchemas(
   schema: GeminiResponseSchema,
@@ -148,7 +151,7 @@ function validateJsonAgainstSchema(data: unknown, schema: GeminiResponseSchema):
     const validator = new Validator(schema, '2020-12', false);
     const result = validator.validate(data);
     if (result.valid) return [];
-    return result.errors.map((e) => `${e.instanceLocation}: ${e.error}`);
+    return result.errors.map((error) => `${error.instanceLocation}: ${error.error}`);
   } catch {
     return ['Schema validation could not be performed'];
   }
@@ -246,7 +249,7 @@ export function formatStructuredResult(
     ...result,
     content: [
       { type: 'text', text: structured.answer },
-      ...result.content.filter((c) => c.type !== 'text'),
+      ...result.content.filter((content) => content.type !== 'text'),
     ],
     structuredContent: structured,
   };
@@ -257,7 +260,7 @@ function getAskStructuredContent(result: CallToolResult): AskStructuredContent |
     return undefined;
   }
 
-  return result.structuredContent as unknown as AskStructuredContent;
+  return result.structuredContent as AskStructuredContent;
 }
 
 function attachWorkspaceCacheMetadata(
@@ -362,6 +365,7 @@ async function runAskStream(
       );
     }
   }
+
   const { streamResult, result } = await executeToolStream(
     ctx,
     'ask',
@@ -369,8 +373,12 @@ async function runAskStream(
     streamGenerator,
   );
   const hasThoughts = streamResult.thoughtText.length > 0;
-  const detail = hasThoughts ? 'completed with reasoning' : 'completed';
-  await reportCompletion(ctx, ASK_TOOL_LABEL, detail);
+  await reportCompletion(
+    ctx,
+    ASK_TOOL_LABEL,
+    hasThoughts ? 'completed with reasoning' : 'completed',
+  );
+
   return {
     result: formatStructuredResult(result, streamResult, jsonMode, responseSchema, workspaceCache),
     streamResult,
@@ -381,9 +389,11 @@ async function runAskStream(
 
 function appendSessionResource(result: CallToolResult, sessionId: string): void {
   if (result.isError) return;
-  result.content.push(createResourceLink(`sessions://${sessionId}`, `Chat Session ${sessionId}`));
   result.content.push(
-    createResourceLink(`sessions://${sessionId}/events`, `Chat Session ${sessionId} Events`),
+    createResourceLink(`memory://sessions/${sessionId}`, `Chat Session ${sessionId}`),
+  );
+  result.content.push(
+    createResourceLink(`memory://sessions/${sessionId}/events`, `Chat Session ${sessionId} Events`),
   );
 }
 
@@ -547,8 +557,10 @@ async function resolveWorkspaceCacheName(
     args.temperature !== undefined ||
     args.seed !== undefined ||
     !getWorkspaceCacheEnabled()
-  )
+  ) {
     return undefined;
+  }
+
   try {
     const allowedRoots = await getAllowedRoots();
     if (allowedRoots.length === 0) {
@@ -561,7 +573,7 @@ async function resolveWorkspaceCacheName(
   }
 }
 
-function createDefaultAskDependencies(sessionStore: SessionStore): AskDependencies {
+export function createDefaultAskDependencies(sessionStore: SessionStore): AskDependencies {
   return {
     appendSessionEvent: sessionStore.appendSessionEvent.bind(sessionStore),
     appendSessionTranscript: sessionStore.appendSessionTranscript.bind(sessionStore),
@@ -678,5 +690,109 @@ export function registerAskTool(
     },
     taskMessageQueue,
     askWork,
+  );
+}
+
+function extractSessionId(
+  result: CallToolResult,
+  requestedSessionId: string | undefined,
+): string | undefined {
+  if (requestedSessionId) {
+    return requestedSessionId;
+  }
+
+  for (const item of result.content) {
+    if (item.type !== 'resource_link' || typeof item.uri !== 'string') continue;
+    const match = /^memory:\/\/sessions\/([^/]+)$/.exec(item.uri);
+    if (match?.[1]) {
+      return decodeURIComponent(match[1]);
+    }
+  }
+
+  return undefined;
+}
+
+function sessionResources(sessionId: string) {
+  return {
+    detail: `memory://sessions/${sessionId}`,
+    events: `memory://sessions/${sessionId}/events`,
+    transcript: `memory://sessions/${sessionId}/transcript`,
+  };
+}
+
+async function chatWork(
+  askWork: ReturnType<typeof createAskWork>,
+  args: ChatInput,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const result = await askWork(
+    {
+      message: args.goal,
+      sessionId: args.session?.id,
+      cacheName: args.memory?.cacheName,
+      responseSchema: args.responseSchema,
+      seed: args.seed,
+      systemInstruction: args.systemInstruction,
+      temperature: args.temperature,
+      thinkingLevel: args.thinkingLevel,
+    },
+    ctx,
+  );
+
+  if (result.isError) {
+    return result;
+  }
+
+  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const answer =
+    typeof structured.answer === 'string' ? structured.answer : extractTextContent(result.content);
+  const warnings = Array.isArray(structured.schemaWarnings)
+    ? structured.schemaWarnings.filter((value): value is string => typeof value === 'string')
+    : undefined;
+  const sessionId = extractSessionId(result, args.session?.id);
+
+  return {
+    ...result,
+    structuredContent: {
+      ...buildBaseStructuredOutput(ctx.task?.id, warnings),
+      answer,
+      ...(structured.data !== undefined ? { data: structured.data } : {}),
+      ...(sessionId
+        ? {
+            session: {
+              id: sessionId,
+              resources: sessionResources(sessionId),
+            },
+          }
+        : {}),
+      ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
+      ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
+      ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
+      ...(structured.usage ? { usage: structured.usage } : {}),
+      ...(structured.workspaceCache ? { workspaceCache: structured.workspaceCache } : {}),
+    },
+  };
+}
+
+export function registerChatTool(
+  server: McpServer,
+  sessionStore: SessionStore,
+  taskMessageQueue: TaskMessageQueue,
+): void {
+  const askWork = createAskWork(createDefaultAskDependencies(sessionStore));
+
+  registerTaskTool(
+    server,
+    'chat',
+    {
+      title: 'Chat',
+      description:
+        'Direct Gemini chat with optional server-managed sessions and reusable cache memory.',
+      inputSchema: createChatInputSchema(sessionStore.completeSessionIds.bind(sessionStore)),
+      outputSchema: ChatOutputSchema,
+      annotations: MUTABLE_ANNOTATIONS,
+    },
+    taskMessageQueue,
+    (args: ChatInput, ctx: ServerContext) => chatWork(askWork, args, ctx),
   );
 }

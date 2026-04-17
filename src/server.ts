@@ -15,19 +15,13 @@ import { onWorkspaceCacheChange } from './lib/workspace-context.js';
 import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
 import { createSessionStore, type SessionChangeEvent, type SessionStore } from './sessions.js';
-import { registerAskTool } from './tools/ask.js';
-import { type CacheChangeEvent, onCacheChange } from './tools/cache.js';
-import { registerCacheTools } from './tools/cache.js';
-import { registerCompareFilesTool } from './tools/compare.js';
-import { registerGenerateDiagramTool } from './tools/diagram.js';
-import { registerAnalyzeFileTool, registerExecuteCodeTool } from './tools/execution.js';
-import { registerExplainErrorTool } from './tools/explain-error.js';
-import { registerAnalyzePrTool } from './tools/pr.js';
-import {
-  registerAgenticSearchTool,
-  registerAnalyzeUrlTool,
-  registerSearchTool,
-} from './tools/research.js';
+import { registerAnalyzeTool } from './tools/analyze.js';
+import { registerChatTool } from './tools/chat.js';
+import { registerDiscoverTool } from './tools/discover.js';
+import { registerMemoryTool } from './tools/memory.js';
+import { type CacheChangeEvent, onCacheChange } from './tools/memory.js';
+import { registerResearchTool } from './tools/research-job.js';
+import { registerReviewTool } from './tools/review.js';
 import type { ServerInstance } from './transport.js';
 
 const { version } = JSON.parse(
@@ -44,56 +38,37 @@ type ServerRegistrar = (server: McpServer, services: ServerServices) => void;
 
 export const SERVER_TOOL_REGISTRARS = [
   (server, services) => {
-    registerAskTool(server, services.sessionStore, services.taskMessageQueue);
+    registerChatTool(server, services.sessionStore, services.taskMessageQueue);
   },
   (server, services) => {
-    registerExecuteCodeTool(server, services.taskMessageQueue);
+    registerResearchTool(server, services.taskMessageQueue);
   },
   (server, services) => {
-    registerSearchTool(server, services.taskMessageQueue);
+    registerAnalyzeTool(server, services.taskMessageQueue);
   },
   (server, services) => {
-    registerAgenticSearchTool(server, services.taskMessageQueue);
+    registerReviewTool(server, services.taskMessageQueue);
   },
   (server, services) => {
-    registerAnalyzeFileTool(server, services.taskMessageQueue);
+    registerMemoryTool(server, services.sessionStore, services.taskMessageQueue);
   },
-  (server, services) => {
-    registerAnalyzeUrlTool(server, services.taskMessageQueue);
-  },
-  (server, services) => {
-    registerAnalyzePrTool(server, services.taskMessageQueue);
-  },
-  (server, services) => {
-    registerExplainErrorTool(server, services.taskMessageQueue);
-  },
-  (server, services) => {
-    registerCompareFilesTool(server, services.taskMessageQueue);
-  },
-  (server, services) => {
-    registerGenerateDiagramTool(server, services.taskMessageQueue);
-  },
-  (server, services) => {
-    registerCacheTools(server, services.taskMessageQueue);
+  (server) => {
+    registerDiscoverTool(server);
   },
 ] as const satisfies readonly ServerRegistrar[];
 
 const SERVER_DESCRIPTION =
-  'Gemini AI assistant: multi-turn chat, sandboxed code execution, ' +
-  'Google Search grounding, file analysis, context caching, PR diff analysis, ' +
-  'error diagnosis, file comparison, and diagram generation.';
+  'Gemini AI assistant with six job-first public tools: chat, research, analyze, review, memory, and discover.';
 
 const SERVER_INSTRUCTIONS =
-  'Tools: ask (chat, multi-turn via sessionId, temperature/seed control), execute_code (sandboxed code), ' +
-  'search (web-grounded answers, optional URL Context), ' +
-  'agentic_search (deep multi-step research with progress notifications), ' +
-  'analyze_file (file upload, mediaResolution for images/video), analyze_url (URL content analysis), ' +
-  'create_cache/list_caches/update_cache/delete_cache (context caching, ≥32k tokens), ' +
-  'analyze_pr (inspect the current repo, auto-generate a local diff, and review it with Gemini), ' +
-  'explain_error (diagnose stack traces and error messages), ' +
-  'compare_files (upload two files for structured comparison), ' +
-  'generate_diagram (create Mermaid/PlantUML diagrams from descriptions or code). ' +
-  'Use cacheName with ask to attach cached context. displayName auto-replaces stale caches.';
+  'Public tools: ' +
+  'chat (direct Gemini chat with optional in-memory sessions and cache memory), ' +
+  'research (explicit quick or deep grounded research), ' +
+  'analyze (file, URL, or small file-set analysis), ' +
+  'review (diff review, file comparison, or failure diagnosis), ' +
+  'memory (sessions, caches, and workspace memory inspection/mutation), ' +
+  'discover (guidance, workflows, prompts, resources, and limitation notes). ' +
+  'Use discover://catalog and discover://workflows for the canonical public surface.';
 
 function sendResourceChangedForServer(
   server: McpServer,
@@ -115,10 +90,10 @@ function sendResourceChanged(listUri: string, detailUris: readonly string[] = []
 }
 
 onCacheChange(({ detailUris }: CacheChangeEvent) => {
-  sendResourceChanged('caches://list', detailUris);
+  sendResourceChanged('memory://caches', detailUris);
 });
 onWorkspaceCacheChange(() => {
-  sendResourceChanged('workspace://cache');
+  sendResourceChanged('memory://workspace/cache');
 });
 
 export function createServerInstance(): ServerInstance {
@@ -150,7 +125,7 @@ export function createServerInstance(): ServerInstance {
   const detachLogger = logger.attachServer(server);
   const unsubscribeSessionChange = sessionStore.subscribe(
     ({ detailUris, eventUris, transcriptUris }: SessionChangeEvent) => {
-      sendResourceChangedForServer(server, 'sessions://list', [
+      sendResourceChangedForServer(server, 'memory://sessions', [
         ...detailUris,
         ...transcriptUris,
         ...eventUris,

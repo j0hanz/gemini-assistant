@@ -5,10 +5,10 @@ import { listDiscoveryEntries, listWorkflowEntries } from '../src/catalog.js';
 import {
   getSessionEventsResourceData,
   getSessionTranscriptResourceData,
+  readDiscoverCatalogResource,
+  readDiscoverWorkflowsResource,
   readSessionEventsResource,
   readSessionTranscriptResource,
-  readToolsListResource,
-  readWorkflowsListResource,
   readWorkspaceContextResource,
   renderWorkspaceContextMarkdown,
 } from '../src/resources.js';
@@ -27,8 +27,8 @@ function createStore(): SessionStore {
 }
 
 describe('discovery resources', () => {
-  it('reads tools://list with deterministic catalog contents and markdown rendering', () => {
-    const result = readToolsListResource('tools://list');
+  it('reads discover://catalog with deterministic catalog contents and markdown rendering', () => {
+    const result = readDiscoverCatalogResource('discover://catalog');
     assert.strictEqual(result.contents.length, 2);
     assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
     assert.deepStrictEqual(parseResourceText(result), listDiscoveryEntries());
@@ -37,17 +37,17 @@ describe('discovery resources', () => {
     assert.match(result.contents[1]?.text ?? '', /## Tools/);
   });
 
-  it('reads workflows://list with getting-started first and markdown rendering', () => {
-    const result = readWorkflowsListResource('workflows://list');
+  it('reads discover://workflows with start-here first and markdown rendering', () => {
+    const result = readDiscoverWorkflowsResource('discover://workflows');
     const data = parseResourceText(result) as ReturnType<typeof listWorkflowEntries>;
 
     assert.strictEqual(result.contents.length, 2);
     assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
     assert.deepStrictEqual(data, listWorkflowEntries());
-    assert.strictEqual(data[0]?.name, 'getting-started');
+    assert.strictEqual(data[0]?.name, 'start-here');
     assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
     assert.match(result.contents[1]?.text ?? '', /^# Workflow Catalog/m);
-    assert.match(result.contents[1]?.text ?? '', /### getting-started/);
+    assert.match(result.contents[1]?.text ?? '', /### start-here/);
   });
 });
 
@@ -69,13 +69,13 @@ describe('workspace context resource', () => {
   });
 
   it('returns workspace context as markdown text content', () => {
-    const result = readWorkspaceContextResource('workspace://context', {
+    const result = readWorkspaceContextResource('memory://workspace/context', {
       content: 'Workspace body',
       estimatedTokens: 42,
       sources: [],
     });
 
-    assert.strictEqual(result.contents[0]?.uri, 'workspace://context');
+    assert.strictEqual(result.contents[0]?.uri, 'memory://workspace/context');
     assert.match(result.contents[0]?.text ?? '', /^# Workspace Context/m);
     assert.throws(() => {
       JSON.parse(result.contents[0]?.text ?? '');
@@ -100,7 +100,7 @@ describe('session transcript resource', () => {
 
     const result = readSessionTranscriptResource(
       store,
-      'sessions://sess-resource-transcript/transcript',
+      'memory://sessions/sess-resource-transcript/transcript',
       'sess-resource-transcript',
     );
     assert.strictEqual(result.contents.length, 2);
@@ -117,7 +117,11 @@ describe('session transcript resource', () => {
 
   it('renders a not-found markdown body for a missing session transcript', () => {
     const store = createStore();
-    const result = readSessionTranscriptResource(store, 'sessions://missing/transcript', 'missing');
+    const result = readSessionTranscriptResource(
+      store,
+      'memory://sessions/missing/transcript',
+      'missing',
+    );
     assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
     assert.match(result.contents[1]?.text ?? '', /Session not found/);
   });
@@ -151,7 +155,7 @@ describe('session events resource', () => {
 
     const result = readSessionEventsResource(
       store,
-      'sessions://sess-resource-events/events',
+      'memory://sessions/sess-resource-events/events',
       'sess-resource-events',
     );
     assert.strictEqual(result.contents.length, 2);
@@ -169,7 +173,7 @@ describe('session events resource', () => {
 
   it('renders a not-found markdown body for a missing session events resource', () => {
     const store = createStore();
-    const result = readSessionEventsResource(store, 'sessions://missing/events', 'missing');
+    const result = readSessionEventsResource(store, 'memory://sessions/missing/events', 'missing');
     assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
     assert.match(result.contents[1]?.text ?? '', /Session not found/);
   });

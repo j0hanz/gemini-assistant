@@ -8,8 +8,11 @@ import { afterEach, describe, it } from 'node:test';
 
 import { InMemoryTransport } from './lib/in-memory-transport.js';
 
-import { PUBLIC_PROMPT_NAMES } from '../src/prompts.js';
-import { PUBLIC_RESOURCE_URIS } from '../src/resources.js';
+import {
+  PUBLIC_PROMPT_NAMES,
+  PUBLIC_RESOURCE_URIS,
+  PUBLIC_TOOL_NAMES,
+} from '../src/public-contract.js';
 import { createServerInstance } from '../src/server.js';
 
 process.env.API_KEY ??= 'test-key-for-e2e';
@@ -177,11 +180,11 @@ describe('in-memory MCP server e2e', () => {
     const resourceTemplates = await harness.client.request('resources/templates/list');
     const prompts = await harness.client.request('prompts/list');
     const discoveryCatalog = await harness.client.request('resources/read', {
-      uri: 'tools://list',
+      uri: 'discover://catalog',
     });
-    const gettingStarted = await harness.client.request('prompts/get', {
+    const discoverPrompt = await harness.client.request('prompts/get', {
       arguments: {},
-      name: 'getting-started',
+      name: 'discover',
     });
 
     assert.equal(initialize.result.protocolVersion, LATEST_PROTOCOL_VERSION);
@@ -189,25 +192,16 @@ describe('in-memory MCP server e2e', () => {
     assert.equal(typeof initialize.result.instructions, 'string');
 
     const toolNames = ((tools.result.tools as { name: string }[]) ?? []).map((tool) => tool.name);
-    assert.ok(toolNames.includes('ask'));
-    assert.ok(toolNames.includes('search'));
-    assert.ok(toolNames.includes('create_cache'));
+    assert.deepStrictEqual(toolNames.sort(), [...PUBLIC_TOOL_NAMES].sort());
 
     const resourceUris = ((resources.result.resources as { uri: string }[]) ?? []).map(
       (resource) => resource.uri,
     );
-    assert.ok(resourceUris.includes('tools://list'));
-    assert.ok(resourceUris.includes('workspace://context'));
-
     const templateUris = (
       (resourceTemplates.result.resourceTemplates as { uriTemplate: string }[]) ?? []
     ).map((template) => template.uriTemplate);
     const advertisedUris = new Set<string>([...resourceUris, ...templateUris]);
-    assert.deepStrictEqual(
-      [...advertisedUris].sort(),
-      [...PUBLIC_RESOURCE_URIS].sort(),
-      'PUBLIC_RESOURCE_URIS must match the union of resources/list and resources/templates/list',
-    );
+    assert.deepStrictEqual([...advertisedUris].sort(), [...PUBLIC_RESOURCE_URIS].sort());
 
     const promptNames = ((prompts.result.prompts as { name: string }[]) ?? []).map(
       (prompt) => prompt.name,
@@ -218,19 +212,19 @@ describe('in-memory MCP server e2e', () => {
       ((discoveryCatalog.result.contents as { text?: string }[]) ?? []).find(
         (entry) => typeof entry.text === 'string',
       )?.text ?? '';
-    assert.match(discoveryText, /ask/);
-    assert.match(discoveryText, /generate_diagram/);
+    assert.match(discoveryText, /chat/);
+    assert.match(discoveryText, /memory:\/\/sessions/);
 
     const promptText =
-      ((gettingStarted.result.messages as { content?: { text?: string } }[]) ?? []).find(
+      ((discoverPrompt.result.messages as { content?: { text?: string } }[]) ?? []).find(
         (entry) => typeof entry.content?.text === 'string',
       )?.content?.text ?? '';
-    assert.match(promptText, /first-time user/i);
-    assert.match(promptText, /Workflow: `getting-started`/);
+    assert.match(promptText, /Workflow: `start-here`/);
+    assert.match(promptText, /discover:\/\/catalog/);
 
     assert.equal(
       ((discoveryCatalog.result.contents as { uri?: string }[]) ?? [])[0]?.uri,
-      'tools://list',
+      'discover://catalog',
     );
     assert.equal(harness.client.getNotifications().length, 0);
   });
@@ -242,27 +236,27 @@ describe('in-memory MCP server e2e', () => {
     await harness.client.initialize();
     const response = await harness.client.requestRaw('tools/call', {
       arguments: {},
-      name: 'search',
+      name: 'research',
     });
 
     if (isJsonRpcFailure(response)) {
       assert.equal(response.error.code, -32602);
-      assert.match(response.error.message, /query/i);
+      assert.match(response.error.message, /mode/i);
       return;
     }
 
     assert.equal(response.result.isError, true);
     const content = (response.result.content as { text?: string }[]) ?? [];
-    assert.match(content[0]?.text ?? '', /query/i);
+    assert.match(content[0]?.text ?? '', /mode/i);
   });
 
-  it('reads workspace://context as markdown through MCP', async () => {
+  it('reads memory://workspace/context as markdown through MCP', async () => {
     const harness = await createHarness();
     cleanupCallbacks.push(harness.close);
 
     await harness.client.initialize({});
     const response = await harness.client.request('resources/read', {
-      uri: 'workspace://context',
+      uri: 'memory://workspace/context',
     });
 
     const text =
@@ -289,7 +283,7 @@ describe('in-memory MCP server e2e', () => {
     try {
       await harness.client.initialize({});
       const response = await harness.client.request('resources/read', {
-        uri: 'workspace://context',
+        uri: 'memory://workspace/context',
       });
 
       const text =
@@ -301,8 +295,6 @@ describe('in-memory MCP server e2e', () => {
       assert.match(text, /- None/);
       assert.match(text, /## Content\s+# Workspace Context/m);
       assert.doesNotMatch(text, /package\.json/);
-      assert.doesNotMatch(text, /## Workspace Files/);
-      assert.doesNotMatch(text, /## Project Context/);
     } finally {
       process.env.ALLOWED_FILE_ROOTS = originalAllowedRoots;
       process.env.WORKSPACE_CONTEXT_FILE = originalContextFile;

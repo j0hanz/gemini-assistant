@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { listWorkflowEntries } from '../src/catalog.js';
-import { PUBLIC_RESOURCE_URIS } from '../src/resources.js';
+import {
+  PUBLIC_PROMPT_NAMES,
+  PUBLIC_RESOURCE_URIS,
+  PUBLIC_TOOL_NAMES,
+} from '../src/public-contract.js';
 
 const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 const packageJson = JSON.parse(
@@ -18,14 +22,13 @@ const packageJson = JSON.parse(
 };
 
 describe('documentation and package metadata', () => {
-  it('names the public prompts and resources in the README', () => {
-    for (const promptName of [
-      'getting-started',
-      'deep-research',
-      'project-memory',
-      'diff-review',
-    ]) {
-      assert.match(readme, new RegExp(promptName.replace('-', '\\-')));
+  it('names the public tools, prompts, and resources in the README', () => {
+    for (const toolName of PUBLIC_TOOL_NAMES) {
+      assert.match(readme, new RegExp(toolName));
+    }
+
+    for (const promptName of PUBLIC_PROMPT_NAMES) {
+      assert.match(readme, new RegExp(promptName));
     }
 
     for (const resourceUri of PUBLIC_RESOURCE_URIS) {
@@ -39,40 +42,27 @@ describe('documentation and package metadata', () => {
     }
   });
 
-  it('documents the public capability matrix and contract limits', () => {
-    assert.match(readme, /\|\s*Code Execution\s*\|\s*`partial`\s*\|/);
-    assert.match(readme, /\|\s*Structured Output\s*\|\s*`partial`\s*\|/);
-    assert.match(readme, /\|\s*Tool Combination\s*\|\s*`partial`\s*\|/);
-    assert.match(readme, /\|\s*File Search\s*\|\s*`unsupported`\s*\|/);
-    assert.match(readme, /\|\s*Live API\s*\|\s*`unsupported`\s*\|/);
-    assert.match(readme, /responseSchema.*single-turn calls and brand-new sessions/i);
-    assert.match(readme, /inspection summary/i);
-    assert.match(readme, /truncated into previews/i);
-    assert.match(
-      readme,
-      /`execute_code` uses Gemini's Python runtime; `language` is advisory only\./,
-    );
-    assert.match(readme, /`list_caches` is the single non-tasked read-only outlier/i);
+  it('documents the job-first surface and memory/discovery split', () => {
+    assert.match(readme, /job-first public surface/i);
+    assert.match(readme, /discover:\/\/catalog/);
+    assert.match(readme, /memory:\/\/sessions/);
+    assert.match(readme, /quick or deep/i);
+    assert.match(readme, /no backward-compatible aliases/i);
   });
 
   it('keeps web-standard runtime guidance aligned with transport behavior', () => {
     assert.match(readme, /Auto-serves only when the process is running under Bun or Deno\./);
     assert.match(readme, /returns a `handler` but does not start a listener/);
-    assert.doesNotMatch(
-      readme,
-      /```bash\s*MCP_TRANSPORT=web-standard npx tsx src\/index\.ts\s*```/s,
-    );
   });
 
   it('keeps package metadata aligned with distribution and discovery vocabulary', () => {
-    assert.match(packageJson.description ?? '', /workflow/i);
+    assert.match(packageJson.description ?? '', /Gemini/i);
     assert.match(packageJson.description ?? '', /MCP/i);
     assert.deepStrictEqual(packageJson.files, ['dist', 'README.md']);
     assert.ok(packageJson.exports && '.' in packageJson.exports);
     assert.ok(Array.isArray(packageJson.keywords));
     assert.ok(packageJson.keywords?.includes('mcp'));
     assert.ok(packageJson.keywords?.includes('gemini'));
-    assert.ok(packageJson.keywords?.includes('workflow'));
     assert.strictEqual(packageJson.license, 'MIT');
   });
 

@@ -66,15 +66,15 @@ export interface SessionStoreOptions {
 type SessionChangeSubscriber = (event: SessionChangeEvent) => void;
 
 function sessionDetailUri(id: string): string {
-  return `sessions://${id}`;
+  return `memory://sessions/${id}`;
 }
 
 function sessionTranscriptUri(id: string): string {
-  return `sessions://${id}/transcript`;
+  return `memory://sessions/${id}/transcript`;
 }
 
 function sessionEventsUri(id: string): string {
-  return `sessions://${id}/events`;
+  return `memory://sessions/${id}/events`;
 }
 
 function cloneValue<T>(value: T): T {

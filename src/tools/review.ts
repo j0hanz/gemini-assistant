@@ -10,18 +10,42 @@ import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { reportCompletion, sendProgress } from '../lib/errors.js';
+import { createPartFromUri } from '@google/genai';
+
+import {
+  cleanupErrorLogger,
+  handleToolError,
+  reportCompletion,
+  sendProgress,
+} from '../lib/errors.js';
+import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
+import { buildOrchestrationConfig } from '../lib/orchestration.js';
+import { buildBaseStructuredOutput } from '../lib/response.js';
 import { handleToolExecution } from '../lib/streaming.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
-import { type AnalyzePrInput, AnalyzePrInputSchema } from '../schemas/inputs.js';
-import { AnalyzePrOutputSchema } from '../schemas/outputs.js';
+import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
+import {
+  type AnalyzePrInput,
+  AnalyzePrInputSchema,
+  type CompareFilesInput,
+  CompareFilesInputSchema,
+  type ReviewInput,
+  ReviewInputSchema,
+} from '../schemas/inputs.js';
+import {
+  AnalyzePrOutputSchema,
+  CompareFilesOutputSchema,
+  ReviewOutputSchema,
+} from '../schemas/outputs.js';
+import { withCurrentWorkspaceRoot } from '../schemas/shared.js';
 
-import { buildGenerateContentConfig } from '../client.js';
-import { getAI, MODEL } from '../client.js';
+import { buildGenerateContentConfig, getAI, MODEL } from '../client.js';
+import { explainErrorWork } from './explain-error.js';
 
 const execFileAsync = promisify(execFile);
 
-const TOOL_LABEL = 'Analyze PR';
+const COMPARE_FILE_TOOL_LABEL = 'Compare Files';
+const REVIEW_DIFF_TOOL_LABEL = 'Analyze PR';
 const GIT_TIMEOUT_MS = 30_000;
 const GIT_MAX_BUFFER = 10 * 1024 * 1024;
 const MAX_DIFF_CHARS = 500_000;
@@ -131,7 +155,15 @@ const NOISY_EXCLUDE_PATHSPECS = [
   ...NOISY_SUFFIXES.map((suffix) => `:!*${suffix}`),
 ];
 
-const SYSTEM_INSTRUCTION =
+const COMPARE_SYSTEM_INSTRUCTION =
+  'Compare the two provided files. Base claims on the files. ' +
+  'Cite symbols, section names, or short quotes. Do not invent line numbers.\n\n' +
+  'Output:\n' +
+  '## Summary\n' +
+  '## Differences\n' +
+  '## Impact';
+
+const REVIEW_DIFF_SYSTEM_INSTRUCTION =
   'Review the unified diff for bugs, regressions, and behavior risk. Ignore formatting-only changes. ' +
   'Cite file paths and hunk context from the diff. Do not invent content or line numbers. ' +
   'If clean, say so briefly.\n\n' +
@@ -193,6 +225,70 @@ interface GitDiffArgsOptions {
   againstHead?: boolean;
   nameOnly?: boolean;
   staged?: boolean;
+}
+
+export function createCompareFileWork(rootsFetcher: RootsFetcher) {
+  return async function compareFileWork(
+    { filePathA, filePathB, question, thinkingLevel, googleSearch, cacheName }: CompareFilesInput,
+    ctx: ServerContext,
+  ): Promise<CallToolResult> {
+    const uploadedNames: string[] = [];
+
+    try {
+      await sendProgress(ctx, 0, 4, `${COMPARE_FILE_TOOL_LABEL}: Uploading file A`);
+      const fileA = await uploadFile(filePathA, ctx.mcpReq.signal, rootsFetcher);
+      uploadedNames.push(fileA.name);
+
+      await sendProgress(ctx, 1, 4, `${COMPARE_FILE_TOOL_LABEL}: Uploading file B`);
+      const fileB = await uploadFile(filePathB, ctx.mcpReq.signal, rootsFetcher);
+      uploadedNames.push(fileB.name);
+
+      await ctx.mcpReq.log('info', `Comparing: ${fileA.displayPath} vs ${fileB.displayPath}`);
+      await sendProgress(ctx, 2, 4, `${COMPARE_FILE_TOOL_LABEL}: Analyzing differences`);
+
+      const prompt = question ? `Focus: ${question}` : 'Task: Compare the two files.';
+
+      const effectiveSystemInstruction = cacheName ? undefined : COMPARE_SYSTEM_INSTRUCTION;
+      const effectivePrompt = cacheName ? `${COMPARE_SYSTEM_INSTRUCTION}\n\n${prompt}` : prompt;
+
+      return await handleToolExecution(
+        ctx,
+        'compare_files',
+        COMPARE_FILE_TOOL_LABEL,
+        () =>
+          getAI().models.generateContentStream({
+            model: MODEL,
+            contents: [
+              { text: `File A: ${fileA.displayPath}` },
+              createPartFromUri(fileA.uri, fileA.mimeType),
+              { text: `File B: ${fileB.displayPath}` },
+              createPartFromUri(fileB.uri, fileB.mimeType),
+              { text: effectivePrompt },
+            ],
+            config: buildGenerateContentConfig(
+              {
+                systemInstruction: effectiveSystemInstruction,
+                thinkingLevel: thinkingLevel ?? 'MEDIUM',
+                cacheName,
+                ...buildOrchestrationConfig({
+                  toolProfile: googleSearch ? 'search' : 'none',
+                }),
+              },
+              ctx.mcpReq.signal,
+            ),
+          }),
+        (_streamResult, textContent) => ({
+          structuredContent: {
+            comparison: textContent || '',
+          },
+        }),
+      );
+    } catch (err) {
+      return await handleToolError(ctx, 'compare_files', COMPARE_FILE_TOOL_LABEL, err);
+    } finally {
+      await deleteUploadedFiles(uploadedNames, cleanupErrorLogger(ctx));
+    }
+  };
 }
 
 export function matchesNoisyPath(filePath: string): boolean {
@@ -709,7 +805,7 @@ function buildTextResult(
 
 function buildAnalyzePrErrorResult(err: unknown): CallToolResult {
   return {
-    content: [{ type: 'text', text: `${TOOL_LABEL}: ${formatAnalyzePrError(err)}` }],
+    content: [{ type: 'text', text: `${REVIEW_DIFF_TOOL_LABEL}: ${formatAnalyzePrError(err)}` }],
     isError: true,
   };
 }
@@ -734,14 +830,14 @@ function buildModelPrompt(
 } {
   if (cacheName) {
     return {
-      effectivePrompt: `${SYSTEM_INSTRUCTION}\n\n${prompt}`,
+      effectivePrompt: `${REVIEW_DIFF_SYSTEM_INSTRUCTION}\n\n${prompt}`,
       effectiveSystemInstruction: undefined,
     };
   }
 
   return {
     effectivePrompt: prompt,
-    effectiveSystemInstruction: SYSTEM_INSTRUCTION,
+    effectiveSystemInstruction: REVIEW_DIFF_SYSTEM_INSTRUCTION,
   };
 }
 
@@ -776,11 +872,11 @@ export async function buildLocalDiffSnapshot(
   };
 }
 
-async function analyzePrWork(
+export async function analyzePrWork(
   { thinkingLevel, language, dryRun, cacheName }: AnalyzePrInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  await sendProgress(ctx, 0, 3, `${TOOL_LABEL}: Inspecting local changes`);
+  await sendProgress(ctx, 0, 3, `${REVIEW_DIFF_TOOL_LABEL}: Inspecting local changes`);
 
   let snapshot: LocalDiffSnapshot;
   try {
@@ -790,16 +886,16 @@ async function analyzePrWork(
   }
 
   const budgetedDiff = buildBudgetedSnapshotDiff(snapshot);
-  await sendProgress(ctx, 1, 3, `${TOOL_LABEL}: ${budgetedDiff.summary}`);
+  await sendProgress(ctx, 1, 3, `${REVIEW_DIFF_TOOL_LABEL}: ${budgetedDiff.summary}`);
 
   if (snapshot.empty) {
     const analysis = buildNoChangesAnalysis(snapshot);
-    await reportCompletion(ctx, TOOL_LABEL, 'no changes');
+    await reportCompletion(ctx, REVIEW_DIFF_TOOL_LABEL, 'no changes');
     return buildTextResult(snapshot, analysis);
   }
 
   if (dryRun) {
-    await reportCompletion(ctx, TOOL_LABEL, 'snapshot ready');
+    await reportCompletion(ctx, REVIEW_DIFF_TOOL_LABEL, 'snapshot ready');
     return buildTextResult(
       snapshot,
       budgetedDiff.diff,
@@ -808,7 +904,7 @@ async function analyzePrWork(
     );
   }
 
-  await sendProgress(ctx, 2, 3, `${TOOL_LABEL}: Analyzing generated diff`);
+  await sendProgress(ctx, 2, 3, `${REVIEW_DIFF_TOOL_LABEL}: Analyzing generated diff`);
   await logSnapshotStats(ctx, snapshot, budgetedDiff.truncated);
 
   const prompt = buildAnalysisPrompt(
@@ -827,7 +923,7 @@ async function analyzePrWork(
   return await handleToolExecution(
     ctx,
     'analyze_pr',
-    TOOL_LABEL,
+    REVIEW_DIFF_TOOL_LABEL,
     () =>
       getAI().models.generateContentStream({
         model: MODEL,
@@ -853,12 +949,118 @@ async function analyzePrWork(
   );
 }
 
+async function reviewWork(
+  compareWork: ReturnType<typeof createCompareFileWork>,
+  args: ReviewInput,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const result =
+    args.subject.kind === 'diff'
+      ? await analyzePrWork(
+          {
+            dryRun: args.subject.dryRun,
+            cacheName: args.cacheName,
+            language: args.subject.language,
+            thinkingLevel: args.thinkingLevel,
+          },
+          ctx,
+        )
+      : args.subject.kind === 'comparison'
+        ? await compareWork(
+            {
+              filePathA: args.subject.filePathA,
+              filePathB: args.subject.filePathB,
+              question: args.subject.question ?? args.focus,
+              thinkingLevel: args.thinkingLevel,
+              googleSearch: args.subject.googleSearch,
+              cacheName: args.cacheName,
+            },
+            ctx,
+          )
+        : await explainErrorWork(
+            {
+              error: args.subject.error,
+              codeContext: args.focus
+                ? [args.subject.codeContext, `Review focus: ${args.focus}`]
+                    .filter(Boolean)
+                    .join('\n\n')
+                : args.subject.codeContext,
+              language: args.subject.language,
+              thinkingLevel: args.thinkingLevel,
+              googleSearch: args.subject.googleSearch,
+              urls: args.subject.urls,
+              cacheName: args.cacheName,
+            },
+            ctx,
+          );
+
+  if (result.isError) {
+    return result;
+  }
+
+  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const summary =
+    typeof structured.analysis === 'string'
+      ? structured.analysis
+      : typeof structured.comparison === 'string'
+        ? structured.comparison
+        : typeof structured.explanation === 'string'
+          ? structured.explanation
+          : '';
+
+  return {
+    ...result,
+    structuredContent: {
+      ...buildBaseStructuredOutput(ctx.task?.id),
+      subjectKind: args.subject.kind,
+      summary,
+      ...(structured.stats ? { stats: structured.stats } : {}),
+      ...(structured.reviewedPaths ? { reviewedPaths: structured.reviewedPaths } : {}),
+      ...(structured.includedUntracked ? { includedUntracked: structured.includedUntracked } : {}),
+      ...(structured.skippedBinaryPaths
+        ? { skippedBinaryPaths: structured.skippedBinaryPaths }
+        : {}),
+      ...(structured.skippedLargePaths ? { skippedLargePaths: structured.skippedLargePaths } : {}),
+      ...(structured.omittedPaths ? { omittedPaths: structured.omittedPaths } : {}),
+      ...(typeof structured.empty === 'boolean' ? { empty: structured.empty } : {}),
+      ...(typeof structured.truncated === 'boolean' ? { truncated: structured.truncated } : {}),
+      ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
+      ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
+      ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
+      ...(structured.usage ? { usage: structured.usage } : {}),
+    },
+  };
+}
+
+export function registerCompareFilesTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue,
+): void {
+  registerTaskTool(
+    server,
+    'compare_files',
+    {
+      title: COMPARE_FILE_TOOL_LABEL,
+      description: withCurrentWorkspaceRoot(
+        'Upload two files to Gemini and get a structured comparison analysis. ' +
+          'Supports code, documents, configs, and other file types. ' +
+          'Optionally uses Google Search for best practices or migration context.',
+      ),
+      inputSchema: CompareFilesInputSchema,
+      outputSchema: CompareFilesOutputSchema,
+      annotations: READONLY_ANNOTATIONS,
+    },
+    taskMessageQueue,
+    createCompareFileWork(buildServerRootsFetcher(server)),
+  );
+}
+
 export function registerAnalyzePrTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
   registerTaskTool(
     server,
     'analyze_pr',
     {
-      title: TOOL_LABEL,
+      title: REVIEW_DIFF_TOOL_LABEL,
       description:
         'Inspect the current local git repository, auto-generate a diff of all local changes, ' +
         'and review that generated diff with Gemini. Use dryRun to preview the generated diff ' +
@@ -869,5 +1071,23 @@ export function registerAnalyzePrTool(server: McpServer, taskMessageQueue: TaskM
     },
     taskMessageQueue,
     analyzePrWork,
+  );
+}
+
+export function registerReviewTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
+  const compareWork = createCompareFileWork(buildServerRootsFetcher(server));
+
+  registerTaskTool(
+    server,
+    'review',
+    {
+      title: 'Review',
+      description: 'Review a local diff, compare two files, or diagnose a failing change.',
+      inputSchema: ReviewInputSchema,
+      outputSchema: ReviewOutputSchema,
+      annotations: READONLY_ANNOTATIONS,
+    },
+    taskMessageQueue,
+    (args: ReviewInput, ctx: ServerContext) => reviewWork(compareWork, args, ctx),
   );
 }

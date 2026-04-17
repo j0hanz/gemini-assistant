@@ -8,7 +8,7 @@ import type { GenerateContentResponse, Part } from '@google/genai';
 
 import { resetProgressThrottle } from '../../src/lib/errors.js';
 import { handleToolExecution } from '../../src/lib/streaming.js';
-import { buildAgenticSearchResult } from '../../src/tools/research.js';
+import { buildAgenticSearchResult } from '../../src/tools/research-job.js';
 
 interface AgenticSearchStructuredContent {
   report: string;

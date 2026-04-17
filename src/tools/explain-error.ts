@@ -57,7 +57,7 @@ function buildPrompt(
   return sections.join('\n\n');
 }
 
-async function explainErrorWork(
+export async function explainErrorWork(
   { error, codeContext, language, thinkingLevel, googleSearch, urls, cacheName }: ExplainErrorInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {

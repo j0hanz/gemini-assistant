@@ -136,9 +136,11 @@ describe('sessions', () => {
         timestamp: 3,
       });
 
-      assert.deepStrictEqual(detailUris, ['sessions://sess-transcript-notify']);
-      assert.deepStrictEqual(eventUris, ['sessions://sess-transcript-notify/events']);
-      assert.deepStrictEqual(transcriptUris, ['sessions://sess-transcript-notify/transcript']);
+      assert.deepStrictEqual(detailUris, ['memory://sessions/sess-transcript-notify']);
+      assert.deepStrictEqual(eventUris, ['memory://sessions/sess-transcript-notify/events']);
+      assert.deepStrictEqual(transcriptUris, [
+        'memory://sessions/sess-transcript-notify/transcript',
+      ]);
     });
   });
 
@@ -187,7 +189,7 @@ describe('sessions', () => {
         timestamp: 1,
       });
 
-      assert.deepStrictEqual(eventUris, ['sessions://sess-events-notify/events']);
+      assert.deepStrictEqual(eventUris, ['memory://sessions/sess-events-notify/events']);
     });
 
     it('retains only the most recent event entries when over the limit', () => {
@@ -362,9 +364,9 @@ describe('sessions', () => {
       });
 
       store.setSession('sess-task-set', mockChat('task-set') as never);
-      assert.ok(detailUris.includes('sessions://sess-task-set'));
-      assert.ok(eventUris.includes('sessions://sess-task-set/events'));
-      assert.ok(transcriptUris.includes('sessions://sess-task-set/transcript'));
+      assert.ok(detailUris.includes('memory://sessions/sess-task-set'));
+      assert.ok(eventUris.includes('memory://sessions/sess-task-set/events'));
+      assert.ok(transcriptUris.includes('memory://sessions/sess-task-set/transcript'));
     });
 
     it('includes detail and transcript URIs on getSession', () => {
@@ -380,9 +382,9 @@ describe('sessions', () => {
       });
 
       store.getSession('sess-task-get');
-      assert.deepStrictEqual(detailUris, ['sessions://sess-task-get']);
-      assert.deepStrictEqual(eventUris, ['sessions://sess-task-get/events']);
-      assert.deepStrictEqual(transcriptUris, ['sessions://sess-task-get/transcript']);
+      assert.deepStrictEqual(detailUris, ['memory://sessions/sess-task-get']);
+      assert.deepStrictEqual(eventUris, ['memory://sessions/sess-task-get/events']);
+      assert.deepStrictEqual(transcriptUris, ['memory://sessions/sess-task-get/transcript']);
     });
   });
 

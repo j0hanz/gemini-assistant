@@ -27,17 +27,27 @@ function createStore(): SessionStore {
 }
 
 describe('discovery resources', () => {
-  it('reads tools://list with deterministic catalog contents', () => {
+  it('reads tools://list with deterministic catalog contents and markdown rendering', () => {
     const result = readToolsListResource('tools://list');
+    assert.strictEqual(result.contents.length, 2);
+    assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
     assert.deepStrictEqual(parseResourceText(result), listDiscoveryEntries());
+    assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
+    assert.match(result.contents[1]?.text ?? '', /^# Discovery Catalog/m);
+    assert.match(result.contents[1]?.text ?? '', /## Tools/);
   });
 
-  it('reads workflows://list with getting-started first', () => {
+  it('reads workflows://list with getting-started first and markdown rendering', () => {
     const result = readWorkflowsListResource('workflows://list');
     const data = parseResourceText(result) as ReturnType<typeof listWorkflowEntries>;
 
+    assert.strictEqual(result.contents.length, 2);
+    assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
     assert.deepStrictEqual(data, listWorkflowEntries());
     assert.strictEqual(data[0]?.name, 'getting-started');
+    assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
+    assert.match(result.contents[1]?.text ?? '', /^# Workflow Catalog/m);
+    assert.match(result.contents[1]?.text ?? '', /### getting-started/);
   });
 });
 
@@ -93,10 +103,23 @@ describe('session transcript resource', () => {
       'sessions://sess-resource-transcript/transcript',
       'sess-resource-transcript',
     );
+    assert.strictEqual(result.contents.length, 2);
+    assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
     assert.deepStrictEqual(
       parseResourceText(result),
       store.listSessionTranscriptEntries('sess-resource-transcript'),
     );
+    assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
+    assert.match(result.contents[1]?.text ?? '', /# Session Transcript `sess-resource-transcript`/);
+    assert.match(result.contents[1]?.text ?? '', /## user/);
+    assert.match(result.contents[1]?.text ?? '', /## assistant/);
+  });
+
+  it('renders a not-found markdown body for a missing session transcript', () => {
+    const store = createStore();
+    const result = readSessionTranscriptResource(store, 'sessions://missing/transcript', 'missing');
+    assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
+    assert.match(result.contents[1]?.text ?? '', /Session not found/);
   });
 
   it('returns a stable error payload for a missing session transcript', () => {

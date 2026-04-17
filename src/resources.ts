@@ -5,7 +5,12 @@ import { formatError } from './lib/errors.js';
 import { buildServerRootsFetcher, getAllowedRoots } from './lib/validation.js';
 import { assembleWorkspaceContext, workspaceCacheManager } from './lib/workspace-context.js';
 
-import { listDiscoveryEntries, listWorkflowEntries } from './catalog.js';
+import {
+  listDiscoveryEntries,
+  listWorkflowEntries,
+  renderDiscoveryCatalogMarkdown,
+  renderWorkflowCatalogMarkdown,
+} from './catalog.js';
 import { completeCacheNames, getCacheSummary, listCacheSummaries } from './client.js';
 import { createSessionStore, type SessionStore } from './sessions.js';
 
@@ -55,7 +60,25 @@ function jsonResource(uri: string, data: unknown): ReadResourceResult {
     contents: [
       {
         uri,
+        mimeType: 'application/json',
         text: JSON.stringify(data),
+      },
+    ],
+  };
+}
+
+function dualContentResource(uri: string, data: unknown, markdown: string): ReadResourceResult {
+  return {
+    contents: [
+      {
+        uri,
+        mimeType: 'application/json',
+        text: JSON.stringify(data),
+      },
+      {
+        uri,
+        mimeType: 'text/markdown',
+        text: markdown,
       },
     ],
   };
@@ -162,13 +185,38 @@ function cacheDetailResources(
 export function readToolsListResource(
   uri: URL | string = TOOLS_LIST_RESOURCE.uri,
 ): ReadResourceResult {
-  return jsonResource(toResourceUri(uri), listDiscoveryEntries());
+  const entries = listDiscoveryEntries();
+  return dualContentResource(toResourceUri(uri), entries, renderDiscoveryCatalogMarkdown(entries));
 }
 
 export function readWorkflowsListResource(
   uri: URL | string = WORKFLOWS_LIST_RESOURCE.uri,
 ): ReadResourceResult {
-  return jsonResource(toResourceUri(uri), listWorkflowEntries());
+  const entries = listWorkflowEntries();
+  return dualContentResource(toResourceUri(uri), entries, renderWorkflowCatalogMarkdown(entries));
+}
+
+export function renderSessionTranscriptMarkdown(
+  sessionId: string | undefined,
+  data: SessionTranscriptResourceData,
+): string {
+  const header = sessionId ? `# Session Transcript \`${sessionId}\`` : '# Session Transcript';
+
+  if (!Array.isArray(data)) {
+    return [header, '', '_Session not found._', ''].join('\n');
+  }
+
+  if (data.length === 0) {
+    return [header, '', '_No transcript entries yet._', ''].join('\n');
+  }
+
+  const lines: string[] = [header, ''];
+  for (const entry of data) {
+    const ts = new Date(entry.timestamp).toISOString();
+    const taskSuffix = entry.taskId ? ` · task \`${entry.taskId}\`` : '';
+    lines.push(`## ${entry.role} · ${ts}${taskSuffix}`, '', entry.text, '');
+  }
+  return lines.join('\n').trimEnd() + '\n';
 }
 
 export function getSessionTranscriptResourceData(
@@ -200,10 +248,9 @@ export function readSessionTranscriptResource(
   uri: URL | string,
   sessionId: string | string[] | undefined,
 ): ReadResourceResult {
-  return jsonResource(
-    toResourceUri(uri),
-    getSessionTranscriptResourceData(sessionStore, normalizeTemplateParam(sessionId)),
-  );
+  const id = normalizeTemplateParam(sessionId);
+  const data = getSessionTranscriptResourceData(sessionStore, id);
+  return dualContentResource(toResourceUri(uri), data, renderSessionTranscriptMarkdown(id, data));
 }
 
 export function readSessionEventsResource(
@@ -259,8 +306,14 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
     }),
     {
       title: 'Chat Session Transcript',
-      description: 'Transcript entries for a single active chat session by ID.',
+      description:
+        'Transcript entries for a single active chat session by ID. ' +
+        'Served as application/json with a secondary text/markdown rendering.',
       mimeType: 'application/json',
+      annotations: {
+        audience: ['assistant'],
+        priority: 0.8,
+      },
     },
     (uri, { sessionId }): ReadResourceResult =>
       readSessionTranscriptResource(sessionStore, uri, sessionId),
@@ -343,8 +396,14 @@ function registerDiscoveryResources(server: McpServer): void {
     'tools://list',
     {
       title: 'Discovery Catalog',
-      description: 'Machine-readable catalog of public tools, prompts, and resources.',
+      description:
+        'Machine-readable catalog of public tools, prompts, and resources. ' +
+        'Served as application/json with a secondary text/markdown rendering.',
       mimeType: 'application/json',
+      annotations: {
+        audience: ['assistant'],
+        priority: 0.8,
+      },
     },
     (uri): ReadResourceResult => readToolsListResource(uri),
   );
@@ -354,8 +413,14 @@ function registerDiscoveryResources(server: McpServer): void {
     'workflows://list',
     {
       title: 'Workflow Catalog',
-      description: 'Machine-readable catalog of guided workflows for gemini-assistant.',
+      description:
+        'Machine-readable catalog of guided workflows for gemini-assistant. ' +
+        'Served as application/json with a secondary text/markdown rendering.',
       mimeType: 'application/json',
+      annotations: {
+        audience: ['assistant'],
+        priority: 0.8,
+      },
     },
     (uri): ReadResourceResult => readWorkflowsListResource(uri),
   );

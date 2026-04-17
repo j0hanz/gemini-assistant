@@ -34,10 +34,7 @@ import {
   createAskInputSchema,
   createChatInputSchema,
 } from '../schemas/inputs.js';
-import {
-  type GeminiResponseSchema,
-  isGeminiResponseSchemaKeyword,
-} from '../schemas/json-schema.js';
+import { type GeminiResponseSchema } from '../schemas/json-schema.js';
 import { AskOutputSchema, ChatOutputSchema, type UsageMetadata } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, EXPOSE_THOUGHTS, getAI, MODEL } from '../client.js';
@@ -94,58 +91,6 @@ interface AskExecutionResult {
 
 const ASK_TOOL_LABEL = 'Ask Gemini';
 const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
-const SCHEMA_COMPOSITION_KEYS = ['anyOf', 'oneOf', 'allOf', 'items', 'prefixItems'] as const;
-
-function visitNestedSchemas(
-  schema: GeminiResponseSchema,
-  visitor: (nestedSchema: GeminiResponseSchema) => void,
-): void {
-  const nested = schema.properties;
-  if (nested && typeof nested === 'object') {
-    for (const value of Object.values(nested as Record<string, unknown>)) {
-      if (value && typeof value === 'object') {
-        visitor(value as GeminiResponseSchema);
-      }
-    }
-  }
-
-  for (const compositionKey of SCHEMA_COMPOSITION_KEYS) {
-    const value = schema[compositionKey];
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (item && typeof item === 'object') {
-          visitor(item as GeminiResponseSchema);
-        }
-      }
-      continue;
-    }
-
-    if (value && typeof value === 'object') {
-      visitor(value as GeminiResponseSchema);
-    }
-  }
-
-  if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
-    visitor(schema.additionalProperties as GeminiResponseSchema);
-  }
-}
-
-function collectUnsupportedKeywords(
-  schema: GeminiResponseSchema,
-  found = new Set<string>(),
-): string[] {
-  for (const key of Object.keys(schema)) {
-    if (!isGeminiResponseSchemaKeyword(key)) {
-      found.add(key);
-    }
-  }
-
-  visitNestedSchemas(schema, (nestedSchema) => {
-    collectUnsupportedKeywords(nestedSchema, found);
-  });
-
-  return [...found];
-}
 
 function validateJsonAgainstSchema(data: unknown, schema: GeminiResponseSchema): string[] {
   try {
@@ -358,15 +303,6 @@ async function runAskStream(
 ): Promise<AskExecutionResult> {
   const progress = new ProgressReporter(ctx, ASK_TOOL_LABEL);
   await progress.send(0, undefined, 'Preparing');
-  if (responseSchema) {
-    const unsupported = collectUnsupportedKeywords(responseSchema);
-    if (unsupported.length > 0) {
-      await ctx.mcpReq.log(
-        'warning',
-        `ask: responseSchema contains keywords unsupported by Gemini: ${unsupported.join(', ')}`,
-      );
-    }
-  }
 
   let capturedStreamResult: StreamResult | undefined;
   const result = await executor.runStream(

@@ -29,9 +29,6 @@ export const GEMINI_RESPONSE_SCHEMA_KEYWORDS = [
   'anyOf',
   'oneOf',
   'allOf',
-  '$ref',
-  '$schema',
-  '$id',
   'propertyOrdering',
 ] as const;
 
@@ -52,7 +49,6 @@ const RESPONSE_SCHEMA_SHAPE_KEYS = [
   'anyOf',
   'oneOf',
   'allOf',
-  '$ref',
   'propertyOrdering',
 ] as const;
 
@@ -80,7 +76,6 @@ export const GeminiResponseSchema: z.ZodType<Record<string, unknown>> = z.lazy((
       minimum: z.number().optional(),
       maximum: z.number().optional(),
       items: z.union([GeminiResponseSchema, z.array(GeminiResponseSchema).min(1)]).optional(),
-      prefixItems: z.array(GeminiResponseSchema).min(1).optional(),
       minItems: z.int().nonnegative().optional(),
       maxItems: z.int().nonnegative().optional(),
       title: z.string().min(1).optional(),
@@ -88,9 +83,6 @@ export const GeminiResponseSchema: z.ZodType<Record<string, unknown>> = z.lazy((
       anyOf: z.array(GeminiResponseSchema).min(1).optional(),
       oneOf: z.array(GeminiResponseSchema).min(1).optional(),
       allOf: z.array(GeminiResponseSchema).min(1).optional(),
-      $ref: z.string().min(1).optional(),
-      $schema: z.string().min(1).optional(),
-      $id: z.string().min(1).optional(),
       propertyOrdering: z.array(z.string().min(1)).min(1).optional(),
     })
     .superRefine((schema, ctx) => {
@@ -186,7 +178,7 @@ export const GeminiResponseSchema: z.ZodType<Record<string, unknown>> = z.lazy((
     })
     .refine(hasSchemaShape, {
       error:
-        'responseSchema must contain at least one supported JSON Schema keyword (type, properties, required, additionalProperties, enum, format, minimum, maximum, items, prefixItems, minItems, maxItems, anyOf, oneOf, allOf, $ref, or propertyOrdering)',
+        'responseSchema must contain at least one supported JSON Schema keyword (type, properties, required, additionalProperties, enum, format, minimum, maximum, items, minItems, maxItems, anyOf, oneOf, allOf, or propertyOrdering)',
     }),
 );
 

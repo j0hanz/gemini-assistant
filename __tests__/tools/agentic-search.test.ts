@@ -1,13 +1,15 @@
 import type { ServerContext } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
+import { PassThrough } from 'node:stream';
 import { beforeEach, describe, it } from 'node:test';
 
 import { FinishReason, Outcome } from '@google/genai';
 import type { GenerateContentResponse, Part } from '@google/genai';
 
 import { resetProgressThrottle } from '../../src/lib/errors.js';
-import { handleToolExecution } from '../../src/lib/streaming.js';
+import { Logger } from '../../src/lib/logger.js';
+import { ToolExecutor } from '../../src/lib/tool-executor.js';
 import { buildAgenticSearchResult } from '../../src/tools/research-job.js';
 
 interface AgenticSearchStructuredContent {
@@ -69,6 +71,12 @@ function makeMockContext(): {
   return { ctx, progressCalls };
 }
 
+function createExecutor(): ToolExecutor {
+  return new ToolExecutor(
+    new Logger({ logStream: new PassThrough() }).child('agentic-search-test'),
+  );
+}
+
 describe('agentic_search result shaping', () => {
   beforeEach(() => {
     resetProgressThrottle();
@@ -76,6 +84,7 @@ describe('agentic_search result shaping', () => {
 
   it('preserves combined search and code-execution metadata', async () => {
     const { ctx, progressCalls } = makeMockContext();
+    const executor = createExecutor();
     const searchChunk = makeChunk([{ text: 'Researching...' }]);
     if (searchChunk.candidates?.[0]) {
       searchChunk.candidates[0].groundingMetadata = {
@@ -83,7 +92,7 @@ describe('agentic_search result shaping', () => {
       };
     }
 
-    const result = await handleToolExecution(
+    const result = await executor.runStream(
       ctx,
       'agentic_search',
       'Agentic Search',

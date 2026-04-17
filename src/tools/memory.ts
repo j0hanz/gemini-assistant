@@ -9,17 +9,17 @@ import { createPartFromUri } from '@google/genai';
 import { z } from 'zod/v4';
 
 import {
+  AppError,
   cleanupErrorLogger,
-  errorResult,
   reportCompletion,
   sendProgress,
-  withErrorLogging,
   withRetry,
 } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { logger } from '../lib/logger.js';
 import { buildBaseStructuredOutput, createResourceLink } from '../lib/response.js';
 import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from '../lib/validation.js';
 import { assembleWorkspaceContext, workspaceCacheManager } from '../lib/workspace-context.js';
 import {
@@ -48,6 +48,7 @@ type CachePart = ReturnType<typeof createPartFromUri>;
 
 const CACHE_UPLOAD_CHUNK_SIZE = 3;
 const CREATE_CACHE_TOOL_LABEL = 'Create Cache';
+const log = logger.child('memory');
 
 export interface CacheChangeEvent {
   detailUris: string[];
@@ -73,7 +74,7 @@ function notifyCacheChange(cacheNames: string[] = []): void {
     try {
       subscriber(event);
     } catch (err) {
-      logger.warn('memory', `Cache change subscriber threw: ${String(err)}`);
+      log.warn(`Cache change subscriber threw: ${String(err)}`);
     }
   }
 }
@@ -393,14 +394,15 @@ function registerListCachesTool(server: McpServer): void {
       outputSchema: ListCachesOutputSchema,
       annotations: READONLY_ANNOTATIONS,
     },
-    withErrorLogging('list_caches', 'List Caches', async (_args, ctx: ServerContext) => {
-      const caches = await listCacheSummaries(ctx.mcpReq.signal);
-      const cacheLinks = cacheSummaryResourceLinks(caches);
-      return {
-        content: [{ type: 'text', text: formatCacheListMarkdown(caches) }, ...cacheLinks],
-        structuredContent: { caches, count: caches.length },
-      };
-    }),
+    async (_args, ctx: ServerContext) =>
+      await executor.run(ctx, 'list_caches', 'List Caches', {}, async (_innerArgs, innerCtx) => {
+        const caches = await listCacheSummaries(innerCtx.mcpReq.signal);
+        const cacheLinks = cacheSummaryResourceLinks(caches);
+        return {
+          content: [{ type: 'text', text: formatCacheListMarkdown(caches) }, ...cacheLinks],
+          structuredContent: { caches, count: caches.length },
+        };
+      }),
   );
 }
 
@@ -555,7 +557,10 @@ async function memoryWork(
     case 'sessions.get': {
       const session = sessionStore.getSessionEntry(args.sessionId);
       if (!session) {
-        return errorResult(`memory: Session '${args.sessionId}' not found.`);
+        return new AppError(
+          'memory',
+          `memory: Session '${args.sessionId}' not found.`,
+        ).toToolResult();
       }
       return {
         content: [
@@ -577,7 +582,10 @@ async function memoryWork(
     case 'sessions.transcript': {
       const transcript = sessionStore.listSessionTranscriptEntries(args.sessionId);
       if (!transcript) {
-        return errorResult(`memory: Session '${args.sessionId}' not found.`);
+        return new AppError(
+          'memory',
+          `memory: Session '${args.sessionId}' not found.`,
+        ).toToolResult();
       }
       return {
         content: [
@@ -600,7 +608,10 @@ async function memoryWork(
     case 'sessions.events': {
       const events = sessionStore.listSessionEventEntries(args.sessionId);
       if (!events) {
-        return errorResult(`memory: Session '${args.sessionId}' not found.`);
+        return new AppError(
+          'memory',
+          `memory: Session '${args.sessionId}' not found.`,
+        ).toToolResult();
       }
       return {
         content: [
@@ -773,7 +784,10 @@ async function memoryWork(
     }
   }
 
-  return errorResult(`memory: Unsupported action ${(args as { action?: string }).action ?? ''}.`);
+  return new AppError(
+    'memory',
+    `memory: Unsupported action ${(args as { action?: string }).action ?? ''}.`,
+  ).toToolResult();
 }
 
 export function registerMemoryTool(

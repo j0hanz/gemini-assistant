@@ -12,17 +12,12 @@ import { promisify } from 'node:util';
 
 import { createPartFromUri } from '@google/genai';
 
-import {
-  cleanupErrorLogger,
-  handleToolError,
-  reportCompletion,
-  sendProgress,
-} from '../lib/errors.js';
+import { cleanupErrorLogger, reportCompletion, sendProgress } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { buildBaseStructuredOutput } from '../lib/response.js';
-import { handleToolExecution } from '../lib/streaming.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
 import {
   type AnalyzePrInput,
@@ -251,7 +246,7 @@ export function createCompareFileWork(rootsFetcher: RootsFetcher) {
       const effectiveSystemInstruction = cacheName ? undefined : COMPARE_SYSTEM_INSTRUCTION;
       const effectivePrompt = cacheName ? `${COMPARE_SYSTEM_INSTRUCTION}\n\n${prompt}` : prompt;
 
-      return await handleToolExecution(
+      return await executor.runStream(
         ctx,
         'compare_files',
         COMPARE_FILE_TOOL_LABEL,
@@ -277,14 +272,12 @@ export function createCompareFileWork(rootsFetcher: RootsFetcher) {
               ctx.mcpReq.signal,
             ),
           }),
-        (_streamResult, textContent) => ({
+        (_streamResult, textContent: string) => ({
           structuredContent: {
             comparison: textContent || '',
           },
         }),
       );
-    } catch (err) {
-      return await handleToolError(ctx, 'compare_files', COMPARE_FILE_TOOL_LABEL, err);
     } finally {
       await deleteUploadedFiles(uploadedNames, cleanupErrorLogger(ctx));
     }
@@ -920,7 +913,7 @@ export async function analyzePrWork(
 
   const { effectivePrompt, effectiveSystemInstruction } = buildModelPrompt(prompt, cacheName);
 
-  return await handleToolExecution(
+  return await executor.runStream(
     ctx,
     'analyze_pr',
     REVIEW_DIFF_TOOL_LABEL,
@@ -937,7 +930,7 @@ export async function analyzePrWork(
           ctx.mcpReq.signal,
         ),
       }),
-    (_streamResult, textContent) => ({
+    (_streamResult, textContent: string) => ({
       structuredContent: buildStructuredContent(
         snapshot,
         textContent || '',

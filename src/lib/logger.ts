@@ -1,7 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomUUID } from 'node:crypto';
 import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Writable } from 'node:stream';
@@ -21,7 +20,7 @@ interface LogEntry {
   data?: unknown;
 }
 
-const logContext = new AsyncLocalStorage<string>();
+export const logContext = new AsyncLocalStorage<string>();
 
 interface LoggerOptions {
   logStream?: Pick<Writable, 'write'>;
@@ -60,7 +59,7 @@ export function summarizeLogValue(value: unknown, depth = 0): unknown {
   return { type: typeof value };
 }
 
-function maybeSummarizePayload(value: unknown, verbosePayloads: boolean): unknown {
+export function maybeSummarizePayload(value: unknown, verbosePayloads: boolean): unknown {
   return verbosePayloads ? value : summarizeLogValue(value);
 }
 
@@ -90,7 +89,7 @@ export class Logger {
     };
   }
 
-  private log(level: LogLevel, context: string, message: string, data?: unknown) {
+  protected log(level: LogLevel, context: string, message: string, data?: unknown) {
     const traceId = logContext.getStore();
     const entry: LogEntry = {
       timestamp: new Date().toISOString(),
@@ -162,6 +161,14 @@ export class Logger {
     return this.verbosePayloads;
   }
 
+  write(level: LogLevel, context: string, message: string, data?: unknown) {
+    this.log(level, context, message, data);
+  }
+
+  child(context: string): ScopedLogger {
+    return new ScopedLogger(this, context);
+  }
+
   debug(context: string, message: string, data?: unknown) {
     this.log('debug', context, message, data);
   }
@@ -179,47 +186,35 @@ export class Logger {
   }
 }
 
-export const logger = new Logger();
+export class ScopedLogger {
+  constructor(
+    private readonly parent: Logger,
+    private readonly context: string,
+  ) {}
 
-/**
- * Higher Order Function to automatically instrument tools with structured logging,
- * execution timing, and trace IDs.
- */
-export function withToolLogging<TArgs, TResult>(
-  toolName: string,
-  handler: (args: TArgs) => Promise<TResult>,
-  options: { loggerInstance?: Logger } = {},
-): (args: TArgs) => Promise<TResult> {
-  const loggerInstance = options.loggerInstance ?? logger;
+  getVerbosePayloads(): boolean {
+    return this.parent.getVerbosePayloads();
+  }
 
-  return async (args: TArgs): Promise<TResult> => {
-    const traceId = randomUUID();
-    return logContext.run(traceId, async () => {
-      loggerInstance.info(toolName, 'Execution started', {
-        args: maybeSummarizePayload(args, loggerInstance.getVerbosePayloads()),
-      });
-      const startTime = performance.now();
+  debug(message: string, data?: unknown) {
+    this.parent.write('debug', this.context, message, data);
+  }
 
-      try {
-        const result = await handler(args);
-        const durationMs = performance.now() - startTime;
-        loggerInstance.info(toolName, 'Execution completed successfully', {
-          durationMs,
-          result: maybeSummarizePayload(result, loggerInstance.getVerbosePayloads()),
-        });
-        return result;
-      } catch (error) {
-        const durationMs = performance.now() - startTime;
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const errorStack = error instanceof Error ? error.stack : undefined;
-        loggerInstance.error(toolName, 'Execution failed', {
-          durationMs,
-          error: errorMessage,
-          stack: errorStack,
-          args: maybeSummarizePayload(args, loggerInstance.getVerbosePayloads()),
-        });
-        throw error; // Rethrow to let MCP framework handle the tool error
-      }
-    });
-  };
+  info(message: string, data?: unknown) {
+    this.parent.write('info', this.context, message, data);
+  }
+
+  warn(message: string, data?: unknown) {
+    this.parent.write('warn', this.context, message, data);
+  }
+
+  error(message: string, data?: unknown) {
+    this.parent.write('error', this.context, message, data);
+  }
+
+  fatal(message: string, data?: unknown) {
+    this.parent.write('fatal', this.context, message, data);
+  }
 }
+
+export const logger = new Logger();

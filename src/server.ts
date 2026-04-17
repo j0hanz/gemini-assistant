@@ -29,6 +29,7 @@ const { version } = JSON.parse(
 ) as { version: string };
 
 const activeServers = new Set<McpServer>();
+const log = logger.child('server');
 interface ServerServices {
   sessionStore: SessionStore;
   taskMessageQueue: InMemoryTaskMessageQueue;
@@ -83,14 +84,14 @@ function sendResourceChangedForServer(
 ): void {
   if (!server.isConnected()) return;
   if (!isAllowedResourceUri(listUri)) {
-    logger.warn('server', `Blocked resource notification with unexpected URI: ${listUri}`);
+    log.warn(`Blocked resource notification with unexpected URI: ${listUri}`);
     return;
   }
   server.sendResourceListChanged();
   void server.server.sendResourceUpdated({ uri: listUri });
   for (const uri of detailUris) {
     if (!isAllowedResourceUri(uri)) {
-      logger.warn('server', `Blocked resource notification with unexpected URI: ${uri}`);
+      log.warn(`Blocked resource notification with unexpected URI: ${uri}`);
       continue;
     }
     void server.server.sendResourceUpdated({ uri });
@@ -169,7 +170,7 @@ export function createServerInstance(): ServerInstance {
         try {
           fn();
         } catch (err) {
-          logger.warn('server', `close: ${label} failed: ${String(err)}`);
+          log.warn(`close: ${label} failed: ${String(err)}`);
         }
       };
       safeRun('unsubscribeSessionChange', unsubscribeSessionChange);
@@ -188,7 +189,7 @@ export function createServerInstance(): ServerInstance {
       try {
         await server.close();
       } catch (err) {
-        logger.warn('server', `close: server.close failed: ${String(err)}`);
+        log.warn(`close: server.close failed: ${String(err)}`);
       }
     },
   };

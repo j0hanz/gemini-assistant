@@ -118,10 +118,11 @@ export interface WebStandardTransportResult {
   close: () => Promise<void>;
 }
 
+const log = logger.child('transport');
+
 function warnIfUnprotected(host: string, hasProtection: boolean): void {
   if (!hasProtection && (host === '0.0.0.0' || host === '::')) {
-    logger.warn(
-      'transport',
+    log.warn(
       `SECURITY: bound to ${host} without DNS rebinding protection. ` +
         'Set MCP_ALLOWED_HOSTS=hostname1,hostname2 to restrict accepted Host headers.',
     );
@@ -130,15 +131,15 @@ function warnIfUnprotected(host: string, hasProtection: boolean): void {
 
 function logListening(host: string, port: number, runtime?: string): void {
   const suffix = runtime ? ` (${runtime})` : '';
-  logger.info('transport', `listening on http://${host}:${port}/mcp${suffix}`);
+  log.info(`listening on http://${host}:${port}/mcp${suffix}`);
 }
 
 function logSessionEvent(label: 'open' | 'closed', sessionId: string): void {
-  logger.info('transport', `session ${label}: ${sessionId}`);
+  log.info(`session ${label}: ${sessionId}`);
 }
 
 function logTransportSessionEviction(reason: 'capacity' | 'expired', sessionId: string): void {
-  logger.info('transport', `transport session ${reason}: ${sessionId}`);
+  log.info(`transport session ${reason}: ${sessionId}`);
 }
 
 function now(): number {
@@ -245,7 +246,7 @@ async function createWebPair(
 
 function logRequestFailure(label: string, err: unknown): void {
   const detail = err instanceof Error ? err.message : String(err);
-  logger.error('transport', `${label}: ${detail}`);
+  log.error(`${label}: ${detail}`);
 }
 
 function touchManagedPair<TTransport>(pair: ManagedPair<TTransport>): void {
@@ -478,10 +479,7 @@ function startDetectedRuntime(
     };
   }
 
-  logger.warn(
-    'transport',
-    'no auto-serve runtime detected (Bun/Deno) — wire the exported handler manually.',
-  );
+  log.warn('no auto-serve runtime detected (Bun/Deno) — wire the exported handler manually.');
   return undefined;
 }
 

@@ -8,16 +8,11 @@ import type {
 import { createPartFromUri, Outcome } from '@google/genai';
 import type { Part } from '@google/genai';
 
-import {
-  cleanupErrorLogger,
-  handleToolError,
-  responseBlockedResult,
-  sendProgress,
-} from '../lib/errors.js';
+import { cleanupErrorLogger, SafetyError, sendProgress } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
-import { handleToolExecution } from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
 import {
   type ExecuteCodeInput,
@@ -255,7 +250,7 @@ export function createDiagramWork(rootsFetcher: RootsFetcher) {
         cacheName,
       );
 
-      return await handleToolExecution(
+      return await executor.runStream(
         ctx,
         'generate_diagram',
         DIAGRAM_TOOL_LABEL,
@@ -282,7 +277,7 @@ export function createDiagramWork(rootsFetcher: RootsFetcher) {
               ctx.mcpReq.signal,
             ),
           }),
-        (_streamResult, textContent) => {
+        (_streamResult, textContent: string) => {
           const { diagram, explanation } = extractDiagram(textContent);
 
           return {
@@ -294,8 +289,6 @@ export function createDiagramWork(rootsFetcher: RootsFetcher) {
           };
         },
       );
-    } catch (err) {
-      return await handleToolError(ctx, 'generate_diagram', DIAGRAM_TOOL_LABEL, err);
     } finally {
       await deleteUploadedFiles(uploadedNames, cleanupErrorLogger(ctx));
     }
@@ -315,7 +308,7 @@ export async function executeCodeWork(
       : []),
   ].join('\n\n');
 
-  return await handleToolExecution(
+  return await executor.runStream(
     ctx,
     'execute_code',
     EXECUTE_CODE_TOOL_LABEL,
@@ -335,7 +328,7 @@ export async function executeCodeWork(
     (streamResult) => {
       if (streamResult.parts.length === 0) {
         return {
-          resultMod: () => responseBlockedResult('execute_code'),
+          resultMod: () => new SafetyError('execute_code', 'response_blocked').toToolResult(),
         };
       }
 

@@ -2,7 +2,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/server';
 
 import { pathToFileURL } from 'node:url';
 
-import { formatError } from './lib/errors.js';
+import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
 
 import { getTransportMode, type TransportMode } from './config.js';
@@ -78,12 +78,12 @@ function logCriticalAndExit(
   loggerInstance: LoggerLike,
   processLike: ProcessLike,
 ): void {
-  loggerInstance.fatal('system', `${label}: ${formatError(err)}`);
+  loggerInstance.fatal('system', `${label}: ${AppError.formatMessage(err)}`);
   processLike.exit(1);
 }
 
 function createShutdownError(label: string, err: unknown): Error {
-  return new Error(`${label} shutdown failed: ${formatError(err)}`);
+  return new Error(`${label} shutdown failed: ${AppError.formatMessage(err)}`);
 }
 
 export async function closeStartedRuntime(runtime: StartedRuntime): Promise<void> {
@@ -144,7 +144,7 @@ function createShutdownHandler(
         await closeStartedRuntime(runtime);
       } catch (err) {
         disposeProcessHandlers();
-        loggerInstance.fatal('system', `Shutdown failed: ${formatError(err)}`);
+        loggerInstance.fatal('system', `Shutdown failed: ${AppError.formatMessage(err)}`);
         processLike.exit(1);
         return;
       } finally {

@@ -4,7 +4,7 @@ import type { GenerateContentResponse, GroundingMetadata, UrlMetadata } from '@g
 
 import type { SourceDetail, UrlMetadataEntry, UsageMetadata } from '../schemas/outputs.js';
 
-import { finishReasonError, promptBlockedResult } from './errors.js';
+import { finishReasonToError, SafetyError } from './errors.js';
 
 type PickDefined<T> = {
   [K in keyof T as undefined extends T[K] ? K : never]?: Exclude<T[K], undefined>;
@@ -54,7 +54,7 @@ export function collectGroundedSourceDetails(
 }
 
 export function promptBlockedError(toolName: string, blockReason?: string): CallToolResult {
-  return promptBlockedResult(toolName, blockReason);
+  return new SafetyError(toolName, 'prompt_blocked', blockReason).toToolResult();
 }
 
 export interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
@@ -164,8 +164,8 @@ export function extractTextOrError(
   }
 
   const text = response.text ?? '';
-  const errResult = finishReasonError(candidate.finishReason, text, toolName);
-  if (errResult) return errResult;
+  const errResult = finishReasonToError(candidate.finishReason, text, toolName);
+  if (errResult) return errResult.toToolResult();
 
   return {
     content: [{ type: 'text', text }],

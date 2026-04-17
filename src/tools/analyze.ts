@@ -7,11 +7,11 @@ import type {
 
 import { createPartFromUri } from '@google/genai';
 
-import { cleanupErrorLogger, handleToolError, sendProgress } from '../lib/errors.js';
+import { cleanupErrorLogger, sendProgress } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { buildBaseStructuredOutput } from '../lib/response.js';
-import { handleToolExecution } from '../lib/streaming.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
 import {
   type AnalyzeFileInput,
@@ -50,7 +50,7 @@ export function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
       await ctx.mcpReq.log('info', `Analyzing ${uploaded.displayPath} (${uploaded.mimeType})`);
       await sendProgress(ctx, 1, 3, `${ANALYZE_FILE_TOOL_LABEL}: Analyzing content`);
 
-      return await handleToolExecution(
+      return await executor.runStream(
         ctx,
         'analyze_file',
         ANALYZE_FILE_TOOL_LABEL,
@@ -67,14 +67,12 @@ export function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
               ctx.mcpReq.signal,
             ),
           }),
-        (_streamResult, textContent) => ({
+        (_streamResult, textContent: string) => ({
           structuredContent: {
             analysis: textContent || '',
           },
         }),
       );
-    } catch (err) {
-      return await handleToolError(ctx, 'analyze_file', ANALYZE_FILE_TOOL_LABEL, err);
     } finally {
       await deleteUploadedFiles(
         uploadedFileName ? [uploadedFileName] : [],
@@ -94,7 +92,7 @@ async function analyzeMultiFileWork(
   const uploadedNames: string[] = [];
 
   try {
-    return await handleToolExecution(
+    return await executor.runStream(
       ctx,
       'analyze',
       ANALYZE_TOOL_LABEL,
@@ -120,7 +118,7 @@ async function analyzeMultiFileWork(
           ),
         });
       },
-      (_streamResult, textContent) => ({
+      (_streamResult, textContent: string) => ({
         structuredContent: {
           summary: textContent || '',
           targetKind: 'multi',
@@ -128,8 +126,6 @@ async function analyzeMultiFileWork(
         },
       }),
     );
-  } catch (error) {
-    return await handleToolError(ctx, 'analyze', ANALYZE_TOOL_LABEL, error);
   } finally {
     await deleteUploadedFiles(uploadedNames, cleanupErrorLogger(ctx));
   }

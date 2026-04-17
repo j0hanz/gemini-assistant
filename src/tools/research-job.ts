@@ -17,8 +17,9 @@ import {
   formatCountLabel,
   pickDefined,
 } from '../lib/response.js';
-import { handleToolExecution, type StreamResult } from '../lib/streaming.js';
+import { type StreamResult } from '../lib/streaming.js';
 import { elicitTaskInput, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { executor } from '../lib/tool-executor.js';
 import { validateUrls } from '../lib/validation.js';
 import {
   type AgenticSearchInput,
@@ -217,7 +218,7 @@ export async function searchWork(
     toolProfile: (urls?.length ?? 0) > 0 ? 'search_url' : 'search',
   });
 
-  return await handleToolExecution(
+  return await executor.runStream(
     ctx,
     'search',
     SEARCH_TOOL_LABEL,
@@ -251,7 +252,7 @@ export async function analyzeUrlWork(
 
   await sendProgress(ctx, 0, undefined, `${ANALYZE_URL_TOOL_LABEL}: Fetching`);
   await ctx.mcpReq.log('info', `Analyzing ${String(urls.length)} URL(s)`);
-  return await handleToolExecution(
+  return await executor.runStream(
     ctx,
     'analyze_url',
     ANALYZE_URL_TOOL_LABEL,
@@ -296,7 +297,7 @@ export async function agenticSearchWork(
   const enrichedTopic = await enrichTopicWithSampling(topic, ctx);
   const depthInstruction = buildAgenticDepthInstruction(searchDepth);
 
-  return await handleToolExecution(
+  return await executor.runStream(
     ctx,
     'agentic_search',
     AGENTIC_SEARCH_TOOL_LABEL,

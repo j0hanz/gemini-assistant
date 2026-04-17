@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, it } from 'node:test';
 
-import { Logger, summarizeLogValue, withToolLogging } from '../../src/lib/logger.js';
+import { Logger, summarizeLogValue } from '../../src/lib/logger.js';
 
 interface MockServer {
   messages: unknown[];
@@ -112,43 +112,38 @@ describe('Logger forwarding', () => {
   });
 });
 
-describe('withToolLogging', () => {
-  it('redacts args and results by default', async () => {
-    const { logger, readEntries } = createBufferedLogger(false);
-    const handler = withToolLogging(
-      'ask',
-      async (args: { prompt: string }) => ({ answer: `reply:${args.prompt}` }),
-      { loggerInstance: logger },
-    );
+describe('ScopedLogger', () => {
+  it('delegates all levels to the parent logger with a bound context', () => {
+    const { logger, readEntries } = createBufferedLogger();
+    const scoped = logger.child('ask');
 
-    await handler({ prompt: 'super-secret' });
+    scoped.debug('debugging', { step: 1 });
+    scoped.info('starting');
+    scoped.warn('warning');
+    scoped.error('failed');
+    scoped.fatal('fatal');
+
     const entries = readEntries();
-    const successData = entries[1]?.data as Record<string, unknown>;
-
-    assert.deepStrictEqual(entries[0]?.data, {
-      args: { type: 'object', keys: ['prompt'] },
-    });
-    assert.strictEqual(typeof successData?.durationMs, 'number');
-    assert.deepStrictEqual(successData?.result, { type: 'object', keys: ['answer'] });
-    assert.ok(!JSON.stringify(entries).includes('super-secret'));
+    assert.deepStrictEqual(
+      entries.map((entry) => ({
+        level: entry.level,
+        context: entry.context,
+        message: entry.message,
+      })),
+      [
+        { level: 'debug', context: 'ask', message: 'debugging' },
+        { level: 'info', context: 'ask', message: 'starting' },
+        { level: 'warn', context: 'ask', message: 'warning' },
+        { level: 'error', context: 'ask', message: 'failed' },
+        { level: 'fatal', context: 'ask', message: 'fatal' },
+      ],
+    );
   });
 
-  it('logs raw args and results when verbose payload logging is enabled', async () => {
-    const { logger, readEntries } = createBufferedLogger(true);
-    const handler = withToolLogging(
-      'ask',
-      async (args: { prompt: string }) => ({ answer: `reply:${args.prompt}` }),
-      { loggerInstance: logger },
-    );
+  it('inherits verbose payload configuration through child()', () => {
+    const { logger } = createBufferedLogger(true);
+    const scoped = logger.child('ask');
 
-    await handler({ prompt: 'super-secret' });
-    const entries = readEntries();
-    const successData = entries[1]?.data as Record<string, unknown>;
-
-    assert.deepStrictEqual(entries[0]?.data, {
-      args: { prompt: 'super-secret' },
-    });
-    assert.strictEqual(typeof successData?.durationMs, 'number');
-    assert.deepStrictEqual(successData?.result, { answer: 'reply:super-secret' });
+    assert.strictEqual(scoped.getVerbosePayloads(), true);
   });
 });

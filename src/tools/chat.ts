@@ -8,7 +8,7 @@ import type {
 import { Validator } from '@cfworker/json-schema';
 import type { Chat } from '@google/genai';
 
-import { errorResult, reportCompletion, sendProgress } from '../lib/errors.js';
+import { AppError, sendProgress } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
 import {
@@ -18,13 +18,13 @@ import {
   extractTextContent,
 } from '../lib/response.js';
 import {
-  executeToolStream,
   extractUsage,
   type FunctionCallEntry,
   type StreamResult,
   type ToolEvent,
 } from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { executor } from '../lib/tool-executor.js';
 import { getAllowedRoots, validateUrls } from '../lib/validation.js';
 import { workspaceCacheManager } from '../lib/workspace-context.js';
 import {
@@ -285,7 +285,7 @@ function attachWorkspaceCacheMetadata(
 }
 
 function validateAskConflict(condition: boolean, message: string): CallToolResult | undefined {
-  return condition ? errorResult(message) : undefined;
+  return condition ? new AppError('ask', message).toToolResult() : undefined;
 }
 
 function validateAskRequest(
@@ -366,21 +366,44 @@ async function runAskStream(
     }
   }
 
-  const { streamResult, result } = await executeToolStream(
+  let capturedStreamResult: StreamResult | undefined;
+  const result = await executor.runStream(
     ctx,
     'ask',
     ASK_TOOL_LABEL,
     streamGenerator,
-  );
-  const hasThoughts = streamResult.thoughtText.length > 0;
-  await reportCompletion(
-    ctx,
-    ASK_TOOL_LABEL,
-    hasThoughts ? 'completed with reasoning' : 'completed',
+    (streamResult) => {
+      capturedStreamResult = streamResult;
+      const hasThoughts = streamResult.thoughtText.length > 0;
+
+      return {
+        resultMod: (baseResult) =>
+          formatStructuredResult(
+            baseResult,
+            streamResult,
+            jsonMode,
+            responseSchema,
+            workspaceCache,
+          ),
+        reportMessage: hasThoughts ? 'completed with reasoning' : 'completed',
+      };
+    },
   );
 
+  const streamResult =
+    capturedStreamResult ??
+    ({
+      text: '',
+      thoughtText: '',
+      parts: [],
+      toolsUsed: [],
+      functionCalls: [],
+      toolEvents: [],
+      hadCandidate: false,
+    } satisfies StreamResult);
+
   return {
-    result: formatStructuredResult(result, streamResult, jsonMode, responseSchema, workspaceCache),
+    result,
     streamResult,
     toolProfile,
     ...(urls && urls.length > 0 ? { urls } : {}),
@@ -568,7 +591,7 @@ async function resolveWorkspaceCacheName(
     }
     return await workspaceCacheManager.getOrCreateCache(allowedRoots, signal);
   } catch (err) {
-    logger.warn('workspace', `Failed to resolve workspace cache: ${String(err)}`);
+    logger.child('workspace').warn(`Failed to resolve workspace cache: ${String(err)}`);
     return undefined;
   }
 }

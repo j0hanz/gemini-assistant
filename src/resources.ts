@@ -1,7 +1,7 @@
 import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server';
 import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontextprotocol/server';
 
-import { formatError } from './lib/errors.js';
+import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from './lib/validation.js';
 import { assembleWorkspaceContext, workspaceCacheManager } from './lib/workspace-context.js';
@@ -371,6 +371,8 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
 }
 
 function registerCacheResources(server: McpServer): void {
+  const log = logger.child('resources');
+
   server.registerResource(
     'memory-caches',
     'memory://caches',
@@ -387,7 +389,7 @@ function registerCacheResources(server: McpServer): void {
       try {
         return jsonResource(uri.href, await listCacheSummaries());
       } catch (err) {
-        logger.error('resources', `Failed to list caches: ${formatError(err)}`);
+        log.error(`Failed to list caches: ${AppError.formatMessage(err)}`);
         throw new ProtocolError(ProtocolErrorCode.InternalError, 'Failed to list caches');
       }
     },
@@ -419,7 +421,7 @@ function registerCacheResources(server: McpServer): void {
       try {
         return jsonResource(uri.href, await getCacheSummary(decoded));
       } catch (err) {
-        logger.error('resources', `Failed to get cache '${decoded}': ${formatError(err)}`);
+        log.error(`Failed to get cache '${decoded}': ${AppError.formatMessage(err)}`);
         throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Cache '${decoded}' not found`);
       }
     },
@@ -463,6 +465,8 @@ function registerDiscoveryResources(server: McpServer): void {
 }
 
 function registerWorkspaceResources(server: McpServer, rootsFetcher: RootsFetcher): void {
+  const log = logger.child('resources');
+
   server.registerResource(
     'memory-workspace-context',
     'memory://workspace/context',
@@ -485,7 +489,7 @@ function registerWorkspaceResources(server: McpServer, rootsFetcher: RootsFetche
           estimatedTokens: ctx.estimatedTokens,
         });
       } catch (err) {
-        logger.error('resources', `Failed to assemble workspace context: ${formatError(err)}`);
+        log.error(`Failed to assemble workspace context: ${AppError.formatMessage(err)}`);
         throw new ProtocolError(
           ProtocolErrorCode.InternalError,
           'Failed to assemble workspace context',

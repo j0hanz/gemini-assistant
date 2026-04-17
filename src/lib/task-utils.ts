@@ -9,7 +9,7 @@ import type {
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
 
-import { withErrorLogging } from './errors.js';
+import { executor } from './tool-executor.js';
 
 const DEFAULT_TTL = 300_000;
 
@@ -196,11 +196,14 @@ export function registerTaskTool<TArgs>(
 ): void {
   const toolLabel = config.title ?? name;
   const handler = createToolTaskHandlers(
-    withErrorLogging<TArgs>(
-      name,
-      toolLabel,
-      work as unknown as (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
-    ),
+    async (args: TArgs, ctx: ExtendedServerContext) =>
+      await executor.run(
+        ctx,
+        name,
+        toolLabel,
+        args,
+        work as unknown as (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
+      ),
     taskMessageQueue,
   ) as TaskToolHandler;
 

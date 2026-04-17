@@ -15,20 +15,8 @@ import type {
   UrlContextMetadata,
 } from '@google/genai';
 
-import { EXPOSE_THOUGHTS } from '../client.js';
-import {
-  finishReasonError,
-  reportCompletion,
-  reportFailure,
-  sendProgress,
-  withRetry,
-} from './errors.js';
-import {
-  buildSharedStructuredMetadata,
-  extractTextContent,
-  pickDefined,
-  promptBlockedError,
-} from './response.js';
+import { finishReasonToError, sendProgress, withRetry } from './errors.js';
+import { pickDefined, promptBlockedError } from './response.js';
 
 export const PROGRESS_TOTAL = 100;
 const PROGRESS_STEP_FRACTION = 0.15;
@@ -560,8 +548,8 @@ export function validateStreamResult(result: StreamResult, toolName: string): Ca
     return promptBlockedError(toolName);
   }
 
-  const errResult = finishReasonError(result.finishReason, result.text, toolName);
-  if (errResult) return errResult;
+  const errResult = finishReasonToError(result.finishReason, result.text, toolName);
+  if (errResult) return errResult.toToolResult();
 
   return {
     content: [{ type: 'text', text: result.text }],
@@ -598,63 +586,4 @@ export async function executeToolStream(
   const streamResult = await consumeStreamWithProgress(stream, ctx, toolLabel);
   const result = validateStreamResult(streamResult, toolName);
   return { streamResult, result };
-}
-
-export async function handleToolExecution<T extends Record<string, unknown>>(
-  ctx: ServerContext,
-  toolName: string,
-  toolLabel: string,
-  streamGenerator: () => Promise<AsyncGenerator<GenerateContentResponse>>,
-  responseBuilder: (
-    streamResult: StreamResult,
-    text: string,
-  ) => {
-    resultMod?: (r: CallToolResult) => Partial<CallToolResult>;
-    structuredContent?: T;
-    reportMessage?: string;
-  } = (s, t) => ({ structuredContent: { answer: t } as unknown as T }),
-): Promise<CallToolResult> {
-  const { streamResult, result } = await executeToolStream(
-    ctx,
-    toolName,
-    toolLabel,
-    streamGenerator,
-  );
-  if (result.isError) {
-    await reportFailure(ctx, toolLabel, extractTextContent(result.content));
-    return result;
-  }
-
-  const text = extractTextContent(result.content);
-  const built = responseBuilder(streamResult, text);
-  const finalResult: CallToolResult = {
-    ...result,
-    ...(built.resultMod ? built.resultMod(result) : {}),
-  };
-
-  if (finalResult.isError) {
-    await reportFailure(ctx, toolLabel, extractTextContent(finalResult.content));
-  } else {
-    if (built.reportMessage) {
-      await reportCompletion(ctx, toolLabel, built.reportMessage);
-    } else {
-      await reportCompletion(ctx, toolLabel, 'completed');
-    }
-  }
-
-  const usage = extractUsage(streamResult.usageMetadata);
-
-  return {
-    ...finalResult,
-    structuredContent: {
-      ...(built.structuredContent ?? {}),
-      ...buildSharedStructuredMetadata({
-        functionCalls: streamResult.functionCalls,
-        includeThoughts: EXPOSE_THOUGHTS,
-        thoughtText: streamResult.thoughtText,
-        toolEvents: streamResult.toolEvents,
-        usage,
-      }),
-    },
-  };
 }

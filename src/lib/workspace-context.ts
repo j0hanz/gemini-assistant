@@ -21,6 +21,7 @@ const MAX_SCAN_FILE_SIZE = 512 * 1024;
 const MAX_TOTAL_CONTEXT_SIZE = 2 * 1024 * 1024;
 const WORKSPACE_CACHE_DISPLAY = 'gemini-assistant-workspace';
 const HASH_CHECK_INTERVAL_MS = 30_000;
+const log = logger.child('workspace');
 
 const SCAN_FILE_NAMES = new Set([
   'readme.md',
@@ -94,7 +95,7 @@ async function scanRootForFiles(root: string): Promise<Map<string, string>> {
       }
     }
   } catch {
-    logger.warn('workspace', `Failed to scan root: ${root}`);
+    log.warn(`Failed to scan root: ${root}`);
   }
   return files;
 }
@@ -160,8 +161,7 @@ export async function assembleWorkspaceContext(roots: string[]): Promise<Workspa
       const files = await scanRootForFiles(root);
       for (const [filePath, content] of files) {
         if (totalSize + content.length > MAX_TOTAL_CONTEXT_SIZE) {
-          logger.warn(
-            'workspace',
+          log.warn(
             `Total context size limit reached (${MAX_TOTAL_CONTEXT_SIZE} bytes), skipping remaining files`,
           );
           break;
@@ -200,7 +200,7 @@ function emitWorkspaceCacheChange(status: WorkspaceCacheStatus): void {
     try {
       subscriber(status);
     } catch (err) {
-      logger.warn('workspace', `Workspace cache change subscriber threw: ${String(err)}`);
+      log.warn(`Workspace cache change subscriber threw: ${String(err)}`);
     }
   }
 }
@@ -228,7 +228,7 @@ class WorkspaceCacheManagerImpl {
       if (newHash === this.contentHash) {
         return this.cacheName;
       }
-      logger.info('workspace', 'Workspace content changed, recreating cache');
+      log.info('Workspace content changed, recreating cache');
       return await this.refreshCache(ctx, signal);
     }
 
@@ -287,8 +287,7 @@ class WorkspaceCacheManagerImpl {
       const previousCacheName = this.cacheName;
 
       if (ctx.estimatedTokens < MIN_CACHE_TOKENS) {
-        logger.warn(
-          'workspace',
+        log.warn(
           `Workspace context too small for caching (${ctx.estimatedTokens} tokens, need ${MIN_CACHE_TOKENS})`,
         );
         this.invalidate();
@@ -325,8 +324,7 @@ class WorkspaceCacheManagerImpl {
     const gen = this.generation;
     try {
       if (ctx.estimatedTokens < MIN_CACHE_TOKENS) {
-        logger.warn(
-          'workspace',
+        log.warn(
           `Workspace context too small for caching (${ctx.estimatedTokens} tokens, need ${MIN_CACHE_TOKENS})`,
         );
         return undefined;
@@ -350,7 +348,7 @@ class WorkspaceCacheManagerImpl {
       );
 
       if (gen !== this.generation) {
-        logger.info('workspace', 'Cache creation completed but invalidated mid-flight, discarding');
+        log.info('Cache creation completed but invalidated mid-flight, discarding');
         await this.deleteCacheBestEffort(cache.name ?? '', signal);
         return undefined;
       }
@@ -361,12 +359,12 @@ class WorkspaceCacheManagerImpl {
       this.sources = ctx.sources;
       this.createdAt = Date.now();
 
-      logger.info('workspace', `Workspace cache created: ${cache.name}`);
+      log.info(`Workspace cache created: ${cache.name}`);
       this.emitChange();
 
       return this.cacheName;
     } catch (err) {
-      logger.error('workspace', `Failed to create workspace cache: ${String(err)}`);
+      log.error(`Failed to create workspace cache: ${String(err)}`);
       return undefined;
     }
   }
@@ -378,7 +376,7 @@ class WorkspaceCacheManagerImpl {
         ...(signal ? { config: { abortSignal: signal } } : {}),
       });
     } catch (err) {
-      logger.warn('workspace', `Failed to delete workspace cache ${cacheName}: ${String(err)}`);
+      log.warn(`Failed to delete workspace cache ${cacheName}: ${String(err)}`);
     }
   }
 

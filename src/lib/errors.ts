@@ -7,7 +7,7 @@ import { INVALID_PARAMS, ProtocolError } from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
 
-import { withToolLogging } from './logger.js';
+export type AppErrorCategory = 'client' | 'server' | 'safety' | 'cancelled' | 'internal';
 
 // ── Progress / Context ────────────────────────────────────────────────
 
@@ -177,37 +177,6 @@ export async function reportFailure(
 
 // ── Error Formatting ──────────────────────────────────────────────────
 
-export function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-export function throwInvalidParams(message: string): never {
-  throw new ProtocolError(INVALID_PARAMS, message);
-}
-
-export function errorResult(message: string): CallToolResult {
-  return {
-    content: [{ type: 'text', text: message }],
-    isError: true,
-  };
-}
-
-export function responseBlockedMessage(toolName: string): string {
-  return `${toolName}: response blocked by safety filter`;
-}
-
-export function responseBlockedResult(toolName: string): CallToolResult {
-  return errorResult(responseBlockedMessage(toolName));
-}
-
-export function promptBlockedMessage(toolName: string, blockReason?: string): string {
-  return `${toolName}: prompt blocked by safety filter (${blockReason ?? 'unknown'})`;
-}
-
-export function promptBlockedResult(toolName: string, blockReason?: string): CallToolResult {
-  return errorResult(promptBlockedMessage(toolName, blockReason));
-}
-
 function hasHttpStatus(err: unknown): err is Error & { status: number } {
   return err instanceof Error && 'status' in err && typeof err.status === 'number';
 }
@@ -216,101 +185,173 @@ function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === 'AbortError';
 }
 
-const STATUS_MESSAGES: Record<number, string> = {
-  400: 'Bad request',
-  403: 'Permission denied / invalid API key',
-  404: 'Resource or model not found',
-  429: 'Rate limited — try again later',
-  500: 'Gemini server error',
-  503: 'Gemini service unavailable',
-};
+export class AppError extends Error {
+  readonly category: AppErrorCategory;
+  readonly retryable: boolean;
+  readonly statusCode?: number | undefined;
+  readonly toolName: string;
 
-export function finishReasonError(
+  constructor(
+    toolName: string,
+    message: string,
+    category: AppErrorCategory = 'internal',
+    retryable = false,
+    statusCode?: number,
+  ) {
+    super(message);
+    this.name = new.target.name;
+    this.toolName = toolName;
+    this.category = category;
+    this.retryable = retryable;
+    this.statusCode = statusCode;
+  }
+
+  toToolResult(): CallToolResult {
+    return {
+      content: [{ type: 'text', text: this.message }],
+      isError: true,
+    };
+  }
+
+  static formatMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
+  }
+
+  static isRetryable(err: unknown): boolean {
+    if (err instanceof AppError) {
+      return err.retryable;
+    }
+
+    return hasHttpStatus(err) && RETRYABLE_STATUS_CODES.has(err.status);
+  }
+
+  static from(err: unknown, toolName: string): AppError {
+    if (err instanceof AppError) {
+      return err;
+    }
+
+    if (isAbortError(err)) {
+      return new CancelledError(toolName);
+    }
+
+    if (hasHttpStatus(err)) {
+      return new GeminiError(toolName, err);
+    }
+
+    return new AppError(toolName, `${toolName} failed: ${AppError.formatMessage(err)}`);
+  }
+}
+
+export class GeminiError extends AppError {
+  private static readonly STATUS_MESSAGES: Record<number, string> = {
+    400: 'Bad request',
+    403: 'Permission denied / invalid API key',
+    404: 'Resource or model not found',
+    429: 'Rate limited — try again later',
+    500: 'Gemini server error',
+    503: 'Gemini service unavailable',
+    504: 'Gemini request timed out',
+  };
+
+  constructor(toolName: string, cause: Error & { status?: number }) {
+    const statusCode = typeof cause.status === 'number' ? cause.status : undefined;
+    const retryable = statusCode !== undefined && RETRYABLE_STATUS_CODES.has(statusCode);
+    const category: AppErrorCategory = retryable ? 'server' : 'client';
+    const hint =
+      statusCode !== undefined
+        ? (GeminiError.STATUS_MESSAGES[statusCode] ?? `HTTP ${statusCode}`)
+        : 'Gemini error';
+    super(
+      toolName,
+      `${toolName} failed: ${hint} — ${cause.message}`,
+      category,
+      retryable,
+      statusCode,
+    );
+  }
+}
+
+export class SafetyError extends AppError {
+  readonly blockReason?: string | undefined;
+  readonly kind: 'response_blocked' | 'prompt_blocked' | 'recitation';
+
+  constructor(
+    toolName: string,
+    kind: 'response_blocked' | 'prompt_blocked' | 'recitation',
+    blockReason?: string,
+  ) {
+    const message =
+      kind === 'response_blocked'
+        ? `${toolName}: response blocked by safety filter`
+        : kind === 'prompt_blocked'
+          ? `${toolName}: prompt blocked by safety filter (${blockReason ?? 'unknown'})`
+          : `${toolName}: response blocked due to recitation policy`;
+    super(toolName, message, 'safety', false);
+    this.kind = kind;
+    this.blockReason = blockReason;
+  }
+}
+
+export class ValidationError extends AppError {
+  constructor(message: string) {
+    super('validation', message, 'client', false);
+    throw new ProtocolError(INVALID_PARAMS, message);
+  }
+}
+
+export class CancelledError extends AppError {
+  constructor(toolName: string) {
+    super(toolName, `${toolName}: cancelled by client`, 'cancelled', false);
+  }
+}
+
+export class TruncationError extends AppError {
+  constructor(toolName: string) {
+    super(
+      toolName,
+      `${toolName}: response truncated — max tokens reached with no output`,
+      'internal',
+      false,
+    );
+  }
+}
+
+export function finishReasonToError(
   finishReason: FinishReason | undefined,
   text: string,
   toolName: string,
-): CallToolResult | undefined {
+): AppError | undefined {
   if (finishReason === FinishReason.SAFETY) {
-    return responseBlockedResult(toolName);
+    return new SafetyError(toolName, 'response_blocked');
   }
+
   if (finishReason === FinishReason.RECITATION) {
-    return errorResult(`${toolName}: response blocked due to recitation policy`);
+    return new SafetyError(toolName, 'recitation');
   }
+
   if (!text && finishReason === FinishReason.MAX_TOKENS) {
-    return errorResult(`${toolName}: response truncated — max tokens reached with no output`);
+    return new TruncationError(toolName);
   }
+
   return undefined;
-}
-
-export function formatGeminiErrorMessage(toolName: string, err: unknown): string {
-  if (isAbortError(err)) {
-    return `${toolName}: cancelled by client`;
-  }
-  if (hasHttpStatus(err)) {
-    const hint = STATUS_MESSAGES[err.status] ?? `HTTP ${err.status}`;
-    return `${toolName} failed: ${hint} — ${err.message}`;
-  }
-  return `${toolName} failed: ${formatError(err)}`;
-}
-
-export function geminiErrorResult(toolName: string, err: unknown): CallToolResult {
-  return errorResult(formatGeminiErrorMessage(toolName, err));
-}
-
-export async function handleToolError(
-  ctx: ServerContext,
-  toolName: string,
-  toolLabel: string,
-  err: unknown,
-): Promise<CallToolResult> {
-  await reportFailure(ctx, toolLabel, err);
-  await ctx.mcpReq.log('error', `${toolName} failed: ${formatError(err)}`);
-  return geminiErrorResult(toolName, err);
 }
 
 export function cleanupErrorLogger(ctx: ServerContext): (reason: unknown) => void {
   return (reason) => {
-    void ctx.mcpReq.log('warning', `File cleanup failed: ${formatError(reason)}`);
-  };
-}
-
-function toErrorMessage(toolName: string, err: unknown): string {
-  return formatGeminiErrorMessage(toolName, err);
-}
-
-export function withErrorLogging<TArgs>(
-  toolName: string,
-  toolLabel: string,
-  handler: (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
-): (args: TArgs, ctx: ServerContext) => Promise<CallToolResult> {
-  const wrapped = withToolLogging(
-    toolName,
-    async (argsCtx: { args: TArgs; ctx: ServerContext }) => {
-      return await handler(argsCtx.args, argsCtx.ctx);
-    },
-  );
-
-  return async (args: TArgs, ctx: ServerContext) => {
-    try {
-      return await wrapped({ args, ctx });
-    } catch (err) {
-      await reportFailure(ctx, toolLabel, err);
-      // Removed direct ctx.mcpReq.log to avoid duplicates, as logger handles it
-      return errorResult(toErrorMessage(toolName, err));
-    }
+    void ctx.mcpReq.log('warning', `File cleanup failed: ${AppError.formatMessage(reason)}`);
   };
 }
 
 // ── Retry ─────────────────────────────────────────────────────────────
 
-const RETRYABLE_STATUS_CODES = new Set([429, 500, 503]);
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 503, 504]);
 const DEFAULT_MAX_RETRIES = 2;
 const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 10_000;
 const JITTER_MS = 500;
 
 function isRetryableError(err: unknown): boolean {
-  return hasHttpStatus(err) && RETRYABLE_STATUS_CODES.has(err.status);
+  return AppError.isRetryable(err);
 }
 
 function extractRetryAfterMs(err: unknown): number | undefined {

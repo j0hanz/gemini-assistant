@@ -7,8 +7,8 @@ import type {
 
 import { sendProgress } from '../lib/errors.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
-import { handleToolExecution } from '../lib/streaming.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { executor } from '../lib/tool-executor.js';
 import { validateUrls } from '../lib/validation.js';
 import { type ExplainErrorInput, ExplainErrorInputSchema } from '../schemas/inputs.js';
 import { ExplainErrorOutputSchema } from '../schemas/outputs.js';
@@ -83,7 +83,7 @@ export async function explainErrorWork(
   const effectiveSystemInstruction = cacheName ? undefined : SYSTEM_INSTRUCTION;
   const effectivePrompt = cacheName ? `${SYSTEM_INSTRUCTION}\n\n${prompt}` : prompt;
 
-  return await handleToolExecution(
+  return await executor.runStream(
     ctx,
     'explain_error',
     TOOL_LABEL,
@@ -101,7 +101,7 @@ export async function explainErrorWork(
           ctx.mcpReq.signal,
         ),
       }),
-    (_streamResult, textContent) => ({
+    (_streamResult, textContent: string) => ({
       structuredContent: {
         explanation: textContent || '',
       },

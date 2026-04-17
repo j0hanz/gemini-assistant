@@ -1,8 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 
-import { withErrorLogging } from '../lib/errors.js';
 import { buildBaseStructuredOutput } from '../lib/response.js';
 import { READONLY_ANNOTATIONS } from '../lib/task-utils.js';
+import { executor } from '../lib/tool-executor.js';
 import { type DiscoverInput, DiscoverInputSchema } from '../schemas/inputs.js';
 import { DiscoverOutputSchema } from '../schemas/outputs.js';
 
@@ -28,49 +28,52 @@ export function registerDiscoverTool(server: McpServer): void {
       outputSchema: DiscoverOutputSchema,
       annotations: READONLY_ANNOTATIONS,
     },
-    withErrorLogging('discover', 'Discover', async (args: DiscoverInput, ctx) => {
-      const entry = args.job ? findDiscoveryEntry('tool', args.job) : undefined;
-      let workflows = listWorkflowEntries();
-      let recommendedTools = ['discover', 'chat'];
-      let recommendedPrompts = ['discover'];
-      let relatedResources = ['discover://catalog', 'discover://workflows'];
+    async (args: DiscoverInput, ctx) =>
+      await executor.run(ctx, 'discover', 'Discover', args, async (innerArgs, innerCtx) => {
+        const entry = innerArgs.job ? findDiscoveryEntry('tool', innerArgs.job) : undefined;
+        let workflows = listWorkflowEntries();
+        let recommendedTools = ['discover', 'chat'];
+        let recommendedPrompts = ['discover'];
+        let relatedResources = ['discover://catalog', 'discover://workflows'];
 
-      if (args.job) {
-        const focusedJob = args.job;
-        workflows = workflows.filter((workflow) => workflow.recommendedTools.includes(focusedJob));
-        recommendedTools = [focusedJob];
-        if (entry) {
-          recommendedPrompts = entry.related
-            .filter((related) => related.kind === 'prompt')
-            .map((related) => related.name);
-          relatedResources = entry.related
-            .filter((related) => related.kind === 'resource')
-            .map((related) => related.name);
+        if (innerArgs.job) {
+          const focusedJob = innerArgs.job;
+          workflows = workflows.filter((workflow) =>
+            workflow.recommendedTools.includes(focusedJob),
+          );
+          recommendedTools = [focusedJob];
+          if (entry) {
+            recommendedPrompts = entry.related
+              .filter((related) => related.kind === 'prompt')
+              .map((related) => related.name);
+            relatedResources = entry.related
+              .filter((related) => related.kind === 'resource')
+              .map((related) => related.name);
+          }
         }
-      }
 
-      return await Promise.resolve({
-        content: [{ type: 'text', text: discoverSummary(args) }],
-        structuredContent: {
-          ...buildBaseStructuredOutput(ctx.task?.id),
-          summary: discoverSummary(args),
-          ...(args.job ? { job: args.job } : {}),
-          recommendedTools,
-          recommendedPrompts,
-          relatedResources,
-          ...(entry?.limitations ? { limitations: entry.limitations } : {}),
-          catalog: listDiscoveryEntries().map((item) => ({
-            kind: item.kind,
-            name: item.name,
-            title: item.title,
-          })),
-          workflows: workflows.map((workflow) => ({
-            goal: workflow.goal,
-            name: workflow.name,
-            whenToUse: workflow.whenToUse,
-          })),
-        },
-      });
-    }),
+        return await Promise.resolve({
+          content: [{ type: 'text', text: discoverSummary(innerArgs) }],
+          structuredContent: {
+            ...buildBaseStructuredOutput(innerCtx.task?.id),
+            summary: discoverSummary(innerArgs),
+            ...(innerArgs.job ? { job: innerArgs.job } : {}),
+            recommendedTools,
+            recommendedPrompts,
+            relatedResources,
+            ...(entry?.limitations ? { limitations: entry.limitations } : {}),
+            catalog: listDiscoveryEntries().map((item) => ({
+              kind: item.kind,
+              name: item.name,
+              title: item.title,
+            })),
+            workflows: workflows.map((workflow) => ({
+              goal: workflow.goal,
+              name: workflow.name,
+              whenToUse: workflow.whenToUse,
+            })),
+          },
+        });
+      }),
   );
 }

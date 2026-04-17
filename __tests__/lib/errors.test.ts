@@ -5,16 +5,14 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
 import {
-  errorResult,
-  finishReasonError,
-  geminiErrorResult,
-  promptBlockedMessage,
-  promptBlockedResult,
+  AppError,
+  CancelledError,
+  finishReasonToError,
   resetProgressThrottle,
-  responseBlockedMessage,
-  responseBlockedResult,
+  SafetyError,
   sendProgress,
-  throwInvalidParams,
+  TruncationError,
+  ValidationError,
   withRetry,
 } from '../../src/lib/errors.js';
 
@@ -56,146 +54,103 @@ function createStatusError(status: number, message = 'error'): Error & { status:
   return err;
 }
 
-// ── errorResult ───────────────────────────────────────────────────────
+describe('AppError', () => {
+  it('formats generic errors and non-errors', () => {
+    assert.strictEqual(AppError.formatMessage(new Error('network timeout')), 'network timeout');
+    assert.strictEqual(AppError.formatMessage('string error'), 'string error');
+  });
 
-describe('errorResult', () => {
-  it('returns a CallToolResult with isError true', () => {
-    const result = errorResult('something went wrong');
+  it('creates error tool results', () => {
+    const result = new AppError('ask', 'something went wrong').toToolResult();
     assert.deepStrictEqual(result, {
       content: [{ type: 'text', text: 'something went wrong' }],
       isError: true,
     });
   });
 
-  it('handles empty string', () => {
-    const result = errorResult('');
-    assert.strictEqual(result.isError, true);
-    assert.strictEqual(result.content[0]?.text, '');
+  it('classifies retryable and non-retryable Gemini statuses', () => {
+    const rateLimited = AppError.from(createStatusError(429, 'Too many requests'), 'ask');
+    const forbidden = AppError.from(createStatusError(403, 'Forbidden'), 'ask');
+    const missing = AppError.from(createStatusError(404, 'Missing'), 'ask');
+    const internal = AppError.from(createStatusError(500, 'Internal'), 'ask');
+    const unavailable = AppError.from(createStatusError(503, 'Unavailable'), 'ask');
+
+    assert.strictEqual(rateLimited.category, 'server');
+    assert.strictEqual(rateLimited.retryable, true);
+    assert.match(rateLimited.message, /Rate limited/);
+    assert.strictEqual(forbidden.category, 'client');
+    assert.strictEqual(forbidden.retryable, false);
+    assert.match(forbidden.message, /Permission denied/);
+    assert.strictEqual(missing.category, 'client');
+    assert.match(missing.message, /not found/i);
+    assert.strictEqual(internal.category, 'server');
+    assert.strictEqual(internal.retryable, true);
+    assert.strictEqual(unavailable.category, 'server');
+    assert.strictEqual(unavailable.retryable, true);
+  });
+
+  it('classifies abort and generic errors', () => {
+    const cancelled = AppError.from(new DOMException('Aborted', 'AbortError'), 'ask');
+    const generic = AppError.from(new Error('boom'), 'ask');
+
+    assert.ok(cancelled instanceof CancelledError);
+    assert.strictEqual(cancelled.category, 'cancelled');
+    assert.strictEqual(cancelled.retryable, false);
+    assert.strictEqual(cancelled.message, 'ask: cancelled by client');
+    assert.strictEqual(generic.category, 'internal');
+    assert.strictEqual(generic.retryable, false);
+    assert.strictEqual(generic.message, 'ask failed: boom');
+  });
+
+  it('detects retryability', () => {
+    assert.strictEqual(AppError.isRetryable(createStatusError(429)), true);
+    assert.strictEqual(AppError.isRetryable(createStatusError(500)), true);
+    assert.strictEqual(AppError.isRetryable(createStatusError(503)), true);
+    assert.strictEqual(AppError.isRetryable(createStatusError(403)), false);
+    assert.strictEqual(AppError.isRetryable(new CancelledError('ask')), false);
+    assert.strictEqual(AppError.isRetryable(new SafetyError('ask', 'response_blocked')), false);
   });
 });
 
-// ── geminiErrorResult ─────────────────────────────────────────────────
-
-describe('geminiErrorResult', () => {
-  it('formats a generic Error', () => {
-    const result = geminiErrorResult('ask', new Error('network timeout'));
-    assert.strictEqual(result.isError, true);
-    assert.strictEqual(result.content[0]?.text, 'ask failed: network timeout');
-  });
-
-  it('formats a non-Error value', () => {
-    const result = geminiErrorResult('search', 'string error');
-    assert.strictEqual(result.isError, true);
-    assert.strictEqual(result.content[0]?.text, 'search failed: string error');
-  });
-
-  it('maps HTTP 429 to rate-limit message', () => {
-    const err = Object.assign(new Error('Too many requests'), { status: 429 });
-    const result = geminiErrorResult('ask', err);
-    assert.strictEqual(result.isError, true);
-    assert.match(result.content[0]?.text ?? '', /Rate limited/);
-  });
-
-  it('maps HTTP 403 to permission denied', () => {
-    const err = Object.assign(new Error('Forbidden'), { status: 403 });
-    const result = geminiErrorResult('ask', err);
-    assert.match(result.content[0]?.text ?? '', /Permission denied/);
-  });
-
-  it('maps HTTP 404 to not found', () => {
-    const err = Object.assign(new Error('Not found'), { status: 404 });
-    const result = geminiErrorResult('search', err);
-    assert.match(result.content[0]?.text ?? '', /not found/);
-  });
-
-  it('maps HTTP 500 to server error', () => {
-    const err = Object.assign(new Error('Internal'), { status: 500 });
-    const result = geminiErrorResult('execute_code', err);
-    assert.match(result.content[0]?.text ?? '', /server error/);
-  });
-
-  it('maps HTTP 503 to service unavailable', () => {
-    const err = Object.assign(new Error('Unavailable'), { status: 503 });
-    const result = geminiErrorResult('ask', err);
-    assert.match(result.content[0]?.text ?? '', /unavailable/);
-  });
-
-  it('maps HTTP 400 to bad request', () => {
-    const err = Object.assign(new Error('Nope'), { status: 400 });
-    const result = geminiErrorResult('ask', err);
-    assert.match(result.content[0]?.text ?? '', /Bad request/);
-  });
-
-  it('handles unknown HTTP status', () => {
-    const err = Object.assign(new Error('wat'), { status: 418 });
-    const result = geminiErrorResult('ask', err);
-    assert.match(result.content[0]?.text ?? '', /HTTP 418/);
-  });
-
-  it('handles AbortError', () => {
-    const err = new DOMException('Aborted', 'AbortError');
-    const result = geminiErrorResult('ask', err);
-    assert.strictEqual(result.isError, true);
-    assert.strictEqual(result.content[0]?.text, 'ask: cancelled by client');
-  });
-});
-
-describe('blocked-result helpers', () => {
-  it('formats response-blocked text exactly once from the shared helper', () => {
+describe('SafetyError', () => {
+  it('formats response-blocked, prompt-blocked, and recitation messages', () => {
     assert.strictEqual(
-      responseBlockedMessage('execute_code'),
+      new SafetyError('execute_code', 'response_blocked').message,
       'execute_code: response blocked by safety filter',
     );
-    assert.deepStrictEqual(responseBlockedResult('execute_code'), {
-      content: [{ type: 'text', text: 'execute_code: response blocked by safety filter' }],
-      isError: true,
-    });
-  });
-
-  it('formats prompt-blocked text exactly once from the shared helper', () => {
     assert.strictEqual(
-      promptBlockedMessage('ask', 'SAFETY'),
+      new SafetyError('ask', 'prompt_blocked', 'SAFETY').message,
       'ask: prompt blocked by safety filter (SAFETY)',
     );
-    assert.deepStrictEqual(promptBlockedResult('ask', 'SAFETY'), {
-      content: [{ type: 'text', text: 'ask: prompt blocked by safety filter (SAFETY)' }],
-      isError: true,
-    });
+    assert.strictEqual(
+      new SafetyError('ask', 'recitation').message,
+      'ask: response blocked due to recitation policy',
+    );
   });
 });
 
-describe('finishReasonError', () => {
-  it('normalizes safety finish reasons', () => {
-    assert.deepStrictEqual(finishReasonError(undefined, 'text', 'ask'), undefined);
-    assert.deepStrictEqual(finishReasonError('SAFETY' as never, '', 'execute_code'), {
-      content: [{ type: 'text', text: 'execute_code: response blocked by safety filter' }],
-      isError: true,
-    });
+describe('finishReasonToError', () => {
+  it('maps safety and recitation finish reasons', () => {
+    assert.strictEqual(finishReasonToError(undefined, 'text', 'ask'), undefined);
+    assert.ok(finishReasonToError('SAFETY' as never, '', 'execute_code') instanceof SafetyError);
+    assert.ok(finishReasonToError('RECITATION' as never, '', 'ask') instanceof SafetyError);
   });
 
-  it('normalizes recitation and max-token edge cases', () => {
-    assert.deepStrictEqual(finishReasonError('RECITATION' as never, '', 'ask'), {
-      content: [{ type: 'text', text: 'ask: response blocked due to recitation policy' }],
-      isError: true,
-    });
-    assert.deepStrictEqual(finishReasonError('MAX_TOKENS' as never, '', 'search'), {
-      content: [
-        {
-          type: 'text',
-          text: 'search: response truncated — max tokens reached with no output',
-        },
-      ],
-      isError: true,
-    });
+  it('maps max-token truncation only when no text exists', () => {
+    const truncated = finishReasonToError('MAX_TOKENS' as never, '', 'search');
+    assert.ok(truncated instanceof TruncationError);
+    assert.strictEqual(
+      truncated?.message,
+      'search: response truncated — max tokens reached with no output',
+    );
+    assert.strictEqual(finishReasonToError('MAX_TOKENS' as never, 'partial', 'search'), undefined);
   });
 });
 
-// ── throwInvalidParams ────────────────────────────────────────────────
-
-describe('throwInvalidParams', () => {
+describe('ValidationError', () => {
   it('throws ProtocolError with INVALID_PARAMS code', () => {
     assert.throws(
-      () => throwInvalidParams('bad input'),
+      () => new ValidationError('bad input'),
       (err: unknown) =>
         err instanceof ProtocolError && err.code === INVALID_PARAMS && err.message === 'bad input',
     );

@@ -3,8 +3,9 @@ import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server
 import { randomUUID } from 'node:crypto';
 
 import { EXPOSE_THOUGHTS } from '../client.js';
-import { AppError, reportCompletion, reportFailure } from './errors.js';
+import { AppError } from './errors.js';
 import { logContext, logger, maybeSummarizePayload, type ScopedLogger } from './logger.js';
+import { reportCompletion, reportFailure } from './progress.js';
 import { buildSharedStructuredMetadata, extractTextContent } from './response.js';
 import { executeToolStream, extractUsage, type StreamResult } from './streaming.js';
 

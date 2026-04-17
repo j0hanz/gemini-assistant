@@ -8,9 +8,10 @@ import type {
 import { createPartFromUri, Outcome } from '@google/genai';
 import type { Part } from '@google/genai';
 
-import { cleanupErrorLogger, SafetyError, sendProgress } from '../lib/errors.js';
+import { cleanupErrorLogger, SafetyError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
+import { ProgressReporter } from '../lib/progress.js';
 import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
@@ -76,17 +77,17 @@ async function uploadDiagramSourceFiles(
 ): Promise<Part[]> {
   const contentParts: Part[] = [];
   const totalSteps = filesToUpload.length + 1;
+  const progress = new ProgressReporter(ctx, DIAGRAM_TOOL_LABEL);
 
   for (let index = 0; index < filesToUpload.length; index++) {
     if (ctx.mcpReq.signal.aborted) throw new DOMException('Aborted', 'AbortError');
     const filePath = filesToUpload[index];
     if (!filePath) continue;
 
-    await sendProgress(
-      ctx,
+    await progress.step(
       index,
       totalSteps,
-      `${DIAGRAM_TOOL_LABEL}: Uploading ${filePath.split(/[\\/]/).pop() ?? filePath} (${String(index + 1)}/${String(filesToUpload.length)})`,
+      `Uploading ${filePath.split(/[\\/]/).pop() ?? filePath} (${String(index + 1)}/${String(filesToUpload.length)})`,
     );
     const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
     uploadedNames.push(uploaded.name);
@@ -233,11 +234,11 @@ export function createDiagramWork(rootsFetcher: RootsFetcher) {
           : [];
 
       const hasFiles = filesToUpload.length > 0;
-      await sendProgress(
-        ctx,
+      const progress = new ProgressReporter(ctx, DIAGRAM_TOOL_LABEL);
+      await progress.send(
         hasFiles ? filesToUpload.length : 0,
         hasFiles ? filesToUpload.length + 1 : undefined,
-        `${DIAGRAM_TOOL_LABEL}: Generating ${diagramType} diagram`,
+        `Generating ${diagramType} diagram`,
       );
       await ctx.mcpReq.log('info', `Generating ${diagramType} diagram`);
 
@@ -299,7 +300,8 @@ export async function executeCodeWork(
   { task, language, thinkingLevel }: ExecuteCodeInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  await sendProgress(ctx, 0, undefined, `${EXECUTE_CODE_TOOL_LABEL}: Preparing sandbox`);
+  const progress = new ProgressReporter(ctx, EXECUTE_CODE_TOOL_LABEL);
+  await progress.send(0, undefined, 'Preparing sandbox');
   await ctx.mcpReq.log('info', `Executing code${language ? ` [${language}]` : ''}`);
   const prompt = [
     task,

@@ -5,8 +5,8 @@ import type {
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
 
-import { sendProgress } from '../lib/errors.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
+import { ProgressReporter } from '../lib/progress.js';
 import {
   appendSources,
   appendUrlStatus,
@@ -212,7 +212,8 @@ export async function searchWork(
     return invalidUrlResult;
   }
 
-  await sendProgress(ctx, 0, undefined, `${SEARCH_TOOL_LABEL}: Starting`);
+  const progress = new ProgressReporter(ctx, SEARCH_TOOL_LABEL);
+  await progress.send(0, undefined, 'Starting');
   await ctx.mcpReq.log('info', `Search: ${query}`);
   const { functionCallingMode, toolConfig, tools } = buildOrchestrationConfig({
     toolProfile: (urls?.length ?? 0) > 0 ? 'search_url' : 'search',
@@ -250,7 +251,8 @@ export async function analyzeUrlWork(
     return invalidUrlResult;
   }
 
-  await sendProgress(ctx, 0, undefined, `${ANALYZE_URL_TOOL_LABEL}: Fetching`);
+  const progress = new ProgressReporter(ctx, ANALYZE_URL_TOOL_LABEL);
+  await progress.send(0, undefined, 'Fetching');
   await ctx.mcpReq.log('info', `Analyzing ${String(urls.length)} URL(s)`);
   return await executor.runStream(
     ctx,
@@ -292,7 +294,8 @@ export async function agenticSearchWork(
     }
   }
 
-  await sendProgress(ctx, 0, undefined, `${AGENTIC_SEARCH_TOOL_LABEL}: Starting deep research`);
+  const progress = new ProgressReporter(ctx, AGENTIC_SEARCH_TOOL_LABEL);
+  await progress.send(0, undefined, 'Starting deep research');
   await ctx.mcpReq.log('info', `Agentic search: ${topic}`);
   const enrichedTopic = await enrichTopicWithSampling(topic, ctx);
   const depthInstruction = buildAgenticDepthInstruction(searchDepth);

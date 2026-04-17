@@ -7,8 +7,9 @@ import type {
 
 import { createPartFromUri } from '@google/genai';
 
-import { cleanupErrorLogger, sendProgress } from '../lib/errors.js';
+import { cleanupErrorLogger } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
+import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput } from '../lib/response.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
@@ -42,13 +43,15 @@ export function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
   ): Promise<CallToolResult> {
     let uploadedFileName: string | undefined;
 
+    const progress = new ProgressReporter(ctx, ANALYZE_FILE_TOOL_LABEL);
+
     try {
-      await sendProgress(ctx, 0, 3, `${ANALYZE_FILE_TOOL_LABEL}: Uploading to Gemini`);
+      await progress.step(0, 3, 'Uploading to Gemini');
       const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
       uploadedFileName = uploaded.name;
 
       await ctx.mcpReq.log('info', `Analyzing ${uploaded.displayPath} (${uploaded.mimeType})`);
-      await sendProgress(ctx, 1, 3, `${ANALYZE_FILE_TOOL_LABEL}: Analyzing content`);
+      await progress.step(1, 3, 'Analyzing content');
 
       return await executor.runStream(
         ctx,

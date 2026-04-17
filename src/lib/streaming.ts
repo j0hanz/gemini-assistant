@@ -15,16 +15,11 @@ import type {
   UrlContextMetadata,
 } from '@google/genai';
 
-import { finishReasonToError, sendProgress, withRetry } from './errors.js';
+import { finishReasonToError, withRetry } from './errors.js';
+import { advanceProgress, PROGRESS_TOTAL, sendProgress } from './progress.js';
 import { pickDefined, promptBlockedError } from './response.js';
 
-export const PROGRESS_TOTAL = 100;
-const PROGRESS_STEP_FRACTION = 0.15;
-export const PROGRESS_CAP = 95;
-
-export function advanceProgress(current: number): number {
-  return Math.min(current + (PROGRESS_TOTAL - current) * PROGRESS_STEP_FRACTION, PROGRESS_CAP);
-}
+export { advanceProgress, PROGRESS_CAP, PROGRESS_TOTAL } from './progress.js';
 
 export interface FunctionCallEntry {
   id?: string;

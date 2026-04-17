@@ -8,9 +8,10 @@ import type {
 import { Validator } from '@cfworker/json-schema';
 import type { Chat } from '@google/genai';
 
-import { AppError, sendProgress } from '../lib/errors.js';
+import { AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
+import { ProgressReporter } from '../lib/progress.js';
 import {
   buildBaseStructuredOutput,
   buildSharedStructuredMetadata,
@@ -355,7 +356,8 @@ async function runAskStream(
   responseSchema?: GeminiResponseSchema,
   workspaceCache?: WorkspaceCacheMetadata,
 ): Promise<AskExecutionResult> {
-  await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Preparing`);
+  const progress = new ProgressReporter(ctx, ASK_TOOL_LABEL);
+  await progress.send(0, undefined, 'Preparing');
   if (responseSchema) {
     const unsupported = collectUnsupportedKeywords(responseSchema);
     if (unsupported.length > 0) {
@@ -626,7 +628,8 @@ async function askExistingSession(
   if (!chat) return undefined;
 
   await ctx.mcpReq.log('debug', `Resuming session ${args.sessionId}`);
-  await sendProgress(ctx, 0, undefined, `${ASK_TOOL_LABEL}: Resuming session`);
+  const progress = new ProgressReporter(ctx, ASK_TOOL_LABEL);
+  await progress.send(0, undefined, 'Resuming session');
   const askResult = await deps.runWithoutSession(args, ctx, chat, workspaceCache);
   askResult.result = attachWorkspaceCacheMetadata(askResult.result, workspaceCache);
   appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id);

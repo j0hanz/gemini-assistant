@@ -12,9 +12,10 @@ import { promisify } from 'node:util';
 
 import { createPartFromUri } from '@google/genai';
 
-import { cleanupErrorLogger, reportCompletion, sendProgress } from '../lib/errors.js';
+import { cleanupErrorLogger } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
+import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput } from '../lib/response.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
@@ -229,17 +230,19 @@ export function createCompareFileWork(rootsFetcher: RootsFetcher) {
   ): Promise<CallToolResult> {
     const uploadedNames: string[] = [];
 
+    const progress = new ProgressReporter(ctx, COMPARE_FILE_TOOL_LABEL);
+
     try {
-      await sendProgress(ctx, 0, 4, `${COMPARE_FILE_TOOL_LABEL}: Uploading file A`);
+      await progress.step(0, 4, 'Uploading file A');
       const fileA = await uploadFile(filePathA, ctx.mcpReq.signal, rootsFetcher);
       uploadedNames.push(fileA.name);
 
-      await sendProgress(ctx, 1, 4, `${COMPARE_FILE_TOOL_LABEL}: Uploading file B`);
+      await progress.step(1, 4, 'Uploading file B');
       const fileB = await uploadFile(filePathB, ctx.mcpReq.signal, rootsFetcher);
       uploadedNames.push(fileB.name);
 
       await ctx.mcpReq.log('info', `Comparing: ${fileA.displayPath} vs ${fileB.displayPath}`);
-      await sendProgress(ctx, 2, 4, `${COMPARE_FILE_TOOL_LABEL}: Analyzing differences`);
+      await progress.step(2, 4, 'Analyzing differences');
 
       const prompt = question ? `Focus: ${question}` : 'Task: Compare the two files.';
 
@@ -869,7 +872,8 @@ export async function analyzePrWork(
   { thinkingLevel, language, dryRun, cacheName }: AnalyzePrInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  await sendProgress(ctx, 0, 3, `${REVIEW_DIFF_TOOL_LABEL}: Inspecting local changes`);
+  const progress = new ProgressReporter(ctx, REVIEW_DIFF_TOOL_LABEL);
+  await progress.step(0, 3, 'Inspecting local changes');
 
   let snapshot: LocalDiffSnapshot;
   try {
@@ -879,16 +883,16 @@ export async function analyzePrWork(
   }
 
   const budgetedDiff = buildBudgetedSnapshotDiff(snapshot);
-  await sendProgress(ctx, 1, 3, `${REVIEW_DIFF_TOOL_LABEL}: ${budgetedDiff.summary}`);
+  await progress.step(1, 3, budgetedDiff.summary);
 
   if (snapshot.empty) {
     const analysis = buildNoChangesAnalysis(snapshot);
-    await reportCompletion(ctx, REVIEW_DIFF_TOOL_LABEL, 'no changes');
+    await progress.complete('no changes');
     return buildTextResult(snapshot, analysis);
   }
 
   if (dryRun) {
-    await reportCompletion(ctx, REVIEW_DIFF_TOOL_LABEL, 'snapshot ready');
+    await progress.complete('snapshot ready');
     return buildTextResult(
       snapshot,
       budgetedDiff.diff,
@@ -897,7 +901,7 @@ export async function analyzePrWork(
     );
   }
 
-  await sendProgress(ctx, 2, 3, `${REVIEW_DIFF_TOOL_LABEL}: Analyzing generated diff`);
+  await progress.step(2, 3, 'Analyzing generated diff');
   await logSnapshotStats(ctx, snapshot, budgetedDiff.truncated);
 
   const prompt = buildAnalysisPrompt(

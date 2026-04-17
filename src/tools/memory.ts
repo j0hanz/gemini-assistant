@@ -7,9 +7,10 @@ import type {
 
 import { createPartFromUri } from '@google/genai';
 
-import { AppError, cleanupErrorLogger, sendProgress, withRetry } from '../lib/errors.js';
+import { AppError, cleanupErrorLogger, withRetry } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { logger } from '../lib/logger.js';
+import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput, createResourceLink } from '../lib/response.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from '../lib/validation.js';
@@ -97,7 +98,8 @@ async function uploadCacheParts(
   rootsFetcher?: RootsFetcher,
 ): Promise<CachePart[]> {
   await ctx.mcpReq.log('info', `Caching ${filePaths.length}`);
-  await sendProgress(ctx, 0, totalSteps, `${toolLabel}: Preparing ${filePaths.length}`);
+  const progress = new ProgressReporter(ctx, toolLabel);
+  await progress.step(0, totalSteps, `Preparing ${filePaths.length}`);
 
   const parts: CachePart[] = [];
   let filesUploaded = 0;
@@ -111,11 +113,10 @@ async function uploadCacheParts(
         const uploadedFile = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
         uploadedFileNames.push(uploadedFile.name);
         filesUploaded += 1;
-        await sendProgress(
-          ctx,
+        await progress.step(
           filesUploaded,
           totalSteps,
-          `${toolLabel}: ${fileNameFromPath(filePath)} (${filesUploaded}/${filePaths.length})`,
+          `${fileNameFromPath(filePath)} (${filesUploaded}/${filePaths.length})`,
         );
         return createPartFromUri(uploadedFile.uri, uploadedFile.mimeType);
       }),
@@ -198,7 +199,8 @@ async function createCacheWithRetry(
   ctx: ServerContext,
   totalSteps: number,
 ) {
-  await sendProgress(ctx, totalSteps - 1, totalSteps, `${CREATE_CACHE_TOOL_LABEL}: Creating cache`);
+  const progress = new ProgressReporter(ctx, CREATE_CACHE_TOOL_LABEL);
+  await progress.step(totalSteps - 1, totalSteps, 'Creating cache');
 
   return await withRetry(
     () =>
@@ -215,11 +217,10 @@ async function createCacheWithRetry(
     {
       signal: ctx.mcpReq.signal,
       onRetry: (attempt, max, delayMs) => {
-        void sendProgress(
-          ctx,
+        void progress.send(
           totalSteps - 1,
           totalSteps,
-          `${CREATE_CACHE_TOOL_LABEL}: Retrying cache creation (${attempt}/${max}, ~${Math.round(delayMs / 1000)}s)`,
+          `Retrying cache creation (${attempt}/${max}, ~${Math.round(delayMs / 1000)}s)`,
         );
       },
     },

@@ -5,8 +5,8 @@ import type {
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
 
-import { sendProgress } from '../lib/errors.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
+import { ProgressReporter } from '../lib/progress.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { validateUrls } from '../lib/validation.js';
@@ -64,7 +64,8 @@ export async function explainErrorWork(
   const invalidUrlResult = validateUrls(urls);
   if (invalidUrlResult) return invalidUrlResult;
 
-  await sendProgress(ctx, 0, undefined, `${TOOL_LABEL}: Diagnosing`);
+  const progress = new ProgressReporter(ctx, TOOL_LABEL);
+  await progress.send(0, undefined, 'Diagnosing');
   await ctx.mcpReq.log('info', `Explaining error (${error.length} chars)`);
 
   const prompt = buildPrompt(error, codeContext, language, urls);

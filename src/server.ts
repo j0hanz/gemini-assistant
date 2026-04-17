@@ -107,10 +107,12 @@ function sendResourceChanged(listUri: string, detailUris: readonly string[] = []
 
 function handleCacheChange({ detailUris }: CacheChangeEvent): void {
   sendResourceChanged('memory://caches', detailUris);
+  sendResourceChanged('discover://context');
 }
 
 function handleWorkspaceCacheChange(): void {
   sendResourceChanged('memory://workspace/cache');
+  sendResourceChanged('discover://context');
 }
 
 export function createServerInstance(): ServerInstance {
@@ -147,6 +149,7 @@ export function createServerInstance(): ServerInstance {
         ...transcriptUris,
         ...eventUris,
       ]);
+      sendResourceChangedForServer(server, 'discover://context');
     },
   );
   const unsubscribeCacheChange = subscribeCacheChange(handleCacheChange);

@@ -46,6 +46,8 @@ function createHarness() {
       getSessionEntry: (sessionId: string) =>
         sessions.has(sessionId) ? ({ id: sessionId, lastAccess: 0 } as never) : undefined,
       isEvicted: () => false,
+      listSessionTranscriptEntries: (sessionId: string) =>
+        sessions.get(sessionId)?.transcript as never,
       now: () => {
         nowValue += 1;
         return nowValue;
@@ -286,27 +288,18 @@ describe('ask transcript capture', () => {
         createContext('task-workspace'),
       );
 
-      assert.deepStrictEqual(result.structuredContent, {
-        answer: 'Assistant answer',
-        workspaceCache: {
-          applied: true,
-          cacheName: 'cachedContents/workspace-1',
-        },
-      });
-      assert.deepStrictEqual(harness.sessions.get('sess-workspace')?.events, [
-        {
-          request: { message: 'Use workspace context' },
-          response: {
-            text: 'Assistant answer',
-            workspaceCache: {
-              applied: true,
-              cacheName: 'cachedContents/workspace-1',
-            },
-          },
-          timestamp: 2,
-          taskId: 'task-workspace',
-        },
-      ]);
+      const structured = result.structuredContent as Record<string, unknown>;
+      assert.strictEqual(structured.answer, 'Assistant answer');
+      const contextUsed = structured.contextUsed as Record<string, unknown>;
+      assert.strictEqual(contextUsed.workspaceCacheApplied, true);
+
+      const events = harness.sessions.get('sess-workspace')?.events ?? [];
+      assert.strictEqual(events.length, 1);
+      const event = events[0];
+      assert.ok(event);
+      const response = event.response as Record<string, unknown>;
+      assert.strictEqual(response.text, 'Assistant answer');
+      assert.strictEqual(response.workspaceCache, undefined);
     } finally {
       process.env.WORKSPACE_CACHE_ENABLED = originalEnabled;
       workspaceCacheManager.getOrCreateCache = originalGetOrCreateCache;

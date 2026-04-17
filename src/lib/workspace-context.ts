@@ -81,7 +81,7 @@ async function tryReadFile(filePath: string): Promise<string | undefined> {
 
 // ── Context Assembly ──────────────────────────────────────────────────
 
-async function scanRootForFiles(root: string): Promise<Map<string, string>> {
+export async function scanRootForFiles(root: string): Promise<Map<string, string>> {
   const files = new Map<string, string>();
   try {
     const entries = await readdir(root, { withFileTypes: true });

@@ -160,3 +160,14 @@ export function getWorkspaceCacheTtl(): string {
 export function getWorkspaceAutoScan(): boolean {
   return process.env.WORKSPACE_AUTO_SCAN !== 'false';
 }
+
+// ── Context Intelligence ──────────────────────────────────────────────
+
+const DEFAULT_CONTEXT_BUDGET_TOKENS = 8192;
+
+export function getContextBudget(): number {
+  return parseIntEnv('CONTEXT_BUDGET_TOKENS', DEFAULT_CONTEXT_BUDGET_TOKENS, {
+    min: 1024,
+    max: 128_000,
+  });
+}

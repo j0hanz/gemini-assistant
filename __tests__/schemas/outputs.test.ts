@@ -7,6 +7,7 @@ import {
   AnalyzePrOutputSchema,
   AnalyzeUrlOutputSchema,
   AskOutputSchema,
+  ContextUsedSchema,
   CreateCacheOutputSchema,
   DeleteCacheOutputSchema,
   ExecuteCodeOutputSchema,
@@ -44,13 +45,9 @@ describe('AskOutputSchema', () => {
     assert.ok(result.success);
   });
 
-  it('accepts workspace cache metadata', () => {
+  it('accepts output without contextUsed', () => {
     const result = AskOutputSchema.safeParse({
       answer: 'test',
-      workspaceCache: {
-        applied: true,
-        cacheName: 'cachedContents/workspace-1',
-      },
     });
     assert.ok(result.success);
   });
@@ -86,12 +83,12 @@ describe('AskOutputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
-  it('rejects malformed workspace cache metadata', () => {
+  it('rejects unknown fields on AskOutputSchema', () => {
     const result = AskOutputSchema.safeParse({
       answer: 'test',
       workspaceCache: {
-        applied: false,
-        cacheName: 'workspace-1',
+        applied: true,
+        cacheName: 'x',
       },
     });
     assert.strictEqual(result.success, false);
@@ -101,6 +98,46 @@ describe('AskOutputSchema', () => {
     const result = AskOutputSchema.safeParse({
       answer: 'test',
       extra: true,
+    });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('ContextUsedSchema', () => {
+  it('accepts valid context used metadata', () => {
+    const result = ContextUsedSchema.safeParse({
+      sources: [
+        { kind: 'workspace-file', name: 'package.json', tokens: 850 },
+        { kind: 'session-summary', name: 'session-abc', tokens: 480 },
+      ],
+      totalTokens: 1330,
+      workspaceCacheApplied: false,
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts empty sources array', () => {
+    const result = ContextUsedSchema.safeParse({
+      sources: [],
+      totalTokens: 0,
+      workspaceCacheApplied: false,
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects unknown source kind', () => {
+    const result = ContextUsedSchema.safeParse({
+      sources: [{ kind: 'magic', name: 'x', tokens: 1 }],
+      totalTokens: 1,
+      workspaceCacheApplied: false,
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects missing workspaceCacheApplied', () => {
+    const result = ContextUsedSchema.safeParse({
+      sources: [],
+      totalTokens: 0,
     });
     assert.strictEqual(result.success, false);
   });

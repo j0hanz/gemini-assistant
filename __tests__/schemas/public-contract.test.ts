@@ -75,6 +75,18 @@ describe('public contract schemas', () => {
       'chat output should parse',
     );
     assert.ok(
+      ChatOutputSchema.safeParse({
+        ...base,
+        answer: 'hello',
+        contextUsed: {
+          sources: [{ kind: 'workspace-file', name: 'README.md', tokens: 100 }],
+          totalTokens: 100,
+          workspaceCacheApplied: false,
+        },
+      }).success,
+      'chat output with contextUsed should parse',
+    );
+    assert.ok(
       ResearchOutputSchema.safeParse({ ...base, mode: 'quick', summary: 'x', sources: [] }).success,
       'research output should parse',
     );

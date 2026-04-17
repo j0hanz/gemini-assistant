@@ -28,6 +28,7 @@ function createDeps(overrides: Partial<Parameters<typeof createAskWork>[0]> = {}
     getSession: () => undefined,
     getSessionEntry: () => undefined,
     isEvicted: () => false,
+    listSessionTranscriptEntries: () => undefined,
     now: () => 1,
     runWithoutSession: async (args: Record<string, unknown>) =>
       ({
@@ -118,13 +119,11 @@ describe('ask contract', () => {
 
       assert.strictEqual(observedCacheName, 'cachedContents/workspace-1');
       assert.deepStrictEqual(observedRoots, [allowedRoot]);
-      assert.deepStrictEqual(result.structuredContent, {
-        answer: 'Assistant answer',
-        workspaceCache: {
-          applied: true,
-          cacheName: 'cachedContents/workspace-1',
-        },
-      });
+      const structured = result.structuredContent as Record<string, unknown>;
+      assert.strictEqual(structured.answer, 'Assistant answer');
+      const contextUsed = structured.contextUsed as Record<string, unknown>;
+      assert.strictEqual(contextUsed.workspaceCacheApplied, true);
+      assert.ok(Array.isArray(contextUsed.sources));
     } finally {
       process.env.WORKSPACE_CACHE_ENABLED = originalEnabled;
       process.env.ALLOWED_FILE_ROOTS = originalAllowedRoots;
@@ -177,7 +176,10 @@ describe('ask contract', () => {
       assert.strictEqual(result.isError, undefined);
       assert.strictEqual(workspaceCalls, 0);
       assert.strictEqual(observedCacheName, undefined);
-      assert.deepStrictEqual(result.structuredContent, { answer: 'Assistant answer' });
+      const structured = result.structuredContent as Record<string, unknown>;
+      assert.strictEqual(structured.answer, 'Assistant answer');
+      const contextUsed = structured.contextUsed as Record<string, unknown>;
+      assert.strictEqual(contextUsed.workspaceCacheApplied, false);
     } finally {
       process.env.WORKSPACE_CACHE_ENABLED = originalEnabled;
       workspaceCacheManager.getOrCreateCache = originalGetOrCreateCache;

@@ -4,13 +4,16 @@ import { describe, it } from 'node:test';
 import { listDiscoveryEntries, listWorkflowEntries } from '../src/catalog.js';
 import { PUBLIC_RESOURCE_URIS, PUBLIC_WORKFLOW_NAMES } from '../src/public-contract.js';
 import {
+  buildServerContextSnapshot,
   getSessionEventsResourceData,
   getSessionTranscriptResourceData,
   readDiscoverCatalogResource,
+  readDiscoverContextResource,
   readDiscoverWorkflowsResource,
   readSessionEventsResource,
   readSessionTranscriptResource,
   readWorkspaceContextResource,
+  renderServerContextMarkdown,
   renderWorkspaceContextMarkdown,
 } from '../src/resources.js';
 import { createSessionStore, type SessionStore } from '../src/sessions.js';
@@ -49,6 +52,7 @@ describe('discovery resources', () => {
         'prompt:research',
         'prompt:review',
         'resource:discover://catalog',
+        'resource:discover://context',
         'resource:discover://workflows',
         'resource:memory://caches',
         'resource:memory://caches/{cacheName}',
@@ -81,11 +85,30 @@ describe('discovery resources', () => {
     assert.match(result.contents[1]?.text ?? '', /### start-here/);
   });
 
+  it('reads discover://context with snapshot data and markdown rendering', async () => {
+    const sessionStore = createStore();
+    const result = await readDiscoverContextResource(
+      'discover://context',
+      async () => [],
+      sessionStore,
+    );
+    const data = parseResourceText(result) as Awaited<
+      ReturnType<typeof buildServerContextSnapshot>
+    >;
+
+    assert.strictEqual(result.contents.length, 2);
+    assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
+    assert.ok(data.workspace.roots.length >= 1);
+    assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
+    assert.match(result.contents[1]?.text ?? '', /^# Server Context/m);
+  });
+
   it('keeps the concrete and templated resource URI ordering stable', () => {
     assert.deepStrictEqual(
       [...PUBLIC_RESOURCE_URIS].filter((uri) => !uri.includes('{')),
       [
         'discover://catalog',
+        'discover://context',
         'discover://workflows',
         'memory://sessions',
         'memory://caches',
@@ -134,6 +157,40 @@ describe('workspace context resource', () => {
     assert.throws(() => {
       JSON.parse(result.contents[0]?.text ?? '');
     });
+  });
+
+  it('renders server context markdown with cache, sessions, and config', () => {
+    const markdown = renderServerContextMarkdown({
+      workspace: {
+        roots: ['C:/repo'],
+        scannedFiles: ['README.md'],
+        estimatedTokens: 42,
+        cacheStatus: {
+          enabled: true,
+          cacheName: 'cachedContents/workspace-1',
+          fresh: true,
+          ttl: '3600s',
+        },
+      },
+      sessions: {
+        active: 1,
+        maxSessions: 50,
+        ttlMs: 1_800_000,
+        ids: ['sess-1'],
+      },
+      config: {
+        model: 'gemini-3-flash-preview',
+        exposeThoughts: false,
+        workspaceCacheEnabled: true,
+        workspaceAutoScan: true,
+      },
+    });
+
+    assert.match(markdown, /^# Server Context/m);
+    assert.match(markdown, /## Workspace/);
+    assert.match(markdown, /## Sessions/);
+    assert.match(markdown, /## Config/);
+    assert.match(markdown, /cachedContents\/workspace-1/);
   });
 });
 

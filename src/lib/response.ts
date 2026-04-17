@@ -2,7 +2,12 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 
 import type { GenerateContentResponse, GroundingMetadata, UrlMetadata } from '@google/genai';
 
-import type { SourceDetail, UrlMetadataEntry, UsageMetadata } from '../schemas/outputs.js';
+import type {
+  ContextUsed,
+  SourceDetail,
+  UrlMetadataEntry,
+  UsageMetadata,
+} from '../schemas/outputs.js';
 
 import { finishReasonToError, SafetyError } from './errors.js';
 
@@ -58,6 +63,7 @@ export function promptBlockedError(toolName: string, blockReason?: string): Call
 }
 
 export interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
+  contextUsed?: ContextUsed;
   functionCalls?: TFunctionCall[];
   thoughts?: string;
   toolEvents?: TToolEvent[];
@@ -65,12 +71,14 @@ export interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
 }
 
 export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
+  contextUsed,
   functionCalls,
   includeThoughts = false,
   thoughtText,
   toolEvents,
   usage,
 }: {
+  contextUsed?: ContextUsed;
   functionCalls?: readonly TFunctionCall[];
   includeThoughts?: boolean;
   thoughtText?: string;
@@ -78,6 +86,7 @@ export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
   usage?: UsageMetadata | undefined;
 }): SharedStructuredMetadata<TFunctionCall, TToolEvent> {
   return pickDefined({
+    contextUsed,
     functionCalls: functionCalls && functionCalls.length > 0 ? [...functionCalls] : undefined,
     thoughts: includeThoughts && thoughtText ? thoughtText : undefined,
     toolEvents: toolEvents && toolEvents.length > 0 ? [...toolEvents] : undefined,

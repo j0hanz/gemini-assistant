@@ -35,6 +35,7 @@ function expectedConcreteResourceUris(): string[] {
     'memory://caches',
     'discover://catalog',
     'discover://workflows',
+    'discover://context',
     'memory://workspace/context',
     'memory://workspace/cache',
   ];

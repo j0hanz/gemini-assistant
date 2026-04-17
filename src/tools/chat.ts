@@ -8,6 +8,11 @@ import type {
 import { Validator } from '@cfworker/json-schema';
 import type { Chat } from '@google/genai';
 
+import {
+  buildContextUsed,
+  buildSessionSummary,
+  emptyContextUsed,
+} from '../lib/context-assembler.js';
 import { AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
@@ -35,7 +40,12 @@ import {
   createChatInputSchema,
 } from '../schemas/inputs.js';
 import { type GeminiResponseSchema } from '../schemas/json-schema.js';
-import { AskOutputSchema, ChatOutputSchema, type UsageMetadata } from '../schemas/outputs.js';
+import {
+  AskOutputSchema,
+  ChatOutputSchema,
+  type ContextUsed,
+  type UsageMetadata,
+} from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, EXPOSE_THOUGHTS, getAI, MODEL } from '../client.js';
 import { getWorkspaceCacheEnabled } from '../config.js';
@@ -51,18 +61,13 @@ type AskArgs = AskInput;
 
 export interface AskStructuredContent extends Record<string, unknown> {
   answer: string;
+  contextUsed?: ContextUsed;
   data?: unknown;
   functionCalls?: FunctionCallEntry[];
   schemaWarnings?: string[];
   thoughts?: string;
   toolEvents?: ToolEvent[];
   usage?: UsageMetadata;
-  workspaceCache?: WorkspaceCacheMetadata;
-}
-
-export interface WorkspaceCacheMetadata {
-  applied: true;
-  cacheName: string;
 }
 
 interface AskDependencies {
@@ -73,11 +78,11 @@ interface AskDependencies {
   getSessionEntry: (sessionId: string) => SessionSummary | undefined;
   isEvicted: (sessionId: string) => boolean;
   now: () => number;
+  listSessionTranscriptEntries: (sessionId: string) => TranscriptEntry[] | undefined;
   runWithoutSession: (
     args: AskArgs,
     ctx: ServerContext,
     chat?: Chat,
-    workspaceCache?: WorkspaceCacheMetadata,
   ) => Promise<AskExecutionResult>;
   setSession: (sessionId: string, chat: Chat) => void;
 }
@@ -149,13 +154,14 @@ export function buildAskStructuredContent(
   >,
   jsonMode?: boolean,
   responseSchema?: GeminiResponseSchema,
-  workspaceCache?: WorkspaceCacheMetadata,
+  contextUsed?: ContextUsed,
 ): AskStructuredContent {
   const parsedData = jsonMode ? tryParseJsonResponse(text) : undefined;
   const answer = parsedData === undefined ? text : JSON.stringify(parsedData, null, 2);
   const usage = extractUsage(streamResult.usageMetadata);
   const warnings = buildAskWarnings(parsedData, jsonMode, responseSchema);
   const sharedMetadata = buildSharedStructuredMetadata({
+    ...(contextUsed ? { contextUsed } : {}),
     functionCalls: streamResult.functionCalls,
     includeThoughts: EXPOSE_THOUGHTS,
     thoughtText: streamResult.thoughtText,
@@ -168,7 +174,6 @@ export function buildAskStructuredContent(
     ...(parsedData !== undefined ? { data: parsedData } : {}),
     ...(warnings.length > 0 ? { schemaWarnings: warnings } : {}),
     ...sharedMetadata,
-    ...(workspaceCache ? { workspaceCache } : {}),
   };
 }
 
@@ -180,7 +185,7 @@ export function formatStructuredResult(
   >,
   jsonMode?: boolean,
   responseSchema?: GeminiResponseSchema,
-  workspaceCache?: WorkspaceCacheMetadata,
+  contextUsed?: ContextUsed,
 ): CallToolResult {
   if (result.isError) return result;
   const structured = buildAskStructuredContent(
@@ -188,7 +193,7 @@ export function formatStructuredResult(
     streamResult,
     jsonMode,
     responseSchema,
-    workspaceCache,
+    contextUsed,
   );
 
   return {
@@ -209,11 +214,8 @@ function getAskStructuredContent(result: CallToolResult): AskStructuredContent |
   return result.structuredContent as AskStructuredContent;
 }
 
-function attachWorkspaceCacheMetadata(
-  result: CallToolResult,
-  workspaceCache?: WorkspaceCacheMetadata,
-): CallToolResult {
-  if (!workspaceCache || result.isError) {
+function attachContextUsed(result: CallToolResult, contextUsed?: ContextUsed): CallToolResult {
+  if (!contextUsed || result.isError) {
     return result;
   }
 
@@ -225,7 +227,7 @@ function attachWorkspaceCacheMetadata(
     ...result,
     structuredContent: {
       ...structured,
-      workspaceCache,
+      contextUsed,
     },
   };
 }
@@ -299,7 +301,6 @@ async function runAskStream(
   urls: string[] | undefined,
   jsonMode = false,
   responseSchema?: GeminiResponseSchema,
-  workspaceCache?: WorkspaceCacheMetadata,
 ): Promise<AskExecutionResult> {
   const progress = new ProgressReporter(ctx, ASK_TOOL_LABEL);
   await progress.send(0, undefined, 'Preparing');
@@ -316,13 +317,7 @@ async function runAskStream(
 
       return {
         resultMod: (baseResult) =>
-          formatStructuredResult(
-            baseResult,
-            streamResult,
-            jsonMode,
-            responseSchema,
-            workspaceCache,
-          ),
+          formatStructuredResult(baseResult, streamResult, jsonMode, responseSchema),
         reportMessage: hasThoughts ? 'completed with reasoning' : 'completed',
       };
     },
@@ -362,7 +357,6 @@ async function askWithoutSession(
   args: AskArgs,
   ctx: ServerContext,
   chat?: Chat,
-  workspaceCache?: WorkspaceCacheMetadata,
 ): Promise<AskExecutionResult> {
   const { prompt, toolConfig, toolProfile, tools, urls, functionCallingMode } =
     resolveAskTooling(args);
@@ -389,7 +383,6 @@ async function askWithoutSession(
     urls,
     !!args.responseSchema,
     args.responseSchema,
-    workspaceCache,
   );
 }
 
@@ -501,7 +494,6 @@ function appendSessionTurn(
       ...(structured?.thoughts ? { thoughts: structured.thoughts } : {}),
       ...(structured?.toolEvents ? { toolEvents: sanitizeToolEvents(structured.toolEvents) } : {}),
       ...(structured?.usage ? { usage: structured.usage } : {}),
-      ...(structured?.workspaceCache ? { workspaceCache: structured.workspaceCache } : {}),
     },
     timestamp: deps.now(),
     ...(taskId ? { taskId } : {}),
@@ -548,9 +540,21 @@ export function createDefaultAskDependencies(sessionStore: SessionStore): AskDep
     getSession: sessionStore.getSession.bind(sessionStore),
     getSessionEntry: sessionStore.getSessionEntry.bind(sessionStore),
     isEvicted: sessionStore.isEvicted.bind(sessionStore),
+    listSessionTranscriptEntries: sessionStore.listSessionTranscriptEntries.bind(sessionStore),
     now: () => Date.now(),
     runWithoutSession: askWithoutSession,
     setSession: sessionStore.setSession.bind(sessionStore),
+  };
+}
+
+function addContextSource(
+  contextUsed: ContextUsed,
+  source: { kind: 'session-summary'; name: string; tokens: number },
+): ContextUsed {
+  return {
+    ...contextUsed,
+    sources: [...contextUsed.sources, source],
+    totalTokens: contextUsed.totalTokens + source.tokens,
   };
 }
 
@@ -558,16 +562,31 @@ async function askExistingSession(
   args: AskArgs & { sessionId: string },
   ctx: ServerContext,
   deps: AskDependencies,
-  workspaceCache?: WorkspaceCacheMetadata,
+  contextUsed?: ContextUsed,
 ): Promise<CallToolResult | undefined> {
   const chat = deps.getSession(args.sessionId);
   if (!chat) return undefined;
 
+  const sessionSummary = buildSessionSummary(
+    deps.listSessionTranscriptEntries(args.sessionId) ?? [],
+  );
+  const resumedArgs = sessionSummary
+    ? { ...args, message: `${sessionSummary}\n\n${args.message}` }
+    : args;
+  const effectiveContextUsed =
+    sessionSummary && contextUsed
+      ? addContextSource(contextUsed, {
+          kind: 'session-summary',
+          name: args.sessionId,
+          tokens: Math.ceil(sessionSummary.length / 4),
+        })
+      : contextUsed;
+
   await ctx.mcpReq.log('debug', `Resuming session ${args.sessionId}`);
   const progress = new ProgressReporter(ctx, ASK_TOOL_LABEL);
   await progress.send(0, undefined, 'Resuming session');
-  const askResult = await deps.runWithoutSession(args, ctx, chat, workspaceCache);
-  askResult.result = attachWorkspaceCacheMetadata(askResult.result, workspaceCache);
+  const askResult = await deps.runWithoutSession(resumedArgs, ctx, chat);
+  askResult.result = attachContextUsed(askResult.result, effectiveContextUsed);
   appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id);
   return askResult.result;
 }
@@ -576,13 +595,13 @@ async function askNewSession(
   args: AskArgs & { sessionId: string },
   ctx: ServerContext,
   deps: AskDependencies,
-  workspaceCache?: WorkspaceCacheMetadata,
+  contextUsed?: ContextUsed,
 ): Promise<CallToolResult> {
   await ctx.mcpReq.log('debug', `Creating session ${args.sessionId}`);
   const chat = deps.createChat(args);
 
-  const askResult = await deps.runWithoutSession(args, ctx, chat, workspaceCache);
-  askResult.result = attachWorkspaceCacheMetadata(askResult.result, workspaceCache);
+  const askResult = await deps.runWithoutSession(args, ctx, chat);
+  askResult.result = attachContextUsed(askResult.result, contextUsed);
 
   if (!askResult.result.isError) {
     deps.setSession(args.sessionId, chat);
@@ -607,21 +626,25 @@ export function createAskWork(
     const workspaceCacheName = canUseWorkspaceCache
       ? await resolveWorkspaceCacheName(args, ctx.mcpReq.signal)
       : undefined;
-    const workspaceCache = workspaceCacheName
-      ? ({ applied: true, cacheName: workspaceCacheName } as const)
-      : undefined;
+    const contextUsed = workspaceCacheName
+      ? buildContextUsed(
+          [{ kind: 'workspace-cache', name: workspaceCacheName, tokens: 0, relevanceScore: 1 }],
+          0,
+          true,
+        )
+      : emptyContextUsed();
     const effectiveArgs = workspaceCacheName ? { ...args, cacheName: workspaceCacheName } : args;
 
     if (!effectiveArgs.sessionId) {
-      const askResult = await deps.runWithoutSession(effectiveArgs, ctx, undefined, workspaceCache);
-      return attachWorkspaceCacheMetadata(askResult.result, workspaceCache);
+      const askResult = await deps.runWithoutSession(effectiveArgs, ctx);
+      return attachContextUsed(askResult.result, contextUsed);
     }
 
     const resumed = await askExistingSession(
       effectiveArgs as AskArgs & { sessionId: string },
       ctx,
       deps,
-      workspaceCache,
+      contextUsed,
     );
     if (resumed) return resumed;
 
@@ -629,7 +652,7 @@ export function createAskWork(
       effectiveArgs as AskArgs & { sessionId: string },
       ctx,
       deps,
-      workspaceCache,
+      contextUsed,
     );
   };
 }
@@ -731,7 +754,7 @@ async function chatWork(
       ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
       ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
       ...(structured.usage ? { usage: structured.usage } : {}),
-      ...(structured.workspaceCache ? { workspaceCache: structured.workspaceCache } : {}),
+      ...(structured.contextUsed ? { contextUsed: structured.contextUsed } : {}),
     },
   };
 }

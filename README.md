@@ -29,6 +29,7 @@ Public prompts:
 Public resources:
 
 - `discover://catalog`
+- `discover://context`
 - `discover://workflows`
 - `memory://sessions`
 - `memory://sessions/{sessionId}`
@@ -71,6 +72,7 @@ Large event payloads may be truncated into previews.
 
 Use `memory` cache actions when the same large context should be reused across multiple calls.
 Cache state is exposed through `memory://caches` and `memory://caches/{cacheName}`.
+Server context state is exposed through `discover://context`.
 
 ## Capability Notes
 
@@ -113,6 +115,7 @@ Useful optional variables:
 - `WORKSPACE_CONTEXT_FILE`: optional path to a custom context file to include in workspace context
 - `WORKSPACE_CACHE_TTL`: Gemini cache TTL for workspace context, default `3600s`
 - `WORKSPACE_AUTO_SCAN`: auto-scan workspace roots for known project files when set to `true` (default), set `false` to disable
+- `CONTEXT_BUDGET_TOKENS`: max token budget for request-aware context assembly, default `8192`
 
 ## Run
 

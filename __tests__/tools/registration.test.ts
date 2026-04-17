@@ -104,6 +104,7 @@ describe('tool registration', () => {
       [...PUBLIC_RESOURCE_URIS],
       [
         'discover://catalog',
+        'discover://context',
         'discover://workflows',
         'memory://sessions',
         'memory://sessions/{sessionId}',

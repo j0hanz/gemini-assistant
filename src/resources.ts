@@ -4,7 +4,11 @@ import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontex
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from './lib/validation.js';
-import { assembleWorkspaceContext, workspaceCacheManager } from './lib/workspace-context.js';
+import {
+  assembleWorkspaceContext,
+  scanRootForFiles,
+  workspaceCacheManager,
+} from './lib/workspace-context.js';
 
 import {
   listDiscoveryEntries,
@@ -13,6 +17,14 @@ import {
   renderWorkflowCatalogMarkdown,
 } from './catalog.js';
 import { completeCacheNames, getCacheSummary, listCacheSummaries } from './client.js';
+import {
+  getExposeThoughts,
+  getGeminiModel,
+  getSessionLimits,
+  getWorkspaceAutoScan,
+  getWorkspaceCacheEnabled,
+  getWorkspaceCacheTtl,
+} from './config.js';
 import { createSessionStore, type SessionStore } from './sessions.js';
 
 export { PUBLIC_RESOURCE_URIS } from './public-contract.js';
@@ -39,6 +51,11 @@ const DISCOVER_CATALOG_RESOURCE: ResourceListEntry = {
 const DISCOVER_WORKFLOWS_RESOURCE: ResourceListEntry = {
   uri: 'discover://workflows',
   name: 'Guided workflows for common gemini-assistant jobs',
+};
+
+const DISCOVER_CONTEXT_RESOURCE: ResourceListEntry = {
+  uri: 'discover://context',
+  name: 'Server context dashboard showing workspace, sessions, caches, and config',
 };
 
 function jsonResource(uri: string, data: unknown): ReadResourceResult {
@@ -167,6 +184,126 @@ export function readDiscoverWorkflowsResource(
 ): ReadResourceResult {
   const entries = listWorkflowEntries();
   return dualContentResource(toResourceUri(uri), entries, renderWorkflowCatalogMarkdown(entries));
+}
+
+export interface ServerContextSnapshot {
+  workspace: {
+    roots: string[];
+    scannedFiles: string[];
+    estimatedTokens: number;
+    cacheStatus: {
+      enabled: boolean;
+      cacheName: string | undefined;
+      fresh: boolean;
+      ttl: string;
+    };
+  };
+  sessions: {
+    active: number;
+    maxSessions: number;
+    ttlMs: number;
+    ids: string[];
+  };
+  config: {
+    model: string;
+    exposeThoughts: boolean;
+    workspaceCacheEnabled: boolean;
+    workspaceAutoScan: boolean;
+  };
+}
+
+export function renderServerContextMarkdown(snapshot: ServerContextSnapshot): string {
+  const { workspace, sessions, config } = snapshot;
+  const cacheStatus = workspace.cacheStatus.enabled
+    ? workspace.cacheStatus.cacheName
+      ? `active (\`${workspace.cacheStatus.cacheName}\`), ${workspace.cacheStatus.fresh ? 'fresh' : 'stale'}, TTL ${workspace.cacheStatus.ttl}`
+      : `enabled, no active cache, TTL ${workspace.cacheStatus.ttl}`
+    : 'disabled';
+
+  return [
+    '# Server Context',
+    '',
+    '## Workspace',
+    '',
+    `- **Roots**: ${workspace.roots.join(', ') || 'none'}`,
+    `- **Scanned files**: ${workspace.scannedFiles.join(', ') || 'none'} (${String(workspace.scannedFiles.length)} files)`,
+    `- **Estimated tokens**: ${String(workspace.estimatedTokens)}`,
+    `- **Cache**: ${cacheStatus}`,
+    '',
+    '## Sessions',
+    '',
+    `- **Active**: ${String(sessions.active)} / ${String(sessions.maxSessions)} max`,
+    `- **TTL**: ${String(Math.round(sessions.ttlMs / 60_000))} minutes`,
+    ...(sessions.ids.length > 0 ? [`- **IDs**: ${sessions.ids.join(', ')}`] : []),
+    '',
+    '## Config',
+    '',
+    `- **Model**: ${config.model}`,
+    `- **Thoughts**: ${config.exposeThoughts ? 'exposed' : 'hidden'}`,
+    `- **Workspace cache**: ${config.workspaceCacheEnabled ? 'enabled' : 'disabled'}`,
+    `- **Auto-scan**: ${config.workspaceAutoScan ? 'enabled' : 'disabled'}`,
+    '',
+  ].join('\n');
+}
+
+export async function buildServerContextSnapshot(
+  rootsFetcher: RootsFetcher,
+  sessionStore: SessionStore,
+): Promise<ServerContextSnapshot> {
+  const roots = await getAllowedRoots(rootsFetcher);
+  const scannedFiles: string[] = [];
+  let estimatedTokens = 0;
+
+  for (const root of roots) {
+    try {
+      const files = await scanRootForFiles(root);
+      for (const [filePath, content] of files) {
+        scannedFiles.push(filePath.split(/[\\/]/).pop() ?? filePath);
+        estimatedTokens += Math.ceil(content.length / 4);
+      }
+    } catch {
+      // Ignore scan failures in the dashboard.
+    }
+  }
+
+  const sessionLimits = getSessionLimits();
+  const cacheStatus = workspaceCacheManager.getCacheStatus();
+  const sessions = sessionStore.listSessionEntries();
+
+  return {
+    workspace: {
+      roots,
+      scannedFiles,
+      estimatedTokens,
+      cacheStatus: {
+        enabled: getWorkspaceCacheEnabled(),
+        cacheName: cacheStatus.cacheName ?? undefined,
+        fresh: cacheStatus.createdAt !== undefined,
+        ttl: getWorkspaceCacheTtl(),
+      },
+    },
+    sessions: {
+      active: sessions.length,
+      maxSessions: sessionLimits.maxSessions,
+      ttlMs: sessionLimits.ttlMs,
+      ids: sessions.map((session) => session.id),
+    },
+    config: {
+      model: getGeminiModel(),
+      exposeThoughts: getExposeThoughts(),
+      workspaceCacheEnabled: getWorkspaceCacheEnabled(),
+      workspaceAutoScan: getWorkspaceAutoScan(),
+    },
+  };
+}
+
+export async function readDiscoverContextResource(
+  uri: URL | string = DISCOVER_CONTEXT_RESOURCE.uri,
+  rootsFetcher: RootsFetcher,
+  sessionStore: SessionStore,
+): Promise<ReadResourceResult> {
+  const snapshot = await buildServerContextSnapshot(rootsFetcher, sessionStore);
+  return dualContentResource(toResourceUri(uri), snapshot, renderServerContextMarkdown(snapshot));
 }
 
 export function renderSessionTranscriptMarkdown(
@@ -464,6 +601,30 @@ function registerDiscoveryResources(server: McpServer): void {
   );
 }
 
+function registerContextResource(
+  server: McpServer,
+  sessionStore: SessionStore,
+  rootsFetcher: RootsFetcher,
+): void {
+  server.registerResource(
+    'discover-context',
+    'discover://context',
+    {
+      title: 'Server Context Dashboard',
+      description:
+        'Live snapshot of workspace files, sessions, caches, and config. ' +
+        'Served as application/json with a secondary text/markdown rendering.',
+      mimeType: 'application/json',
+      annotations: {
+        audience: ['assistant'],
+        priority: 0.7,
+      },
+    },
+    async (uri): Promise<ReadResourceResult> =>
+      readDiscoverContextResource(uri, rootsFetcher, sessionStore),
+  );
+}
+
 function registerWorkspaceResources(server: McpServer, rootsFetcher: RootsFetcher): void {
   const log = logger.child('resources');
 
@@ -522,5 +683,6 @@ export function registerResources(
   registerSessionResources(server, sessionStore);
   registerCacheResources(server);
   registerDiscoveryResources(server);
+  registerContextResource(server, sessionStore, rootsFetcher);
   registerWorkspaceResources(server, rootsFetcher);
 }

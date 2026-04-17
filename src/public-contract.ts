@@ -9,6 +9,7 @@ export type PublicWorkflowName =
   | 'memory';
 export type PublicResourceUri =
   | 'discover://catalog'
+  | 'discover://context'
   | 'discover://workflows'
   | 'memory://sessions'
   | 'memory://sessions/{sessionId}'
@@ -73,6 +74,7 @@ export const PUBLIC_PROMPT_NAMES = [
 
 export const PUBLIC_RESOURCE_URIS = [
   'discover://catalog',
+  'discover://context',
   'discover://workflows',
   'memory://sessions',
   'memory://sessions/{sessionId}',
@@ -354,6 +356,21 @@ export const DISCOVERY_ENTRIES = [
     inputs: [],
     returns: 'JSON and Markdown workflow catalog content.',
     related: [{ kind: 'resource', name: 'discover://catalog' }],
+  },
+  {
+    name: 'discover://context',
+    kind: 'resource',
+    title: 'Server Context Dashboard',
+    bestFor:
+      'Inspecting the server knowledge state: workspace files, sessions, caches, and config.',
+    whenToUse:
+      'Use when you need to understand what context the server has before making a request.',
+    inputs: [],
+    returns: 'JSON and Markdown snapshot of the server context state.',
+    related: [
+      { kind: 'resource', name: 'discover://catalog' },
+      { kind: 'resource', name: 'memory://workspace/context' },
+    ],
   },
   {
     name: 'memory://sessions',

@@ -74,11 +74,6 @@ const publicBaseOutputFields = {
 
 export const PublicBaseOutputSchema = z.strictObject(publicBaseOutputFields);
 
-const WorkspaceCacheSchema = z.strictObject({
-  applied: z.literal(true).describe('Whether the automatic workspace cache was applied'),
-  cacheName: cacheName('Automatically applied workspace cache resource name'),
-});
-
 export const AskOutputSchema = z.strictObject({
   answer: z.string().describe('Generated response'),
   data: z.unknown().describe('Parsed structured response when JSON mode is used').optional(),
@@ -86,11 +81,28 @@ export const AskOutputSchema = z.strictObject({
     .array(z.string())
     .optional()
     .describe('Warnings from structured output validation (parse failures, schema mismatches)'),
-  workspaceCache: WorkspaceCacheSchema.optional().describe(
-    'Metadata about an automatically applied workspace cache',
-  ),
   ...streamMetadataOutputFields,
 });
+
+const ContextSourceReportSchema = z.strictObject({
+  kind: z
+    .enum(['workspace-file', 'session-summary', 'cache', 'workspace-cache'])
+    .describe('Context source type'),
+  name: z.string().describe('Source identifier (filename, session ID, or cache name)'),
+  tokens: nonNegativeInt('Estimated token cost for this source'),
+});
+
+export type ContextSourceReport = z.infer<typeof ContextSourceReportSchema>;
+
+export const ContextUsedSchema = z
+  .strictObject({
+    sources: z.array(ContextSourceReportSchema).describe('Context sources included in the call'),
+    totalTokens: nonNegativeInt('Total context tokens consumed'),
+    workspaceCacheApplied: z.boolean().describe('Whether automatic workspace cache was applied'),
+  })
+  .describe('Context transparency metadata');
+
+export type ContextUsed = z.infer<typeof ContextUsedSchema>;
 
 export const ExecuteCodeOutputSchema = z.strictObject({
   code: z.string().describe('Generated code'),
@@ -258,9 +270,7 @@ export const ChatOutputSchema = z.strictObject({
     })
     .optional()
     .describe('Session metadata for new or resumed chat sessions.'),
-  workspaceCache: WorkspaceCacheSchema.optional().describe(
-    'Metadata about an automatically applied workspace cache',
-  ),
+  contextUsed: ContextUsedSchema.optional(),
 });
 
 export const ResearchOutputSchema = z.strictObject({
@@ -274,6 +284,7 @@ export const ResearchOutputSchema = z.strictObject({
     .describe('Structured source entries for client consumption'),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
   toolsUsed: z.array(z.string()).optional().describe('Tools invoked during deep research'),
+  contextUsed: ContextUsedSchema.optional(),
 });
 
 export const AnalyzeOutputSchema = z.strictObject({
@@ -282,6 +293,7 @@ export const AnalyzeOutputSchema = z.strictObject({
   summary: z.string().describe('Grounded analysis summary'),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
   analyzedPaths: z.array(z.string()).optional().describe('Local files included in the analysis'),
+  contextUsed: ContextUsedSchema.optional(),
 });
 
 export const ReviewOutputSchema = z.strictObject({
@@ -303,6 +315,7 @@ export const ReviewOutputSchema = z.strictObject({
   omittedPaths: z.array(z.string()).optional().describe('Diff paths omitted due to budget'),
   empty: z.boolean().optional().describe('Whether there were any local changes to review'),
   truncated: z.boolean().optional().describe('Whether the diff review was truncated'),
+  contextUsed: ContextUsedSchema.optional(),
 });
 
 const CacheListEntrySchema = z.strictObject({

@@ -147,6 +147,11 @@ function getEffectiveWorkspaceRoots(clientRoots: string[]): string[] {
   return clientRoots.length > 0 ? clientRoots : [getDefaultWorkspaceRoot()];
 }
 
+interface WorkspaceCandidate {
+  candidate: string;
+  root: string;
+}
+
 function toPortablePath(filePath: string): string {
   return filePath.replaceAll('\\', '/');
 }
@@ -199,6 +204,62 @@ function buildAmbiguousWorkspacePathError(filePath: string, roots: string[]): Er
   return new Error(
     `Relative path '${filePath}' is ambiguous across workspace roots:\n${listedRoots}`,
   );
+}
+
+function getRelativeWorkspaceCandidates(
+  filePath: string,
+  workspaceRoots: readonly string[],
+): WorkspaceCandidate[] {
+  const normalizedRelative = normalize(filePath);
+
+  return workspaceRoots
+    .map((root) => ({
+      root,
+      candidate: resolve(root, normalizedRelative),
+    }))
+    .filter(({ root, candidate }) => isPathWithinRoot(candidate, root));
+}
+
+async function getExistingWorkspaceCandidates(
+  candidates: readonly WorkspaceCandidate[],
+): Promise<WorkspaceCandidate[]> {
+  const existingCandidates: WorkspaceCandidate[] = [];
+
+  for (const candidate of candidates) {
+    if (await pathExists(candidate.candidate)) {
+      existingCandidates.push(candidate);
+    }
+  }
+
+  return existingCandidates;
+}
+
+async function resolveRelativeWorkspaceCandidate(
+  filePath: string,
+  workspaceRoots: readonly string[],
+): Promise<WorkspaceCandidate> {
+  const candidates = getRelativeWorkspaceCandidates(filePath, workspaceRoots);
+
+  if (candidates.length === 0) {
+    throw new Error(`Relative path '${filePath}' escapes the workspace root.`);
+  }
+
+  const existingCandidates = await getExistingWorkspaceCandidates(candidates);
+  const matchedCandidates = existingCandidates.length > 0 ? existingCandidates : candidates;
+
+  if (matchedCandidates.length > 1) {
+    throw buildAmbiguousWorkspacePathError(
+      filePath,
+      matchedCandidates.map((candidate) => candidate.root),
+    );
+  }
+
+  const selected = matchedCandidates[0];
+  if (!selected) {
+    throw new Error(`Unable to resolve path: ${filePath}`);
+  }
+
+  return selected;
 }
 
 function intersectRoots(serverRoots: string[], clientRoots: string[]): string[] {
@@ -270,38 +331,7 @@ export async function resolveWorkspacePath(
     resolvedPath = await canonicalizePath(filePath);
     workspaceRoot = chooseDisplayRoot(resolvedPath, workspaceRoots);
   } else {
-    const normalizedRelative = normalize(filePath);
-    const candidates = workspaceRoots
-      .map((root) => ({
-        root,
-        candidate: resolve(root, normalizedRelative),
-      }))
-      .filter(({ root, candidate }) => isPathWithinRoot(candidate, root));
-
-    if (candidates.length === 0) {
-      throw new Error(`Relative path '${filePath}' escapes the workspace root.`);
-    }
-
-    const existingCandidates: typeof candidates = [];
-    for (const candidate of candidates) {
-      if (await pathExists(candidate.candidate)) {
-        existingCandidates.push(candidate);
-      }
-    }
-
-    const matchedCandidates = existingCandidates.length > 0 ? existingCandidates : candidates;
-    if (matchedCandidates.length > 1) {
-      throw buildAmbiguousWorkspacePathError(
-        filePath,
-        matchedCandidates.map((candidate) => candidate.root),
-      );
-    }
-
-    const selected = matchedCandidates[0];
-    if (!selected) {
-      throw new Error(`Unable to resolve path: ${filePath}`);
-    }
-
+    const selected = await resolveRelativeWorkspaceCandidate(filePath, workspaceRoots);
     resolvedPath = await canonicalizePath(selected.candidate);
     workspaceRoot = selected.root;
   }
@@ -334,16 +364,25 @@ export function buildServerRootsFetcher(server: McpServer): RootsFetcher {
 
 function isPrivateIpv4(hostname: string): boolean {
   const parts = hostname.split('.').map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) return false;
+  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) {
+    return false;
+  }
+
   const [a, b] = parts;
-  const is172PrivateRange = a === 172 && b !== undefined && b >= 16 && b <= 31;
-  return (
-    a === 10 ||
-    a === 127 ||
-    is172PrivateRange ||
-    (a === 192 && b === 168) ||
-    (a === 169 && b === 254)
-  );
+
+  if (a === 10 || a === 127) {
+    return true;
+  }
+
+  if (a === 172) {
+    return b !== undefined && b >= 16 && b <= 31;
+  }
+
+  if (a === 192) {
+    return b === 168;
+  }
+
+  return a === 169 && b === 254;
 }
 
 function isPrivateIpv6(hostname: string): boolean {
@@ -380,48 +419,47 @@ export function isRejectedHost(hostname: string): boolean {
 }
 
 export function isPublicHttpUrl(url: string): boolean {
-  let parsed: URL;
+  const parsed = tryParseUrl(url);
+  return parsed !== undefined && isAllowedHttpUrl(parsed);
+}
+
+function tryParseUrl(url: string): URL | undefined {
   try {
-    parsed = new URL(url);
+    return new URL(url);
   } catch {
-    return false;
+    return undefined;
+  }
+}
+
+function isAllowedHttpUrl(url: URL): boolean {
+  return (url.protocol === 'http:' || url.protocol === 'https:') && !isRejectedHost(url.hostname);
+}
+
+function buildUrlValidationMessage(url: string): string | undefined {
+  const parsed = tryParseUrl(url);
+  if (!parsed) {
+    return `Invalid URL provided: ${url}`;
   }
 
-  return (
-    (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
-    !isRejectedHost(parsed.hostname)
-  );
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return `Only http:// and https:// URLs are allowed: ${url}`;
+  }
+
+  if (isRejectedHost(parsed.hostname)) {
+    return `Private, loopback, and localhost URLs are not allowed: ${url}`;
+  }
+
+  return undefined;
 }
 
 export function validateUrls(urls: readonly string[] | undefined): CallToolResult | undefined {
   if (!urls) return undefined;
 
   for (const url of urls) {
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
+    const validationMessage = buildUrlValidationMessage(url);
+    if (validationMessage) {
       return {
-        content: [{ type: 'text', text: `Invalid URL provided: ${url}` }],
-        isError: true,
-      };
-    }
-
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return {
-        content: [{ type: 'text', text: `Only http:// and https:// URLs are allowed: ${url}` }],
-        isError: true,
-      };
-    }
-
-    if (isRejectedHost(parsed.hostname)) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Private, loopback, and localhost URLs are not allowed: ${url}`,
-          },
-        ],
+        content: [{ type: 'text', text: validationMessage }],
         isError: true,
       };
     }

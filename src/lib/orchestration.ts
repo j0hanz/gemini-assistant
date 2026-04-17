@@ -16,6 +16,52 @@ export const TOOL_PROFILES = [
 
 export type ToolProfile = (typeof TOOL_PROFILES)[number];
 
+interface ToolProfileCapabilities {
+  builtInTools: ToolListUnion;
+  usesCodeExecution: boolean;
+  usesGoogleSearch: boolean;
+  usesUrlContext: boolean;
+}
+
+const TOOL_PROFILE_CAPABILITIES: Record<ToolProfile, ToolProfileCapabilities> = {
+  none: {
+    builtInTools: [],
+    usesCodeExecution: false,
+    usesGoogleSearch: false,
+    usesUrlContext: false,
+  },
+  search: {
+    builtInTools: [{ googleSearch: {} }],
+    usesCodeExecution: false,
+    usesGoogleSearch: true,
+    usesUrlContext: false,
+  },
+  url: {
+    builtInTools: [{ urlContext: {} }],
+    usesCodeExecution: false,
+    usesGoogleSearch: false,
+    usesUrlContext: true,
+  },
+  search_url: {
+    builtInTools: [{ googleSearch: {} }, { urlContext: {} }],
+    usesCodeExecution: false,
+    usesGoogleSearch: true,
+    usesUrlContext: true,
+  },
+  code: {
+    builtInTools: [{ codeExecution: {} }],
+    usesCodeExecution: true,
+    usesGoogleSearch: false,
+    usesUrlContext: false,
+  },
+  search_code: {
+    builtInTools: [{ googleSearch: {} }, { codeExecution: {} }],
+    usesCodeExecution: true,
+    usesGoogleSearch: true,
+    usesUrlContext: false,
+  },
+};
+
 interface OrchestrationRequest {
   functionDeclarations?: FunctionDeclaration[] | undefined;
   googleSearch?: boolean | undefined;
@@ -55,29 +101,16 @@ export function isUrlCapableToolProfile(toolProfile: ToolProfile): boolean {
 }
 
 function hasBuiltInTools(toolProfile: ToolProfile): boolean {
-  return toolProfile !== 'none';
+  return TOOL_PROFILE_CAPABILITIES[toolProfile].builtInTools.length > 0;
 }
 
 function buildBuiltInTools(toolProfile: ToolProfile): ToolListUnion {
-  switch (toolProfile) {
-    case 'search':
-      return [{ googleSearch: {} }];
-    case 'url':
-      return [{ urlContext: {} }];
-    case 'search_url':
-      return [{ googleSearch: {} }, { urlContext: {} }];
-    case 'code':
-      return [{ codeExecution: {} }];
-    case 'search_code':
-      return [{ googleSearch: {} }, { codeExecution: {} }];
-    case 'none':
-    default:
-      return [];
-  }
+  return TOOL_PROFILE_CAPABILITIES[toolProfile].builtInTools.map((tool) => ({ ...tool }));
 }
 
 export function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationConfig {
   const toolProfile = normalizeToolProfile(request);
+  const capabilities = TOOL_PROFILE_CAPABILITIES[toolProfile];
   const builtInTools = buildBuiltInTools(toolProfile);
   const functionDeclarations = request.functionDeclarations?.slice();
   const tools: ToolListUnion = [
@@ -100,9 +133,8 @@ export function buildOrchestrationConfig(request: OrchestrationRequest): Orchest
     ...(toolConfig ? { toolConfig } : {}),
     toolProfile,
     ...(tools.length > 0 ? { tools } : {}),
-    usesCodeExecution: toolProfile === 'code' || toolProfile === 'search_code',
-    usesGoogleSearch:
-      toolProfile === 'search' || toolProfile === 'search_url' || toolProfile === 'search_code',
-    usesUrlContext: toolProfile === 'url' || toolProfile === 'search_url',
+    usesCodeExecution: capabilities.usesCodeExecution,
+    usesGoogleSearch: capabilities.usesGoogleSearch,
+    usesUrlContext: capabilities.usesUrlContext,
   };
 }

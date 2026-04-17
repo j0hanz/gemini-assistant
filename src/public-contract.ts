@@ -152,6 +152,7 @@ export const DISCOVERY_ENTRIES = [
       'A direct answer, optional structured data, usage metadata, and memory resource links for active sessions.',
     limitations: [
       'Sessions are stored in server memory only and expire or evict over time.',
+      'Sessions require a stateful server connection path; stateless transport mode does not preserve chat continuity across requests.',
       'Structured output is intended for single-turn calls and new sessions, not resumed sessions.',
     ],
     related: [

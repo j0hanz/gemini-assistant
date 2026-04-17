@@ -168,10 +168,19 @@ export class SessionStore {
   }
 
   listSessionEntries(): SessionSummary[] {
-    // Read-only: TTL eviction broadcasting is handled by the periodic sweep
-    // (startEvictionTimer) and by getActiveSessionEntry. This method must not
-    // produce notification side effects on every read.
-    return Array.from(this.sessions, ([id, entry]) => toSessionSummary(id, entry));
+    // Read-path eviction: filter out expired sessions so consumers never see
+    // entries that subsequent session reads would report as missing. Eviction
+    // is performed silently (no notifyChange) — the periodic sweep remains the
+    // canonical broadcaster to avoid notification storms on every list call.
+    const active: SessionSummary[] = [];
+    for (const [id, entry] of this.sessions) {
+      if (this.hasExpired(entry)) {
+        this.removeSession(id, true);
+        continue;
+      }
+      active.push(toSessionSummary(id, entry));
+    }
+    return active;
   }
 
   listSessionTranscriptEntries(id: string): TranscriptEntry[] | undefined {

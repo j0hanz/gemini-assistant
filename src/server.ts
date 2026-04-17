@@ -63,7 +63,8 @@ const SERVER_DESCRIPTION =
 
 const SERVER_INSTRUCTIONS =
   'Public tools: ' +
-  'chat (direct Gemini chat with optional in-memory sessions and cache memory), ' +
+  'chat (direct Gemini chat with optional in-memory sessions and cache memory; ' +
+  'chat sessions are server-memory only, expire/evict over time, and require a stateful transport path), ' +
   'research (explicit quick or deep grounded research), ' +
   'analyze (file, URL, or small file-set analysis), ' +
   'review (diff review, file comparison, or failure diagnosis), ' +

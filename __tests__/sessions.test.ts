@@ -243,6 +243,23 @@ describe('sessions', () => {
       assert.ok(entry);
       assert.strictEqual(typeof entry.lastAccess, 'number');
     });
+
+    it('excludes expired sessions and evicts them silently', () => {
+      let now = 1_000_000;
+      const store = createStore({ ttlMs: 1_000, now: () => now, sweepIntervalMs: 60_000 });
+      store.setSession('sess-expiry-active', mockChat('active') as never);
+      store.setSession('sess-expiry-stale', mockChat('stale') as never);
+
+      // Advance past TTL to expire both entries, then refresh one via get.
+      now += 500;
+      store.getSession('sess-expiry-active');
+      now += 600; // sess-expiry-stale is now older than ttlMs; active still fresh.
+
+      const ids = store.listSessionEntries().map((session) => session.id);
+      assert.ok(ids.includes('sess-expiry-active'));
+      assert.ok(!ids.includes('sess-expiry-stale'));
+      assert.strictEqual(store.isEvicted('sess-expiry-stale'), true);
+    });
   });
 
   describe('completeSessionIds', () => {

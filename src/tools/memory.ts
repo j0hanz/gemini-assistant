@@ -6,40 +6,22 @@ import type {
 } from '@modelcontextprotocol/server';
 
 import { createPartFromUri } from '@google/genai';
-import { z } from 'zod/v4';
 
-import {
-  AppError,
-  cleanupErrorLogger,
-  reportCompletion,
-  sendProgress,
-  withRetry,
-} from '../lib/errors.js';
+import { AppError, cleanupErrorLogger, sendProgress, withRetry } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { logger } from '../lib/logger.js';
 import { buildBaseStructuredOutput, createResourceLink } from '../lib/response.js';
-import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
-import { executor } from '../lib/tool-executor.js';
+import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from '../lib/validation.js';
 import { assembleWorkspaceContext, workspaceCacheManager } from '../lib/workspace-context.js';
 import {
   type CreateCacheInput,
-  CreateCacheInputSchema,
   createMemoryInputSchema,
   type DeleteCacheInput,
-  DeleteCacheInputSchema,
   type MemoryInput,
   type UpdateCacheInput,
-  UpdateCacheInputSchema,
 } from '../schemas/inputs.js';
-import {
-  CreateCacheOutputSchema,
-  DeleteCacheOutputSchema,
-  ListCachesOutputSchema,
-  MemoryOutputSchema,
-  UpdateCacheOutputSchema,
-} from '../schemas/outputs.js';
-import { withCurrentWorkspaceRoot } from '../schemas/shared.js';
+import { MemoryOutputSchema } from '../schemas/outputs.js';
 
 import { type CacheSummary, getAI, getCacheSummary, listCacheSummaries, MODEL } from '../client.js';
 import type { SessionStore } from '../sessions.js';
@@ -79,27 +61,6 @@ function notifyCacheChange(cacheNames: string[] = []): void {
   }
 }
 
-function formatCacheListMarkdown(caches: CacheSummary[]): string {
-  if (caches.length === 0) return 'No active caches found.';
-  const str = (value: unknown, fallback: string): string =>
-    typeof value === 'string' ? value : fallback;
-  const num = (value: unknown): string => (typeof value === 'number' ? String(value) : 'N/A');
-
-  return (
-    `**Active Caches (${String(caches.length)})**\n\n` +
-    caches
-      .map(
-        (cache, index) =>
-          `${String(index + 1)}. **${str(cache.displayName, 'Untitled')}**\n` +
-          `   - Name: \`${str(cache.name, 'N/A')}\`\n` +
-          `   - Model: ${str(cache.model, 'N/A')}\n` +
-          `   - Tokens: ${num(cache.totalTokenCount)}\n` +
-          `   - Expires: ${str(cache.expireTime, 'N/A')}`,
-      )
-      .join('\n')
-  );
-}
-
 function truncateName(name: string, maxLen = 10): string {
   return name.length > maxLen ? `${name.slice(0, maxLen)}…` : name;
 }
@@ -113,12 +74,6 @@ function cacheResourceLink(cacheName: string, displayName?: string) {
 
 function cacheListResourceLink() {
   return createResourceLink('memory://caches', 'Active Caches');
-}
-
-function cacheSummaryResourceLinks(caches: CacheSummary[]) {
-  return caches
-    .filter((cache): cache is CacheSummary & { name: string } => typeof cache.name === 'string')
-    .map((cache) => cacheResourceLink(cache.name, cache.displayName ?? cache.name));
 }
 
 function normalizeCreateCacheError(err: unknown): unknown {
@@ -346,11 +301,6 @@ export function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
       );
       await cleanupDuplicateCaches(displayName, cache.name, ctx.mcpReq.signal);
       notifyCacheMutation(cache.name);
-      await reportCompletion(
-        ctx,
-        CREATE_CACHE_TOOL_LABEL,
-        `cached ${truncateName(cache.name ?? 'N/A')}`,
-      );
 
       return buildCreateCacheResult(cache);
     } catch (err) {
@@ -359,51 +309,6 @@ export function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
       await deleteUploadedFiles(uploadedFileNames, cleanupErrorLogger(ctx));
     }
   };
-}
-
-function registerCreateCacheTool(
-  server: McpServer,
-  rootsFetcher: RootsFetcher,
-  taskMessageQueue: TaskMessageQueue,
-): void {
-  registerTaskTool(
-    server,
-    'create_cache',
-    {
-      title: CREATE_CACHE_TOOL_LABEL,
-      description: withCurrentWorkspaceRoot(
-        'Create a Gemini context cache from files and/or a system instruction. ' +
-          'Combined content MUST exceed ~32,000 tokens.',
-      ),
-      inputSchema: CreateCacheInputSchema,
-      outputSchema: CreateCacheOutputSchema,
-      annotations: MUTABLE_ANNOTATIONS,
-    },
-    taskMessageQueue,
-    buildCreateCacheWork(rootsFetcher),
-  );
-}
-
-function registerListCachesTool(server: McpServer): void {
-  server.registerTool(
-    'list_caches',
-    {
-      title: 'List Caches',
-      description: 'List all active Gemini context caches.',
-      inputSchema: z.strictObject({}),
-      outputSchema: ListCachesOutputSchema,
-      annotations: READONLY_ANNOTATIONS,
-    },
-    async (_args, ctx: ServerContext) =>
-      await executor.run(ctx, 'list_caches', 'List Caches', {}, async (_innerArgs, innerCtx) => {
-        const caches = await listCacheSummaries(innerCtx.mcpReq.signal);
-        const cacheLinks = cacheSummaryResourceLinks(caches);
-        return {
-          content: [{ type: 'text', text: formatCacheListMarkdown(caches) }, ...cacheLinks],
-          structuredContent: { caches, count: caches.length },
-        };
-      }),
-  );
 }
 
 export async function deleteCacheWork(
@@ -448,25 +353,6 @@ export async function deleteCacheWork(
   };
 }
 
-function registerDeleteCacheTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
-  registerTaskTool(
-    server,
-    'delete_cache',
-    {
-      title: 'Delete Cache',
-      description: 'Delete a Gemini context cache by resource name.',
-      inputSchema: DeleteCacheInputSchema,
-      outputSchema: DeleteCacheOutputSchema,
-      annotations: {
-        ...MUTABLE_ANNOTATIONS,
-        destructiveHint: true,
-      },
-    },
-    taskMessageQueue,
-    deleteCacheWork,
-  );
-}
-
 export async function updateCacheWork(
   { cacheName, ttl }: UpdateCacheInput,
   ctx: ServerContext,
@@ -493,30 +379,6 @@ export async function updateCacheWork(
       ...(updated.expireTime ? { expireTime: updated.expireTime } : {}),
     },
   };
-}
-
-function registerUpdateCacheTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
-  registerTaskTool(
-    server,
-    'update_cache',
-    {
-      title: 'Update Cache',
-      description: 'Update the TTL of an existing Gemini context cache.',
-      inputSchema: UpdateCacheInputSchema,
-      outputSchema: UpdateCacheOutputSchema,
-      annotations: MUTABLE_ANNOTATIONS,
-    },
-    taskMessageQueue,
-    updateCacheWork,
-  );
-}
-
-export function registerCacheTools(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
-  const rootsFetcher = buildServerRootsFetcher(server);
-  registerCreateCacheTool(server, rootsFetcher, taskMessageQueue);
-  registerListCachesTool(server);
-  registerDeleteCacheTool(server, taskMessageQueue);
-  registerUpdateCacheTool(server, taskMessageQueue);
 }
 
 function sessionUris(sessionId: string): string[] {

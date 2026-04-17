@@ -1,6 +1,9 @@
 import { LATEST_PROTOCOL_VERSION, type McpServer } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
 import { InMemoryTransport } from './lib/in-memory-transport.js';
@@ -259,5 +262,39 @@ describe('in-memory MCP server e2e', () => {
     assert.match(text, /Estimated tokens:/);
     assert.match(text, /## Sources/);
     assert.match(text, /## Content/);
+  });
+
+  it('does not fall back to cwd when workspace context is restricted by ALLOWED_FILE_ROOTS', async () => {
+    const originalAllowedRoots = process.env.ALLOWED_FILE_ROOTS;
+    const originalContextFile = process.env.WORKSPACE_CONTEXT_FILE;
+    const restrictedRoot = await mkdtemp(join(tmpdir(), 'workspace-context-restricted-'));
+    process.env.ALLOWED_FILE_ROOTS = restrictedRoot;
+    process.env.WORKSPACE_CONTEXT_FILE = join(process.cwd(), 'package.json');
+
+    const harness = await createHarness();
+    cleanupCallbacks.push(harness.close);
+
+    try {
+      await harness.client.initialize({});
+      const response = await harness.client.request('resources/read', {
+        uri: 'workspace://context',
+      });
+
+      const text =
+        ((response.result.contents as { text?: string }[]) ?? []).find(
+          (entry) => typeof entry.text === 'string',
+        )?.text ?? '';
+
+      assert.match(text, /^# Workspace Context/m);
+      assert.match(text, /- None/);
+      assert.match(text, /## Content\s+# Workspace Context/m);
+      assert.doesNotMatch(text, /package\.json/);
+      assert.doesNotMatch(text, /## Workspace Files/);
+      assert.doesNotMatch(text, /## Project Context/);
+    } finally {
+      process.env.ALLOWED_FILE_ROOTS = originalAllowedRoots;
+      process.env.WORKSPACE_CONTEXT_FILE = originalContextFile;
+      await rm(restrictedRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -16,6 +16,19 @@ function isBroadBind(host: string): boolean {
   return BROAD_BIND_ADDRESSES.has(host);
 }
 
+function isLocalhostBind(host: string): boolean {
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+}
+
+function normalizeAllowedHost(host: string): string {
+  const cleanHost = host.replace(/^\[(.*)\]$/, '$1').toLowerCase();
+  const ipVersion = isIP(cleanHost);
+  if (ipVersion === 6) {
+    return `[${cleanHost}]`;
+  }
+  return cleanHost;
+}
+
 export function parseAllowedHosts(): string[] | undefined {
   const raw = getAllowedHostsEnv();
   if (!raw) return undefined;
@@ -37,8 +50,9 @@ export function parseAllowedHosts(): string[] | undefined {
 export function resolveAllowedHosts(bindHost: string): string[] | undefined {
   const explicit = parseAllowedHosts();
   if (explicit) return explicit;
-  if (!isBroadBind(bindHost)) return LOCALHOST_HOSTS;
-  return undefined;
+  if (isBroadBind(bindHost)) return undefined;
+  if (isLocalhostBind(bindHost)) return LOCALHOST_HOSTS;
+  return [normalizeAllowedHost(bindHost)];
 }
 
 /**

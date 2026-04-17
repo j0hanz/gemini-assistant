@@ -58,11 +58,15 @@ function createServerInstance(options: ServerInstanceOptions = {}) {
   };
 }
 
-function createRequest(body: unknown, sessionId?: string): Request {
-  return new Request('http://127.0.0.1:3000/mcp', {
+function createRequest(
+  body: unknown,
+  sessionId?: string,
+  options: { hostHeader?: string; requestUrl?: string } = {},
+): Request {
+  return new Request(options.requestUrl ?? 'http://127.0.0.1:3000/mcp', {
     method: 'POST',
     headers: {
-      host: '127.0.0.1:3000',
+      host: options.hostHeader ?? '127.0.0.1:3000',
       accept: 'application/json, text/event-stream',
       'content-type': 'application/json',
       ...(sessionId ? { 'mcp-session-id': sessionId } : {}),
@@ -94,6 +98,7 @@ async function initializeSession(
 
 afterEach(() => {
   delete (globalThis as Record<string, unknown>).Bun;
+  delete process.env.MCP_HTTP_HOST;
   delete process.env.MCP_MAX_TRANSPORT_SESSIONS;
   delete process.env.MCP_STATELESS;
   delete process.env.MCP_TRANSPORT_SESSION_TTL_MS;
@@ -111,6 +116,58 @@ describe('startWebStandardTransport', () => {
 
       assert.strictEqual(response.status, 404);
       assert.match(await response.text(), /Session not found/);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('accepts matching Host headers for specific non-local binds', async () => {
+    process.env.MCP_STATELESS = 'false';
+    process.env.MCP_HTTP_HOST = 'example.internal';
+    const transport = await startWebStandardTransport(() => createServerInstance());
+
+    try {
+      const response = await transport.handler(
+        createRequest(
+          {
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'initialize',
+            params: {
+              capabilities: { roots: {} },
+              clientInfo: { name: 'transport-test', version: '0.0.1' },
+              protocolVersion: LATEST_PROTOCOL_VERSION,
+            },
+          },
+          undefined,
+          {
+            hostHeader: 'example.internal:3000',
+            requestUrl: 'http://example.internal:3000/mcp',
+          },
+        ),
+      );
+
+      assert.strictEqual(response.status, 200);
+      assert.ok(response.headers.get('mcp-session-id'));
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('rejects mismatched Host headers for specific non-local binds', async () => {
+    process.env.MCP_STATELESS = 'false';
+    process.env.MCP_HTTP_HOST = 'example.internal';
+    const transport = await startWebStandardTransport(() => createServerInstance());
+
+    try {
+      const response = await transport.handler(
+        createRequest({ jsonrpc: '2.0', id: 1, method: 'ping' }, undefined, {
+          hostHeader: 'other.internal:3000',
+          requestUrl: 'http://example.internal:3000/mcp',
+        }),
+      );
+
+      assert.strictEqual(response.status, 403);
     } finally {
       await transport.close();
     }

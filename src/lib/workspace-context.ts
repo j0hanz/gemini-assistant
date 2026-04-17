@@ -11,6 +11,7 @@ import {
 } from '../config.js';
 import { withRetry } from './errors.js';
 import { logger } from './logger.js';
+import { isPathWithinRoot } from './validation.js';
 
 // ── Constants ─────────────────────────────────────────────────────────
 
@@ -140,7 +141,12 @@ export async function assembleWorkspaceContext(roots: string[]): Promise<Workspa
   let contextFileContent: string | undefined;
 
   const contextFilePath = getWorkspaceContextFile();
-  if (contextFilePath && isAbsolute(contextFilePath)) {
+  const allowContextFile =
+    contextFilePath &&
+    isAbsolute(contextFilePath) &&
+    validRoots.some((root) => isPathWithinRoot(contextFilePath, root));
+
+  if (allowContextFile) {
     contextFileContent = await tryReadFile(contextFilePath);
     if (contextFileContent) {
       totalSize += contextFileContent.length;

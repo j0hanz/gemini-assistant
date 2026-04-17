@@ -25,7 +25,7 @@ import {
   type ToolEvent,
 } from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
-import { validateUrls } from '../lib/validation.js';
+import { getAllowedRoots, validateUrls } from '../lib/validation.js';
 import { workspaceCacheManager } from '../lib/workspace-context.js';
 import { type AskInput, createAskInputSchema } from '../schemas/inputs.js';
 import {
@@ -551,7 +551,11 @@ async function resolveWorkspaceCacheName(
   )
     return undefined;
   try {
-    return await workspaceCacheManager.getOrCreateCache([process.cwd()], signal);
+    const allowedRoots = await getAllowedRoots();
+    if (allowedRoots.length === 0) {
+      return undefined;
+    }
+    return await workspaceCacheManager.getOrCreateCache(allowedRoots, signal);
   } catch (err) {
     logger.warn('workspace', `Failed to resolve workspace cache: ${String(err)}`);
     return undefined;

@@ -105,7 +105,7 @@ describe('workspace-context', () => {
     it('includes custom context file when configured', async () => {
       process.env.WORKSPACE_CONTEXT_FILE = join(process.cwd(), 'package.json');
       process.env.WORKSPACE_AUTO_SCAN = 'false';
-      const result = await assembleWorkspaceContext([]);
+      const result = await assembleWorkspaceContext([process.cwd()]);
       assert.ok(result.content.includes('## Project Context'));
       assert.strictEqual(result.fileCount, 1);
       assert.ok(result.sources.includes(join(process.cwd(), 'package.json')));
@@ -116,6 +116,30 @@ describe('workspace-context', () => {
       process.env.WORKSPACE_AUTO_SCAN = 'false';
       const result = await assembleWorkspaceContext([]);
       assert.strictEqual(result.fileCount, 0);
+    });
+
+    it('ignores custom context file outside the supplied roots', async () => {
+      const root = await createWorkspaceFile(`ws-context-root-${Date.now()}`, '# Allowed root');
+      process.env.WORKSPACE_CONTEXT_FILE = join(process.cwd(), 'package.json');
+      process.env.WORKSPACE_AUTO_SCAN = 'false';
+
+      const result = await assembleWorkspaceContext([root]);
+
+      assert.strictEqual(result.fileCount, 0);
+      assert.ok(!result.content.includes('## Project Context'));
+      await rm(root, { recursive: true, force: true });
+    });
+
+    it('returns header-only context when no allowed roots remain', async () => {
+      process.env.WORKSPACE_CONTEXT_FILE = join(process.cwd(), 'package.json');
+      process.env.WORKSPACE_AUTO_SCAN = 'true';
+
+      const result = await assembleWorkspaceContext([]);
+
+      assert.strictEqual(result.fileCount, 0);
+      assert.strictEqual(result.content.trim(), '# Workspace Context');
+      assert.ok(!result.content.includes('## Project Context'));
+      assert.ok(!result.content.includes('## Workspace Files'));
     });
 
     it('filters out non-absolute roots', async () => {

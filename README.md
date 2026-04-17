@@ -101,8 +101,8 @@ Useful optional variables:
 - `MCP_HTTP_HOST`: HTTP bind host, default `127.0.0.1`
 - `MCP_STATELESS`: enable stateless streamable HTTP mode when set to `true`
 - `MCP_CORS_ORIGIN`: optional `Access-Control-Allow-Origin` for HTTP mode
-- `MCP_ALLOWED_HOSTS`: optional comma-separated host allowlist for HTTP/web-standard mode
-- `ALLOWED_FILE_ROOTS`: optional comma-separated absolute roots allowed for file tools
+- `MCP_ALLOWED_HOSTS`: optional comma-separated host allowlist for HTTP/web-standard mode; when unset, localhost binds allow localhost aliases automatically and specific non-local binds allow the bind host itself
+- `ALLOWED_FILE_ROOTS`: optional comma-separated absolute roots allowed for file tools, `workspace://context`, and automatic workspace caching
 - `SESSION_TTL_MS`: session idle TTL in milliseconds, default `1800000`
 - `MAX_SESSIONS`: max in-memory chat sessions before LRU eviction, default `50`
 - `WORKSPACE_CACHE_ENABLED`: enable automatic workspace context caching for `ask` calls when set to `true`, default `false`
@@ -116,7 +116,7 @@ File path handling:
 - Relative paths resolve against the active MCP workspace root when the client provides one.
 - If the client does not expose workspace roots, relative paths resolve against the server `cwd`.
 - If the same relative path matches more than one active workspace root, the server returns an ambiguity error.
-- `ALLOWED_FILE_ROOTS` remains an absolute-root security boundary for file access.
+- `ALLOWED_FILE_ROOTS` remains an absolute-root security boundary for explicit file access, `workspace://context`, and automatic workspace caching.
 
 Gemini tool-combination notes:
 

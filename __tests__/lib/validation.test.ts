@@ -118,6 +118,18 @@ describe('resolveAllowedHosts', () => {
     assert.deepEqual(resolveAllowedHosts('::1'), ['localhost', '127.0.0.1', '[::1]']);
   });
 
+  it('auto-resolves specific hostnames to the bind host', () => {
+    assert.deepEqual(resolveAllowedHosts('Example.Internal'), ['example.internal']);
+  });
+
+  it('auto-resolves specific IPv4 binds to the bind host', () => {
+    assert.deepEqual(resolveAllowedHosts('192.168.1.10'), ['192.168.1.10']);
+  });
+
+  it('auto-resolves specific IPv6 binds to bracketed bind hosts', () => {
+    assert.deepEqual(resolveAllowedHosts('2001:db8::10'), ['[2001:db8::10]']);
+  });
+
   it('returns undefined for 0.0.0.0 without env', () => {
     assert.equal(resolveAllowedHosts('0.0.0.0'), undefined);
   });

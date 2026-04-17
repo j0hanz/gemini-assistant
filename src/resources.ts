@@ -2,7 +2,7 @@ import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server
 import { ResourceTemplate } from '@modelcontextprotocol/server';
 
 import { formatError } from './lib/errors.js';
-import { buildServerRootsFetcher } from './lib/validation.js';
+import { buildServerRootsFetcher, getAllowedRoots } from './lib/validation.js';
 import { assembleWorkspaceContext, workspaceCacheManager } from './lib/workspace-context.js';
 
 import { listDiscoveryEntries, listWorkflowEntries } from './catalog.js';
@@ -406,14 +406,7 @@ function registerWorkspaceResources(server: McpServer): void {
     },
     async (uri): Promise<ReadResourceResult> => {
       try {
-        const fetchRoots = buildServerRootsFetcher(server);
-        let roots: string[];
-        try {
-          roots = await fetchRoots();
-        } catch {
-          roots = [];
-        }
-        if (roots.length === 0) roots = [process.cwd()];
+        const roots = await getAllowedRoots(buildServerRootsFetcher(server));
         const ctx = await assembleWorkspaceContext(roots);
         return readWorkspaceContextResource(uri, {
           content: ctx.content,

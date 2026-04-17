@@ -1,6 +1,9 @@
 import type { ServerContext } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { workspaceCacheManager } from '../../src/lib/workspace-context.js';
@@ -74,12 +77,19 @@ describe('ask contract', () => {
 
   it('auto-applies workspace cache metadata on single-turn calls', async () => {
     const originalEnabled = process.env.WORKSPACE_CACHE_ENABLED;
+    const originalAllowedRoots = process.env.ALLOWED_FILE_ROOTS;
     const originalGetOrCreateCache =
       workspaceCacheManager.getOrCreateCache.bind(workspaceCacheManager);
     process.env.WORKSPACE_CACHE_ENABLED = 'true';
+    const allowedRoot = await mkdtemp(join(tmpdir(), 'ask-workspace-cache-'));
 
     let observedCacheName: string | undefined;
-    workspaceCacheManager.getOrCreateCache = async () => 'cachedContents/workspace-1';
+    let observedRoots: string[] | undefined;
+    process.env.ALLOWED_FILE_ROOTS = allowedRoot;
+    workspaceCacheManager.getOrCreateCache = async (roots) => {
+      observedRoots = roots;
+      return 'cachedContents/workspace-1';
+    };
     const askWork = createAskWork(
       createDeps({
         runWithoutSession: async (args: Record<string, unknown>) => {
@@ -107,6 +117,7 @@ describe('ask contract', () => {
       const result = await askWork({ message: 'hello' }, createContext());
 
       assert.strictEqual(observedCacheName, 'cachedContents/workspace-1');
+      assert.deepStrictEqual(observedRoots, [allowedRoot]);
       assert.deepStrictEqual(result.structuredContent, {
         answer: 'Assistant answer',
         workspaceCache: {
@@ -116,7 +127,9 @@ describe('ask contract', () => {
       });
     } finally {
       process.env.WORKSPACE_CACHE_ENABLED = originalEnabled;
+      process.env.ALLOWED_FILE_ROOTS = originalAllowedRoots;
       workspaceCacheManager.getOrCreateCache = originalGetOrCreateCache;
+      await rm(allowedRoot, { recursive: true, force: true });
     }
   });
 

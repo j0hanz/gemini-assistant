@@ -108,6 +108,30 @@ describe('ask transcript capture', () => {
     );
   });
 
+  it('encodes session resource links for session IDs with spaces, %, /, and #', async () => {
+    const harness = createHarness();
+    const askWork = createAskWork(harness.deps as never);
+    const sessionId = 'sess special%/#';
+
+    const result = await askWork({ message: 'Hello', sessionId }, createContext('task-encoded'));
+
+    const encodedSessionId = encodeURIComponent(sessionId);
+    assert.strictEqual(result.isError, undefined);
+    assert.ok(
+      result.content.some(
+        (item) =>
+          item.type === 'resource_link' && item.uri === `memory://sessions/${encodedSessionId}`,
+      ),
+    );
+    assert.ok(
+      result.content.some(
+        (item) =>
+          item.type === 'resource_link' &&
+          item.uri === `memory://sessions/${encodedSessionId}/events`,
+      ),
+    );
+  });
+
   it('captures transcript entries when resuming an existing session', async () => {
     const harness = createHarness();
     harness.sessions.set('sess-existing', { events: [], transcript: [] });

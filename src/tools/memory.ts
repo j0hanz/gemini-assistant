@@ -11,6 +11,7 @@ import { AppError, cleanupErrorLogger, withRetry } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { logger } from '../lib/logger.js';
 import { ProgressReporter } from '../lib/progress.js';
+import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from '../lib/resource-uris.js';
 import { buildBaseStructuredOutput, createResourceLink } from '../lib/response.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from '../lib/validation.js';
@@ -330,7 +331,7 @@ async function deleteCacheWork(
         content: [
           {
             type: 'text',
-            text: 'Interactive confirmation is unavailable. Re-run delete_cache with confirm=true to delete the cache.',
+            text: 'Interactive confirmation is unavailable. Re-run memory action=caches.delete with confirm=true to delete the cache.',
           },
         ],
         structuredContent: {
@@ -384,9 +385,9 @@ async function updateCacheWork(
 
 function sessionUris(sessionId: string): string[] {
   return [
-    `memory://sessions/${sessionId}`,
-    `memory://sessions/${sessionId}/transcript`,
-    `memory://sessions/${sessionId}/events`,
+    sessionDetailUri(sessionId),
+    sessionTranscriptUri(sessionId),
+    sessionEventsUri(sessionId),
   ];
 }
 
@@ -451,14 +452,14 @@ function handleSessionsTranscript(
   return {
     content: [
       { type: 'text', text: `Transcript entries: ${String(transcript.length)}.` },
-      createResourceLink(`memory://sessions/${sessionId}/transcript`, `Transcript ${sessionId}`),
+      createResourceLink(sessionTranscriptUri(sessionId), `Transcript ${sessionId}`),
     ],
     structuredContent: {
       ...base,
       action,
       summary: `Transcript entries: ${String(transcript.length)}.`,
       transcript,
-      resourceUris: [`memory://sessions/${sessionId}/transcript`],
+      resourceUris: [sessionTranscriptUri(sessionId)],
     },
   };
 }
@@ -476,14 +477,14 @@ function handleSessionsEvents(
   return {
     content: [
       { type: 'text', text: `Event entries: ${String(events.length)}.` },
-      createResourceLink(`memory://sessions/${sessionId}/events`, `Events ${sessionId}`),
+      createResourceLink(sessionEventsUri(sessionId), `Events ${sessionId}`),
     ],
     structuredContent: {
       ...base,
       action,
       summary: `Event entries: ${String(events.length)}.`,
       events,
-      resourceUris: [`memory://sessions/${sessionId}/events`],
+      resourceUris: [sessionEventsUri(sessionId)],
     },
   };
 }

@@ -13,6 +13,7 @@ import { AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
+import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from '../lib/resource-uris.js';
 import {
   buildBaseStructuredOutput,
   buildSharedStructuredMetadata,
@@ -80,7 +81,7 @@ interface AskExecutionResult {
   urls?: string[];
 }
 
-const ASK_TOOL_LABEL = 'Ask Gemini';
+const ASK_TOOL_LABEL = 'Chat';
 const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
 
 function validateJsonAgainstSchema(data: unknown, schema: GeminiResponseSchema): string[] {
@@ -219,7 +220,7 @@ function attachContextUsed(result: CallToolResult, contextUsed?: ContextUsed): C
 }
 
 function validateAskConflict(condition: boolean, message: string): CallToolResult | undefined {
-  return condition ? new AppError('ask', message).toToolResult() : undefined;
+  return condition ? new AppError('chat', message).toToolResult() : undefined;
 }
 
 function hasExpiredSession(
@@ -271,22 +272,22 @@ function validateAskRequest(
 
   const hasExistingSession = sessionId ? deps.getSessionEntry(sessionId) !== undefined : false;
   const conflicts: [boolean, string][] = [
-    [hasExpiredSession(sessionId, deps), `ask: Session '${sessionId}' has expired.`],
+    [hasExpiredSession(sessionId, deps), `chat: Session '${sessionId}' has expired.`],
     [
       hasExistingSessionCacheConflict(sessionId, cacheName, hasExistingSession),
-      'ask: Cannot apply a cachedContent to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
+      'chat: Cannot apply cached content to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
     ],
     [
       hasCacheInstructionConflict(cacheName, systemInstruction),
-      'ask: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via create_cache instead.',
+      'chat: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via memory action=caches.create instead.',
     ],
     [
       hasCacheGenerationControlConflict(cacheName, temperature, seed),
-      'ask: temperature and seed cannot be used with cacheName. Generation parameters are fixed at cache creation time.',
+      'chat: temperature and seed cannot be used with cacheName. Generation parameters are fixed when the cache is created.',
     ],
     [
       hasExistingSessionResponseSchemaConflict(responseSchema, sessionId, hasExistingSession),
-      'ask: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
+      'chat: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
     ],
   ];
 
@@ -338,7 +339,7 @@ async function runAskStream(
   let capturedStreamResult: StreamResult | undefined;
   const result = await executor.runStream(
     ctx,
-    'ask',
+    'chat',
     ASK_TOOL_LABEL,
     streamGenerator,
     (streamResult) => {
@@ -375,11 +376,9 @@ async function runAskStream(
 
 function appendSessionResource(result: CallToolResult, sessionId: string): void {
   if (result.isError) return;
+  result.content.push(createResourceLink(sessionDetailUri(sessionId), `Chat Session ${sessionId}`));
   result.content.push(
-    createResourceLink(`memory://sessions/${sessionId}`, `Chat Session ${sessionId}`),
-  );
-  result.content.push(
-    createResourceLink(`memory://sessions/${sessionId}/events`, `Chat Session ${sessionId} Events`),
+    createResourceLink(sessionEventsUri(sessionId), `Chat Session ${sessionId} Events`),
   );
 }
 
@@ -782,9 +781,9 @@ function extractSessionId(
 
 function sessionResources(sessionId: string) {
   return {
-    detail: `memory://sessions/${sessionId}`,
-    events: `memory://sessions/${sessionId}/events`,
-    transcript: `memory://sessions/${sessionId}/transcript`,
+    detail: sessionDetailUri(sessionId),
+    events: sessionEventsUri(sessionId),
+    transcript: sessionTranscriptUri(sessionId),
   };
 }
 

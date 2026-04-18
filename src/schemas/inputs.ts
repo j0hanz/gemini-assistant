@@ -325,7 +325,7 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
     thinkingLevel: thinkingLevel('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
     cacheName: completable(
       cacheName(
-        'Cache name from create_cache. Cannot be applied to an existing chat session.',
+        'Cache name from memory action=caches.create. Cannot be applied to an existing chat session.',
       ).optional(),
       completeCacheNames,
     ),

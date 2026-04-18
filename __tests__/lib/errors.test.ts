@@ -61,7 +61,7 @@ describe('AppError', () => {
   });
 
   it('creates error tool results', () => {
-    const result = new AppError('ask', 'something went wrong').toToolResult();
+    const result = new AppError('chat', 'something went wrong').toToolResult();
     assert.deepStrictEqual(result, {
       content: [{ type: 'text', text: 'something went wrong' }],
       isError: true,
@@ -69,11 +69,11 @@ describe('AppError', () => {
   });
 
   it('classifies retryable and non-retryable Gemini statuses', () => {
-    const rateLimited = AppError.from(createStatusError(429, 'Too many requests'), 'ask');
-    const forbidden = AppError.from(createStatusError(403, 'Forbidden'), 'ask');
-    const missing = AppError.from(createStatusError(404, 'Missing'), 'ask');
-    const internal = AppError.from(createStatusError(500, 'Internal'), 'ask');
-    const unavailable = AppError.from(createStatusError(503, 'Unavailable'), 'ask');
+    const rateLimited = AppError.from(createStatusError(429, 'Too many requests'), 'chat');
+    const forbidden = AppError.from(createStatusError(403, 'Forbidden'), 'chat');
+    const missing = AppError.from(createStatusError(404, 'Missing'), 'chat');
+    const internal = AppError.from(createStatusError(500, 'Internal'), 'chat');
+    const unavailable = AppError.from(createStatusError(503, 'Unavailable'), 'chat');
 
     assert.strictEqual(rateLimited.category, 'server');
     assert.strictEqual(rateLimited.retryable, true);
@@ -90,16 +90,16 @@ describe('AppError', () => {
   });
 
   it('classifies abort and generic errors', () => {
-    const cancelled = AppError.from(new DOMException('Aborted', 'AbortError'), 'ask');
-    const generic = AppError.from(new Error('boom'), 'ask');
+    const cancelled = AppError.from(new DOMException('Aborted', 'AbortError'), 'chat');
+    const generic = AppError.from(new Error('boom'), 'chat');
 
     assert.ok(cancelled instanceof CancelledError);
     assert.strictEqual(cancelled.category, 'cancelled');
     assert.strictEqual(cancelled.retryable, false);
-    assert.strictEqual(cancelled.message, 'ask: cancelled by client');
+    assert.strictEqual(cancelled.message, 'chat: cancelled by client');
     assert.strictEqual(generic.category, 'internal');
     assert.strictEqual(generic.retryable, false);
-    assert.strictEqual(generic.message, 'ask failed: boom');
+    assert.strictEqual(generic.message, 'chat failed: boom');
   });
 
   it('detects retryability', () => {
@@ -107,8 +107,8 @@ describe('AppError', () => {
     assert.strictEqual(AppError.isRetryable(createStatusError(500)), true);
     assert.strictEqual(AppError.isRetryable(createStatusError(503)), true);
     assert.strictEqual(AppError.isRetryable(createStatusError(403)), false);
-    assert.strictEqual(AppError.isRetryable(new CancelledError('ask')), false);
-    assert.strictEqual(AppError.isRetryable(new SafetyError('ask', 'response_blocked')), false);
+    assert.strictEqual(AppError.isRetryable(new CancelledError('chat')), false);
+    assert.strictEqual(AppError.isRetryable(new SafetyError('chat', 'response_blocked')), false);
   });
 });
 
@@ -119,21 +119,21 @@ describe('SafetyError', () => {
       'execute_code: response blocked by safety filter',
     );
     assert.strictEqual(
-      new SafetyError('ask', 'prompt_blocked', 'SAFETY').message,
-      'ask: prompt blocked by safety filter (SAFETY)',
+      new SafetyError('chat', 'prompt_blocked', 'SAFETY').message,
+      'chat: prompt blocked by safety filter (SAFETY)',
     );
     assert.strictEqual(
-      new SafetyError('ask', 'recitation').message,
-      'ask: response blocked due to recitation policy',
+      new SafetyError('chat', 'recitation').message,
+      'chat: response blocked due to recitation policy',
     );
   });
 });
 
 describe('finishReasonToError', () => {
   it('maps safety and recitation finish reasons', () => {
-    assert.strictEqual(finishReasonToError(undefined, 'text', 'ask'), undefined);
+    assert.strictEqual(finishReasonToError(undefined, 'text', 'chat'), undefined);
     assert.ok(finishReasonToError('SAFETY' as never, '', 'execute_code') instanceof SafetyError);
-    assert.ok(finishReasonToError('RECITATION' as never, '', 'ask') instanceof SafetyError);
+    assert.ok(finishReasonToError('RECITATION' as never, '', 'chat') instanceof SafetyError);
   });
 
   it('maps max-token truncation only when no text exists', () => {

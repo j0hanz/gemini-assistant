@@ -9,6 +9,7 @@ import {
   assembleWorkspaceContext,
   estimateTokens,
   MIN_CACHE_TOKENS,
+  summarizeRootForDashboard,
   workspaceCacheManager,
 } from '../../src/lib/workspace-context.js';
 
@@ -211,6 +212,25 @@ describe('workspace-context', () => {
       assert.ok(!result.content.includes('semi'));
       assert.ok(!result.content.includes('rules'));
       await rm(testDir, { recursive: true, force: true });
+    });
+  });
+
+  describe('summarizeRootForDashboard', () => {
+    it('returns matching dashboard filenames without reading file contents', async () => {
+      const testDir = join(tmpdir(), `ws-dashboard-summary-${Date.now()}`);
+      await mkdir(testDir, { recursive: true });
+      await writeFile(join(testDir, 'readme.md'), 'x'.repeat(600_000));
+      await writeFile(join(testDir, 'package.json'), '{"name":"summary"}');
+      await writeFile(join(testDir, 'notes.txt'), 'ignore');
+
+      try {
+        const summary = await summarizeRootForDashboard(testDir);
+
+        assert.strictEqual(summary.fileCount, 2);
+        assert.deepStrictEqual(summary.fileNames, ['package.json', 'readme.md']);
+      } finally {
+        await rm(testDir, { recursive: true, force: true });
+      }
     });
   });
 

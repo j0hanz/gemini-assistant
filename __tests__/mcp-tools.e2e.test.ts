@@ -323,6 +323,24 @@ describe('MCP tool smoke coverage', () => {
       assert.ok(memoryTool);
       assertAdvertisedOutputSchema(memoryTool, sessionListResult);
 
+      env.queueStream(makeChunk([{ text: 'Session ready' }], FinishReason.STOP));
+
+      const encodedSessionId = 'sess special%/#';
+      const sessionResult = await callTool(harness.client, 'chat', {
+        goal: 'Start a session',
+        session: { id: encodedSessionId },
+      });
+      expectSuccess(sessionResult);
+      assert.deepStrictEqual(sessionResult.structuredContent.session, {
+        id: encodedSessionId,
+        resources: {
+          detail: `memory://sessions/${encodeURIComponent(encodedSessionId)}`,
+          events: `memory://sessions/${encodeURIComponent(encodedSessionId)}/events`,
+          transcript: `memory://sessions/${encodeURIComponent(encodedSessionId)}/transcript`,
+        },
+      });
+      assertAdvertisedOutputSchema(chatTool, sessionResult);
+
       const createCacheResult = await callTool(harness.client, 'memory', {
         action: 'caches.create',
         filePaths: ['package.json'],

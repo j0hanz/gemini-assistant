@@ -35,7 +35,7 @@ import { explainErrorWork } from './explain-error.js';
 const execFileAsync = promisify(execFile);
 
 const COMPARE_FILE_TOOL_LABEL = 'Compare Files';
-const REVIEW_DIFF_TOOL_LABEL = 'Analyze PR';
+const REVIEW_DIFF_TOOL_LABEL = 'Review Diff';
 const GIT_TIMEOUT_MS = 30_000;
 const GIT_MAX_BUFFER = 10 * 1024 * 1024;
 const MAX_DIFF_CHARS = 500_000;
@@ -189,6 +189,7 @@ interface DiffUnit {
 interface BudgetedSnapshotDiff {
   diff: string;
   omittedPaths: string[];
+  reviewedPaths: string[];
   summary: string;
   truncated: boolean;
 }
@@ -582,7 +583,7 @@ export function scoreDiffUnitRisk(unit: DiffUnit): number {
 export function budgetDiffUnits(
   units: DiffUnit[],
   maxChars = MAX_DIFF_CHARS,
-): { diff: string; omittedPaths: string[]; truncated: boolean } {
+): { diff: string; omittedPaths: string[]; reviewedPaths: string[]; truncated: boolean } {
   const orderedUnits = [...units].sort((a, b) => {
     const scoreDelta = scoreDiffUnitRisk(b) - scoreDiffUnitRisk(a);
     return scoreDelta !== 0 ? scoreDelta : a.path.localeCompare(b.path);
@@ -596,7 +597,7 @@ export function budgetDiffUnits(
     const separatorLength = keptUnits.length > 0 ? 1 : 0;
     const nextLength = currentLength + separatorLength + unit.text.length;
 
-    if (keptUnits.length > 0 && nextLength > maxChars) {
+    if (nextLength > maxChars) {
       omittedPaths.push(unit.path);
       continue;
     }
@@ -608,6 +609,7 @@ export function budgetDiffUnits(
   return {
     diff: keptUnits.map((unit) => unit.text).join('\n'),
     ...(omittedPaths.length > 0 ? { omittedPaths: omittedPaths.sort() } : { omittedPaths: [] }),
+    reviewedPaths: keptUnits.map((unit) => unit.path).sort(),
     truncated: omittedPaths.length > 0,
   };
 }
@@ -717,10 +719,13 @@ function buildSnapshotStats(diff: string): Pick<LocalDiffSnapshot, 'empty' | 'st
 }
 
 function buildBudgetedSnapshotDiff(snapshot: LocalDiffSnapshot): BudgetedSnapshotDiff {
-  const { diff, omittedPaths, truncated } = budgetDiffUnits(splitDiffUnits(snapshot.diff));
+  const { diff, omittedPaths, reviewedPaths, truncated } = budgetDiffUnits(
+    splitDiffUnits(snapshot.diff),
+  );
   return {
     diff,
     omittedPaths,
+    reviewedPaths,
     summary: formatSnapshotSummary(snapshot.stats, omittedPaths),
     truncated,
   };
@@ -729,13 +734,14 @@ function buildBudgetedSnapshotDiff(snapshot: LocalDiffSnapshot): BudgetedSnapsho
 function buildStructuredContent(
   snapshot: LocalDiffSnapshot,
   analysis: string,
+  reviewedPaths: string[],
   omittedPaths: string[] = [],
   truncated?: boolean,
 ): AnalyzePrStructuredContent {
   return {
     analysis,
     stats: snapshot.stats,
-    reviewedPaths: snapshot.reviewedPaths,
+    reviewedPaths,
     includedUntracked: snapshot.includedUntracked,
     skippedBinaryPaths: snapshot.skippedBinaryPaths,
     skippedLargePaths: snapshot.skippedLargePaths,
@@ -760,6 +766,10 @@ function buildNoChangesAnalysis(snapshot: LocalDiffSnapshot): string {
     : 'No local changes to review.';
 }
 
+function buildBudgetExceededAnalysis(omittedPaths: string[]): string {
+  return `No local diff content fit the review size budget. Omitted ${String(omittedPaths.length)} path(s): ${omittedPaths.join(', ')}. Narrow the change set or run a more targeted review.`;
+}
+
 function formatSnapshotSummary(stats: DiffStats, omittedPaths: string[] = []): string {
   return `${String(stats.files)} files (+${String(stats.additions)}, -${String(stats.deletions)})${omittedPaths.length > 0 ? `, omitted ${String(omittedPaths.length)}` : ''}`;
 }
@@ -767,12 +777,19 @@ function formatSnapshotSummary(stats: DiffStats, omittedPaths: string[] = []): s
 function buildTextResult(
   snapshot: LocalDiffSnapshot,
   text: string,
+  reviewedPaths: string[],
   omittedPaths: string[] = [],
   truncated?: boolean,
 ): CallToolResult {
   return {
     content: [{ type: 'text' as const, text }],
-    structuredContent: buildStructuredContent(snapshot, text, omittedPaths, truncated),
+    structuredContent: buildStructuredContent(
+      snapshot,
+      text,
+      reviewedPaths,
+      omittedPaths,
+      truncated,
+    ),
   };
 }
 
@@ -845,7 +862,7 @@ export async function analyzePrWork(
   if (snapshot.empty) {
     const analysis = buildNoChangesAnalysis(snapshot);
     await progress.complete('no changes');
-    return buildTextResult(snapshot, analysis);
+    return buildTextResult(snapshot, analysis, snapshot.reviewedPaths);
   }
 
   if (dryRun) {
@@ -853,6 +870,19 @@ export async function analyzePrWork(
     return buildTextResult(
       snapshot,
       budgetedDiff.diff,
+      budgetedDiff.reviewedPaths,
+      budgetedDiff.omittedPaths,
+      budgetedDiff.truncated,
+    );
+  }
+
+  if (budgetedDiff.reviewedPaths.length === 0) {
+    const analysis = buildBudgetExceededAnalysis(budgetedDiff.omittedPaths);
+    await progress.complete('all changes omitted');
+    return buildTextResult(
+      snapshot,
+      analysis,
+      budgetedDiff.reviewedPaths,
       budgetedDiff.omittedPaths,
       budgetedDiff.truncated,
     );
@@ -864,7 +894,7 @@ export async function analyzePrWork(
   const prompt = buildAnalysisPrompt(
     budgetedDiff.diff,
     snapshot.stats,
-    snapshot.reviewedPaths,
+    budgetedDiff.reviewedPaths,
     snapshot.includedUntracked,
     snapshot.skippedBinaryPaths,
     snapshot.skippedLargePaths,
@@ -899,6 +929,7 @@ export async function analyzePrWork(
       structuredContent: buildStructuredContent(
         snapshot,
         textContent || '',
+        budgetedDiff.reviewedPaths,
         budgetedDiff.omittedPaths,
         budgetedDiff.truncated,
       ),

@@ -3,10 +3,11 @@ import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontex
 
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
+import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from './lib/resource-uris.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from './lib/validation.js';
 import {
   assembleWorkspaceContext,
-  scanRootForFiles,
+  summarizeRootForDashboard,
   workspaceCacheManager,
 } from './lib/workspace-context.js';
 
@@ -102,6 +103,11 @@ function normalizeTemplateParam(value: string | string[] | undefined): string | 
   return Array.isArray(value) ? value[0] : value;
 }
 
+function decodeTemplateParam(value: string | string[] | undefined): string | undefined {
+  const normalized = normalizeTemplateParam(value);
+  return normalized ? decodeURIComponent(normalized) : normalized;
+}
+
 function toResourceUri(uri: URL | string): string {
   return typeof uri === 'string' ? uri : uri.href;
 }
@@ -142,21 +148,21 @@ export function readWorkspaceContextResource(
 
 function sessionDetailResources(sessionStore: SessionStore): ResourceListEntry[] {
   return sessionStore.listSessionEntries().map((session) => ({
-    uri: `memory://sessions/${session.id}`,
+    uri: sessionDetailUri(session.id),
     name: `Session ${session.id}`,
   }));
 }
 
 function sessionTranscriptResources(sessionStore: SessionStore): ResourceListEntry[] {
   return sessionStore.listSessionEntries().map((session) => ({
-    uri: `memory://sessions/${session.id}/transcript`,
+    uri: sessionTranscriptUri(session.id),
     name: `Transcript ${session.id}`,
   }));
 }
 
 function sessionEventResources(sessionStore: SessionStore): ResourceListEntry[] {
   return sessionStore.listSessionEntries().map((session) => ({
-    uri: `memory://sessions/${session.id}/events`,
+    uri: sessionEventsUri(session.id),
     name: `Events ${session.id}`,
   }));
 }
@@ -214,6 +220,10 @@ interface ServerContextSnapshot {
 
 export function renderServerContextMarkdown(snapshot: ServerContextSnapshot): string {
   const { workspace, sessions, config } = snapshot;
+  const displayedFiles = workspace.scannedFiles.slice(0, 10);
+  const hiddenFileCount = Math.max(workspace.scannedFiles.length - displayedFiles.length, 0);
+  const scannedFileLabel = displayedFiles.length > 0 ? displayedFiles.join(', ') : 'none';
+  const scannedFileSuffix = hiddenFileCount > 0 ? ` (+${String(hiddenFileCount)} more)` : '';
   const cacheStatus = workspace.cacheStatus.enabled
     ? workspace.cacheStatus.cacheName
       ? `active (\`${workspace.cacheStatus.cacheName}\`), ${workspace.cacheStatus.fresh ? 'fresh' : 'stale'}, TTL ${workspace.cacheStatus.ttl}`
@@ -226,7 +236,7 @@ export function renderServerContextMarkdown(snapshot: ServerContextSnapshot): st
     '## Workspace',
     '',
     `- **Roots**: ${workspace.roots.join(', ') || 'none'}`,
-    `- **Scanned files**: ${workspace.scannedFiles.join(', ') || 'none'} (${String(workspace.scannedFiles.length)} files)`,
+    `- **Scanned files**: ${scannedFileLabel}${scannedFileSuffix} (${String(workspace.scannedFiles.length)} files)`,
     `- **Estimated tokens**: ${String(workspace.estimatedTokens)}`,
     `- **Cache**: ${cacheStatus}`,
     '',
@@ -251,30 +261,19 @@ export async function buildServerContextSnapshot(
   sessionStore: SessionStore,
 ): Promise<ServerContextSnapshot> {
   const roots = await getAllowedRoots(rootsFetcher);
-  const scannedFiles: string[] = [];
-  let estimatedTokens = 0;
-
-  for (const root of roots) {
-    try {
-      const files = await scanRootForFiles(root);
-      for (const [filePath, content] of files) {
-        scannedFiles.push(filePath.split(/[\\/]/).pop() ?? filePath);
-        estimatedTokens += Math.ceil(content.length / 4);
-      }
-    } catch {
-      // Ignore scan failures in the dashboard.
-    }
-  }
-
   const sessionLimits = getSessionLimits();
   const cacheStatus = workspaceCacheManager.getCacheStatus();
   const sessions = sessionStore.listSessionEntries();
+  const rootSummaries = await Promise.all(
+    roots.map(async (root) => await summarizeRootForDashboard(root)),
+  );
+  const scannedFiles = rootSummaries.flatMap((summary) => summary.fileNames);
 
   return {
     workspace: {
       roots,
       scannedFiles,
-      estimatedTokens,
+      estimatedTokens: cacheStatus.estimatedTokens ?? 0,
       cacheStatus: {
         enabled: getWorkspaceCacheEnabled(),
         cacheName: cacheStatus.cacheName ?? undefined,
@@ -360,7 +359,7 @@ export function readSessionTranscriptResource(
   uri: URL | string,
   sessionId: string | string[] | undefined,
 ): ReadResourceResult {
-  const id = normalizeTemplateParam(sessionId);
+  const id = decodeTemplateParam(sessionId);
   const data = getSessionTranscriptResourceData(sessionStore, id);
   return dualContentResource(toResourceUri(uri), data, renderSessionTranscriptMarkdown(id, data));
 }
@@ -428,7 +427,7 @@ export function readSessionEventsResource(
   uri: URL | string,
   sessionId: string | string[] | undefined,
 ): ReadResourceResult {
-  const id = normalizeTemplateParam(sessionId);
+  const id = decodeTemplateParam(sessionId);
   const data = getSessionEventsResourceData(sessionStore, id);
   return dualContentResource(toResourceUri(uri), data, renderSessionEventsMarkdown(id, data));
 }
@@ -467,7 +466,7 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
       },
     },
     (uri, { sessionId }): ReadResourceResult => {
-      const id = normalizeTemplateParam(sessionId);
+      const id = decodeTemplateParam(sessionId);
       if (!id) {
         throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Session ID required');
       }

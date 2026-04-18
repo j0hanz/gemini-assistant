@@ -101,9 +101,11 @@ export const AgenticSearchOutputSchema = z.strictObject({
 });
 
 export const AnalyzePrOutputSchema = z.strictObject({
-  analysis: z.string().describe('Comprehensive PR review'),
-  stats: z.strictObject(diffStatsFields).describe('Diff statistics'),
-  reviewedPaths: z.array(z.string()).describe('Relative file paths included in the review'),
+  analysis: z.string().describe('Comprehensive local diff review'),
+  stats: z.strictObject(diffStatsFields).describe('Local diff statistics'),
+  reviewedPaths: z
+    .array(z.string())
+    .describe('Relative file paths included in the local diff review'),
   includedUntracked: z
     .array(z.string())
     .describe('Relative untracked text files synthesized into the generated diff'),
@@ -118,7 +120,9 @@ export const AnalyzePrOutputSchema = z.strictObject({
   omittedPaths: z
     .array(z.string())
     .optional()
-    .describe('Relative diff paths omitted from Gemini review because of the review budget'),
+    .describe(
+      'Relative diff paths omitted from the local diff review because of the review budget',
+    ),
   empty: z.boolean().describe('Whether there were any local changes to review'),
   truncated: z.boolean().describe('Whether the diff was truncated due to size').optional(),
   ...streamMetadataOutputFields,
@@ -203,11 +207,11 @@ export const ReviewOutputSchema = z.strictObject({
     .strictObject(diffStatsFields)
     .optional()
     .describe('Diff statistics when review.subject.kind=diff'),
-  reviewedPaths: z.array(z.string()).optional().describe('Paths included in a diff review'),
+  reviewedPaths: z.array(z.string()).optional().describe('Paths included in a local diff review'),
   includedUntracked: z.array(z.string()).optional().describe('Included untracked text files'),
   skippedBinaryPaths: z.array(z.string()).optional().describe('Skipped untracked binary files'),
   skippedLargePaths: z.array(z.string()).optional().describe('Skipped large untracked files'),
-  omittedPaths: z.array(z.string()).optional().describe('Diff paths omitted due to budget'),
+  omittedPaths: z.array(z.string()).optional().describe('Local diff paths omitted due to budget'),
   empty: z.boolean().optional().describe('Whether there were any local changes to review'),
   truncated: z.boolean().optional().describe('Whether the diff review was truncated'),
   contextUsed: ContextUsedSchema.optional(),

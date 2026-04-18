@@ -1,6 +1,7 @@
 import type { Chat } from '@google/genai';
 
 import type { ToolProfile } from './lib/orchestration.js';
+import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from './lib/resource-uris.js';
 import type { FunctionCallEntry, ToolEvent } from './lib/streaming.js';
 import type { UsageMetadata } from './schemas/outputs.js';
 
@@ -66,18 +67,6 @@ export interface SessionStoreOptions {
 }
 
 type SessionChangeSubscriber = (event: SessionChangeEvent) => void;
-
-function sessionDetailUri(id: string): string {
-  return `memory://sessions/${encodeURIComponent(id)}`;
-}
-
-function sessionTranscriptUri(id: string): string {
-  return `memory://sessions/${encodeURIComponent(id)}/transcript`;
-}
-
-function sessionEventsUri(id: string): string {
-  return `memory://sessions/${encodeURIComponent(id)}/events`;
-}
 
 function cloneValue<T>(value: T): T {
   return structuredClone(value);

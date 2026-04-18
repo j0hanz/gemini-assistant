@@ -194,9 +194,31 @@ describe('budgetDiffUnits', () => {
     assert.strictEqual(result.truncated, false);
     assert.match(result.diff, /diff --git a\/src\/a\.ts b\/src\/a\.ts/);
     assert.deepStrictEqual(result.omittedPaths, []);
+    assert.deepStrictEqual(result.reviewedPaths, ['src/a.ts']);
   });
 
-  it('omits whole-file units once the budget is exceeded', () => {
+  it('omits an oversized first diff unit instead of exceeding the hard cap', () => {
+    const diff = [
+      'diff --git a/src/huge.ts b/src/huge.ts',
+      '--- a/src/huge.ts',
+      '+++ b/src/huge.ts',
+      ...Array.from({ length: 60 }, (_, i) => `+huge line ${String(i)}`),
+      'diff --git a/src/tiny.ts b/src/tiny.ts',
+      '--- a/src/tiny.ts',
+      '+++ b/src/tiny.ts',
+      '+tiny',
+    ].join('\n');
+    const result = budgetDiffUnits(splitDiffUnits(diff), 120);
+
+    assert.strictEqual(result.truncated, true);
+    assert.doesNotMatch(result.diff, /src\/huge\.ts/);
+    assert.match(result.diff, /src\/tiny\.ts/);
+    assert.ok(result.diff.length <= 120);
+    assert.deepStrictEqual(result.omittedPaths, ['src/huge.ts']);
+    assert.deepStrictEqual(result.reviewedPaths, ['src/tiny.ts']);
+  });
+
+  it('keeps later units that still fit after an earlier unit overflows the budget', () => {
     const diff = [
       'diff --git a/src/large.ts b/src/large.ts',
       '--- a/src/large.ts',
@@ -210,9 +232,10 @@ describe('budgetDiffUnits', () => {
     const result = budgetDiffUnits(splitDiffUnits(diff), 250);
 
     assert.strictEqual(result.truncated, true);
-    assert.match(result.diff, /src\/large\.ts/);
-    assert.doesNotMatch(result.diff, /src\/small\.ts/);
-    assert.deepStrictEqual(result.omittedPaths, ['src/small.ts']);
+    assert.doesNotMatch(result.diff, /src\/large\.ts/);
+    assert.match(result.diff, /src\/small\.ts/);
+    assert.deepStrictEqual(result.omittedPaths, ['src/large.ts']);
+    assert.deepStrictEqual(result.reviewedPaths, ['src/small.ts']);
   });
 
   it('prefers high-risk source files over larger low-signal assets', () => {
@@ -234,6 +257,34 @@ describe('budgetDiffUnits', () => {
     assert.match(result.diff, /src\/auth\/session\.ts/);
     assert.doesNotMatch(result.diff, /public\/banner\.png/);
     assert.deepStrictEqual(result.omittedPaths, ['public/banner.png']);
+    assert.deepStrictEqual(result.reviewedPaths, ['src/auth/session.ts']);
+  });
+
+  it('keeps units that land exactly on the limit', () => {
+    const diff = [
+      'diff --git a/src/exact.ts b/src/exact.ts',
+      '--- a/src/exact.ts',
+      '+++ b/src/exact.ts',
+      '+exact budget',
+    ].join('\n');
+    const [unit] = splitDiffUnits(diff);
+
+    assert.ok(unit);
+    const result = budgetDiffUnits([unit], unit.text.length);
+
+    assert.strictEqual(result.truncated, false);
+    assert.strictEqual(result.diff.length, unit.text.length);
+    assert.deepStrictEqual(result.omittedPaths, []);
+    assert.deepStrictEqual(result.reviewedPaths, ['src/exact.ts']);
+  });
+
+  it('returns empty budgeting metadata for empty diffs', () => {
+    const result = budgetDiffUnits([], 50);
+
+    assert.strictEqual(result.diff, '');
+    assert.strictEqual(result.truncated, false);
+    assert.deepStrictEqual(result.omittedPaths, []);
+    assert.deepStrictEqual(result.reviewedPaths, []);
   });
 
   it('gives config and routing changes higher risk scores than tests', () => {
@@ -381,6 +432,90 @@ describe('analyzePrWork cache prompt integration', () => {
       );
       assert.match(contents, /## Snapshot/);
       assert.match(contents, /```diff/);
+    } finally {
+      process.chdir(cwd);
+      client.models.generateContentStream = originalGenerateContentStream;
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('analyzePrWork diff budgeting metadata', () => {
+  it('reports reviewedPaths only for files kept in the prompt and omittedPaths for the rest', async () => {
+    const repoRoot = await createTempRepo();
+    const cwd = process.cwd();
+
+    try {
+      await mkdir(join(repoRoot, 'src'), { recursive: true });
+      await writeFile(join(repoRoot, 'src', 'large.ts'), 'export const large = 1;\n');
+      await writeFile(join(repoRoot, 'src', 'small.ts'), 'export const small = 1;\n');
+      runGit(repoRoot, ['add', '.']);
+      runGit(repoRoot, ['commit', '-m', 'initial']);
+
+      await writeFile(
+        join(repoRoot, 'src', 'large.ts'),
+        Array.from(
+          { length: 30_000 },
+          (_, i) => `export const large${String(i)} = ${String(i)};`,
+        ).join('\n') + '\n',
+      );
+      await writeFile(join(repoRoot, 'src', 'small.ts'), 'export const small = 2;\n');
+
+      process.chdir(repoRoot);
+      const result = await analyzePrWork({ dryRun: true }, makeContext());
+      const structured = result.structuredContent as Record<string, unknown>;
+
+      assert.strictEqual(result.isError, undefined);
+      assert.deepStrictEqual(structured.reviewedPaths, ['src/small.ts']);
+      assert.deepStrictEqual(structured.omittedPaths, ['src/large.ts']);
+      assert.strictEqual(structured.truncated, true);
+      assert.ok(String(result.content[0]?.text ?? '').length <= 500_000);
+    } finally {
+      process.chdir(cwd);
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('returns a local truncated result when every diff unit is omitted by the budget', async () => {
+    const repoRoot = await createTempRepo();
+    const cwd = process.cwd();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+    let modelCalled = false;
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () => {
+      modelCalled = true;
+      return fakeStream('unexpected');
+    };
+
+    try {
+      await mkdir(join(repoRoot, 'src'), { recursive: true });
+      await writeFile(join(repoRoot, 'src', 'large.ts'), 'export const large = 1;\n');
+      runGit(repoRoot, ['add', '.']);
+      runGit(repoRoot, ['commit', '-m', 'initial']);
+
+      await writeFile(
+        join(repoRoot, 'src', 'large.ts'),
+        Array.from(
+          { length: 30_000 },
+          (_, i) => `export const large${String(i)} = ${String(i)};`,
+        ).join('\n') + '\n',
+      );
+
+      process.chdir(repoRoot);
+      const result = await analyzePrWork({}, makeContext());
+      const structured = result.structuredContent as Record<string, unknown>;
+
+      assert.strictEqual(result.isError, undefined);
+      assert.strictEqual(modelCalled, false);
+      assert.deepStrictEqual(structured.reviewedPaths, []);
+      assert.deepStrictEqual(structured.omittedPaths, ['src/large.ts']);
+      assert.strictEqual(structured.truncated, true);
+      assert.match(
+        String(result.content[0]?.text ?? ''),
+        /No local diff content fit the review size budget\./,
+      );
     } finally {
       process.chdir(cwd);
       client.models.generateContentStream = originalGenerateContentStream;

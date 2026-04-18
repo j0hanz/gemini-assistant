@@ -72,7 +72,7 @@ describe('ask contract', () => {
       content: [
         {
           type: 'text',
-          text: "ask: Session 'sess-expired' has expired.",
+          text: "chat: Session 'sess-expired' has expired.",
         },
       ],
       isError: true,
@@ -95,11 +95,12 @@ describe('ask contract', () => {
       content: [
         {
           type: 'text',
-          text: 'ask: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via create_cache instead.',
+          text: 'chat: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via memory action=caches.create instead.',
         },
       ],
       isError: true,
     });
+    assert.doesNotMatch(result.content[0]?.text ?? '', /\bask\b|create_cache/);
   });
 
   it('returns the exact validation error for cacheName plus existing session', async () => {
@@ -123,11 +124,12 @@ describe('ask contract', () => {
       content: [
         {
           type: 'text',
-          text: 'ask: Cannot apply a cachedContent to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
+          text: 'chat: Cannot apply cached content to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
         },
       ],
       isError: true,
     });
+    assert.doesNotMatch(result.content[0]?.text ?? '', /\bask\b|cachedContent/);
   });
 
   it('returns the exact validation error for cacheName plus generation controls', async () => {
@@ -146,7 +148,7 @@ describe('ask contract', () => {
       content: [
         {
           type: 'text',
-          text: 'ask: temperature and seed cannot be used with cacheName. Generation parameters are fixed at cache creation time.',
+          text: 'chat: temperature and seed cannot be used with cacheName. Generation parameters are fixed when the cache is created.',
         },
       ],
       isError: true,
@@ -177,7 +179,7 @@ describe('ask contract', () => {
       content: [
         {
           type: 'text',
-          text: 'ask: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
+          text: 'chat: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
         },
       ],
       isError: true,

@@ -67,7 +67,7 @@ describe('public MCP resource notifications', () => {
     try {
       env.queueStream(makeChunk([{ text: 'Session started' }], FinishReason.STOP));
 
-      const sessionId = 'notifications-session';
+      const sessionId = 'notifications session%/#';
       let offset = harness.client.getNotifications().length;
       await harness.client.request('tools/call', {
         arguments: { goal: 'Start a reusable chat session', session: { id: sessionId } },

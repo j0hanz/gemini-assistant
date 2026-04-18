@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { listDiscoveryEntries, listWorkflowEntries } from '../src/catalog.js';
+import { workspaceCacheManager } from '../src/lib/workspace-context.js';
 import { PUBLIC_RESOURCE_URIS, PUBLIC_WORKFLOW_NAMES } from '../src/public-contract.js';
 import {
   buildServerContextSnapshot,
@@ -103,6 +107,39 @@ describe('discovery resources', () => {
     assert.match(result.contents[1]?.text ?? '', /^# Server Context/m);
   });
 
+  it('builds discover://context from lightweight filename scans and cached token metadata', async () => {
+    const sessionStore = createStore();
+    const originalAllowedRoots = process.env.ALLOWED_FILE_ROOTS;
+    const originalStatus = workspaceCacheManager.getCacheStatus.bind(workspaceCacheManager);
+    const root = await mkdtemp(join(tmpdir(), 'discover-context-lightweight-'));
+    await writeFile(join(root, 'readme.md'), 'x'.repeat(20_000), 'utf8');
+    await writeFile(join(root, 'package.json'), '{"name":"demo"}', 'utf8');
+    await writeFile(join(root, 'notes.txt'), 'ignore me', 'utf8');
+    process.env.ALLOWED_FILE_ROOTS = root;
+
+    workspaceCacheManager.getCacheStatus = () => ({
+      enabled: true,
+      cacheName: 'cachedContents/workspace-ctx',
+      contentHash: 'hash',
+      estimatedTokens: 321,
+      sources: [join(root, 'readme.md')],
+      createdAt: 1,
+      ttl: '3600s',
+    });
+
+    try {
+      const snapshot = await buildServerContextSnapshot(async () => [root], sessionStore);
+
+      assert.deepStrictEqual(snapshot.workspace.scannedFiles, ['package.json', 'readme.md']);
+      assert.strictEqual(snapshot.workspace.estimatedTokens, 321);
+      assert.doesNotMatch(renderServerContextMarkdown(snapshot), /x{100}/);
+    } finally {
+      process.env.ALLOWED_FILE_ROOTS = originalAllowedRoots;
+      workspaceCacheManager.getCacheStatus = originalStatus;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps the concrete and templated resource URI ordering stable', () => {
     assert.deepStrictEqual(
       [...PUBLIC_RESOURCE_URIS].filter((uri) => !uri.includes('{')),
@@ -192,6 +229,37 @@ describe('workspace context resource', () => {
     assert.match(markdown, /## Config/);
     assert.match(markdown, /cachedContents\/workspace-1/);
   });
+
+  it('caps displayed filenames in server context markdown', () => {
+    const markdown = renderServerContextMarkdown({
+      workspace: {
+        roots: ['C:/repo'],
+        scannedFiles: Array.from({ length: 12 }, (_, index) => `file-${String(index)}.md`),
+        estimatedTokens: 42,
+        cacheStatus: {
+          enabled: true,
+          cacheName: 'cachedContents/workspace-1',
+          fresh: true,
+          ttl: '3600s',
+        },
+      },
+      sessions: {
+        active: 1,
+        maxSessions: 50,
+        ttlMs: 1_800_000,
+        ids: ['sess-1'],
+      },
+      config: {
+        model: 'gemini-3-flash-preview',
+        exposeThoughts: false,
+        workspaceCacheEnabled: true,
+        workspaceAutoScan: true,
+      },
+    });
+
+    assert.match(markdown, /\(\+2 more\) \(12 files\)/);
+    assert.doesNotMatch(markdown, /file-10\.md, file-11\.md/);
+  });
 });
 
 describe('session transcript resource', () => {
@@ -224,6 +292,27 @@ describe('session transcript resource', () => {
     assert.match(result.contents[1]?.text ?? '', /# Session Transcript `sess-resource-transcript`/);
     assert.match(result.contents[1]?.text ?? '', /## user/);
     assert.match(result.contents[1]?.text ?? '', /## assistant/);
+  });
+
+  it('reads transcript entries for a session ID whose resource URI must be encoded', () => {
+    const store = createStore();
+    const sessionId = 'sess resource%/#';
+    const encodedSessionId = encodeURIComponent(sessionId);
+    store.setSession(sessionId, mockChat('resource-transcript-encoded'));
+    store.appendSessionTranscript(sessionId, {
+      role: 'user',
+      text: 'Hello',
+      timestamp: 1,
+    });
+
+    const result = readSessionTranscriptResource(
+      store,
+      `memory://sessions/${encodedSessionId}/transcript`,
+      encodedSessionId,
+    );
+
+    assert.strictEqual(result.contents[0]?.uri, `memory://sessions/${encodedSessionId}/transcript`);
+    assert.match(result.contents[1]?.text ?? '', /# Session Transcript `sess resource%\/#`/);
   });
 
   it('renders a not-found error for a missing session transcript', () => {
@@ -275,6 +364,27 @@ describe('session events resource', () => {
     assert.match(result.contents[1]?.text ?? '', /- Message: Hello/);
     assert.match(result.contents[1]?.text ?? '', /### Response/);
     assert.match(result.contents[1]?.text ?? '', /- tool_call \(GOOGLE_SEARCH_WEB\)/);
+  });
+
+  it('reads event entries for a session ID whose resource URI must be encoded', () => {
+    const store = createStore();
+    const sessionId = 'sess resource%/#';
+    const encodedSessionId = encodeURIComponent(sessionId);
+    store.setSession(sessionId, mockChat('resource-events-encoded'));
+    store.appendSessionEvent(sessionId, {
+      request: { message: 'Hello' },
+      response: { text: 'Hi there' },
+      timestamp: 1,
+    });
+
+    const result = readSessionEventsResource(
+      store,
+      `memory://sessions/${encodedSessionId}/events`,
+      encodedSessionId,
+    );
+
+    assert.strictEqual(result.contents[0]?.uri, `memory://sessions/${encodedSessionId}/events`);
+    assert.match(result.contents[1]?.text ?? '', /# Session Events `sess resource%\/#`/);
   });
 
   it('throws ProtocolError for a missing session events resource', () => {

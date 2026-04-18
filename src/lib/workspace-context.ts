@@ -47,6 +47,11 @@ interface WorkspaceContextResult {
   sources: string[];
 }
 
+interface WorkspaceDashboardRootSummary {
+  fileCount: number;
+  fileNames: string[];
+}
+
 interface WorkspaceCacheStatus {
   enabled: boolean;
   cacheName: string | undefined;
@@ -98,6 +103,29 @@ export async function scanRootForFiles(root: string): Promise<Map<string, string
     log.warn(`Failed to scan root: ${root}`);
   }
   return files;
+}
+
+export async function summarizeRootForDashboard(
+  root: string,
+): Promise<WorkspaceDashboardRootSummary> {
+  const fileNames: string[] = [];
+
+  try {
+    const entries = await readdir(root, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (!SCAN_FILE_NAMES.has(entry.name.toLowerCase())) continue;
+      fileNames.push(entry.name);
+    }
+  } catch {
+    log.warn(`Failed to scan root: ${root}`);
+  }
+
+  fileNames.sort((a, b) => a.localeCompare(b));
+  return {
+    fileCount: fileNames.length,
+    fileNames,
+  };
 }
 
 function dynamicFence(content: string): string {

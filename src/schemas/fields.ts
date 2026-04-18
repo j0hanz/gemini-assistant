@@ -1,10 +1,12 @@
+import { completable, type CompletableSchema } from '@modelcontextprotocol/server';
+
 import { isAbsolute, normalize } from 'node:path';
 
 import { z } from 'zod/v4';
 
 import { isPublicHttpUrl } from '../lib/validation.js';
 
-import { THINKING_LEVELS } from '../client.js';
+import { completeCacheNames, THINKING_LEVELS } from '../client.js';
 import { PUBLIC_TOOL_NAMES } from '../public-contract.js';
 
 const CACHE_NAME_PATTERN = /^cachedContents\/.+$/;
@@ -19,17 +21,17 @@ const MEDIA_RESOLUTIONS = [
 
 export const PublicJobNameSchema = z.enum(PUBLIC_TOOL_NAMES);
 
-export function requiredText(description: string, maxLength?: number) {
+export function textField(description: string, maxLength?: number) {
   const schema = z.string().trim().min(1);
   return (maxLength === undefined ? schema : schema.max(maxLength)).describe(description);
 }
 
-export function optionalText(description: string, maxLength?: number) {
-  return requiredText(description, maxLength).optional();
+export function requiredText(description: string, maxLength?: number) {
+  return textField(description, maxLength);
 }
 
 export function goalText(description = 'User goal or requested outcome', maxLength = 100_000) {
-  return requiredText(description, maxLength);
+  return textField(description, maxLength);
 }
 
 function escapesRelativeRoot(value: string): boolean {
@@ -52,13 +54,9 @@ export function workspacePath(description: string) {
 }
 
 export function ttlSeconds(description: string) {
-  return z
-    .string()
-    .trim()
-    .regex(TTL_SECONDS_PATTERN, {
-      error: 'TTL must be a positive integer number of seconds ending in "s" (e.g. "3600s")',
-    })
-    .describe(description);
+  return textField(description).regex(TTL_SECONDS_PATTERN, {
+    error: 'TTL must be a positive integer number of seconds ending in "s" (e.g. "3600s")',
+  });
 }
 
 export function nonNegativeInt(description: string) {
@@ -66,14 +64,25 @@ export function nonNegativeInt(description: string) {
 }
 
 export function cacheName(description: string) {
-  return z
-    .string()
-    .trim()
-    .min(1)
-    .regex(CACHE_NAME_PATTERN, {
-      error: 'Cache name must start with "cachedContents/".',
-    })
-    .describe(description);
+  return textField(description).regex(CACHE_NAME_PATTERN, {
+    error: 'Cache name must start with "cachedContents/".',
+  });
+}
+
+export function completableCacheName(
+  description: string,
+  optional?: false,
+): CompletableSchema<ReturnType<typeof cacheName>>;
+export function completableCacheName(
+  description: string,
+  optional: true,
+): CompletableSchema<z.ZodOptional<ReturnType<typeof cacheName>>>;
+export function completableCacheName(description: string, optional = false) {
+  if (optional) {
+    return completable(cacheName(description).optional(), completeCacheNames);
+  }
+
+  return completable(cacheName(description), completeCacheNames);
 }
 
 export const PublicHttpUrlSchema = z.httpUrl().refine(isPublicHttpUrl, {
@@ -112,7 +121,7 @@ export function timestamp(description: string) {
 }
 
 export function sessionId(description: string) {
-  return z.string().trim().min(1).max(256).describe(description);
+  return textField(description, 256);
 }
 
 export function thinkingLevel(description = 'Thinking depth for reasoning.') {

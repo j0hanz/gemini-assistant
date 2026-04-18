@@ -9,6 +9,7 @@ import type { CachedContent } from '@google/genai';
 import { FunctionCallingConfigMode, GoogleGenAI } from '@google/genai';
 
 import { withRetry } from './lib/errors.js';
+import { logger } from './lib/logger.js';
 import { pickDefined } from './lib/response.js';
 import type { GeminiResponseSchema } from './schemas/json-schema.js';
 
@@ -19,6 +20,7 @@ import { getExposeThoughts, getGeminiModel } from './config.js';
 export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
 type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
 export const EXPOSE_THOUGHTS = getExposeThoughts();
+const log = logger.child('client');
 
 export const DEFAULT_SYSTEM_INSTRUCTION =
   'Be direct, accurate, and concise. Use Markdown when useful.';
@@ -183,15 +185,98 @@ export async function listCacheSummaries(signal?: AbortSignal): Promise<CacheSum
 }
 
 async function listCacheNames(prefix?: string, signal?: AbortSignal): Promise<string[]> {
+  const normalizedPrefix = prefix?.trim().toLowerCase() ?? '';
+  const now = Date.now();
+
   return (await listCacheSummaries(signal))
-    .map((cache) => cache.name)
-    .filter((name): name is string => name?.startsWith(prefix ?? '') === true);
+    .filter((cache): cache is CacheSummary & { name: string } => typeof cache.name === 'string')
+    .map((cache) => ({
+      cache,
+      freshnessRank: cacheFreshnessRank(cache.expireTime, now),
+      matchRank: cacheMatchRank(cache, normalizedPrefix),
+    }))
+    .filter((entry) => normalizedPrefix === '' || entry.matchRank !== Number.POSITIVE_INFINITY)
+    .sort((left, right) => {
+      if (left.matchRank !== right.matchRank) {
+        return left.matchRank - right.matchRank;
+      }
+
+      if (left.freshnessRank !== right.freshnessRank) {
+        return left.freshnessRank - right.freshnessRank;
+      }
+
+      const leftLabel = cacheSortLabel(left.cache);
+      const rightLabel = cacheSortLabel(right.cache);
+      return leftLabel.localeCompare(rightLabel);
+    })
+    .map(({ cache }) => cache.name);
 }
 
 export async function completeCacheNames(prefix?: string): Promise<string[]> {
   try {
     return await listCacheNames(prefix);
-  } catch {
+  } catch (error) {
+    log.debug('Failed to complete cache names', {
+      error: error instanceof Error ? error.message : String(error),
+      prefix,
+    });
     return [];
   }
+}
+
+function cacheFreshnessRank(expireTime: string | undefined, now: number): number {
+  if (!expireTime) {
+    return 1;
+  }
+
+  const expiresAt = Date.parse(expireTime);
+  if (Number.isNaN(expiresAt)) {
+    return 1;
+  }
+
+  return expiresAt >= now ? 0 : 2;
+}
+
+function cacheSortLabel(cache: CacheSummary): string {
+  return (cache.displayName ?? cache.name ?? '').toLowerCase();
+}
+
+function cacheMatchRank(cache: CacheSummary, normalizedPrefix: string): number {
+  if (normalizedPrefix === '') {
+    return 0;
+  }
+
+  const shortName = cache.name?.replace(/^cachedContents\//i, '') ?? '';
+  const name = cache.name ?? '';
+  const displayName = cache.displayName ?? '';
+  const directCandidates = [name.toLowerCase(), shortName.toLowerCase()].filter(
+    (value) => value.length > 0,
+  );
+  const labelCandidates = [displayName.toLowerCase()].filter((value) => value.length > 0);
+
+  if (directCandidates.some((value) => value === normalizedPrefix)) {
+    return 0;
+  }
+
+  if (directCandidates.some((value) => value.startsWith(normalizedPrefix))) {
+    return 1;
+  }
+
+  if (labelCandidates.some((value) => value === normalizedPrefix)) {
+    return 2;
+  }
+
+  if (labelCandidates.some((value) => value.startsWith(normalizedPrefix))) {
+    return 3;
+  }
+
+  if (directCandidates.some((value) => value.includes(normalizedPrefix))) {
+    return 4;
+  }
+
+  if (labelCandidates.some((value) => value.includes(normalizedPrefix))) {
+    return 5;
+  }
+
+  return Number.POSITIVE_INFINITY;
 }

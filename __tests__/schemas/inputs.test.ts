@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { completeCacheNames } from '../../src/client.js';
 import {
   AgenticSearchInputSchema,
   AnalyzeFileInputSchema,
@@ -20,6 +21,16 @@ import {
 } from '../../src/schemas/inputs.js';
 
 const absolutePath = (...segments: string[]) => join(process.cwd(), ...segments);
+const COMPLETABLE_SYMBOL = Symbol.for('mcp.completable');
+
+function getCompleter(schema: unknown) {
+  if (!schema || typeof schema !== 'object') {
+    return undefined;
+  }
+
+  return (schema as Record<symbol, { complete?: unknown } | undefined>)[COMPLETABLE_SYMBOL]
+    ?.complete;
+}
 
 describe('AskInputSchema', () => {
   it('accepts valid minimal input', () => {
@@ -533,6 +544,10 @@ describe('AnalyzePrInputSchema', () => {
     const result = AnalyzePrInputSchema.safeParse({ paths: ['src/'] });
     assert.strictEqual(result.success, false);
   });
+
+  it('keeps cacheName wired to live cache completion', () => {
+    assert.strictEqual(getCompleter(AnalyzePrInputSchema.shape.cacheName), completeCacheNames);
+  });
 });
 
 describe('AnalyzeUrlInputSchema', () => {
@@ -681,6 +696,10 @@ describe('ExplainErrorInputSchema', () => {
     });
     assert.strictEqual(result.success, false);
   });
+
+  it('keeps cacheName wired to live cache completion', () => {
+    assert.strictEqual(getCompleter(ExplainErrorInputSchema.shape.cacheName), completeCacheNames);
+  });
 });
 
 describe('CompareFilesInputSchema', () => {
@@ -783,6 +802,10 @@ describe('CompareFilesInputSchema', () => {
       }).success,
       false,
     );
+  });
+
+  it('keeps cacheName wired to live cache completion', () => {
+    assert.strictEqual(getCompleter(CompareFilesInputSchema.shape.cacheName), completeCacheNames);
   });
 });
 
@@ -914,6 +937,13 @@ describe('GenerateDiagramInputSchema', () => {
         sourceFilePaths: ['C:..\\diagram.ts'],
       }).success,
       false,
+    );
+  });
+
+  it('keeps cacheName wired to live cache completion', () => {
+    assert.strictEqual(
+      getCompleter(GenerateDiagramInputSchema.shape.cacheName),
+      completeCacheNames,
     );
   });
 });

@@ -16,4 +16,18 @@ describe('GeminiResponseSchema', () => {
     assert.ok(messages.includes('propertyOrdering'));
     assert.ok(!messages.includes('prefixItems'));
   });
+
+  it('preserves exact property names in required and propertyOrdering', () => {
+    const result = GeminiResponseSchema.safeParse({
+      type: 'object',
+      properties: {
+        ' first name': { type: 'string' },
+        'id ': { type: 'string' },
+      },
+      required: [' first name'],
+      propertyOrdering: ['id '],
+    });
+
+    assert.ok(result.success);
+  });
 });

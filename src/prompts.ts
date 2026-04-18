@@ -3,7 +3,7 @@ import { completable } from '@modelcontextprotocol/server';
 
 import { z } from 'zod/v4';
 
-import { goalText, optionalText, PublicJobNameSchema } from './schemas/fields.js';
+import { goalText, PublicJobNameSchema, textField } from './schemas/fields.js';
 
 import { findWorkflowEntry } from './catalog.js';
 import type { PublicPromptName, PublicWorkflowName } from './public-contract.js';
@@ -104,38 +104,71 @@ function filterByPrefix<T extends string>(values: readonly T[], prefix: string):
 
 export const DiscoverPromptSchema = z
   .strictObject({
-    job: completable(PublicJobNameSchema.optional(), (value) =>
-      filterByPrefix(['chat', 'research', 'analyze', 'review', 'memory', 'discover'], value ?? ''),
+    job: completable(
+      PublicJobNameSchema.optional().describe(
+        'Public job to ask discovery guidance about. Use when the prompt should focus on one job family instead of the full catalog.',
+      ),
+      (value) =>
+        filterByPrefix(
+          ['chat', 'research', 'analyze', 'review', 'memory', 'discover'],
+          value ?? '',
+        ),
     ),
-    goal: optionalText('Optional user goal to narrow the recommendation'),
+    goal: textField(
+      'User outcome to optimize for when recommending a prompt or job. Use when discovery guidance should be tailored to a concrete task.',
+    ).optional(),
   })
   .describe('Guide a client to the best public job, prompt, and resource.');
 
 export const ResearchPromptSchema = z
   .strictObject({
     goal: goalText('Research goal or question'),
-    mode: completable(z.enum(RESEARCH_MODE_OPTIONS).optional(), (value) =>
-      filterByPrefix(RESEARCH_MODE_OPTIONS, value ?? ''),
+    mode: completable(
+      z
+        .enum(RESEARCH_MODE_OPTIONS)
+        .optional()
+        .describe(
+          'Research mode to ask about. Use `quick` for a lighter answer path or `deep` for a more thorough investigation workflow.',
+        ),
+      (value) => filterByPrefix(RESEARCH_MODE_OPTIONS, value ?? ''),
     ),
-    deliverable: optionalText('Optional requested deliverable'),
+    deliverable: textField(
+      'Requested output form for the research help. Use to ask for a brief, report, checklist, recommendation, or another deliverable style.',
+    ).optional(),
   })
   .describe('Explain the quick-versus-deep research decision flow.');
 
 export const ReviewPromptSchema = z
   .strictObject({
-    subject: completable(z.enum(REVIEW_SUBJECT_OPTIONS).optional(), (value) =>
-      filterByPrefix(REVIEW_SUBJECT_OPTIONS, value ?? ''),
+    subject: completable(
+      z
+        .enum(REVIEW_SUBJECT_OPTIONS)
+        .optional()
+        .describe(
+          'Review variant to ask about. Use `diff`, `comparison`, or `failure` to focus the guidance on the right review flow.',
+        ),
+      (value) => filterByPrefix(REVIEW_SUBJECT_OPTIONS, value ?? ''),
     ),
-    focus: optionalText('Optional review focus'),
+    focus: textField(
+      'Review priority to emphasize. Use to steer guidance toward regressions, tests, security, performance, or another review lens.',
+    ).optional(),
   })
   .describe('Guide diff review, file comparison, or failure triage.');
 
 export const MemoryPromptSchema = z
   .strictObject({
-    action: completable(z.enum(MEMORY_ACTION_OPTIONS).optional(), (value) =>
-      filterByPrefix(MEMORY_ACTION_OPTIONS, value ?? ''),
+    action: completable(
+      z
+        .enum(MEMORY_ACTION_OPTIONS)
+        .optional()
+        .describe(
+          'Memory action to ask about. Use it when the prompt should explain one specific sessions, caches, or workspace-memory operation.',
+        ),
+      (value) => filterByPrefix(MEMORY_ACTION_OPTIONS, value ?? ''),
     ),
-    task: optionalText('Optional task or context that should shape the memory advice'),
+    task: textField(
+      'Task context that should shape the memory guidance. Use to explain what you are trying to do so the prompt can recommend the right memory action.',
+    ).optional(),
   })
   .describe('Explain how sessions, caches, and workspace memory fit together.');
 

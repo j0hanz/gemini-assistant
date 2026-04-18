@@ -3,7 +3,7 @@ import { completable } from '@modelcontextprotocol/server';
 import { z } from 'zod/v4';
 
 import {
-  cacheName,
+  completableCacheName,
   nonNegativeInt,
   publicHttpUrlArray,
   PublicHttpUrlSchema,
@@ -107,7 +107,7 @@ export const diffStatsFields = {
 };
 
 export const cacheSummaryFields = {
-  name: cacheName('Cache resource name').optional(),
+  name: completableCacheName('Cache resource name', true),
   displayName: z.string().describe('Human-readable label').optional(),
   model: z.string().describe('Model used').optional(),
   expireTime: timestamp('Expiration timestamp').optional(),
@@ -134,7 +134,7 @@ export function createFilePairFields(firstDescription: string, secondDescription
 
 export function createOptionalCacheReferenceFields(description: string) {
   return {
-    cacheName: cacheName(description).optional(),
+    cacheName: completableCacheName(description, true),
   };
 }
 
@@ -162,7 +162,9 @@ export function createSessionContinuationFields(completeSessionIds: SessionIdCom
         ),
       })
       .optional()
-      .describe('Optional chat session to continue. Omit for single-turn or new-session chat.'),
+      .describe(
+        'Existing chat session to continue. Use when you want multi-turn context; omit it for a single-turn request or to start a new session.',
+      ),
   };
 }
 

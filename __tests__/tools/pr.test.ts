@@ -426,10 +426,7 @@ describe('analyzePrWork cache prompt integration', () => {
       assert.strictEqual(config?.cachedContent, 'cachedContents/workspace-1');
       assert.strictEqual(config?.systemInstruction, undefined);
       assert.strictEqual(typeof contents, 'string');
-      assert.match(
-        contents,
-        /Review the diff for bugs, regressions, and behavior risk\. Ignore formatting-only changes\. Output: Findings, Fixes\./,
-      );
+      assert.match(contents, /TASK: Review the diff for bugs, regressions, and behavior risk\./);
       assert.match(contents, /## Snapshot/);
       assert.match(contents, /```diff/);
     } finally {

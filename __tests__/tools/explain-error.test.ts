@@ -63,7 +63,7 @@ describe('explain_error cache prompt integration', () => {
       assert.strictEqual(config?.cachedContent, 'cachedContents/workspace-1');
       assert.strictEqual(config?.systemInstruction, undefined);
       assert.strictEqual(typeof contents, 'string');
-      assert.match(String(contents), /Diagnose the error and answer with Cause, Fix, and Notes\./);
+      assert.match(String(contents), /TASK: Diagnose the error\./);
       assert.match(String(contents), /## Error/);
       assert.match(String(contents), /## Task/);
     } finally {

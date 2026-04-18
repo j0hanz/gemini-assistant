@@ -66,7 +66,7 @@ describe('model-prompts', () => {
     assert.strictEqual(prompt.systemInstruction, undefined);
     assert.ok(
       prompt.promptText.startsWith(
-        'Review the diff for bugs, regressions, and behavior risk. Ignore formatting-only changes. Output: Findings, Fixes.',
+        'TASK: Review the diff for bugs, regressions, and behavior risk.\nOUTPUT: Findings, Fixes.\nCONSTRAINTS: Ignore formatting-only changes.',
       ),
     );
     assert.ok(prompt.promptText.endsWith('## Snapshot\n\n```diff\n+ok\n```'));
@@ -83,7 +83,7 @@ describe('model-prompts', () => {
     assert.strictEqual(prompt.systemInstruction, undefined);
     assert.deepStrictEqual(prompt.promptParts, [
       {
-        text: 'Compare only the provided files. Cite symbols or short quotes. Output: Summary, Differences, Impact.',
+        text: 'TASK: Compare the provided files.\nOUTPUT: Summary, Differences, Impact.\nCONSTRAINTS: Cite symbols or short quotes.',
       },
       { text: 'File A: src/a.ts' },
       { text: 'File B: src/b.ts' },
@@ -103,13 +103,13 @@ describe('model-prompts', () => {
     assert.strictEqual(prompt.systemInstruction, undefined);
     assert.ok(
       prompt.promptText.startsWith(
-        'Diagnose the error and answer with Cause, Fix, and Notes. If search is available, extract distinct error queries before searching.',
+        'TASK: Diagnose the error.\nOUTPUT: Cause, Fix, Notes.\nCONSTRAINTS: Extract distinct error queries before searching.',
       ),
     );
     assert.ok(prompt.promptText.includes('## Error'));
     assert.ok(prompt.promptText.includes('## Code'));
     assert.ok(prompt.promptText.includes('## URLs'));
-    assert.ok(!prompt.promptText.includes('Diagnose the provided error. If search is available'));
+    assert.ok(!prompt.promptText.includes('TASK: Diagnose the provided error.'));
   });
 
   it('builds diagram prompts with one live task part and a short stable instruction', () => {

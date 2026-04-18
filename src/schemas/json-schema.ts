@@ -46,102 +46,56 @@ export const GeminiResponseSchema: z.ZodType<Record<string, unknown>> = z.lazy((
       type: z
         .union([JSON_SCHEMA_TYPE_SCHEMA, z.array(JSON_SCHEMA_TYPE_SCHEMA).min(1)])
         .optional()
-        .describe(
-          'JSON Schema type for the output value. Use a single type such as "object" or "string", or an array of types when multiple types are allowed.',
-        ),
+        .describe('JSON Schema type for the output value.'),
       properties: z
         .record(z.string(), GeminiResponseSchema)
         .optional()
-        .describe(
-          'Property definitions for an object response. Use when type is "object" and each key should have its own nested schema.',
-        ),
+        .describe('Property definitions for an object response.'),
       required: z
-        .array(propertyNameField('Property name that must be present in the object response.'))
+        .array(propertyNameField('Required property name.'))
         .min(1)
         .optional()
-        .describe(
-          'List of object property names that must be included. Use only together with properties.',
-        ),
+        .describe('List of required object property names.'),
       additionalProperties: z
         .union([z.boolean(), GeminiResponseSchema])
         .optional()
-        .describe(
-          'Controls whether object keys outside properties are allowed. Use false to forbid extras, true to allow any extras, or provide a schema to validate additional values.',
-        ),
+        .describe('Controls whether object keys outside properties are allowed.'),
       enum: z
         .array(JSON_LITERAL_SCHEMA)
         .min(1)
         .optional()
-        .describe(
-          'Fixed set of allowed literal values. Use when the response must be one of a known list of strings, numbers, booleans, or null.',
-        ),
-      format: textField(
-        'String format hint such as "date-time", "email", or another JSON Schema format. Use when a string should follow a standard format.',
-      ).optional(),
-      minimum: z
-        .number()
-        .optional()
-        .describe('Inclusive minimum numeric value. Use for number or integer schemas.'),
-      maximum: z
-        .number()
-        .optional()
-        .describe('Inclusive maximum numeric value. Use for number or integer schemas.'),
+        .describe('Fixed set of allowed literal values.'),
+      format: textField('String format hint (e.g., "date-time", "email").').optional(),
+      minimum: z.number().optional().describe('Inclusive minimum numeric value.'),
+      maximum: z.number().optional().describe('Inclusive maximum numeric value.'),
       items: z
         .union([GeminiResponseSchema, z.array(GeminiResponseSchema).min(1)])
         .optional()
-        .describe(
-          'Schema for array elements. Use a single schema when all items share one shape, or an array of schemas for tuple-style arrays.',
-        ),
-      minItems: z
-        .int()
-        .nonnegative()
-        .optional()
-        .describe(
-          'Minimum number of items allowed in an array. Use when array length has a lower bound.',
-        ),
-      maxItems: z
-        .int()
-        .nonnegative()
-        .optional()
-        .describe(
-          'Maximum number of items allowed in an array. Use when array length has an upper bound.',
-        ),
-      title: textField(
-        'Short human-readable label for this schema node. Use when clients should display a friendly title for the field or object.',
-      ).optional(),
-      description: textField(
-        'Human-readable explanation of what this schema node represents. Use to document the meaning, constraints, or intended usage of the field.',
-      ).optional(),
+        .describe('Schema for array elements.'),
+      minItems: z.int().nonnegative().optional().describe('Minimum number of items in array.'),
+      maxItems: z.int().nonnegative().optional().describe('Maximum number of items in array.'),
+      title: textField('Short human-readable label.').optional(),
+      description: textField('Human-readable explanation of schema node.').optional(),
       anyOf: z
         .array(GeminiResponseSchema)
         .min(1)
         .optional()
-        .describe(
-          'Alternative schemas where the value may match any one of them. Use when multiple different shapes are acceptable.',
-        ),
+        .describe('Alternative schemas (matches any one).'),
       oneOf: z
         .array(GeminiResponseSchema)
         .min(1)
         .optional()
-        .describe(
-          'Alternative schemas where the value should match exactly one branch. Use for mutually exclusive output shapes.',
-        ),
+        .describe('Alternative schemas (matches exactly one).'),
       allOf: z
         .array(GeminiResponseSchema)
         .min(1)
         .optional()
-        .describe(
-          'Schemas that all apply to the same value. Use to combine constraints from multiple schema fragments.',
-        ),
+        .describe('Schemas that all apply to the same value.'),
       propertyOrdering: z
-        .array(
-          propertyNameField('Property name in the order Gemini should emit it in object output.'),
-        )
+        .array(propertyNameField('Property name for ordering.'))
         .min(1)
         .optional()
-        .describe(
-          'Preferred property order for object output. Use with properties when stable key ordering matters for Gemini responses.',
-        ),
+        .describe('Preferred property order for object output.'),
     })
     .superRefine((schema, ctx) => {
       validateBounds(

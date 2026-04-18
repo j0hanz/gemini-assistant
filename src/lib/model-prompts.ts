@@ -59,7 +59,7 @@ export function buildGroundedAnswerPrompt(
     {
       promptText,
       systemInstruction:
-        'Answer from grounded search results only. Keep it concise and grounded in the retrieved sources.',
+        'TASK: Answer from grounded search results only.\nCONSTRAINTS: Keep it concise and grounded in the retrieved sources.',
     },
     cacheName,
   );
@@ -97,7 +97,7 @@ export function buildFileAnalysisPrompt(args: {
       {
         promptText: args.goal,
         systemInstruction:
-          'Answer from the provided file only. Cite relevant sections, lines, or elements.',
+          'TASK: Answer the user goal based on the provided file.\nCONSTRAINTS: Answer from the provided file only. Cite relevant sections, lines, or elements.',
       },
       args.cacheName,
     );
@@ -111,7 +111,7 @@ export function buildFileAnalysisPrompt(args: {
           `Task: ${args.goal}`,
         ]),
         systemInstruction:
-          'Answer from the retrieved URL content only. Cite relevant sections, fields, or short quotes.',
+          'TASK: Answer the user goal based on the retrieved URL content.\nCONSTRAINTS: Answer from the retrieved URL content only. Cite relevant sections, fields, or short quotes.',
       },
       args.cacheName,
     );
@@ -121,7 +121,7 @@ export function buildFileAnalysisPrompt(args: {
     {
       promptParts: [...(args.attachedParts ?? []), { text: `Goal: ${args.goal}` }],
       systemInstruction:
-        'Analyze only the provided local files. Synthesize across them when needed. Cite filenames, symbols, or short excerpts. Do not invent missing context.',
+        'TASK: Analyze the provided local files.\nCONSTRAINTS: Analyze only the provided local files. Synthesize across them when needed. Cite filenames, symbols, or short excerpts. Do not invent missing context.',
     },
     args.cacheName,
   );
@@ -153,10 +153,10 @@ export function buildDiffReviewPrompt(args: {
           { text: args.focus ? `Focus: ${args.focus}` : 'Task: Compare the two files.' },
         ],
         cacheText:
-          'Compare only the provided files. Cite symbols or short quotes. Output: Summary, Differences, Impact.',
+          'TASK: Compare the provided files.\nOUTPUT: Summary, Differences, Impact.\nCONSTRAINTS: Cite symbols or short quotes.',
         systemInstruction: buildOutputInstruction(
-          'Compare the provided files only. Base claims on the files. Cite symbols, section names, or short quotes. Do not invent line numbers.',
-          ['Output:', '## Summary', '## Differences', '## Impact'],
+          'TASK: Compare the provided files.\nCONSTRAINTS:\n- Base claims on the files.\n- Cite symbols, section names, or short quotes.\n- Do not invent line numbers.',
+          ['OUTPUT:', '## Summary', '## Differences', '## Impact'],
         ),
       },
       args.cacheName,
@@ -166,12 +166,12 @@ export function buildDiffReviewPrompt(args: {
   return resolveTextPrompt(
     {
       cacheText:
-        'Review the diff for bugs, regressions, and behavior risk. Ignore formatting-only changes. Output: Findings, Fixes.',
+        'TASK: Review the diff for bugs, regressions, and behavior risk.\nOUTPUT: Findings, Fixes.\nCONSTRAINTS: Ignore formatting-only changes.',
       promptText: args.promptText ?? '',
       systemInstruction: buildOutputInstruction(
-        'Review the unified diff for bugs, regressions, and behavior risk. Ignore formatting-only changes. Cite file paths and hunk context from the diff. Do not invent content or line numbers. If the diff looks clean, say so briefly.',
+        'TASK: Review the unified diff for bugs, regressions, and behavior risk.\nCONSTRAINTS:\n- Ignore formatting-only changes.\n- Cite file paths and hunk context from the diff.\n- Do not invent content or line numbers.\n- If the diff looks clean, say so briefly.',
         [
-          'Output:',
+          'OUTPUT:',
           '## Findings',
           'List issues by severity with file references.',
           '## Fixes',
@@ -209,11 +209,11 @@ export function buildErrorDiagnosisPrompt(args: {
   return resolveTextPrompt(
     {
       cacheText:
-        'Diagnose the error and answer with Cause, Fix, and Notes. If search is available, extract distinct error queries before searching.',
+        'TASK: Diagnose the error.\nOUTPUT: Cause, Fix, Notes.\nCONSTRAINTS: Extract distinct error queries before searching.',
       promptText: sections.join('\n\n'),
       systemInstruction: buildOutputInstruction(
-        'Diagnose the provided error. If search is available, extract distinct error codes or key error messages into <search_queries> and search them individually. Base conclusions on the provided context and grounded tool results. Cite relevant symbols, files, lines, or snippets. If a language is given, follow its norms.',
-        ['Output:', '## Cause', '## Fix', '## Notes'],
+        'TASK: Diagnose the provided error.\nCONSTRAINTS:\n- If search is available, extract distinct error codes or key error messages into <search_queries> and search them individually.\n- Base conclusions on the provided context and grounded tool results.\n- Cite relevant symbols, files, lines, or snippets.\n- If a language is given, follow its norms.',
+        ['OUTPUT:', '## Cause', '## Fix', '## Notes'],
       ),
     },
     args.cacheName,
@@ -232,14 +232,13 @@ export function buildDiagramGenerationPrompt(args: {
       cacheText: `Return exactly one fenced \`\`\`${args.diagramType} block.`,
       promptParts: [...(args.attachedParts ?? []), { text: `Task: ${args.description}` }],
       systemInstruction: joinNonEmpty([
-        `Generate a ${args.diagramType} diagram from the description and files.`,
-        'Rules:',
-        `1. Return exactly one fenced \`\`\`${args.diagramType} block.`,
-        '2. Keep it readable.',
-        '3. Use clear node and edge labels.',
-        '4. If source code is provided, derive the diagram from it.',
+        `TASK: Generate a ${args.diagramType} diagram from the description and files.`,
+        'CONSTRAINTS:',
+        `- Return exactly one fenced \`\`\`${args.diagramType} block.`,
+        '- Keep it readable with clear node and edge labels.',
+        '- If source code is provided, derive the diagram from it.',
         args.validateSyntax
-          ? '5. If syntax validation is requested, use code execution for a best-effort check and state uncertainty.'
+          ? '- If syntax validation is requested, use code execution for a best-effort check and state uncertainty.'
           : undefined,
       ]),
     },
@@ -267,14 +266,12 @@ export function buildAgenticResearchPrompt(args: {
         'Task: research the topic and produce a grounded report.',
       ]),
       systemInstruction: joinNonEmpty([
-        'Research with Google Search and Code Execution.',
-        'Process:',
-        '1. Split the topic into sub-questions.',
-        '2. Search multiple angles.',
-        '3. Use Code Execution for calculations, comparisons, rankings, and tables when useful.',
-        '4. Write a grounded Markdown report.',
-        '5. Include concrete numbers and dates when available.',
-        '6. Do not state unsupported claims.',
+        'TASK: Research with Google Search and Code Execution, then write a grounded Markdown report.',
+        'CONSTRAINTS:',
+        '- Split the topic into sub-questions and search multiple angles.',
+        '- Use Code Execution for calculations, comparisons, rankings, and tables when useful.',
+        '- Include concrete numbers and dates when available.',
+        '- Do not state unsupported claims.',
       ]),
     },
     args.cacheName,

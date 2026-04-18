@@ -138,8 +138,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'tool',
     title: 'Chat',
     bestFor: 'Direct Gemini chat, structured output, and multi-turn server-managed sessions.',
-    whenToUse:
-      'Use when the job is conversational and you may want to continue it later by session ID.',
+    whenToUse: 'Use for conversational tasks that span multiple turns.',
     inputs: [
       'goal',
       'session?',
@@ -168,8 +167,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'tool',
     title: 'Research',
     bestFor: 'Web-grounded lookup with an explicit quick or deep research mode.',
-    whenToUse:
-      'Use when the answer depends on current public information and the caller should choose speed versus depth.',
+    whenToUse: 'Use for tasks requiring current public information.',
     inputs: [
       'mode',
       'goal',
@@ -195,8 +193,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'tool',
     title: 'Analyze',
     bestFor: 'Focused analysis of one local file, one or more public URLs, or a small file set.',
-    whenToUse:
-      'Use when you already know the target artifact and want a bounded grounded answer rather than broad research.',
+    whenToUse: 'Use for bounded artifact analysis.',
     inputs: ['goal', 'targets', 'thinkingLevel?', 'mediaResolution?'],
     returns:
       'An analysis summary tied to the requested target kind with optional URL retrieval metadata.',
@@ -214,8 +211,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'tool',
     title: 'Review',
     bestFor: 'Reviewing local diffs, comparing two files, or diagnosing a failing change.',
-    whenToUse:
-      'Use when the job is evaluative: find bugs, regressions, risky changes, or likely root causes.',
+    whenToUse: 'Use for evaluative tasks (bugs, regressions, root causes).',
     inputs: ['subject', 'focus?', 'thinkingLevel?', 'cacheName?'],
     returns:
       'A review summary plus diff stats, comparison output, or failure guidance depending on the requested subject.',
@@ -234,8 +230,7 @@ export const DISCOVERY_ENTRIES = [
     title: 'Memory',
     bestFor:
       'Inspecting or mutating server-managed sessions, Gemini caches, and workspace memory state.',
-    whenToUse:
-      'Use when you need to list, inspect, create, update, or delete the state behind chat sessions and reusable caches.',
+    whenToUse: 'Use to list, inspect, create, update, or delete sessions and caches.',
     inputs: [
       'action',
       'sessionId?',
@@ -263,8 +258,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'tool',
     title: 'Discover',
     bestFor: 'Orienting a client to the six public jobs, workflows, prompts, and memory resources.',
-    whenToUse:
-      'Use when you need recommendations, a job-specific starting point, or contract-aware limitations before choosing another tool.',
+    whenToUse: 'Use to get recommendations or limitations before choosing a tool.',
     inputs: ['job?', 'goal?'],
     returns:
       'Guidance, related workflows, prompts, resources, and limitation notes derived from the shared public contract.',
@@ -282,8 +276,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'prompt',
     title: 'Discover Prompt',
     bestFor: 'Orienting a user to the six public jobs and the most relevant starting point.',
-    whenToUse:
-      'Use when a client wants a guided explanation of which public job to use before calling tools.',
+    whenToUse: 'Use to guide a client on which public job to use.',
     inputs: ['job?', 'goal?'],
     returns: 'A single prompt that frames the discover workflow and related public resources.',
     related: [
@@ -296,8 +289,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'prompt',
     title: 'Research Prompt',
     bestFor: 'Packaging a research goal into the quick-versus-deep decision flow.',
-    whenToUse:
-      'Use when the client wants a guided way to explain the research task before calling the research job.',
+    whenToUse: 'Use to guide a client on how to explain a research task.',
     inputs: ['goal', 'mode?', 'deliverable?'],
     returns:
       'A workflow-oriented prompt that points to the research job and supporting discovery resources.',
@@ -311,7 +303,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'prompt',
     title: 'Review Prompt',
     bestFor: 'Helping a client frame a diff review, file comparison, or failure triage request.',
-    whenToUse: 'Use when the next step is clarifying what kind of review should happen and why.',
+    whenToUse: 'Use to clarify the type of review needed.',
     inputs: ['subject?', 'focus?'],
     returns: 'A review-oriented prompt that points to the appropriate review subject variant.',
     related: [
@@ -325,8 +317,7 @@ export const DISCOVERY_ENTRIES = [
     title: 'Memory Prompt',
     bestFor:
       'Explaining when to use chat sessions, reusable caches, or workspace memory inspection.',
-    whenToUse:
-      'Use when a user needs guidance on whether the right memory primitive is a session, cache, or resource read.',
+    whenToUse: 'Use to guide users on choosing sessions, caches, or resource reads.',
     inputs: ['action?', 'task?'],
     returns:
       'A memory-oriented prompt that points to the memory job and the related memory resources.',
@@ -341,8 +332,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'resource',
     title: 'Discovery Catalog Resource',
     bestFor: 'Browsing the full public surface from one shared metadata source.',
-    whenToUse:
-      'Use when you need a concise machine-readable list of the public tools, prompts, and resources.',
+    whenToUse: 'Use for a machine-readable list of public tools, prompts, and resources.',
     inputs: [],
     returns: 'JSON and Markdown discovery catalog content.',
     related: [{ kind: 'resource', name: 'discover://workflows' }],
@@ -352,7 +342,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'resource',
     title: 'Workflow Catalog Resource',
     bestFor: 'Browsing job-first starter workflows instead of a raw list of names.',
-    whenToUse: 'Use when you want recommended entry points and related resources for common jobs.',
+    whenToUse: 'Use to find recommended entry points for common jobs.',
     inputs: [],
     returns: 'JSON and Markdown workflow catalog content.',
     related: [{ kind: 'resource', name: 'discover://catalog' }],
@@ -363,8 +353,7 @@ export const DISCOVERY_ENTRIES = [
     title: 'Server Context Dashboard',
     bestFor:
       'Inspecting the server knowledge state: workspace files, sessions, caches, and config.',
-    whenToUse:
-      'Use when you need to understand what context the server has before making a request.',
+    whenToUse: 'Use to understand available server context.',
     inputs: [],
     returns: 'JSON and Markdown snapshot of the server context state.',
     related: [
@@ -377,7 +366,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'resource',
     title: 'Session List Resource',
     bestFor: 'Browsing active in-memory chat sessions.',
-    whenToUse: 'Use when you need to inspect or resume a server-managed chat session.',
+    whenToUse: 'Use to inspect or resume a chat session.',
     inputs: [],
     returns: 'JSON list of active session IDs and their last access timestamps.',
     related: [
@@ -390,7 +379,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'resource',
     title: 'Session Detail Resource',
     bestFor: 'Inspecting a single active session entry.',
-    whenToUse: 'Use when you need detail about one session before resuming or auditing it.',
+    whenToUse: 'Use to get details for one session.',
     inputs: ['sessionId'],
     returns: 'JSON metadata for the selected session.',
     related: [
@@ -403,7 +392,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'resource',
     title: 'Session Transcript Resource',
     bestFor: 'Inspecting the text transcript for one active session.',
-    whenToUse: 'Use when you need read-only visibility into recent user and assistant turns.',
+    whenToUse: 'Use for read-only visibility into recent turns.',
     inputs: ['sessionId'],
     returns: 'JSON and Markdown transcript entries.',
     related: [{ kind: 'resource', name: 'memory://sessions/{sessionId}' }],
@@ -413,8 +402,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'resource',
     title: 'Session Events Resource',
     bestFor: 'Inspecting normalized Gemini tool and function activity for one active session.',
-    whenToUse:
-      'Use when you need the server-managed inspection summary rather than the plain transcript.',
+    whenToUse: 'Use to get the server-managed inspection summary.',
     inputs: ['sessionId'],
     returns: 'JSON and Markdown event summaries.',
     related: [{ kind: 'resource', name: 'memory://sessions/{sessionId}' }],
@@ -424,7 +412,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'resource',
     title: 'Cache List Resource',
     bestFor: 'Browsing active Gemini caches available to the memory job.',
-    whenToUse: 'Use when deciding whether to reuse, update, or delete cached context.',
+    whenToUse: 'Use when deciding to reuse, update, or delete caches.',
     inputs: [],
     returns: 'JSON list of active caches and their summary metadata.',
     related: [{ kind: 'tool', name: 'memory' }],
@@ -434,7 +422,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'resource',
     title: 'Cache Detail Resource',
     bestFor: 'Inspecting one Gemini cache in full detail.',
-    whenToUse: 'Use when you need the exact metadata for one cache before reuse or mutation.',
+    whenToUse: 'Use to get exact metadata for one cache.',
     inputs: ['cacheName'],
     returns: 'JSON cache metadata.',
     related: [{ kind: 'resource', name: 'memory://caches' }],
@@ -444,8 +432,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'resource',
     title: 'Workspace Context Resource',
     bestFor: 'Viewing the assembled workspace context used for Gemini calls.',
-    whenToUse:
-      'Use when you want to inspect which local project files are being summarized for the model.',
+    whenToUse: 'Use to inspect which local files are summarized for the model.',
     inputs: [],
     returns: 'Markdown workspace context with sources and token estimate.',
     related: [{ kind: 'resource', name: 'memory://workspace/cache' }],
@@ -455,8 +442,7 @@ export const DISCOVERY_ENTRIES = [
     kind: 'resource',
     title: 'Workspace Cache Resource',
     bestFor: 'Inspecting automatic workspace cache state.',
-    whenToUse:
-      'Use when you need to verify whether workspace caching is active and what it points at.',
+    whenToUse: 'Use to verify workspace caching status.',
     inputs: [],
     returns: 'JSON workspace cache status.',
     related: [{ kind: 'resource', name: 'memory://workspace/context' }],
@@ -467,7 +453,7 @@ export const WORKFLOW_ENTRIES = [
   {
     name: 'start-here',
     goal: 'Orient a new client to the six public jobs and the recommended next step.',
-    whenToUse: 'Use when the user asks what this server does or where to start.',
+    whenToUse: 'Use when the user asks what this server does.',
     steps: [
       'Read discover://catalog for the current public surface.',
       'Read discover://workflows for the guided entry points.',
@@ -525,7 +511,7 @@ export const WORKFLOW_ENTRIES = [
   {
     name: 'review',
     goal: 'Review a diff, compare two files, or diagnose a failing change from one job surface.',
-    whenToUse: 'Use when the job is evaluative rather than open-ended exploration.',
+    whenToUse: 'Use for evaluative tasks instead of open exploration.',
     steps: [
       'Choose review.subject.kind=diff for the current local repository changes.',
       'Choose review.subject.kind=comparison for two specific files.',
@@ -538,8 +524,7 @@ export const WORKFLOW_ENTRIES = [
   {
     name: 'memory',
     goal: 'Inspect and manage sessions, caches, and workspace memory state from one job.',
-    whenToUse:
-      'Use when you need to understand or mutate the server-managed memory surface behind chat and cache workflows.',
+    whenToUse: 'Use to understand or mutate server-managed sessions, caches, and workspace memory.',
     steps: [
       'Use session actions to list or inspect active chat sessions.',
       'Use cache actions to list, inspect, create, update, or delete Gemini caches.',

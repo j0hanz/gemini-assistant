@@ -67,16 +67,16 @@ export const toolEventFields = {
 export const ToolEventSchema = z.strictObject(toolEventFields);
 
 export const streamMetadataOutputFields = {
-  thoughts: z.string().describe('Internal model reasoning/thinking process').optional(),
+  thoughts: z.string().describe('Internal model reasoning.').optional(),
   usage: UsageMetadataSchema.describe('Token usage').optional(),
   functionCalls: z
     .array(FunctionCallEntrySchema)
     .optional()
-    .describe('Server-side function calls made during generation'),
+    .describe('Server-side function calls.'),
   toolEvents: z
     .array(ToolEventSchema)
     .optional()
-    .describe('Normalized Gemini tool/function event stream captured during generation'),
+    .describe('Normalized tool/function event stream.'),
 };
 
 export const publicBaseOutputFields = {
@@ -162,9 +162,7 @@ export function createSessionContinuationFields(completeSessionIds: SessionIdCom
         ),
       })
       .optional()
-      .describe(
-        'Existing chat session to continue. Use when you want multi-turn context; omit it for a single-turn request or to start a new session.',
-      ),
+      .describe('Existing chat session to continue.'),
   };
 }
 

@@ -114,15 +114,11 @@ export const AnalyzePrOutputSchema = z.strictObject({
     .describe('Relative untracked binary files skipped from the generated diff'),
   skippedLargePaths: z
     .array(z.string())
-    .describe(
-      'Relative untracked files skipped because they exceeded the synthesized diff size limit',
-    ),
+    .describe('Relative untracked files skipped due to diff size limit.'),
   omittedPaths: z
     .array(z.string())
     .optional()
-    .describe(
-      'Relative diff paths omitted from the local diff review because of the review budget',
-    ),
+    .describe('Relative diff paths omitted from review due to budget.'),
   empty: z.boolean().describe('Whether there were any local changes to review'),
   truncated: z.boolean().describe('Whether the diff was truncated due to size').optional(),
   ...streamMetadataOutputFields,
@@ -146,9 +142,7 @@ export const DeleteCacheOutputSchema = z.strictObject({
   confirmationRequired: z
     .boolean()
     .optional()
-    .describe(
-      'Whether the client must rerun with confirm=true because interactive confirmation was unavailable',
-    ),
+    .describe('Whether client must rerun with confirm=true.'),
 });
 
 export const UpdateCacheOutputSchema = z.strictObject({

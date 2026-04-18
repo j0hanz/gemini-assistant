@@ -105,18 +105,14 @@ function filterByPrefix<T extends string>(values: readonly T[], prefix: string):
 export const DiscoverPromptSchema = z
   .strictObject({
     job: completable(
-      PublicJobNameSchema.optional().describe(
-        'Public job to ask discovery guidance about. Use when the prompt should focus on one job family instead of the full catalog.',
-      ),
+      PublicJobNameSchema.optional().describe('Public job to focus discovery guidance on.'),
       (value) =>
         filterByPrefix(
           ['chat', 'research', 'analyze', 'review', 'memory', 'discover'],
           value ?? '',
         ),
     ),
-    goal: textField(
-      'User outcome to optimize for when recommending a prompt or job. Use when discovery guidance should be tailored to a concrete task.',
-    ).optional(),
+    goal: textField('User outcome to optimize for.').optional(),
   })
   .describe('Guide a client to the best public job, prompt, and resource.');
 
@@ -124,17 +120,10 @@ export const ResearchPromptSchema = z
   .strictObject({
     goal: goalText('Research goal or question'),
     mode: completable(
-      z
-        .enum(RESEARCH_MODE_OPTIONS)
-        .optional()
-        .describe(
-          'Research mode to ask about. Use `quick` for a lighter answer path or `deep` for a more thorough investigation workflow.',
-        ),
+      z.enum(RESEARCH_MODE_OPTIONS).optional().describe('Research mode (quick or deep).'),
       (value) => filterByPrefix(RESEARCH_MODE_OPTIONS, value ?? ''),
     ),
-    deliverable: textField(
-      'Requested output form for the research help. Use to ask for a brief, report, checklist, recommendation, or another deliverable style.',
-    ).optional(),
+    deliverable: textField('Requested output form.').optional(),
   })
   .describe('Explain the quick-versus-deep research decision flow.');
 
@@ -144,31 +133,20 @@ export const ReviewPromptSchema = z
       z
         .enum(REVIEW_SUBJECT_OPTIONS)
         .optional()
-        .describe(
-          'Review variant to ask about. Use `diff`, `comparison`, or `failure` to focus the guidance on the right review flow.',
-        ),
+        .describe('Review variant (diff, comparison, failure).'),
       (value) => filterByPrefix(REVIEW_SUBJECT_OPTIONS, value ?? ''),
     ),
-    focus: textField(
-      'Review priority to emphasize. Use to steer guidance toward regressions, tests, security, performance, or another review lens.',
-    ).optional(),
+    focus: textField('Review priority (e.g. regressions, tests, security).').optional(),
   })
   .describe('Guide diff review, file comparison, or failure triage.');
 
 export const MemoryPromptSchema = z
   .strictObject({
     action: completable(
-      z
-        .enum(MEMORY_ACTION_OPTIONS)
-        .optional()
-        .describe(
-          'Memory action to ask about. Use it when the prompt should explain one specific sessions, caches, or workspace-memory operation.',
-        ),
+      z.enum(MEMORY_ACTION_OPTIONS).optional().describe('Memory action to focus on.'),
       (value) => filterByPrefix(MEMORY_ACTION_OPTIONS, value ?? ''),
     ),
-    task: textField(
-      'Task context that should shape the memory guidance. Use to explain what you are trying to do so the prompt can recommend the right memory action.',
-    ).optional(),
+    task: textField('Task context.').optional(),
   })
   .describe('Explain how sessions, caches, and workspace memory fit together.');
 

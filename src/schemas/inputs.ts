@@ -42,26 +42,17 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
     ...createSessionContinuationFields(completeSessionIds),
     memory: MemoryRefSchema,
     systemInstruction: textField(
-      'Instructions that shape response style, constraints, or behavior for this call or for a newly created session. Use when the user goal alone does not fully define how Gemini should respond.',
+      'System instructions for response style, constraints, or behavior.',
     ).optional(),
     thinkingLevel: thinkingLevel('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
-    responseSchema: GeminiResponseSchema.optional().describe(
-      'JSON Schema for structured output. Use when the response must follow a machine-readable shape; best suited for single-turn calls and newly created sessions.',
-    ),
+    responseSchema: GeminiResponseSchema.optional().describe('JSON Schema for structured output.'),
     temperature: z
       .number()
       .min(0)
       .max(2)
       .optional()
-      .describe(
-        'Sampling temperature for generation. Use lower values for deterministic answers and higher values for more varied or creative output.',
-      ),
-    seed: z
-      .int()
-      .optional()
-      .describe(
-        'Fixed random seed for reproducible outputs. Use when repeated runs should stay stable.',
-      ),
+      .describe('Sampling temperature (0.0 to 2.0). Lower is more deterministic.'),
+    seed: z.int().optional().describe('Fixed random seed for reproducible outputs.'),
   });
 }
 
@@ -69,33 +60,24 @@ export const ChatInputSchema = createChatInputSchema();
 export type ChatInput = z.infer<typeof ChatInputSchema>;
 
 const QuickResearchInputSchema = z.strictObject({
-  mode: z
-    .literal('quick')
-    .describe('Research mode selector. Use `quick` for a faster, lighter-weight answer.'),
+  mode: z.literal('quick').describe('Research mode selector (`quick`).'),
   goal: goalText('Question or research goal to answer quickly'),
   ...createUrlContextFields({
     itemDescription: 'Public URL to analyze alongside search results',
-    description:
-      'Public URLs to inspect alongside web search results. Use when specific pages should inform or ground the answer.',
+    description: 'Public URLs to inspect alongside web search results.',
     max: 20,
     optional: true,
   }),
   systemInstruction: textField(
-    'Instructions for how to present the quick research result. Use for format, audience, tone, or scope constraints.',
+    'Instructions for output presentation (format, audience, tone).',
   ).optional(),
   thinkingLevel: thinkingLevelField,
 });
 
 const DeepResearchInputSchema = z.strictObject({
-  mode: z
-    .literal('deep')
-    .describe(
-      'Research mode selector. Use `deep` for a multi-step investigation with broader coverage.',
-    ),
+  mode: z.literal('deep').describe('Research mode selector (`deep`).'),
   goal: goalText('Topic or research goal for a deeper multi-step investigation'),
-  deliverable: textField(
-    'Requested output form for the research result. Use to ask for a brief, report, checklist, recommendation, or another deliverable style.',
-  ).optional(),
+  deliverable: textField('Requested output form (brief, report, checklist, etc.).').optional(),
   searchDepth: z
     .int()
     .min(1)
@@ -129,18 +111,12 @@ export type ResearchInput =
     };
 
 const AnalyzeFileTargetsSchema = z.strictObject({
-  kind: z
-    .literal('file')
-    .describe('Analyze target type. Use `file` when the request is about one local file.'),
+  kind: z.literal('file').describe('Target type (`file`).'),
   filePath: workspacePath('Workspace-relative or absolute path to the file'),
 });
 
 const AnalyzeUrlTargetsSchema = z.strictObject({
-  kind: z
-    .literal('url')
-    .describe(
-      'Analyze target type. Use `url` when the request is about one or more public web pages.',
-    ),
+  kind: z.literal('url').describe('Target type (`url`).'),
   ...createUrlContextFields({
     itemDescription: 'Public URL to analyze',
     description: 'One or more public URLs to analyze.',
@@ -150,18 +126,12 @@ const AnalyzeUrlTargetsSchema = z.strictObject({
 });
 
 const AnalyzeMultiTargetsSchema = z.strictObject({
-  kind: z
-    .literal('multi')
-    .describe(
-      'Analyze target type. Use `multi` when the answer depends on several local files together.',
-    ),
+  kind: z.literal('multi').describe('Target type (`multi`).'),
   filePaths: z
     .array(workspacePath('Workspace-relative or absolute path to a local file'))
     .min(2)
     .max(5)
-    .describe(
-      'Small set of local files to analyze together. Use when the answer depends on comparing or combining context across multiple files.',
-    ),
+    .describe('List of local files to analyze.'),
 });
 
 const AnalyzeTargetsSchema = z
@@ -170,9 +140,7 @@ const AnalyzeTargetsSchema = z
     AnalyzeUrlTargetsSchema,
     AnalyzeMultiTargetsSchema,
   ])
-  .describe(
-    'Target selection for analysis. Choose the variant that matches the source material to inspect.',
-  );
+  .describe('Target selection for analysis.');
 
 export const AnalyzeInputSchema = z.strictObject({
   goal: goalText('Question or analysis goal for the selected targets'),
@@ -202,58 +170,30 @@ export interface AnalyzeInput {
 }
 
 const ReviewDiffSubjectSchema = z.strictObject({
-  kind: z
-    .literal('diff')
-    .describe('Review subject type. Use `diff` to review current local changes as a patch.'),
-  dryRun: z
-    .boolean()
-    .optional()
-    .describe(
-      'Skip model review and return only the generated local diff snapshot. Use for inspection or debugging.',
-    ),
-  language: textField(
-    'Primary language in the local diff. Use when the changes are mostly in one language and review comments should follow its conventions.',
-  ).optional(),
+  kind: z.literal('diff').describe('Subject type (`diff`).'),
+  dryRun: z.boolean().optional().describe('Skip model review, return diff snapshot only.'),
+  language: textField('Primary language hint.').optional(),
 });
 
 const ReviewComparisonSubjectSchema = z.strictObject({
-  kind: z
-    .literal('comparison')
-    .describe('Review subject type. Use `comparison` to compare two local files directly.'),
+  kind: z.literal('comparison').describe('Subject type (`comparison`).'),
   ...createFilePairFields(
     'Workspace-relative or absolute path to the first file',
     'Workspace-relative or absolute path to the second file',
   ),
-  question: textField(
-    'Specific angle for comparing the two files. Use to focus the comparison on behavior, APIs, security, performance, or another concern.',
-  ).optional(),
-  googleSearch: z
-    .boolean()
-    .optional()
-    .describe('Enable Google Search for migration or best-practice context.'),
+  question: textField('Comparison focus (behavior, APIs, security, etc.).').optional(),
+  googleSearch: z.boolean().optional().describe('Enable Google Search.'),
 });
 
 const ReviewFailureSubjectSchema = z.strictObject({
-  kind: z
-    .literal('failure')
-    .describe(
-      'Review subject type. Use `failure` to diagnose an error, stack trace, or broken behavior.',
-    ),
-  error: requiredText('Error message, stack trace, or log output to diagnose'),
-  codeContext: textField(
-    'Relevant source code around the failure. Use when the error output alone is not enough to explain the bug or identify the fix.',
-  ).optional(),
-  language: textField(
-    'Programming language of the failing code. Use when it helps interpret syntax, stack traces, or framework-specific behavior.',
-  ).optional(),
-  googleSearch: z
-    .boolean()
-    .optional()
-    .describe('Enable Google Search for docs/issues and targeted verification.'),
+  kind: z.literal('failure').describe('Subject type (`failure`).'),
+  error: requiredText('Error message or stack trace.'),
+  codeContext: textField('Relevant source code context.').optional(),
+  language: textField('Programming language hint.').optional(),
+  googleSearch: z.boolean().optional().describe('Enable Google Search.'),
   ...createUrlContextFields({
     itemDescription: 'Public URL for additional context',
-    description:
-      'Public URLs with supporting failure context, such as documentation, issue threads, or logs shared on the web.',
+    description: 'Public URLs for additional failure context.',
     max: 20,
     optional: true,
   }),
@@ -265,15 +205,11 @@ const ReviewSubjectSchema = z
     ReviewComparisonSubjectSchema,
     ReviewFailureSubjectSchema,
   ])
-  .describe(
-    'Review subject details. Choose the variant that matches the artifact or problem being reviewed.',
-  );
+  .describe('Review subject details.');
 
 export const ReviewInputSchema = z.strictObject({
   subject: ReviewSubjectSchema,
-  focus: textField(
-    'Review priorities for this request. Use to emphasize regressions, tests, security, performance, maintainability, or another review lens.',
-  ).optional(),
+  focus: textField('Review priorities (e.g. regressions, security, performance).').optional(),
   thinkingLevel: thinkingLevelField,
   cacheName: completableCacheName(
     'Cache resource name to provide project context during review.',
@@ -283,11 +219,7 @@ export const ReviewInputSchema = z.strictObject({
 export type ReviewInput = z.infer<typeof ReviewInputSchema>;
 
 const MemorySessionsListSchema = z.strictObject({
-  action: z
-    .literal('sessions.list')
-    .describe(
-      'Memory action to perform. Use `sessions.list` to see available in-memory chat sessions.',
-    ),
+  action: z.literal('sessions.list').describe('Memory action (`sessions.list`).'),
 });
 
 export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
@@ -297,101 +229,60 @@ export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter =
   );
 
   const memorySessionsGetSchema = z.strictObject({
-    action: z
-      .literal('sessions.get')
-      .describe(
-        'Memory action to perform. Use `sessions.get` to inspect metadata for one session.',
-      ),
+    action: z.literal('sessions.get').describe('Memory action (`sessions.get`).'),
     sessionId: memorySessionIdField,
   });
 
   const memorySessionsTranscriptSchema = z.strictObject({
-    action: z
-      .literal('sessions.transcript')
-      .describe(
-        'Memory action to perform. Use `sessions.transcript` to read the saved conversation transcript for one session.',
-      ),
+    action: z.literal('sessions.transcript').describe('Memory action (`sessions.transcript`).'),
     sessionId: memorySessionIdField,
   });
 
   const memorySessionsEventsSchema = z.strictObject({
-    action: z
-      .literal('sessions.events')
-      .describe(
-        'Memory action to perform. Use `sessions.events` to inspect stored structured request and response events for one session.',
-      ),
+    action: z.literal('sessions.events').describe('Memory action (`sessions.events`).'),
     sessionId: memorySessionIdField,
   });
 
   const memoryCachesListSchema = z.strictObject({
-    action: z
-      .literal('caches.list')
-      .describe('Memory action to perform. Use `caches.list` to see active Gemini caches.'),
+    action: z.literal('caches.list').describe('Memory action (`caches.list`).'),
   });
 
   const memoryCachesGetSchema = z.strictObject({
-    action: z
-      .literal('caches.get')
-      .describe('Memory action to perform. Use `caches.get` to inspect one existing Gemini cache.'),
+    action: z.literal('caches.get').describe('Memory action (`caches.get`).'),
     cacheName: completableCacheName('Cache resource name to inspect'),
   });
 
   const memoryCachesCreateSchema = z
     .strictObject({
-      action: z
-        .literal('caches.create')
-        .describe(
-          'Memory action to perform. Use `caches.create` to build reusable cached context from files and/or instructions.',
-        ),
+      action: z.literal('caches.create').describe('Memory action (`caches.create`).'),
       filePaths: z
         .array(workspacePath('Workspace-relative or absolute path to a file to cache'))
         .max(50)
         .optional()
-        .describe(
-          'Files to include in the cache. Use when reusable context should be built from local source files or documents.',
-        ),
+        .describe('Files to include in the cache.'),
       systemInstruction: requiredText(
-        'System instruction to store alongside the cached files. Use when the cache should preserve stable guidance in addition to file content.',
+        'System instruction to store alongside the cached files.',
       ).optional(),
-      ttl: ttlSeconds(
-        'Time-to-live for the cache, such as "3600s". Use to control how long the cached context remains available.',
-      ).optional(),
-      displayName: textField(
-        'Human-readable label for the cache. Use to make caches easier to identify; reusing the same display name replaces the existing cache.',
-      ).optional(),
+      ttl: ttlSeconds('Time-to-live for the cache (e.g. "3600s").').optional(),
+      displayName: textField('Human-readable label for the cache.').optional(),
     })
     .superRefine(validateMeaningfulCacheCreateInput)
-    .describe(
-      'Create a Gemini cache from files and/or a system instruction. Use it to reuse large context across later requests.',
-    );
+    .describe('Create a Gemini cache from files and/or a system instruction.');
 
   const memoryCachesUpdateSchema = z.strictObject({
-    action: z
-      .literal('caches.update')
-      .describe('Memory action to perform. Use `caches.update` to extend or shorten a cache TTL.'),
+    action: z.literal('caches.update').describe('Memory action (`caches.update`).'),
     cacheName: completableCacheName('Cache resource name to update'),
     ttl: ttlSeconds('New TTL from now (e.g. "7200s" for 2 hours)'),
   });
 
   const memoryCachesDeleteSchema = z.strictObject({
-    action: z
-      .literal('caches.delete')
-      .describe('Memory action to perform. Use `caches.delete` to remove a Gemini cache.'),
+    action: z.literal('caches.delete').describe('Memory action (`caches.delete`).'),
     cacheName: completableCacheName('Cache resource name to delete'),
-    confirm: z
-      .boolean()
-      .optional()
-      .describe(
-        'Confirmation override for non-interactive clients. Use `true` when the caller cannot complete an interactive delete confirmation step.',
-      ),
+    confirm: z.boolean().optional().describe('Confirmation override for non-interactive clients.'),
   });
 
   const memoryWorkspaceContextSchema = z.strictObject({
-    action: z
-      .literal('workspace.context')
-      .describe(
-        'Memory action to perform. Use `workspace.context` to inspect the assembled workspace context summary.',
-      ),
+    action: z.literal('workspace.context').describe('Memory action (`workspace.context`).'),
   });
 
   const memoryWorkspaceCacheSchema = z.strictObject({
@@ -421,12 +312,8 @@ export const MemoryInputSchema = createMemoryInputSchema();
 export type MemoryInput = z.infer<typeof MemoryInputSchema>;
 
 export const DiscoverInputSchema = z.strictObject({
-  job: PublicJobNameSchema.optional().describe(
-    'Public job to focus the discovery response on. Use when you already know the rough category and want more targeted guidance.',
-  ),
-  goal: textField(
-    'User outcome to optimize for when recommending a job. Use when you want discovery guidance tailored to a concrete task.',
-  ).optional(),
+  job: PublicJobNameSchema.optional().describe('Public job to focus discovery guidance on.'),
+  goal: textField('User outcome to optimize for.').optional(),
 });
 export type DiscoverInput = z.infer<typeof DiscoverInputSchema>;
 
@@ -438,36 +325,25 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
       completeSessionIds,
     ),
     systemInstruction: textField(
-      'Instructions that define response style, format, or behavior. Use for single-turn calls or when starting a new session with persistent guidance.',
+      'System instructions for response style, constraints, or behavior.',
     ).optional(),
     thinkingLevel: thinkingLevel('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
     cacheName: completableCacheName(
       'Cache name from memory action=caches.create. Cannot be applied to an existing chat session.',
       true,
     ),
-    responseSchema: GeminiResponseSchema.optional().describe(
-      'JSON Schema for structured output. Use when Gemini should return conforming JSON for a single-turn request or a newly created session; some Gemini 2.0 models may also need propertyOrdering.',
-    ),
+    responseSchema: GeminiResponseSchema.optional().describe('JSON Schema for structured output.'),
     temperature: z
       .number()
       .min(0)
       .max(2)
       .optional()
-      .describe(
-        'Sampling temperature for generation. Use lower values for more deterministic replies and higher values for more varied output; omit it to use the model default.',
-      ),
-    seed: z
-      .int()
-      .optional()
-      .describe(
-        'Fixed random seed for reproducible outputs. Use when repeated calls should stay stable; omit it to use the model default.',
-      ),
+      .describe('Sampling temperature (0.0 to 2.0). Lower is more deterministic.'),
+    seed: z.int().optional().describe('Fixed random seed for reproducible outputs.'),
     googleSearch: z
       .boolean()
       .optional()
-      .describe(
-        'Backward-compatible shortcut for enabling search behavior. Use when older clients still send `googleSearch` instead of `toolProfile=search`.',
-      ),
+      .describe('Legacy shortcut to enable Google Search (prefer toolProfile="search").'),
   };
 
   return z.union([
@@ -475,9 +351,7 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
       ...askCommonShape,
       toolProfile: z
         .enum(URL_TOOL_PROFILES)
-        .describe(
-          'Built-in tool preset to enable for this request. Use `url` or `search_url` when URL Context should be active; use other presets when you want specific built-in tool behavior.',
-        ),
+        .describe('Built-in tool preset (`url` or `search_url`).'),
       ...createUrlContextFields({
         itemDescription: 'Public URL to analyze with URL Context',
         description: 'URLs for URL Context when using toolProfile=url or search_url (max 20).',
@@ -490,9 +364,7 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
       toolProfile: z
         .enum(NON_URL_TOOL_PROFILES)
         .optional()
-        .describe(
-          'Built-in tool preset to enable for this request. Use it when you want Gemini to rely on a specific tool mode such as search, code, or search_code.',
-        ),
+        .describe('Built-in tool preset (search, code, etc.).'),
       ...createUrlContextFields({
         itemDescription: 'Public URL to analyze with URL Context',
         description: 'URLs for URL Context when using toolProfile=url or search_url (max 20).',
@@ -589,7 +461,7 @@ export const AnalyzeUrlInputSchema = z.strictObject({
   }),
   question: requiredText('What to analyze or ask about the URL content'),
   systemInstruction: textField(
-    'Instructions that shape how the URL analysis should be performed or presented. Use for output format, rubric, or audience constraints.',
+    'Instructions for output presentation (format, rubric, audience).',
   ).optional(),
   thinkingLevel: thinkingLevelField,
 });
@@ -601,38 +473,25 @@ export interface AnalyzeUrlInput {
 }
 
 export const AnalyzePrInputSchema = z.strictObject({
-  dryRun: z
-    .boolean()
-    .describe(
-      'Skip Gemini review and return only diff content plus summary stats. Use when you need the snapshot itself without model analysis.',
-    )
-    .optional(),
+  dryRun: z.boolean().describe('Skip model review, return diff snapshot only.').optional(),
   ...createOptionalCacheReferenceFields(
     'Cache resource name to provide project context during review.',
   ),
   thinkingLevel: thinkingLevelField,
-  language: textField(
-    'Primary language for the pull request review. Use when the diff is mostly in one language and you want language-aware review feedback.',
-  ).optional(),
+  language: textField('Primary language hint.').optional(),
 });
 export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
 
 const createCacheFilePathsSchema = z
   .array(workspacePath('Workspace-relative or absolute path to a file to cache'))
   .max(50)
-  .describe(
-    'Workspace-relative or absolute paths to files to cache. Use when reusable context should be built from local files.',
-  );
+  .describe('Workspace-relative or absolute paths to files to cache.');
 const createCacheSystemInstructionSchema = requiredText(
-  'System instruction to store in the cache. Use when reusable guidance should accompany the cached files.',
+  'System instruction to store in the cache.',
 );
 const createCacheSharedShape = {
-  ttl: ttlSeconds(
-    'Time-to-live for the cache, such as "3600s". Use to control how long the cached context remains available.',
-  ).optional(),
-  displayName: textField(
-    'Human-readable label for the cache. Use to make caches easier to identify; reusing the same display name replaces the existing cache.',
-  ).optional(),
+  ttl: ttlSeconds('Time-to-live for the cache (e.g., "3600s").').optional(),
+  displayName: textField('Human-readable label for the cache.').optional(),
 };
 
 export const CreateCacheInputSchema = z
@@ -642,9 +501,7 @@ export const CreateCacheInputSchema = z
     ...createCacheSharedShape,
   })
   .superRefine(validateMeaningfulCacheCreateInput)
-  .describe(
-    'Create a Gemini API cache for reusable large context. Combined content from files and instructions must exceed roughly 32,000 tokens.',
-  );
+  .describe('Create a Gemini API cache for reusable large context (requires ~32k tokens min).');
 export type CreateCacheInput = z.infer<typeof CreateCacheInputSchema>;
 
 function createCacheNameSchema(action: 'delete' | 'update') {
@@ -653,12 +510,7 @@ function createCacheNameSchema(action: 'delete' | 'update') {
 
 export const DeleteCacheInputSchema = z.strictObject({
   cacheName: createCacheNameSchema('delete'),
-  confirm: z
-    .boolean()
-    .optional()
-    .describe(
-      'Confirmation override for non-interactive clients. Use `true` when the caller cannot complete an interactive delete confirmation step.',
-    ),
+  confirm: z.boolean().optional().describe('Confirmation override for non-interactive clients.'),
 });
 export type DeleteCacheInput = z.infer<typeof DeleteCacheInputSchema>;
 
@@ -670,12 +522,8 @@ export type UpdateCacheInput = z.infer<typeof UpdateCacheInputSchema>;
 
 export const ExplainErrorInputSchema = z.strictObject({
   error: requiredText('Error message, stack trace, or log output to diagnose'),
-  codeContext: textField(
-    'Relevant source code around the failure. Use when the error text alone is not enough to explain the root cause.',
-  ).optional(),
-  language: textField(
-    'Programming language of the failing code, such as "typescript" or "python". Use when it helps interpret syntax, tooling, or runtime behavior.',
-  ).optional(),
+  codeContext: textField('Relevant source code context.').optional(),
+  language: textField('Programming language hint.').optional(),
   thinkingLevel: thinkingLevelField,
   googleSearch: z
     .boolean()
@@ -698,9 +546,7 @@ export const CompareFilesInputSchema = z.strictObject({
     'Workspace-relative or absolute path to the first file',
     'Workspace-relative or absolute path to the second file',
   ),
-  question: textField(
-    'Specific angle for comparing the files. Use to focus on API changes, behavior differences, security implications, performance, or another concern.',
-  ).optional(),
+  question: textField('Comparison focus (e.g., API changes, behavior, security).').optional(),
   thinkingLevel: thinkingLevelField,
   googleSearch: z
     .boolean()
@@ -741,18 +587,14 @@ export const GenerateDiagramInputSchema = z
     googleSearch: z
       .boolean()
       .optional()
-      .describe(
-        'Enable Google Search for diagram syntax help or pattern reference. Use when the request depends on external conventions or examples.',
-      ),
+      .describe('Enable Google Search for diagram syntax help or pattern reference.'),
     ...createOptionalCacheReferenceFields(
       'Cache resource name to provide project context for diagram generation.',
     ),
     validateSyntax: z
       .boolean()
       .optional()
-      .describe(
-        'Validate the generated diagram syntax in the code execution sandbox. Use when you want an extra syntax check before returning the diagram.',
-      ),
+      .describe('Validate generated diagram syntax in execution sandbox.'),
   })
   .superRefine(validateExclusiveSourceFileFields);
 export type GenerateDiagramInput = z.infer<typeof GenerateDiagramInputSchema>;

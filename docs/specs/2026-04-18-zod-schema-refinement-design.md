@@ -203,8 +203,8 @@ Expected changes:
 
 Likely touch points include:
 
-- [__tests__/schemas/inputs.test.ts](C:/gemini-assistant/__tests__/schemas/inputs.test.ts)
-- [__tests__/schemas/json-schema.test.ts](C:/gemini-assistant/__tests__/schemas/json-schema.test.ts)
+- [**tests**/schemas/inputs.test.ts](C:/gemini-assistant/__tests__/schemas/inputs.test.ts)
+- [**tests**/schemas/json-schema.test.ts](C:/gemini-assistant/__tests__/schemas/json-schema.test.ts)
 - prompt tests that encode current loose acceptance
 
 Tests should be updated to reflect intended contracts, not historical permissiveness.

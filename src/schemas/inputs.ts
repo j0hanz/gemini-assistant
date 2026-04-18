@@ -24,9 +24,7 @@ import {
 import {
   createFilePairFields,
   createOptionalCacheReferenceFields,
-  createSessionContinuationFields,
   createUrlContextFields,
-  MemoryRefSchema,
 } from './fragments.js';
 import { GeminiResponseSchema } from './json-schema.js';
 import {
@@ -38,24 +36,67 @@ type SessionIdCompleter = (prefix?: string) => string[];
 
 const thinkingLevelField = thinkingLevel();
 
+function validateResponseSchemaJson(value: string, ctx: z.RefinementCtx): void {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'responseSchemaJson must be valid JSON.',
+    });
+    return;
+  }
+
+  const result = GeminiResponseSchema.safeParse(parsed);
+  if (result.success) {
+    return;
+  }
+
+  for (const issue of result.error.issues) {
+    ctx.addIssue({
+      code: 'custom',
+      message: `responseSchemaJson ${issue.message}`,
+      path: issue.path,
+    });
+  }
+}
+
+function responseSchemaJsonField() {
+  return z
+    .string()
+    .trim()
+    .min(1)
+    .superRefine(validateResponseSchemaJson)
+    .describe('Structured output schema as JSON. Use JSON input instead of nested form fields.')
+    .optional();
+}
+
 export function createChatInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
   return z.strictObject({
     goal: goalText(),
-    ...createSessionContinuationFields(completeSessionIds),
-    memory: MemoryRefSchema,
+    sessionId: completable(
+      sessionId('Server-managed in-memory session identifier.').optional(),
+      completeSessionIds,
+    ),
+    cacheName: completableCacheName(
+      'Gemini cache resource name to attach as reusable context.',
+      true,
+    ),
     systemInstruction: textField(
       'System instructions for response style, constraints, or behavior.',
     ).optional(),
     thinkingLevel: thinkingLevelField,
-    responseSchema: GeminiResponseSchema.optional().describe('JSON Schema for structured output.'),
+    responseSchemaJson: responseSchemaJsonField(),
     temperature: boundedFloat(
-      'Sampling temperature (0.0 to 2.0). Lower is more deterministic.',
+      'Advanced. Sampling temperature (0.0 to 2.0). Lower is more deterministic.',
       0,
       2,
     )
       .optional()
-      .describe('Sampling temperature (0.0 to 2.0). Lower is more deterministic.'),
-    seed: z.int().optional().describe('Fixed random seed for reproducible outputs.'),
+      .describe('Advanced. Sampling temperature (0.0 to 2.0). Lower is more deterministic.'),
+    seed: z.int().optional().describe('Advanced. Fixed random seed for reproducible outputs.'),
   });
 }
 

@@ -70,7 +70,7 @@ describe('public MCP resource notifications', () => {
       const sessionId = 'notifications session%/#';
       let offset = harness.client.getNotifications().length;
       await harness.client.request('tools/call', {
-        arguments: { goal: 'Start a reusable chat session', session: { id: sessionId } },
+        arguments: { goal: 'Start a reusable chat session', sessionId },
         name: 'chat',
       });
 

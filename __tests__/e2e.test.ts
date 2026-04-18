@@ -127,16 +127,16 @@ describe('in-memory MCP server e2e', () => {
     const invalidChatSchema = await harness.client.requestRaw('tools/call', {
       arguments: {
         goal: 'Return JSON',
-        responseSchema: {
+        responseSchemaJson: JSON.stringify({
           properties: {
             status: { type: 123 },
           },
           type: 'object',
-        },
+        }),
       },
       name: 'chat',
     });
-    assertRequestValidationFailure(invalidChatSchema, -32602, /responseSchema|type/i);
+    assertRequestValidationFailure(invalidChatSchema, -32602, /responseSchemaJson|type|number/i);
   });
 
   it('reads memory://workspace/context as markdown through MCP', async () => {

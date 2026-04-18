@@ -81,7 +81,7 @@ The job-first surface is intentionally opinionated:
 - `analyze.output.kind` is required and chooses between summary analysis and diagram generation.
 - `review.subject.kind="failure"` is the public failure-diagnosis path.
 - `memory.action` is a discriminated union; it does not accept generic target/input bags.
-- `chat.responseSchema` is intended for single-turn calls and brand-new sessions.
+- `chat.responseSchemaJson` is intended for single-turn calls and brand-new sessions.
 - The public surface does not expose the legacy `discover` callable tool or the retired standalone `search`, `analyze_url`, `agentic_search`, `explain_error`, `diagram`, or `execute_code` tools.
 - The public surface does not expose Gemini File Search stores or Live API sessions.
 

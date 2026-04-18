@@ -154,10 +154,60 @@ describe('ChatInputSchema', () => {
     }
   });
 
-  it('rejects empty session.id after trim', () => {
+  it('accepts the flat sessionId and responseSchemaJson fields', () => {
     const result = ChatInputSchema.safeParse({
       goal: 'continue this thread',
-      session: { id: '   ' },
+      sessionId: 'sess-1',
+      cacheName: 'cachedContents/abc123',
+      responseSchemaJson: JSON.stringify({
+        type: 'object',
+        properties: { answer: { type: 'string' } },
+      }),
+    });
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.sessionId, 'sess-1');
+      assert.strictEqual(result.data.cacheName, 'cachedContents/abc123');
+    }
+  });
+
+  it('rejects empty sessionId after trim', () => {
+    const result = ChatInputSchema.safeParse({
+      goal: 'continue this thread',
+      sessionId: '   ',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects removed nested session and memory fields', () => {
+    const sessionResult = ChatInputSchema.safeParse({
+      goal: 'continue this thread',
+      session: { id: 'sess-1' },
+    });
+    assert.strictEqual(sessionResult.success, false);
+
+    const memoryResult = ChatInputSchema.safeParse({
+      goal: 'continue this thread',
+      memory: { cacheName: 'cachedContents/abc123' },
+    });
+    assert.strictEqual(memoryResult.success, false);
+  });
+
+  it('rejects invalid responseSchemaJson', () => {
+    const result = ChatInputSchema.safeParse({
+      goal: 'return JSON',
+      responseSchemaJson: '{not valid json}',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects responseSchemaJson that fails supported schema validation', () => {
+    const result = ChatInputSchema.safeParse({
+      goal: 'return JSON',
+      responseSchemaJson: JSON.stringify({
+        type: 'object',
+        properties: { ok: { type: 42 } },
+      }),
     });
     assert.strictEqual(result.success, false);
   });

@@ -251,6 +251,14 @@ describe('MCP tool smoke coverage', () => {
         );
       }
 
+      const chatSchema = toolMap.get('chat')?.inputSchema;
+      assert.equal(getObjectProperty(chatSchema, 'session'), undefined);
+      assert.equal(getObjectProperty(chatSchema, 'memory'), undefined);
+      assert.equal(getObjectProperty(chatSchema, 'responseSchema'), undefined);
+      assert.ok(getObjectProperty(chatSchema, 'sessionId'));
+      assert.ok(getObjectProperty(chatSchema, 'cacheName'));
+      assert.ok(getObjectProperty(chatSchema, 'responseSchemaJson'));
+
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);
     } finally {
       await harness.close();
@@ -267,14 +275,14 @@ describe('MCP tool smoke coverage', () => {
 
       const chatResult = await callTool(harness.client, 'chat', {
         goal: 'Return JSON',
-        responseSchema: {
+        responseSchemaJson: JSON.stringify({
           properties: {
             count: { type: 'integer' },
             status: { type: 'string' },
           },
           required: ['status', 'count'],
           type: 'object',
-        },
+        }),
         systemInstruction: 'Return only the requested JSON object.',
       });
       expectSuccess(chatResult);
@@ -400,7 +408,7 @@ describe('MCP tool smoke coverage', () => {
       const encodedSessionId = 'sess special%/#';
       const sessionResult = await callTool(harness.client, 'chat', {
         goal: 'Start a session',
-        session: { id: encodedSessionId },
+        sessionId: encodedSessionId,
       });
       expectSuccess(sessionResult);
       assert.deepStrictEqual(sessionResult.structuredContent.session, {
@@ -478,16 +486,25 @@ describe('MCP tool smoke coverage', () => {
       const invalidChatSchema = await harness.client.requestRaw('tools/call', {
         arguments: {
           goal: 'Return JSON',
-          responseSchema: {
+          responseSchemaJson: JSON.stringify({
             properties: {
               ok: { type: 42 },
             },
             type: 'object',
-          },
+          }),
         },
         name: 'chat',
       });
-      assertRequestValidationFailure(invalidChatSchema, -32602, /responseSchema|type/i);
+      assertRequestValidationFailure(invalidChatSchema, -32602, /responseSchemaJson|type|number/i);
+
+      const removedChatSession = await harness.client.requestRaw('tools/call', {
+        arguments: {
+          goal: 'Start a session',
+          session: { id: 'sess-legacy' },
+        },
+        name: 'chat',
+      });
+      assertRequestValidationFailure(removedChatSession, -32602, /session/i);
 
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);
     } finally {

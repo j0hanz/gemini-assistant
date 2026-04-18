@@ -81,6 +81,16 @@ interface AskExecutionResult {
   urls?: string[];
 }
 
+function parseResponseSchemaJson(
+  responseSchemaJson: string | undefined,
+): GeminiResponseSchema | undefined {
+  if (!responseSchemaJson) {
+    return undefined;
+  }
+
+  return JSON.parse(responseSchemaJson) as GeminiResponseSchema;
+}
+
 const ASK_TOOL_LABEL = 'Chat';
 const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
 
@@ -847,9 +857,9 @@ async function chatWork(
   const result = await askWork(
     {
       message: args.goal,
-      sessionId: args.session?.id,
-      cacheName: args.memory?.cacheName,
-      responseSchema: args.responseSchema,
+      sessionId: args.sessionId,
+      cacheName: args.cacheName,
+      responseSchema: parseResponseSchemaJson(args.responseSchemaJson),
       seed: args.seed,
       systemInstruction: args.systemInstruction,
       temperature: args.temperature,
@@ -858,7 +868,7 @@ async function chatWork(
     ctx,
   );
 
-  return assembleChatOutput(result, args.session?.id, ctx.task?.id);
+  return assembleChatOutput(result, args.sessionId, ctx.task?.id);
 }
 
 export function registerChatTool(

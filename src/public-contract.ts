@@ -134,11 +134,11 @@ export const DISCOVERY_ENTRIES = [
     whenToUse: 'Use for conversational tasks that span multiple turns.',
     inputs: [
       'goal',
-      'session?',
-      'memory?',
+      'sessionId?',
+      'cacheName?',
       'systemInstruction?',
       'thinkingLevel?',
-      'responseSchema?',
+      'responseSchemaJson?',
       'temperature?',
       'seed?',
     ],
@@ -444,7 +444,7 @@ export const WORKFLOW_ENTRIES = [
     goal: 'Start or continue a server-managed chat session with optional reusable memory.',
     whenToUse: 'Use when the task is conversational and may span multiple turns.',
     steps: [
-      'Call chat with a goal and optional session.id.',
+      'Call chat with a goal and optional sessionId.',
       'Inspect memory://sessions if you need to find an active session.',
       'Inspect memory://sessions/{sessionId}/transcript or /events when you need read-only inspection.',
       'Use memory cache actions when the same large context should be reused across calls.',

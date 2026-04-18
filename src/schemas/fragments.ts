@@ -1,5 +1,3 @@
-import { completable } from '@modelcontextprotocol/server';
-
 import { z } from 'zod/v4';
 
 import {
@@ -8,12 +6,9 @@ import {
   publicHttpUrl,
   publicHttpUrlArray,
   PublicHttpUrlSchema,
-  sessionId,
   timestamp,
   workspacePath,
 } from './fields.js';
-
-type SessionIdCompleter = (prefix?: string) => string[];
 
 export const usageMetadataFields = {
   promptTokenCount: nonNegativeInt('Tokens in the prompt').optional(),
@@ -164,26 +159,3 @@ export function createUrlContextFields(options: UrlContextFieldOptions) {
     urls: publicHttpUrlArray({ ...options, optional: false }),
   };
 }
-
-export function createSessionContinuationFields(completeSessionIds: SessionIdCompleter = () => []) {
-  return {
-    session: z
-      .strictObject({
-        id: completable(
-          sessionId('Server-managed in-memory session identifier.').optional(),
-          completeSessionIds,
-        ),
-      })
-      .optional()
-      .describe('Existing chat session to continue.'),
-  };
-}
-
-export const MemoryRefSchema = z
-  .strictObject({
-    ...createOptionalCacheReferenceFields(
-      'Gemini cache resource name to attach as reusable context',
-    ),
-  })
-  .optional()
-  .describe('Reusable memory inputs for the current request.');

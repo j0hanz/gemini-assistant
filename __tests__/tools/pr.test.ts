@@ -1,3 +1,5 @@
+import type { ServerContext } from '@modelcontextprotocol/server';
+
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -5,10 +7,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { getAI } from '../../src/client.js';
+
 // Set dummy API key so client.ts doesn't exit
 process.env.API_KEY ??= 'test-key-for-pr';
 
 const {
+  analyzePrWork,
   buildLocalDiffSnapshot,
   budgetDiffUnits,
   buildAnalysisPrompt,
@@ -23,6 +28,33 @@ const {
 
 function runGit(cwd: string, args: string[]) {
   execFileSync('git', args, { cwd, stdio: 'pipe' });
+}
+
+function makeContext(): ServerContext {
+  return {
+    mcpReq: {
+      _meta: {},
+      signal: new AbortController().signal,
+      log: Object.assign(async () => undefined, {
+        debug: async () => undefined,
+        info: async () => undefined,
+        warning: async () => undefined,
+        error: async () => undefined,
+      }),
+      notify: async () => undefined,
+    },
+  } as unknown as ServerContext;
+}
+
+async function* fakeStream(text: string): AsyncGenerator {
+  yield {
+    candidates: [
+      {
+        content: { parts: [{ text }] },
+        finishReason: 'STOP',
+      },
+    ],
+  };
 }
 
 async function createTempRepo(): Promise<string> {
@@ -305,6 +337,55 @@ describe('buildAnalysisPrompt', () => {
     assert.ok(prompt.includes('- fixtures/big.json'));
     assert.ok(prompt.includes('Omitted:'));
     assert.ok(prompt.includes('- src/omitted.ts'));
+  });
+});
+
+describe('analyzePrWork cache prompt integration', () => {
+  it('keeps concise live review guidance when using cacheName', async () => {
+    const repoRoot = await createTempRepo();
+    const cwd = process.cwd();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+    let observedArgs: Record<string, unknown> | undefined;
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async (args: Record<string, unknown>) => {
+      observedArgs = args;
+      return fakeStream('## Findings\n\nNo issues found.');
+    };
+
+    try {
+      await mkdir(join(repoRoot, 'src'), { recursive: true });
+      await writeFile(join(repoRoot, 'src', 'a.ts'), 'export const value = 1;\n');
+      runGit(repoRoot, ['add', '.']);
+      runGit(repoRoot, ['commit', '-m', 'initial']);
+      await writeFile(join(repoRoot, 'src', 'a.ts'), 'export const value = 2;\n');
+
+      process.chdir(repoRoot);
+      const result = await analyzePrWork(
+        {
+          cacheName: 'cachedContents/workspace-1',
+        },
+        makeContext(),
+      );
+
+      assert.strictEqual(result.isError, undefined);
+      const config = observedArgs?.config as Record<string, unknown> | undefined;
+      const contents = observedArgs?.contents;
+      assert.strictEqual(config?.cachedContent, 'cachedContents/workspace-1');
+      assert.strictEqual(config?.systemInstruction, undefined);
+      assert.strictEqual(typeof contents, 'string');
+      assert.match(
+        contents,
+        /Review the diff for bugs, regressions, and behavior risk\. Ignore formatting-only changes\. Output: Findings, Fixes\./,
+      );
+      assert.match(contents, /## Snapshot/);
+      assert.match(contents, /```diff/);
+    } finally {
+      process.chdir(cwd);
+      client.models.generateContentStream = originalGenerateContentStream;
+      await rm(repoRoot, { recursive: true, force: true });
+    }
   });
 });
 

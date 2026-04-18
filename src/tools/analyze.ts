@@ -9,6 +9,7 @@ import { createPartFromUri } from '@google/genai';
 
 import { cleanupErrorLogger } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
+import { buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput } from '../lib/response.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
@@ -28,13 +29,6 @@ import { analyzeUrlWork } from './research-job.js';
 
 const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
 const ANALYZE_TOOL_LABEL = 'Analyze';
-
-const ANALYZE_FILE_SYSTEM_INSTRUCTION =
-  'Answer from the file only. Cite relevant sections, lines, or elements.';
-
-const ANALYZE_MULTI_SYSTEM_INSTRUCTION =
-  'Analyze only the provided local files. Synthesize across them when needed. ' +
-  'Cite filenames, symbols, or short excerpts. Do not invent missing context.';
 
 export function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
   return async function analyzeFileWork(
@@ -57,19 +51,25 @@ export function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
         ctx,
         'analyze_file',
         ANALYZE_FILE_TOOL_LABEL,
-        () =>
-          getAI().models.generateContentStream({
+        () => {
+          const { promptText, systemInstruction } = buildFileAnalysisPrompt({
+            goal: question,
+            kind: 'single',
+          });
+
+          return getAI().models.generateContentStream({
             model: MODEL,
-            contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: question }],
+            contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: promptText }],
             config: buildGenerateContentConfig(
               {
-                systemInstruction: ANALYZE_FILE_SYSTEM_INSTRUCTION,
+                systemInstruction,
                 thinkingLevel: thinkingLevel ?? 'LOW',
                 ...(mediaResolution ? { mediaResolution } : {}),
               },
               ctx.mcpReq.signal,
             ),
-          }),
+          });
+        },
         (_streamResult, textContent: string) => ({
           structuredContent: {
             analysis: textContent || '',
@@ -107,14 +107,18 @@ async function analyzeMultiFileWork(
           contents.push({ text: `File: ${uploaded.displayPath}` });
           contents.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
         }
-        contents.push({ text: `Goal: ${goal}` });
+        const prompt = buildFileAnalysisPrompt({
+          attachedParts: contents,
+          goal,
+          kind: 'multi',
+        });
 
         return getAI().models.generateContentStream({
           model: MODEL,
-          contents,
+          contents: prompt.promptParts,
           config: buildGenerateContentConfig(
             {
-              systemInstruction: ANALYZE_MULTI_SYSTEM_INSTRUCTION,
+              systemInstruction: prompt.systemInstruction,
               thinkingLevel: thinkingLevel ?? 'MEDIUM',
             },
             ctx.mcpReq.signal,

@@ -5,6 +5,11 @@ import type {
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
 
+import {
+  buildAgenticResearchPrompt,
+  buildFileAnalysisPrompt,
+  buildGroundedAnswerPrompt,
+} from '../lib/model-prompts.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import {
@@ -44,33 +49,6 @@ import { getAI, MODEL } from '../client.js';
 const SEARCH_TOOL_LABEL = 'Web Search';
 const ANALYZE_URL_TOOL_LABEL = 'Analyze URL';
 const AGENTIC_SEARCH_TOOL_LABEL = 'Agentic Search';
-
-const SEARCH_SYSTEM_INSTRUCTION = 'Answer from grounded search results only. Be concise.';
-
-const ANALYZE_URL_SYSTEM_INSTRUCTION =
-  'Answer from retrieved URL content only. Cite relevant sections, fields, or short quotes.';
-
-const AGENT_SYSTEM_INSTRUCTION =
-  'Research with Google Search and Code Execution.\n\n' +
-  'Process:\n' +
-  '1. Split the topic into sub-questions.\n' +
-  '2. Search multiple angles.\n' +
-  '3. Use Code Execution for calculations, comparisons, rankings, and tables when useful.\n' +
-  '4. Write a grounded Markdown report.\n' +
-  '5. Include concrete numbers and dates when available.\n' +
-  '6. Do not state unsupported claims.';
-
-function buildSearchContents(query: string, urls?: readonly string[]): string {
-  if (!urls || urls.length === 0) {
-    return query;
-  }
-
-  return `${query}\n\nUse these URLs too:\n${urls.join('\n')}`;
-}
-
-function buildPromptWithUrls(urls: string[], question: string): string {
-  return `URLs:\n${urls.join('\n')}\n\nTask: ${question}`;
-}
 
 function buildSourceReportMessage(sourceCount: number): string {
   return sourceCount > 0 ? `${formatCountLabel(sourceCount, 'source')} found` : 'completed';
@@ -127,18 +105,6 @@ async function enrichTopicWithSampling(topic: string, ctx: ServerContext): Promi
     await ctx.mcpReq.log('info', `requestSampling encountered an issue: ${String(error)}`);
     return topic;
   }
-}
-
-function buildAgenticDepthInstruction(searchDepth: number): string {
-  if (searchDepth <= 2) {
-    return 'Focused: cover 2-3 key aspects.';
-  }
-
-  if (searchDepth <= 3) {
-    return 'Thorough: cover 4-5 key aspects.';
-  }
-
-  return 'Exhaustive: cover as many relevant aspects as possible.';
 }
 
 export function buildAgenticSearchResult(streamResult: StreamResult, textContent: string) {
@@ -229,6 +195,7 @@ export async function searchWork(
   const { functionCallingMode, toolConfig, tools } = buildOrchestrationConfig({
     toolProfile: (urls?.length ?? 0) > 0 ? 'search_url' : 'search',
   });
+  const prompt = buildGroundedAnswerPrompt(query, urls);
 
   return await executor.runStream(
     ctx,
@@ -237,10 +204,10 @@ export async function searchWork(
     () =>
       getAI().models.generateContentStream({
         model: MODEL,
-        contents: buildSearchContents(query, urls),
+        contents: prompt.promptText,
         config: buildGenerateContentConfig(
           {
-            systemInstruction: systemInstruction ?? SEARCH_SYSTEM_INSTRUCTION,
+            systemInstruction: systemInstruction ?? prompt.systemInstruction,
             thinkingLevel: thinkingLevel ?? 'LOW',
             functionCallingMode,
             toolConfig,
@@ -265,6 +232,12 @@ export async function analyzeUrlWork(
   const progress = new ProgressReporter(ctx, ANALYZE_URL_TOOL_LABEL);
   await progress.send(0, undefined, 'Fetching');
   await ctx.mcpReq.log('info', `Analyzing ${String(urls.length)} URL(s)`);
+  const prompt = buildFileAnalysisPrompt({
+    goal: question,
+    kind: 'url',
+    urls,
+  });
+
   return await executor.runStream(
     ctx,
     'analyze_url',
@@ -272,10 +245,10 @@ export async function analyzeUrlWork(
     () =>
       getAI().models.generateContentStream({
         model: MODEL,
-        contents: buildPromptWithUrls(urls, question),
+        contents: prompt.promptText,
         config: buildGenerateContentConfig(
           {
-            systemInstruction: systemInstruction ?? ANALYZE_URL_SYSTEM_INSTRUCTION,
+            systemInstruction: systemInstruction ?? prompt.systemInstruction,
             thinkingLevel: thinkingLevel ?? 'LOW',
             ...buildOrchestrationConfig({ toolProfile: 'url' }),
           },
@@ -309,7 +282,10 @@ export async function agenticSearchWork(
   await progress.send(0, undefined, 'Starting deep research');
   await ctx.mcpReq.log('info', `Agentic search: ${topic}`);
   const enrichedTopic = await enrichTopicWithSampling(topic, ctx);
-  const depthInstruction = buildAgenticDepthInstruction(searchDepth);
+  const prompt = buildAgenticResearchPrompt({
+    searchDepth,
+    topic: enrichedTopic,
+  });
 
   return await executor.runStream(
     ctx,
@@ -318,13 +294,10 @@ export async function agenticSearchWork(
     () =>
       getAI().models.generateContentStream({
         model: MODEL,
-        contents:
-          `Topic: ${enrichedTopic}\n\n` +
-          `${depthInstruction}\n\n` +
-          'Task: research the topic and produce a grounded report.',
+        contents: prompt.promptText,
         config: buildGenerateContentConfig(
           {
-            systemInstruction: AGENT_SYSTEM_INSTRUCTION,
+            systemInstruction: prompt.systemInstruction,
             thinkingLevel: thinkingLevel ?? 'MEDIUM',
             ...buildOrchestrationConfig({
               includeServerSideToolInvocations: true,

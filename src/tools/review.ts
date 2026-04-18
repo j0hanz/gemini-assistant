@@ -14,6 +14,7 @@ import { createPartFromUri } from '@google/genai';
 
 import { cleanupErrorLogger } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
+import { buildDiffReviewPrompt } from '../lib/model-prompts.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput } from '../lib/response.js';
@@ -151,24 +152,6 @@ const NOISY_EXCLUDE_PATHSPECS = [
   ...NOISY_SUFFIXES.map((suffix) => `:!*${suffix}`),
 ];
 
-const COMPARE_SYSTEM_INSTRUCTION =
-  'Compare the two provided files. Base claims on the files. ' +
-  'Cite symbols, section names, or short quotes. Do not invent line numbers.\n\n' +
-  'Output:\n' +
-  '## Summary\n' +
-  '## Differences\n' +
-  '## Impact';
-
-const REVIEW_DIFF_SYSTEM_INSTRUCTION =
-  'Review the unified diff for bugs, regressions, and behavior risk. Ignore formatting-only changes. ' +
-  'Cite file paths and hunk context from the diff. Do not invent content or line numbers. ' +
-  'If clean, say so briefly.\n\n' +
-  'Output:\n' +
-  '## Findings\n' +
-  'List issues by severity with file references.\n' +
-  '## Fixes\n' +
-  'Short next steps.';
-
 interface DiffStats {
   files: number;
   additions: number;
@@ -244,10 +227,17 @@ export function createCompareFileWork(rootsFetcher: RootsFetcher) {
       await ctx.mcpReq.log('info', `Comparing: ${fileA.displayPath} vs ${fileB.displayPath}`);
       await progress.step(2, 4, 'Analyzing differences');
 
-      const prompt = question ? `Focus: ${question}` : 'Task: Compare the two files.';
-
-      const effectiveSystemInstruction = cacheName ? undefined : COMPARE_SYSTEM_INSTRUCTION;
-      const effectivePrompt = cacheName ? `${COMPARE_SYSTEM_INSTRUCTION}\n\n${prompt}` : prompt;
+      const prompt = buildDiffReviewPrompt({
+        cacheName,
+        focus: question,
+        mode: 'compare',
+        promptParts: [
+          { text: `File A: ${fileA.displayPath}` },
+          createPartFromUri(fileA.uri, fileA.mimeType),
+          { text: `File B: ${fileB.displayPath}` },
+          createPartFromUri(fileB.uri, fileB.mimeType),
+        ],
+      });
 
       return await executor.runStream(
         ctx,
@@ -256,16 +246,10 @@ export function createCompareFileWork(rootsFetcher: RootsFetcher) {
         () =>
           getAI().models.generateContentStream({
             model: MODEL,
-            contents: [
-              { text: `File A: ${fileA.displayPath}` },
-              createPartFromUri(fileA.uri, fileA.mimeType),
-              { text: `File B: ${fileB.displayPath}` },
-              createPartFromUri(fileB.uri, fileB.mimeType),
-              { text: effectivePrompt },
-            ],
+            contents: prompt.promptParts,
             config: buildGenerateContentConfig(
               {
-                systemInstruction: effectiveSystemInstruction,
+                systemInstruction: prompt.systemInstruction,
                 thinkingLevel: thinkingLevel ?? 'MEDIUM',
                 cacheName,
                 ...buildOrchestrationConfig({
@@ -817,26 +801,6 @@ async function logSnapshotStats(
   );
 }
 
-function buildModelPrompt(
-  prompt: string,
-  cacheName?: string,
-): {
-  effectivePrompt: string;
-  effectiveSystemInstruction: string | undefined;
-} {
-  if (cacheName) {
-    return {
-      effectivePrompt: `${REVIEW_DIFF_SYSTEM_INSTRUCTION}\n\n${prompt}`,
-      effectiveSystemInstruction: undefined,
-    };
-  }
-
-  return {
-    effectivePrompt: prompt,
-    effectiveSystemInstruction: REVIEW_DIFF_SYSTEM_INSTRUCTION,
-  };
-}
-
 export async function buildLocalDiffSnapshot(
   workingDirectory = process.cwd(),
   signal?: AbortSignal,
@@ -915,7 +879,11 @@ export async function analyzePrWork(
     language,
   );
 
-  const { effectivePrompt, effectiveSystemInstruction } = buildModelPrompt(prompt, cacheName);
+  const modelPrompt = buildDiffReviewPrompt({
+    cacheName,
+    mode: 'review',
+    promptText: prompt,
+  });
 
   return await executor.runStream(
     ctx,
@@ -924,10 +892,10 @@ export async function analyzePrWork(
     () =>
       getAI().models.generateContentStream({
         model: MODEL,
-        contents: effectivePrompt,
+        contents: modelPrompt.promptText,
         config: buildGenerateContentConfig(
           {
-            systemInstruction: effectiveSystemInstruction,
+            systemInstruction: modelPrompt.systemInstruction,
             thinkingLevel: thinkingLevel ?? 'HIGH',
             cacheName,
           },

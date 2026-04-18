@@ -10,6 +10,7 @@ import type { Part } from '@google/genai';
 
 import { cleanupErrorLogger, SafetyError } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
+import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
@@ -35,20 +36,6 @@ const DIAGRAM_FENCED_PATTERN = /```(?:mermaid|plantuml)?\s*\n([\s\S]*?)```/;
 
 const EXECUTE_CODE_SYSTEM_INSTRUCTION =
   'Write code that runs. Comment only non-obvious logic. Handle likely edge cases. Explain the result briefly.';
-
-function buildDiagramSystemInstruction(diagramType: string, validateSyntax?: boolean): string {
-  return (
-    `Generate a ${diagramType} diagram from the description and files.\n\n` +
-    'Rules:\n' +
-    `1. Return exactly one fenced \`\`\`${diagramType} block.\n` +
-    '2. Keep it readable.\n' +
-    '3. Use clear node and edge labels.\n' +
-    '4. If source code is provided, derive the diagram from it.' +
-    (validateSyntax
-      ? '\n5. If syntax validation is requested, use code execution for a best-effort check and state uncertainty.'
-      : '')
-  );
-}
 
 function extractDiagram(text: string): { diagram: string; explanation: string } {
   const match = DIAGRAM_FENCED_PATTERN.exec(text);
@@ -96,33 +83,6 @@ async function uploadDiagramSourceFiles(
   }
 
   return contentParts;
-}
-
-function buildDiagramPrompt(
-  contentParts: Part[],
-  diagramType: string,
-  description: string,
-  systemInstruction: string,
-  cacheName?: string,
-): {
-  effectiveSystemInstruction: string | undefined;
-  prompt: Part[];
-} {
-  const prompt = [
-    ...contentParts,
-    {
-      text: `Task: ${description}`,
-    },
-  ];
-
-  if (cacheName) {
-    prompt.unshift({ text: systemInstruction });
-  }
-
-  return {
-    effectiveSystemInstruction: cacheName ? undefined : systemInstruction,
-    prompt,
-  };
 }
 
 interface ExecutionSummary {
@@ -242,14 +202,13 @@ export function createDiagramWork(rootsFetcher: RootsFetcher) {
       );
       await ctx.mcpReq.log('info', `Generating ${diagramType} diagram`);
 
-      const systemInstruction = buildDiagramSystemInstruction(diagramType, validateSyntax);
-      const { effectiveSystemInstruction, prompt } = buildDiagramPrompt(
-        contentParts,
-        diagramType,
-        description,
-        systemInstruction,
+      const prompt = buildDiagramGenerationPrompt({
+        attachedParts: contentParts,
         cacheName,
-      );
+        description,
+        diagramType,
+        validateSyntax,
+      });
 
       return await executor.runStream(
         ctx,
@@ -258,10 +217,10 @@ export function createDiagramWork(rootsFetcher: RootsFetcher) {
         () =>
           getAI().models.generateContentStream({
             model: MODEL,
-            contents: prompt,
+            contents: prompt.promptParts,
             config: buildGenerateContentConfig(
               {
-                systemInstruction: effectiveSystemInstruction,
+                systemInstruction: prompt.systemInstruction,
                 thinkingLevel: thinkingLevel ?? 'LOW',
                 cacheName,
                 ...buildOrchestrationConfig({

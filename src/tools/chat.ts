@@ -8,11 +8,7 @@ import type {
 import { Validator } from '@cfworker/json-schema';
 import type { Chat } from '@google/genai';
 
-import {
-  buildContextUsed,
-  buildSessionSummary,
-  emptyContextUsed,
-} from '../lib/context-assembler.js';
+import { buildContextUsed, buildSessionSummary, emptyContextUsed } from '../lib/chat-context.js';
 import { AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';

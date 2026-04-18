@@ -212,12 +212,50 @@ describe('ChatInputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
+  it('formats nested responseSchemaJson validation failures with Zod error text', () => {
+    const result = ChatInputSchema.safeParse({
+      goal: 'return JSON',
+      responseSchemaJson: JSON.stringify({
+        type: 'object',
+        properties: { ok: { type: 42 } },
+      }),
+    });
+    assert.strictEqual(result.success, false);
+    if (!result.success) {
+      assert.match(result.error.issues[0]?.message ?? '', /responseSchemaJson must match/i);
+      assert.match(
+        result.error.issues[0]?.message ?? '',
+        /properties\.ok\.type|properties\["ok"\]\.type/i,
+      );
+    }
+  });
+
   it('rejects temperature above the bounded range', () => {
     const result = ChatInputSchema.safeParse({
       goal: 'help me debug this',
       temperature: 2.1,
     });
     assert.strictEqual(result.success, false);
+  });
+
+  it('keeps standard field descriptions on the public contract', () => {
+    assert.strictEqual(ChatInputSchema.shape.goal.description, 'User goal or requested outcome');
+    assert.strictEqual(
+      ChatInputSchema.shape.thinkingLevel.description,
+      'Reasoning depth. Default: MEDIUM. MINIMAL is fastest; HIGH is deepest.',
+    );
+    assert.strictEqual(
+      ChatInputSchema.shape.responseSchemaJson.description,
+      'Structured output schema as JSON. Use JSON input instead of nested form fields.',
+    );
+    assert.strictEqual(
+      ChatInputSchema.shape.temperature.description,
+      'Sampling temperature (0.0 to 2.0). Lower is more deterministic.',
+    );
+    assert.strictEqual(
+      ChatInputSchema.shape.seed.description,
+      'Fixed random seed for reproducible outputs.',
+    );
   });
 });
 
@@ -670,8 +708,9 @@ describe('shared thinkingLevel defaults', () => {
   it('defaults analyze input to MEDIUM', () => {
     const result = AnalyzeInputSchema.safeParse({
       goal: 'Summarize the architecture',
-      targets: { kind: 'file', filePath: 'src/index.ts' },
-      output: { kind: 'summary' },
+      targetKind: 'file',
+      filePath: 'src/index.ts',
+      outputKind: 'summary',
     });
     assert.ok(result.success);
     if (result.success) {
@@ -681,12 +720,23 @@ describe('shared thinkingLevel defaults', () => {
 
   it('defaults review input to MEDIUM', () => {
     const result = ReviewInputSchema.safeParse({
-      subject: { kind: 'diff' },
+      subjectKind: 'diff',
     });
     assert.ok(result.success);
     if (result.success) {
       assert.strictEqual(result.data.thinkingLevel, 'MEDIUM');
     }
+  });
+
+  it('keeps shared thinkingLevel metadata consistent across public tools', () => {
+    const chatThinking = ChatInputSchema.shape.thinkingLevel;
+    const analyzeThinking = AnalyzeInputSchema.shape.thinkingLevel;
+    const reviewThinking = ReviewInputSchema.shape.thinkingLevel;
+
+    assert.strictEqual(analyzeThinking.description, chatThinking.description);
+    assert.strictEqual(reviewThinking.description, chatThinking.description);
+    assert.strictEqual(analyzeThinking.safeParse(undefined).data, 'MEDIUM');
+    assert.strictEqual(reviewThinking.safeParse(undefined).data, 'MEDIUM');
   });
 });
 
@@ -770,13 +820,9 @@ describe('AnalyzeInputSchema', () => {
   it('accepts a file summary request', () => {
     const result = AnalyzeInputSchema.safeParse({
       goal: 'Summarize this file',
-      targets: {
-        kind: 'file',
-        filePath: absolutePath('src', 'index.ts'),
-      },
-      output: {
-        kind: 'summary',
-      },
+      targetKind: 'file',
+      filePath: absolutePath('src', 'index.ts'),
+      outputKind: 'summary',
     });
     assert.ok(result.success);
   });
@@ -784,31 +830,95 @@ describe('AnalyzeInputSchema', () => {
   it('accepts a diagram request for multiple files', () => {
     const result = AnalyzeInputSchema.safeParse({
       goal: 'Diagram the flow',
-      targets: {
-        kind: 'multi',
-        filePaths: [absolutePath('src', 'a.ts'), absolutePath('src', 'b.ts')],
-      },
-      output: {
-        kind: 'diagram',
-        diagramType: 'mermaid',
-      },
+      targetKind: 'multi',
+      filePaths: [absolutePath('src', 'a.ts'), absolutePath('src', 'b.ts')],
+      outputKind: 'diagram',
+      diagramType: 'mermaid',
     });
     assert.ok(result.success);
+  });
+
+  it('rejects irrelevant fields for the selected target kind', () => {
+    const result = AnalyzeInputSchema.safeParse({
+      goal: 'Summarize this file',
+      targetKind: 'file',
+      filePath: absolutePath('src', 'index.ts'),
+      urls: ['https://example.com'],
+      outputKind: 'summary',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects diagram-only fields when outputKind=summary', () => {
+    const result = AnalyzeInputSchema.safeParse({
+      goal: 'Summarize this file',
+      targetKind: 'file',
+      filePath: absolutePath('src', 'index.ts'),
+      outputKind: 'summary',
+      diagramType: 'mermaid',
+    });
+    assert.strictEqual(result.success, false);
   });
 
   it('rejects unknown fields', () => {
     const result = AnalyzeInputSchema.safeParse({
       goal: 'test',
-      targets: {
-        kind: 'file',
-        filePath: absolutePath('src', 'index.ts'),
-      },
-      output: {
-        kind: 'summary',
-      },
+      targetKind: 'file',
+      filePath: absolutePath('src', 'index.ts'),
+      outputKind: 'summary',
       extra: true,
     });
     assert.strictEqual(result.success, false);
+  });
+
+  it('keeps standard descriptions for flat selector fields', () => {
+    assert.strictEqual(
+      AnalyzeInputSchema.shape.targetKind.description,
+      'What to analyze: one file, one or more public URLs, or a small local file set.',
+    );
+    assert.strictEqual(
+      AnalyzeInputSchema.shape.outputKind.description,
+      'Requested output format: summary text or a generated diagram.',
+    );
+  });
+});
+
+describe('ReviewInputSchema', () => {
+  it('accepts the flat diff selection shape', () => {
+    const result = ReviewInputSchema.safeParse({ subjectKind: 'diff' });
+    assert.ok(result.success);
+  });
+
+  it('accepts the flat comparison selection shape', () => {
+    const result = ReviewInputSchema.safeParse({
+      subjectKind: 'comparison',
+      filePathA: absolutePath('src', 'a.ts'),
+      filePathB: absolutePath('src', 'b.ts'),
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects irrelevant fields for subjectKind=diff', () => {
+    const result = ReviewInputSchema.safeParse({
+      subjectKind: 'diff',
+      filePathA: absolutePath('src', 'a.ts'),
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects missing comparison file paths', () => {
+    const result = ReviewInputSchema.safeParse({
+      subjectKind: 'comparison',
+      filePathA: absolutePath('src', 'a.ts'),
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('keeps the standard description for subject selection', () => {
+    assert.strictEqual(
+      ReviewInputSchema.shape.subjectKind.description,
+      'What to review: the current diff, a file comparison, or a failure report.',
+    );
   });
 });
 

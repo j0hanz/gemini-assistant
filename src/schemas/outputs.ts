@@ -159,7 +159,7 @@ export const ReviewOutputSchema = z.strictObject({
   stats: z
     .strictObject(diffStatsFields)
     .optional()
-    .describe('Diff statistics when review.subject.kind=diff'),
+    .describe('Diff statistics when subjectKind=diff'),
   reviewedPaths: z.array(z.string()).optional().describe('Paths included in a local diff review'),
   includedUntracked: z.array(z.string()).optional().describe('Included untracked text files'),
   skippedBinaryPaths: z.array(z.string()).optional().describe('Skipped untracked binary files'),

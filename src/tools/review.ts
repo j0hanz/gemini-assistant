@@ -1043,6 +1043,22 @@ function buildReviewStructuredContent(
   };
 }
 
+function requireComparisonFilePath(value: string | undefined, field: string): string {
+  if (value) {
+    return value;
+  }
+
+  throw new Error(`ReviewInput validation requires ${field} when subjectKind=comparison.`);
+}
+
+function requireFailureError(value: string | undefined): string {
+  if (value) {
+    return value;
+  }
+
+  throw new Error('ReviewInput validation requires error when subjectKind=failure.');
+}
+
 async function reviewWork(
   compareWork: ReturnType<typeof createCompareFileWork>,
   args: ReviewInput,
@@ -1050,24 +1066,24 @@ async function reviewWork(
 ): Promise<CallToolResult> {
   let result: CallToolResult;
 
-  if (args.subject.kind === 'diff') {
+  if (args.subjectKind === 'diff') {
     result = await analyzePrWork(
       {
-        dryRun: args.subject.dryRun,
+        dryRun: args.dryRun,
         cacheName: args.cacheName,
-        language: args.subject.language,
+        language: args.language,
         thinkingLevel: args.thinkingLevel,
       },
       ctx,
     );
-  } else if (args.subject.kind === 'comparison') {
+  } else if (args.subjectKind === 'comparison') {
     result = await compareWork(
       {
-        filePathA: args.subject.filePathA,
-        filePathB: args.subject.filePathB,
-        question: args.subject.question ?? args.focus,
+        filePathA: requireComparisonFilePath(args.filePathA, 'filePathA'),
+        filePathB: requireComparisonFilePath(args.filePathB, 'filePathB'),
+        question: args.question ?? args.focus,
         thinkingLevel: args.thinkingLevel,
-        googleSearch: args.subject.googleSearch,
+        googleSearch: args.googleSearch,
         cacheName: args.cacheName,
       },
       ctx,
@@ -1075,12 +1091,12 @@ async function reviewWork(
   } else {
     result = await diagnoseFailureWork(
       {
-        error: args.subject.error,
-        codeContext: args.subject.codeContext,
+        error: requireFailureError(args.error),
+        codeContext: args.codeContext,
         kind: 'failure',
-        language: args.subject.language,
-        googleSearch: args.subject.googleSearch,
-        urls: args.subject.urls,
+        language: args.language,
+        googleSearch: args.googleSearch,
+        urls: args.urls,
       },
       args.focus,
       args.cacheName,
@@ -1097,7 +1113,7 @@ async function reviewWork(
 
   return {
     ...result,
-    structuredContent: buildReviewStructuredContent(ctx.task?.id, args.subject.kind, structured),
+    structuredContent: buildReviewStructuredContent(ctx.task?.id, args.subjectKind, structured),
   };
 }
 

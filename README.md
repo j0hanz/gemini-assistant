@@ -54,7 +54,7 @@ Workflow entries:
 - Direct Gemini chat with optional server-managed sessions: `chat`
 - Quick or deep research with grounded results: `research`
 - Analyze a local file, public URLs, a small file set, or generate a diagram: `analyze`
-- Review a diff, compare files, or diagnose a failure through `review.subject.kind="failure"`: `review`
+- Review a diff, compare files, or diagnose a failure through `subjectKind="failure"`: `review`
 - Inspect or mutate sessions, caches, and workspace memory state: `memory`
 
 ## Sessions And Caches
@@ -78,8 +78,8 @@ Server context state is exposed through `discover://context`.
 The job-first surface is intentionally opinionated:
 
 - `research.mode` is required and chooses between quick lookup and deeper multi-step research.
-- `analyze.output.kind` is required and chooses between summary analysis and diagram generation.
-- `review.subject.kind="failure"` is the public failure-diagnosis path.
+- `outputKind` is required for `analyze` and chooses between summary analysis and diagram generation.
+- `subjectKind="failure"` is the public failure-diagnosis path.
 - `memory.action` is a discriminated union; it does not accept generic target/input bags.
 - `chat.responseSchemaJson` is intended for single-turn calls and brand-new sessions.
 - The public surface does not expose the legacy `discover` callable tool or the retired standalone `search`, `analyze_url`, `agentic_search`, `explain_error`, `diagram`, or `execute_code` tools.

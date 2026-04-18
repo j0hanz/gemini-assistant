@@ -50,7 +50,7 @@ describe('public contract schemas', () => {
       false,
     );
     assert.strictEqual(
-      ReviewInputSchema.safeParse({ subject: { kind: 'diff' }, topic: 'legacy' }).success,
+      ReviewInputSchema.safeParse({ subjectKind: 'diff', topic: 'legacy' }).success,
       false,
     );
     assert.strictEqual(
@@ -60,8 +60,9 @@ describe('public contract schemas', () => {
     assert.strictEqual(
       AnalyzeInputSchema.safeParse({
         goal: 'x',
-        targets: { kind: 'file', filePath: 'src/index.ts' },
-        output: { kind: 'summary' },
+        targetKind: 'file',
+        filePath: 'src/index.ts',
+        outputKind: 'summary',
         question: 'legacy',
       }).success,
       false,

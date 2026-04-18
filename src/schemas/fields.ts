@@ -37,18 +37,37 @@ export const MEMORY_ACTION_OPTIONS = [
   'workspace.cache',
 ] as const;
 
+function buildTextSchema(maxLength?: number) {
+  const schema = z.string().trim().min(1);
+  return maxLength === undefined ? schema : schema.max(maxLength);
+}
+
+export function withFieldMetadata<T extends z.ZodType>(schema: T, description: string): T {
+  return schema.describe(description);
+}
+
+export function optionalField<T extends z.ZodType>(schema: T): z.ZodOptional<T> {
+  const metadata = schema.meta();
+  let optionalSchema = schema.optional();
+
+  if (schema.description) {
+    optionalSchema = optionalSchema.describe(schema.description);
+  }
+
+  return metadata ? optionalSchema.meta(metadata) : optionalSchema;
+}
+
 export function enumField<const Values extends readonly [string, ...string[]]>(
   values: Values,
   description: string,
 ) {
-  return z.enum(values).describe(description);
+  return withFieldMetadata(z.enum(values), description);
 }
 
 export const PublicJobNameSchema = enumField(PUBLIC_TOOL_NAMES, 'Public job name');
 
 export function textField(description: string, maxLength?: number) {
-  const schema = z.string().trim().min(1);
-  return (maxLength === undefined ? schema : schema.max(maxLength)).describe(description);
+  return withFieldMetadata(buildTextSchema(maxLength), description);
 }
 
 export function requiredText(description: string, maxLength?: number) {
@@ -60,11 +79,11 @@ export function goalText(description = 'User goal or requested outcome', maxLeng
 }
 
 export function boundedFloat(description: string, minimum: number, maximum: number) {
-  return z.number().min(minimum).max(maximum).describe(description);
+  return withFieldMetadata(z.number().min(minimum).max(maximum), description);
 }
 
 export function boundedInt(description: string, minimum: number, maximum: number) {
-  return z.int().min(minimum).max(maximum).describe(description);
+  return withFieldMetadata(z.int().min(minimum).max(maximum), description);
 }
 
 function escapesRelativeRoot(value: string): boolean {
@@ -77,29 +96,32 @@ function isWindowsDriveRelativePath(value: string): boolean {
 }
 
 export function workspacePath(description: string) {
-  return requiredText(description).refine(
+  const schema = buildTextSchema().refine(
     (value) =>
       !isWindowsDriveRelativePath(value) && (isAbsolute(value) || !escapesRelativeRoot(value)),
     {
       error: 'Path must be workspace-relative or absolute',
     },
   );
+  return withFieldMetadata(schema, description);
 }
 
 export function ttlSeconds(description: string) {
-  return textField(description).regex(TTL_SECONDS_PATTERN, {
+  const schema = buildTextSchema().regex(TTL_SECONDS_PATTERN, {
     error: 'TTL must be a positive integer number of seconds ending in "s" (e.g. "3600s")',
   });
+  return withFieldMetadata(schema, description);
 }
 
 export function nonNegativeInt(description: string) {
-  return z.int().nonnegative().describe(description);
+  return withFieldMetadata(z.int().nonnegative(), description);
 }
 
 export function cacheName(description: string) {
-  return textField(description).regex(CACHE_NAME_PATTERN, {
+  const schema = buildTextSchema().regex(CACHE_NAME_PATTERN, {
     error: 'Cache name must start with "cachedContents/".',
   });
+  return withFieldMetadata(schema, description);
 }
 
 export function completableCacheName(
@@ -112,7 +134,7 @@ export function completableCacheName(
 ): CompletableSchema<z.ZodOptional<ReturnType<typeof cacheName>>>;
 export function completableCacheName(description: string, optional = false) {
   if (optional) {
-    return completable(cacheName(description).optional(), completeCacheNames);
+    return completable(optionalField(cacheName(description)), completeCacheNames);
   }
 
   return completable(cacheName(description), completeCacheNames);
@@ -123,7 +145,7 @@ export const PublicHttpUrlSchema = z.httpUrl().refine(isPublicHttpUrl, {
 });
 
 export function publicHttpUrl(description: string) {
-  return PublicHttpUrlSchema.describe(description);
+  return withFieldMetadata(PublicHttpUrlSchema, description);
 }
 
 interface PublicHttpUrlArrayOptions {
@@ -163,9 +185,7 @@ export function publicHttpUrlArray(
 export function publicHttpUrlArray(options: PublicHttpUrlArrayOptions) {
   const { itemDescription, optional = false, ...rest } = options;
   const schema = buildArrayField(publicHttpUrl(itemDescription), rest);
-  return optional
-    ? schema.optional().describe(rest.description)
-    : schema.describe(rest.description);
+  return withFieldMetadata(optional ? schema.optional() : schema, rest.description);
 }
 
 interface WorkspacePathArrayOptions {
@@ -185,13 +205,11 @@ export function workspacePathArray(
 export function workspacePathArray(options: WorkspacePathArrayOptions) {
   const { itemDescription, optional = false, ...rest } = options;
   const schema = buildArrayField(workspacePath(itemDescription), rest);
-  return optional
-    ? schema.optional().describe(rest.description)
-    : schema.describe(rest.description);
+  return withFieldMetadata(optional ? schema.optional() : schema, rest.description);
 }
 
 export function timestamp(description: string) {
-  return z.iso.datetime({ offset: true }).describe(description);
+  return withFieldMetadata(z.iso.datetime({ offset: true }), description);
 }
 
 export function sessionId(description: string) {
@@ -201,13 +219,9 @@ export function sessionId(description: string) {
 export function thinkingLevel(
   description = 'Reasoning depth. Default: MEDIUM. MINIMAL is fastest; HIGH is deepest.',
 ) {
-  return z
-    .enum(THINKING_LEVELS)
-    .meta({ default: DEFAULT_THINKING_LEVEL })
-    .default(DEFAULT_THINKING_LEVEL)
-    .describe(description);
+  return withFieldMetadata(z.enum(THINKING_LEVELS).default(DEFAULT_THINKING_LEVEL), description);
 }
 
 export function mediaResolution(description: string) {
-  return enumField(MEDIA_RESOLUTIONS, description).optional();
+  return withFieldMetadata(z.enum(MEDIA_RESOLUTIONS).optional(), description);
 }

@@ -118,3 +118,172 @@ export function validateMeaningfulCacheCreateInput(
     );
   }
 }
+
+interface FlatAnalyzeInput {
+  diagramType?: string | undefined;
+  filePath?: string | undefined;
+  filePaths?: string[] | undefined;
+  outputKind: 'summary' | 'diagram';
+  targetKind: 'file' | 'url' | 'multi';
+  urls?: string[] | undefined;
+  validateSyntax?: boolean | undefined;
+}
+
+function addForbiddenFieldIssue(
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+  field: string,
+  selector: string,
+  selectorValue: string,
+  input: unknown,
+): void {
+  addCustomIssue(ctx, `${field} is not allowed when ${selector}=${selectorValue}.`, [field], input);
+}
+
+export function validateFlatAnalyzeInput(
+  value: FlatAnalyzeInput,
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+): void {
+  if (value.targetKind === 'file') {
+    if (!value.filePath) {
+      addCustomIssue(
+        ctx,
+        'filePath is required when targetKind=file.',
+        ['filePath'],
+        value.filePath,
+      );
+    }
+    if (value.urls !== undefined) {
+      addForbiddenFieldIssue(ctx, 'urls', 'targetKind', value.targetKind, value.urls);
+    }
+    if (value.filePaths !== undefined) {
+      addForbiddenFieldIssue(ctx, 'filePaths', 'targetKind', value.targetKind, value.filePaths);
+    }
+  } else if (value.targetKind === 'url') {
+    if (!value.urls) {
+      addCustomIssue(ctx, 'urls is required when targetKind=url.', ['urls'], value.urls);
+    }
+    if (value.filePath !== undefined) {
+      addForbiddenFieldIssue(ctx, 'filePath', 'targetKind', value.targetKind, value.filePath);
+    }
+    if (value.filePaths !== undefined) {
+      addForbiddenFieldIssue(ctx, 'filePaths', 'targetKind', value.targetKind, value.filePaths);
+    }
+  } else {
+    if (!value.filePaths) {
+      addCustomIssue(
+        ctx,
+        'filePaths is required when targetKind=multi.',
+        ['filePaths'],
+        value.filePaths,
+      );
+    }
+    if (value.filePath !== undefined) {
+      addForbiddenFieldIssue(ctx, 'filePath', 'targetKind', value.targetKind, value.filePath);
+    }
+    if (value.urls !== undefined) {
+      addForbiddenFieldIssue(ctx, 'urls', 'targetKind', value.targetKind, value.urls);
+    }
+  }
+
+  if (value.outputKind === 'summary') {
+    if (value.diagramType !== undefined) {
+      addForbiddenFieldIssue(ctx, 'diagramType', 'outputKind', value.outputKind, value.diagramType);
+    }
+    if (value.validateSyntax !== undefined) {
+      addForbiddenFieldIssue(
+        ctx,
+        'validateSyntax',
+        'outputKind',
+        value.outputKind,
+        value.validateSyntax,
+      );
+    }
+  } else if (!value.diagramType) {
+    addCustomIssue(
+      ctx,
+      'diagramType is required when outputKind=diagram.',
+      ['diagramType'],
+      value.diagramType,
+    );
+  }
+}
+
+interface FlatReviewInput {
+  codeContext?: string | undefined;
+  dryRun?: boolean | undefined;
+  error?: string | undefined;
+  filePathA?: string | undefined;
+  filePathB?: string | undefined;
+  googleSearch?: boolean | undefined;
+  language?: string | undefined;
+  question?: string | undefined;
+  subjectKind: 'diff' | 'comparison' | 'failure';
+  urls?: string[] | undefined;
+}
+
+export function validateFlatReviewInput(
+  value: FlatReviewInput,
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+): void {
+  if (value.subjectKind === 'diff') {
+    for (const [field, input] of [
+      ['filePathA', value.filePathA],
+      ['filePathB', value.filePathB],
+      ['question', value.question],
+      ['error', value.error],
+      ['codeContext', value.codeContext],
+      ['googleSearch', value.googleSearch],
+      ['urls', value.urls],
+    ] as const) {
+      if (input !== undefined) {
+        addForbiddenFieldIssue(ctx, field, 'subjectKind', value.subjectKind, input);
+      }
+    }
+    return;
+  }
+
+  if (value.subjectKind === 'comparison') {
+    if (!value.filePathA) {
+      addCustomIssue(
+        ctx,
+        'filePathA is required when subjectKind=comparison.',
+        ['filePathA'],
+        value.filePathA,
+      );
+    }
+    if (!value.filePathB) {
+      addCustomIssue(
+        ctx,
+        'filePathB is required when subjectKind=comparison.',
+        ['filePathB'],
+        value.filePathB,
+      );
+    }
+    for (const [field, input] of [
+      ['dryRun', value.dryRun],
+      ['language', value.language],
+      ['error', value.error],
+      ['codeContext', value.codeContext],
+      ['urls', value.urls],
+    ] as const) {
+      if (input !== undefined) {
+        addForbiddenFieldIssue(ctx, field, 'subjectKind', value.subjectKind, input);
+      }
+    }
+    return;
+  }
+
+  if (!value.error) {
+    addCustomIssue(ctx, 'error is required when subjectKind=failure.', ['error'], value.error);
+  }
+  for (const [field, input] of [
+    ['dryRun', value.dryRun],
+    ['filePathA', value.filePathA],
+    ['filePathB', value.filePathB],
+    ['question', value.question],
+  ] as const) {
+    if (input !== undefined) {
+      addForbiddenFieldIssue(ctx, field, 'subjectKind', value.subjectKind, input);
+    }
+  }
+}

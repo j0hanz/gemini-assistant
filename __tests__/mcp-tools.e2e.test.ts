@@ -170,7 +170,7 @@ const MUTABLE_ANNOTATIONS = {
 const EXPECTED_TOOL_CONTRACTS = {
   analyze: {
     annotations: READONLY_ANNOTATIONS,
-    requiredInput: ['goal', 'targets', 'output'],
+    requiredInput: ['goal', 'targetKind', 'outputKind'],
     requiredOutput: ['status', 'kind', 'targetKind'],
     taskSupport: 'optional',
     title: 'Analyze',
@@ -198,7 +198,7 @@ const EXPECTED_TOOL_CONTRACTS = {
   },
   review: {
     annotations: READONLY_ANNOTATIONS,
-    requiredInput: ['subject'],
+    requiredInput: ['subjectKind'],
     requiredOutput: ['status', 'subjectKind', 'summary'],
     taskSupport: 'optional',
     title: 'Review',
@@ -255,9 +255,64 @@ describe('MCP tool smoke coverage', () => {
       assert.equal(getObjectProperty(chatSchema, 'session'), undefined);
       assert.equal(getObjectProperty(chatSchema, 'memory'), undefined);
       assert.equal(getObjectProperty(chatSchema, 'responseSchema'), undefined);
-      assert.ok(getObjectProperty(chatSchema, 'sessionId'));
-      assert.ok(getObjectProperty(chatSchema, 'cacheName'));
-      assert.ok(getObjectProperty(chatSchema, 'responseSchemaJson'));
+      const goal = getObjectProperty(chatSchema, 'goal');
+      const sessionId = getObjectProperty(chatSchema, 'sessionId');
+      const cacheName = getObjectProperty(chatSchema, 'cacheName');
+      const responseSchemaJson = getObjectProperty(chatSchema, 'responseSchemaJson');
+      const temperature = getObjectProperty(chatSchema, 'temperature');
+      const seed = getObjectProperty(chatSchema, 'seed');
+
+      assert.ok(goal);
+      assert.equal(goal.description, 'User goal or requested outcome');
+
+      assert.ok(sessionId);
+      assert.equal(sessionId.description, 'Server-managed in-memory session identifier.');
+
+      assert.ok(cacheName);
+      assert.equal(
+        cacheName.description,
+        'Gemini cache resource name to attach as reusable context.',
+      );
+
+      assert.ok(responseSchemaJson);
+      assert.equal(
+        responseSchemaJson.description,
+        'Structured output schema as JSON. Use JSON input instead of nested form fields.',
+      );
+
+      assert.ok(temperature);
+      assert.equal(
+        temperature.description,
+        'Sampling temperature (0.0 to 2.0). Lower is more deterministic.',
+      );
+
+      assert.ok(seed);
+      assert.equal(seed.description, 'Fixed random seed for reproducible outputs.');
+
+      const analyzeSchema = toolMap.get('analyze')?.inputSchema;
+      const analyzeTargetKind = getObjectProperty(analyzeSchema, 'targetKind');
+      const analyzeOutputKind = getObjectProperty(analyzeSchema, 'outputKind');
+
+      assert.ok(analyzeTargetKind);
+      assert.equal(
+        analyzeTargetKind.description,
+        'What to analyze: one file, one or more public URLs, or a small local file set.',
+      );
+
+      assert.ok(analyzeOutputKind);
+      assert.equal(
+        analyzeOutputKind.description,
+        'Requested output format: summary text or a generated diagram.',
+      );
+
+      const reviewSchema = toolMap.get('review')?.inputSchema;
+      const reviewSubjectKind = getObjectProperty(reviewSchema, 'subjectKind');
+
+      assert.ok(reviewSubjectKind);
+      assert.equal(
+        reviewSubjectKind.description,
+        'What to review: the current diff, a file comparison, or a failure report.',
+      );
 
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);
     } finally {
@@ -321,13 +376,9 @@ describe('MCP tool smoke coverage', () => {
 
       const analyzeResult = await callTool(harness.client, 'analyze', {
         goal: 'What does this file expose?',
-        targets: {
-          filePath: 'src/client.ts',
-          kind: 'file',
-        },
-        output: {
-          kind: 'summary',
-        },
+        targetKind: 'file',
+        filePath: 'src/client.ts',
+        outputKind: 'summary',
       });
       expectSuccess(analyzeResult);
       assert.strictEqual(analyzeResult.structuredContent.kind, 'summary');
@@ -350,15 +401,11 @@ describe('MCP tool smoke coverage', () => {
 
       const diagramResult = await callTool(harness.client, 'analyze', {
         goal: 'Show the request flow',
-        targets: {
-          filePath: 'src/client.ts',
-          kind: 'file',
-        },
-        output: {
-          kind: 'diagram',
-          diagramType: 'mermaid',
-          validateSyntax: true,
-        },
+        targetKind: 'file',
+        filePath: 'src/client.ts',
+        outputKind: 'diagram',
+        diagramType: 'mermaid',
+        validateSyntax: true,
       });
       expectSuccess(diagramResult);
       assert.strictEqual(diagramResult.structuredContent.kind, 'diagram');
@@ -380,11 +427,9 @@ describe('MCP tool smoke coverage', () => {
       );
 
       const reviewResult = await callTool(harness.client, 'review', {
-        subject: {
-          error: 'TypeError: Cannot read properties of undefined (reading trim)',
-          kind: 'failure',
-          language: 'typescript',
-        },
+        subjectKind: 'failure',
+        error: 'TypeError: Cannot read properties of undefined (reading trim)',
+        language: 'typescript',
       });
       expectSuccess(reviewResult);
       assert.strictEqual(reviewResult.structuredContent.subjectKind, 'failure');
@@ -459,13 +504,9 @@ describe('MCP tool smoke coverage', () => {
       const invalidAnalyzeTargets = await harness.client.requestRaw('tools/call', {
         arguments: {
           goal: 'Inspect this',
-          targets: {
-            kind: 'url',
-            urls: ['http://localhost/private'],
-          },
-          output: {
-            kind: 'summary',
-          },
+          targetKind: 'url',
+          urls: ['http://localhost/private'],
+          outputKind: 'summary',
         },
         name: 'analyze',
       });

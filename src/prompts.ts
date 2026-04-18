@@ -3,7 +3,7 @@ import { completable } from '@modelcontextprotocol/server';
 
 import { z } from 'zod/v4';
 
-import { goalText, optionalText, PublicJobNameSchema } from './schemas/shared.js';
+import { goalText, optionalText, PublicJobNameSchema } from './schemas/fields.js';
 
 import { findWorkflowEntry } from './catalog.js';
 import type { PublicPromptName, PublicWorkflowName } from './public-contract.js';

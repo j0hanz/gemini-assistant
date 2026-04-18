@@ -1,74 +1,23 @@
 import { z } from 'zod/v4';
 
-import { cacheName, nonNegativeInt, PublicHttpUrlSchema, timestamp } from './shared.js';
+import { cacheName, nonNegativeInt, PublicHttpUrlSchema, timestamp } from './fields.js';
+import {
+  UsageMetadataSchema as BaseUsageMetadataSchema,
+  cacheSummaryFields,
+  CacheSummarySchema,
+  diffStatsFields,
+  FunctionCallEntrySchema,
+  publicBaseOutputFields,
+  SessionSummarySchema,
+  SourceDetailSchema,
+  streamMetadataOutputFields,
+  ToolEventSchema,
+  UrlMetadataEntrySchema,
+} from './fragments.js';
 
-export const UsageMetadataSchema = z.strictObject({
-  promptTokenCount: nonNegativeInt('Tokens in the prompt').optional(),
-  candidatesTokenCount: nonNegativeInt('Tokens in the response').optional(),
-  thoughtsTokenCount: nonNegativeInt('Tokens used for thinking').optional(),
-  totalTokenCount: nonNegativeInt('Total tokens for the request').optional(),
-});
+export const UsageMetadataSchema = BaseUsageMetadataSchema;
 
 export type UsageMetadata = z.infer<typeof UsageMetadataSchema>;
-
-const FunctionCallEntrySchema = z.strictObject({
-  name: z.string().describe('Function/tool name'),
-  args: z.record(z.string(), z.unknown()).describe('Function call arguments').optional(),
-  id: z.string().describe('Function call identifier when present').optional(),
-});
-
-const ToolEventKindSchema = z.enum([
-  'part',
-  'tool_call',
-  'tool_response',
-  'function_call',
-  'function_response',
-  'executable_code',
-  'code_execution_result',
-]);
-
-const ToolEventSchema = z.strictObject({
-  kind: ToolEventKindSchema.describe('Normalized Gemini tool/function event type'),
-  name: z.string().describe('Function name when available').optional(),
-  toolType: z.string().describe('Built-in tool type when available').optional(),
-  id: z.string().describe('Stable Gemini call identifier when available').optional(),
-  thoughtSignature: z
-    .string()
-    .optional()
-    .describe('Thought signature returned by Gemini for the part'),
-  args: z.record(z.string(), z.unknown()).describe('Tool or function arguments').optional(),
-  response: z
-    .record(z.string(), z.unknown())
-    .optional()
-    .describe('Tool or function response payload'),
-  code: z.string().describe('Executable code payload').optional(),
-  output: z.string().describe('Code execution output').optional(),
-  outcome: z.string().describe('Code execution outcome').optional(),
-  text: z
-    .string()
-    .optional()
-    .describe('Part text when a signature-bearing part has no tool payload'),
-});
-
-const streamMetadataOutputFields = {
-  thoughts: z.string().describe('Internal model reasoning/thinking process').optional(),
-  usage: UsageMetadataSchema.describe('Token usage').optional(),
-  functionCalls: z
-    .array(FunctionCallEntrySchema)
-    .optional()
-    .describe('Server-side function calls made during generation'),
-  toolEvents: z
-    .array(ToolEventSchema)
-    .optional()
-    .describe('Normalized Gemini tool/function event stream captured during generation'),
-};
-
-const publicBaseOutputFields = {
-  status: z.literal('completed').describe('Stable status for successful tool executions'),
-  requestId: z.string().describe('Server-side request or task identifier').optional(),
-  warnings: z.array(z.string()).describe('Non-fatal warnings for the result').optional(),
-  ...streamMetadataOutputFields,
-};
 
 export const AskOutputSchema = z.strictObject({
   answer: z.string().describe('Generated response'),
@@ -112,18 +61,7 @@ export const ExecuteCodeOutputSchema = z.strictObject({
   ...streamMetadataOutputFields,
 });
 
-const UrlMetadataEntrySchema = z.strictObject({
-  url: PublicHttpUrlSchema.describe('Retrieved URL'),
-  status: z.string().describe('Retrieval status (e.g. URL_RETRIEVAL_STATUS_SUCCESS)'),
-});
-
 export type UrlMetadataEntry = z.infer<typeof UrlMetadataEntrySchema>;
-
-const SourceDetailSchema = z.strictObject({
-  title: z.string().describe('Source title when Gemini provides one').optional(),
-  url: PublicHttpUrlSchema.describe('Source URL'),
-});
-
 export type SourceDetail = z.infer<typeof SourceDetailSchema>;
 
 export const SearchOutputSchema = z.strictObject({
@@ -164,13 +102,7 @@ export const AgenticSearchOutputSchema = z.strictObject({
 
 export const AnalyzePrOutputSchema = z.strictObject({
   analysis: z.string().describe('Comprehensive PR review'),
-  stats: z
-    .strictObject({
-      files: nonNegativeInt('Files changed'),
-      additions: nonNegativeInt('Lines added'),
-      deletions: nonNegativeInt('Lines deleted'),
-    })
-    .describe('Diff statistics'),
+  stats: z.strictObject(diffStatsFields).describe('Diff statistics'),
   reviewedPaths: z.array(z.string()).describe('Relative file paths included in the review'),
   includedUntracked: z
     .array(z.string())
@@ -190,16 +122,6 @@ export const AnalyzePrOutputSchema = z.strictObject({
   empty: z.boolean().describe('Whether there were any local changes to review'),
   truncated: z.boolean().describe('Whether the diff was truncated due to size').optional(),
   ...streamMetadataOutputFields,
-});
-
-const CacheSummarySchema = z.strictObject({
-  name: cacheName('Cache resource name').optional(),
-  displayName: z.string().describe('Human-readable label').optional(),
-  model: z.string().describe('Model used').optional(),
-  expireTime: timestamp('Expiration timestamp').optional(),
-  createTime: timestamp('Creation timestamp').optional(),
-  updateTime: timestamp('Last update timestamp').optional(),
-  totalTokenCount: nonNegativeInt('Total cached tokens').optional(),
 });
 
 export const CreateCacheOutputSchema = z.strictObject({
@@ -278,11 +200,7 @@ export const ReviewOutputSchema = z.strictObject({
   subjectKind: z.enum(['diff', 'comparison', 'failure']).describe('Review subject discriminator'),
   summary: z.string().describe('Review result summary'),
   stats: z
-    .strictObject({
-      files: nonNegativeInt('Files changed'),
-      additions: nonNegativeInt('Lines added'),
-      deletions: nonNegativeInt('Lines deleted'),
-    })
+    .strictObject(diffStatsFields)
     .optional()
     .describe('Diff statistics when review.subject.kind=diff'),
   reviewedPaths: z.array(z.string()).optional().describe('Paths included in a diff review'),
@@ -293,21 +211,6 @@ export const ReviewOutputSchema = z.strictObject({
   empty: z.boolean().optional().describe('Whether there were any local changes to review'),
   truncated: z.boolean().optional().describe('Whether the diff review was truncated'),
   contextUsed: ContextUsedSchema.optional(),
-});
-
-const CacheListEntrySchema = z.strictObject({
-  name: cacheName('Cache resource name').optional(),
-  displayName: z.string().describe('Human-readable label').optional(),
-  model: z.string().describe('Model used').optional(),
-  expireTime: timestamp('Expiration timestamp').optional(),
-  createTime: timestamp('Creation timestamp').optional(),
-  updateTime: timestamp('Last update timestamp').optional(),
-  totalTokenCount: nonNegativeInt('Total cached tokens').optional(),
-});
-
-const SessionSummarySchema = z.strictObject({
-  id: z.string().describe('Server-managed session identifier'),
-  lastAccess: z.number().describe('Last access timestamp in epoch milliseconds'),
 });
 
 const SessionTranscriptEntrySchema = z.strictObject({
@@ -335,6 +238,8 @@ const SessionEventSummarySchema = z.strictObject({
   timestamp: z.number(),
   taskId: z.string().optional(),
 });
+
+const CacheListEntrySchema = z.strictObject(cacheSummaryFields);
 
 export const MemoryOutputSchema = z.strictObject({
   ...publicBaseOutputFields,

@@ -1,5 +1,7 @@
 import { z } from 'zod/v4';
 
+import { validateBounds, validatePropertyKeyList } from './validators.js';
+
 const JSON_LITERAL_SCHEMA = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 const JSON_SCHEMA_TYPE_SCHEMA = z.enum([
   'string',
@@ -21,7 +23,6 @@ const RESPONSE_SCHEMA_SHAPE_KEYS = [
   'minimum',
   'maximum',
   'items',
-  'prefixItems',
   'minItems',
   'maxItems',
   'anyOf',
@@ -32,70 +33,6 @@ const RESPONSE_SCHEMA_SHAPE_KEYS = [
 
 function hasSchemaShape(value: Record<string, unknown>): boolean {
   return RESPONSE_SCHEMA_SHAPE_KEYS.some((key) => key in value);
-}
-
-function hasDuplicates(values: readonly string[]): boolean {
-  return new Set(values).size !== values.length;
-}
-
-function addCustomIssue(
-  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
-  message: string,
-  path: (string | number)[],
-  input: unknown,
-): void {
-  ctx.addIssue({
-    code: 'custom',
-    message,
-    path,
-    input,
-  });
-}
-
-function validateBounds(
-  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
-  minimum: number | undefined,
-  maximum: number | undefined,
-  maximumPath: 'maximum' | 'maxItems',
-  errorMessage: string,
-): void {
-  if (minimum === undefined || maximum === undefined || minimum <= maximum) {
-    return;
-  }
-
-  addCustomIssue(ctx, errorMessage, [maximumPath], maximum);
-}
-
-function validatePropertyKeyList(
-  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
-  propertyNames: Set<string> | undefined,
-  values: string[] | undefined,
-  path: 'required' | 'propertyOrdering',
-  missingMessage: string,
-  duplicateMessage: string,
-): void {
-  if (!values) {
-    return;
-  }
-
-  if (!propertyNames) {
-    addCustomIssue(ctx, missingMessage, [path], values);
-  } else {
-    for (const [index, key] of values.entries()) {
-      if (!propertyNames.has(key)) {
-        addCustomIssue(
-          ctx,
-          `${path} ${path === 'required' ? 'property' : 'entry'} "${key}" is not defined in properties.`,
-          [path, index],
-          key,
-        );
-      }
-    }
-  }
-
-  if (hasDuplicates(values)) {
-    addCustomIssue(ctx, duplicateMessage, [path], values);
-  }
 }
 
 export const GeminiResponseSchema: z.ZodType<Record<string, unknown>> = z.lazy(() =>

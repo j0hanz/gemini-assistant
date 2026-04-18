@@ -2,52 +2,48 @@ import { completable } from '@modelcontextprotocol/server';
 
 import { z } from 'zod/v4';
 
-import { completeCacheNames, THINKING_LEVELS } from '../client.js';
-import { GeminiResponseSchema } from './json-schema.js';
+import { completeCacheNames } from '../client.js';
 import {
   cacheName,
   goalText,
-  MemoryRefSchema,
+  mediaResolution,
   optionalText,
-  publicHttpUrl,
   PublicJobNameSchema,
   requiredText,
+  sessionId,
+  thinkingLevel,
   ttlSeconds,
   workspacePath,
-} from './shared.js';
+} from './fields.js';
+import {
+  createFilePairFields,
+  createOptionalCacheReferenceFields,
+  createSessionContinuationFields,
+  createUrlContextFields,
+  MemoryRefSchema,
+} from './fragments.js';
+import { GeminiResponseSchema } from './json-schema.js';
+import {
+  validateExclusiveSourceFileFields,
+  validateMeaningfulCacheCreateInput,
+} from './validators.js';
 
 const URL_TOOL_PROFILES = ['url', 'search_url'] as const;
 const NON_URL_TOOL_PROFILES = ['none', 'search', 'code', 'search_code'] as const;
 type SessionIdCompleter = (prefix?: string) => string[];
+type ThinkingLevelInput = z.infer<ReturnType<typeof thinkingLevel>>;
+type GeminiResponseInput = z.infer<typeof GeminiResponseSchema>;
+type MediaResolutionInput = z.infer<ReturnType<typeof mediaResolution>>;
 
-const thinkingLevelField = z
-  .enum(THINKING_LEVELS)
-  .optional()
-  .describe('Thinking depth for reasoning.');
+const thinkingLevelField = thinkingLevel();
 
 export function createChatInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
   return z.strictObject({
     goal: goalText(),
-    session: z
-      .strictObject({
-        id: completable(
-          z
-            .string()
-            .trim()
-            .max(256)
-            .optional()
-            .describe('Server-managed in-memory session identifier.'),
-          completeSessionIds,
-        ),
-      })
-      .optional()
-      .describe('Optional chat session to continue. Omit for single-turn or new-session chat.'),
+    ...createSessionContinuationFields(completeSessionIds),
     memory: MemoryRefSchema,
     systemInstruction: optionalText('System prompt for single-turn calls or new sessions'),
-    thinkingLevel: z
-      .enum(THINKING_LEVELS)
-      .optional()
-      .describe('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
+    thinkingLevel: thinkingLevel('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
     responseSchema: GeminiResponseSchema.optional().describe(
       'JSON Schema object for structured output. Intended for single-turn calls and brand-new sessions.',
     ),
@@ -67,11 +63,12 @@ export type ChatInput = z.infer<typeof ChatInputSchema>;
 const QuickResearchInputSchema = z.strictObject({
   mode: z.literal('quick'),
   goal: goalText('Question or research goal to answer quickly'),
-  urls: z
-    .array(publicHttpUrl('Public URL to analyze alongside search results'))
-    .max(20)
-    .optional()
-    .describe('Optional public URLs to inspect alongside web search.'),
+  ...createUrlContextFields({
+    itemDescription: 'Public URL to analyze alongside search results',
+    description: 'Optional public URLs to inspect alongside web search.',
+    max: 20,
+    optional: true,
+  }),
   systemInstruction: optionalText('Optional formatting or response constraints'),
   thinkingLevel: thinkingLevelField,
 });
@@ -94,7 +91,21 @@ export const ResearchInputSchema = z.discriminatedUnion('mode', [
   QuickResearchInputSchema,
   DeepResearchInputSchema,
 ]);
-export type ResearchInput = z.infer<typeof ResearchInputSchema>;
+export type ResearchInput =
+  | {
+      mode: 'quick';
+      goal: string;
+      urls?: string[] | undefined;
+      systemInstruction?: string | undefined;
+      thinkingLevel?: ThinkingLevelInput;
+    }
+  | {
+      mode: 'deep';
+      goal: string;
+      deliverable?: string | undefined;
+      searchDepth: number;
+      thinkingLevel?: ThinkingLevelInput;
+    };
 
 const AnalyzeFileTargetsSchema = z.strictObject({
   kind: z.literal('file'),
@@ -103,11 +114,12 @@ const AnalyzeFileTargetsSchema = z.strictObject({
 
 const AnalyzeUrlTargetsSchema = z.strictObject({
   kind: z.literal('url'),
-  urls: z
-    .array(publicHttpUrl('Public URL to analyze'))
-    .min(1)
-    .max(20)
-    .describe('One or more public URLs to analyze.'),
+  ...createUrlContextFields({
+    itemDescription: 'Public URL to analyze',
+    description: 'One or more public URLs to analyze.',
+    min: 1,
+    max: 20,
+  }),
 });
 
 const AnalyzeMultiTargetsSchema = z.strictObject({
@@ -129,12 +141,28 @@ export const AnalyzeInputSchema = z.strictObject({
   goal: goalText('Question or analysis goal for the selected targets'),
   targets: AnalyzeTargetsSchema,
   thinkingLevel: thinkingLevelField,
-  mediaResolution: z
-    .enum(['MEDIA_RESOLUTION_LOW', 'MEDIA_RESOLUTION_MEDIUM', 'MEDIA_RESOLUTION_HIGH'])
-    .optional()
-    .describe('Resolution for image/video processing. Higher = more detail, more tokens.'),
+  mediaResolution: mediaResolution(
+    'Resolution for image/video processing. Higher = more detail, more tokens.',
+  ),
 });
-export type AnalyzeInput = z.infer<typeof AnalyzeInputSchema>;
+export interface AnalyzeInput {
+  goal: string;
+  targets:
+    | {
+        kind: 'file';
+        filePath: string;
+      }
+    | {
+        kind: 'url';
+        urls: string[];
+      }
+    | {
+        kind: 'multi';
+        filePaths: string[];
+      };
+  thinkingLevel?: ThinkingLevelInput;
+  mediaResolution?: MediaResolutionInput;
+}
 
 const ReviewDiffSubjectSchema = z.strictObject({
   kind: z.literal('diff'),
@@ -144,8 +172,10 @@ const ReviewDiffSubjectSchema = z.strictObject({
 
 const ReviewComparisonSubjectSchema = z.strictObject({
   kind: z.literal('comparison'),
-  filePathA: workspacePath('Workspace-relative or absolute path to the first file'),
-  filePathB: workspacePath('Workspace-relative or absolute path to the second file'),
+  ...createFilePairFields(
+    'Workspace-relative or absolute path to the first file',
+    'Workspace-relative or absolute path to the second file',
+  ),
   question: optionalText('Specific comparison focus'),
   googleSearch: z
     .boolean()
@@ -162,11 +192,12 @@ const ReviewFailureSubjectSchema = z.strictObject({
     .boolean()
     .optional()
     .describe('Enable Google Search for docs/issues and targeted verification.'),
-  urls: z
-    .array(publicHttpUrl('Public URL for additional context'))
-    .max(20)
-    .optional()
-    .describe('Optional public URLs for additional failure context.'),
+  ...createUrlContextFields({
+    itemDescription: 'Public URL for additional context',
+    description: 'Optional public URLs for additional failure context.',
+    max: 20,
+    optional: true,
+  }),
 });
 
 const ReviewSubjectSchema = z.discriminatedUnion('kind', [
@@ -192,7 +223,7 @@ const MemorySessionsListSchema = z.strictObject({
 
 export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
   const memorySessionIdField = completable(
-    z.string().trim().min(1).max(256).describe('Session identifier to inspect'),
+    sessionId('Session identifier to inspect'),
     completeSessionIds,
   );
 
@@ -233,10 +264,7 @@ export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter =
         'Human-readable label. Existing cache with the same displayName is auto-replaced.',
       ),
     })
-    .refine((value) => (value.filePaths?.length ?? 0) > 0 || !!value.systemInstruction, {
-      error: 'Provide filePaths, systemInstruction, or both for caches.create.',
-      path: ['filePaths'],
-    })
+    .superRefine(validateMeaningfulCacheCreateInput)
     .describe('Create a Gemini cache from files and/or a system instruction.');
 
   const memoryCachesUpdateSchema = z.strictObject({
@@ -290,18 +318,11 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
   const askCommonShape = {
     message: requiredText('User message or prompt', 100_000),
     sessionId: completable(
-      z
-        .string()
-        .max(256)
-        .optional()
-        .describe('Session ID for multi-turn chat. Omit for single-turn.'),
+      sessionId('Session ID for multi-turn chat. Omit for single-turn.').optional(),
       completeSessionIds,
     ),
     systemInstruction: optionalText('System prompt (used on session creation or single-turn)'),
-    thinkingLevel: z
-      .enum(THINKING_LEVELS)
-      .optional()
-      .describe('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
+    thinkingLevel: thinkingLevel('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
     cacheName: completable(
       cacheName(
         'Cache name from create_cache. Cannot be applied to an existing chat session.',
@@ -337,11 +358,12 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
         .describe(
           'Optional advanced built-in tool preset: none, search, url, search_url, code, or search_code.',
         ),
-      urls: z
-        .array(publicHttpUrl('Public URL to analyze with URL Context'))
-        .min(1)
-        .max(20)
-        .describe('URLs for URL Context when using toolProfile=url or search_url (max 20).'),
+      ...createUrlContextFields({
+        itemDescription: 'Public URL to analyze with URL Context',
+        description: 'URLs for URL Context when using toolProfile=url or search_url (max 20).',
+        min: 1,
+        max: 20,
+      }),
     }),
     z.strictObject({
       ...askCommonShape,
@@ -351,17 +373,38 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
         .describe(
           'Optional advanced built-in tool preset: none, search, url, search_url, code, or search_code.',
         ),
-      urls: z
-        .array(publicHttpUrl('Public URL to analyze with URL Context'))
-        .max(20)
-        .optional()
-        .describe('URLs for URL Context when using toolProfile=url or search_url (max 20).'),
+      ...createUrlContextFields({
+        itemDescription: 'Public URL to analyze with URL Context',
+        description: 'URLs for URL Context when using toolProfile=url or search_url (max 20).',
+        max: 20,
+        optional: true,
+      }),
     }),
   ]);
 }
 
 export const AskInputSchema = createAskInputSchema();
-export type AskInput = z.infer<typeof AskInputSchema>;
+interface AskCommonInput {
+  message: string;
+  sessionId?: string | undefined;
+  systemInstruction?: string | undefined;
+  thinkingLevel?: ThinkingLevelInput;
+  cacheName?: string | undefined;
+  responseSchema?: GeminiResponseInput | undefined;
+  temperature?: number | undefined;
+  seed?: number | undefined;
+  googleSearch?: boolean | undefined;
+}
+
+export type AskInput =
+  | (AskCommonInput & {
+      toolProfile: (typeof URL_TOOL_PROFILES)[number];
+      urls: string[];
+    })
+  | (AskCommonInput & {
+      toolProfile?: (typeof NON_URL_TOOL_PROFILES)[number] | undefined;
+      urls?: string[] | undefined;
+    });
 
 export const ExecuteCodeInputSchema = z.strictObject({
   task: requiredText('Code task to perform'),
@@ -374,20 +417,21 @@ export type ExecuteCodeInput = z.infer<typeof ExecuteCodeInputSchema>;
 
 export const SearchInputSchema = z.strictObject({
   query: requiredText('Question or topic to research'),
-  systemInstruction: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe('Custom instructions for result format'),
-  urls: z
-    .array(publicHttpUrl('Public URL to analyze alongside search results'))
-    .max(20)
-    .optional()
-    .describe('URLs to deeply analyze alongside search results (max 20). Enables URL Context.'),
+  systemInstruction: optionalText('Custom instructions for result format'),
+  ...createUrlContextFields({
+    itemDescription: 'Public URL to analyze alongside search results',
+    description: 'URLs to deeply analyze alongside search results (max 20). Enables URL Context.',
+    max: 20,
+    optional: true,
+  }),
   thinkingLevel: thinkingLevelField,
 });
-export type SearchInput = z.infer<typeof SearchInputSchema>;
+export interface SearchInput {
+  query: string;
+  systemInstruction?: string | undefined;
+  urls?: string[] | undefined;
+  thinkingLevel?: ThinkingLevelInput;
+}
 
 export const AgenticSearchInputSchema = z.strictObject({
   topic: requiredText('Topic or question for deep multi-step research'),
@@ -406,28 +450,35 @@ export const AnalyzeFileInputSchema = z.strictObject({
   filePath: workspacePath('Workspace-relative or absolute path to the file'),
   question: requiredText('What to analyze or ask about the file'),
   thinkingLevel: thinkingLevelField,
-  mediaResolution: z
-    .enum(['MEDIA_RESOLUTION_LOW', 'MEDIA_RESOLUTION_MEDIUM', 'MEDIA_RESOLUTION_HIGH'])
-    .optional()
-    .describe('Resolution for image/video processing. Higher = more detail, more tokens.'),
+  mediaResolution: mediaResolution(
+    'Resolution for image/video processing. Higher = more detail, more tokens.',
+  ),
 });
 export type AnalyzeFileInput = z.infer<typeof AnalyzeFileInputSchema>;
 
 export const AnalyzeUrlInputSchema = z.strictObject({
-  urls: z
-    .array(publicHttpUrl('Public URL to analyze'))
-    .min(1)
-    .max(20)
-    .describe('URLs to analyze (max 20). Must be publicly accessible.'),
+  ...createUrlContextFields({
+    itemDescription: 'Public URL to analyze',
+    description: 'URLs to analyze (max 20). Must be publicly accessible.',
+    min: 1,
+    max: 20,
+  }),
   question: requiredText('What to analyze or ask about the URL content'),
   systemInstruction: optionalText('Custom system instruction for analysis'),
   thinkingLevel: thinkingLevelField,
 });
-export type AnalyzeUrlInput = z.infer<typeof AnalyzeUrlInputSchema>;
+export interface AnalyzeUrlInput {
+  urls: string[];
+  question: string;
+  systemInstruction?: string | undefined;
+  thinkingLevel?: ThinkingLevelInput;
+}
 
 export const AnalyzePrInputSchema = z.strictObject({
   dryRun: z.boolean().describe('Return diff content and stats without Gemini analysis.').optional(),
-  cacheName: cacheName('Cache resource name to provide project context during review.').optional(),
+  ...createOptionalCacheReferenceFields(
+    'Cache resource name to provide project context during review.',
+  ),
   thinkingLevel: thinkingLevelField,
   language: optionalText('Primary language for review context'),
 });
@@ -448,18 +499,12 @@ const createCacheSharedShape = {
 };
 
 export const CreateCacheInputSchema = z
-  .union([
-    z.strictObject({
-      filePaths: createCacheFilePathsSchema.min(1),
-      systemInstruction: createCacheSystemInstructionSchema.optional(),
-      ...createCacheSharedShape,
-    }),
-    z.strictObject({
-      filePaths: createCacheFilePathsSchema.optional(),
-      systemInstruction: createCacheSystemInstructionSchema,
-      ...createCacheSharedShape,
-    }),
-  ])
+  .strictObject({
+    filePaths: createCacheFilePathsSchema.optional(),
+    systemInstruction: createCacheSystemInstructionSchema.optional(),
+    ...createCacheSharedShape,
+  })
+  .superRefine(validateMeaningfulCacheCreateInput)
   .describe(
     'Creates a Gemini API cache. Combined content (files + instructions) MUST exceed ~32,000 tokens.',
   );
@@ -496,29 +541,32 @@ export const ExplainErrorInputSchema = z.strictObject({
     .boolean()
     .optional()
     .describe('Enable Google Search to look up error messages in docs, issues, and forums.'),
-  urls: z
-    .array(publicHttpUrl('Public URL for additional context'))
-    .max(20)
-    .optional()
-    .describe('URLs for additional context (docs, issues). Enables URL Context (max 20).'),
-  cacheName: cacheName(
+  ...createUrlContextFields({
+    itemDescription: 'Public URL for additional context',
+    description: 'URLs for additional context (docs, issues). Enables URL Context (max 20).',
+    max: 20,
+    optional: true,
+  }),
+  ...createOptionalCacheReferenceFields(
     'Cache resource name to provide project context during diagnosis.',
-  ).optional(),
+  ),
 });
 export type ExplainErrorInput = z.infer<typeof ExplainErrorInputSchema>;
 
 export const CompareFilesInputSchema = z.strictObject({
-  filePathA: workspacePath('Workspace-relative or absolute path to the first file'),
-  filePathB: workspacePath('Workspace-relative or absolute path to the second file'),
+  ...createFilePairFields(
+    'Workspace-relative or absolute path to the first file',
+    'Workspace-relative or absolute path to the second file',
+  ),
   question: optionalText('Specific comparison focus (e.g., "security differences", "API changes")'),
   thinkingLevel: thinkingLevelField,
   googleSearch: z
     .boolean()
     .optional()
     .describe('Enable Google Search for best practices or migration context.'),
-  cacheName: cacheName(
+  ...createOptionalCacheReferenceFields(
     'Cache resource name to provide project context during comparison.',
-  ).optional(),
+  ),
 });
 export type CompareFilesInput = z.infer<typeof CompareFilesInputSchema>;
 
@@ -550,16 +598,13 @@ export const GenerateDiagramInputSchema = z
       .boolean()
       .optional()
       .describe('Enable Google Search for diagram patterns or syntax reference.'),
-    cacheName: cacheName(
+    ...createOptionalCacheReferenceFields(
       'Cache resource name to provide project context for diagram generation.',
-    ).optional(),
+    ),
     validateSyntax: z
       .boolean()
       .optional()
       .describe('Validate generated diagram syntax via code execution sandbox.'),
   })
-  .refine((data) => !(data.sourceFilePath && data.sourceFilePaths), {
-    path: ['sourceFilePaths'],
-    error: 'Provide sourceFilePath or sourceFilePaths, not both.',
-  });
+  .superRefine(validateExclusiveSourceFileFields);
 export type GenerateDiagramInput = z.infer<typeof GenerateDiagramInputSchema>;

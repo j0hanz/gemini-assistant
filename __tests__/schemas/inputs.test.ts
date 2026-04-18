@@ -8,6 +8,7 @@ import {
   AnalyzePrInputSchema,
   AnalyzeUrlInputSchema,
   AskInputSchema,
+  ChatInputSchema,
   CompareFilesInputSchema,
   CreateCacheInputSchema,
   DeleteCacheInputSchema,
@@ -24,6 +25,11 @@ describe('AskInputSchema', () => {
   it('accepts valid minimal input', () => {
     const result = AskInputSchema.safeParse({ message: 'hello' });
     assert.ok(result.success);
+  });
+
+  it('rejects empty sessionId after trim', () => {
+    const result = AskInputSchema.safeParse({ message: 'hello', sessionId: '   ' });
+    assert.strictEqual(result.success, false);
   });
 
   it('accepts the full structured-output surface', () => {
@@ -104,6 +110,21 @@ describe('AskInputSchema', () => {
         properties: { answer: { type: 'string' } },
         propertyOrdering: ['missing'],
       },
+    });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('ChatInputSchema', () => {
+  it('accepts valid minimal input', () => {
+    const result = ChatInputSchema.safeParse({ goal: 'help me debug this' });
+    assert.ok(result.success);
+  });
+
+  it('rejects empty session.id after trim', () => {
+    const result = ChatInputSchema.safeParse({
+      goal: 'continue this thread',
+      session: { id: '   ' },
     });
     assert.strictEqual(result.success, false);
   });
@@ -318,6 +339,23 @@ describe('AnalyzeFileInputSchema', () => {
     });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects Windows drive-relative filePath forms', () => {
+    assert.strictEqual(
+      AnalyzeFileInputSchema.safeParse({
+        filePath: 'C:temp.txt',
+        question: 'Summarize this document',
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      AnalyzeFileInputSchema.safeParse({
+        filePath: 'C:..\\temp.txt',
+        question: 'Summarize this document',
+      }).success,
+      false,
+    );
+  });
 });
 
 describe('CreateCacheInputSchema', () => {
@@ -358,6 +396,14 @@ describe('CreateCacheInputSchema', () => {
 
   it('rejects empty filePaths without systemInstruction', () => {
     const result = CreateCacheInputSchema.safeParse({ filePaths: [] });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects empty filePaths when systemInstruction is present', () => {
+    const result = CreateCacheInputSchema.safeParse({
+      filePaths: [],
+      systemInstruction: 'Cache this instruction',
+    });
     assert.strictEqual(result.success, false);
   });
 
@@ -721,6 +767,23 @@ describe('CompareFilesInputSchema', () => {
     });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects Windows drive-relative file paths', () => {
+    assert.strictEqual(
+      CompareFilesInputSchema.safeParse({
+        filePathA: 'C:temp-a.ts',
+        filePathB: absolutePath('b.ts'),
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      CompareFilesInputSchema.safeParse({
+        filePathA: absolutePath('a.ts'),
+        filePathB: 'C:..\\temp-b.ts',
+      }).success,
+      false,
+    );
+  });
 });
 
 describe('GenerateDiagramInputSchema', () => {
@@ -835,5 +898,22 @@ describe('GenerateDiagramInputSchema', () => {
       extra: true,
     });
     assert.strictEqual(result.success, false);
+  });
+
+  it('rejects Windows drive-relative source file paths', () => {
+    assert.strictEqual(
+      GenerateDiagramInputSchema.safeParse({
+        description: 'test',
+        sourceFilePath: 'C:diagram.ts',
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      GenerateDiagramInputSchema.safeParse({
+        description: 'test',
+        sourceFilePaths: ['C:..\\diagram.ts'],
+      }).success,
+      false,
+    );
   });
 });

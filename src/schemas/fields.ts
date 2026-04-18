@@ -18,8 +18,33 @@ const MEDIA_RESOLUTIONS = [
   'MEDIA_RESOLUTION_MEDIUM',
   'MEDIA_RESOLUTION_HIGH',
 ] as const;
+export const DIAGRAM_TYPES = ['mermaid', 'plantuml'] as const;
+export const ASK_URL_TOOL_PROFILES = ['url', 'search_url'] as const;
+export const ASK_NON_URL_TOOL_PROFILES = ['none', 'search', 'code', 'search_code'] as const;
+export const RESEARCH_MODE_OPTIONS = ['quick', 'deep'] as const;
+export const REVIEW_SUBJECT_OPTIONS = ['diff', 'comparison', 'failure'] as const;
+export const MEMORY_ACTION_OPTIONS = [
+  'sessions.list',
+  'sessions.get',
+  'sessions.transcript',
+  'sessions.events',
+  'caches.list',
+  'caches.get',
+  'caches.create',
+  'caches.update',
+  'caches.delete',
+  'workspace.context',
+  'workspace.cache',
+] as const;
 
-export const PublicJobNameSchema = z.enum(PUBLIC_TOOL_NAMES);
+export function enumField<const Values extends readonly [string, ...string[]]>(
+  values: Values,
+  description: string,
+) {
+  return z.enum(values).describe(description);
+}
+
+export const PublicJobNameSchema = enumField(PUBLIC_TOOL_NAMES, 'Public job name');
 
 export function textField(description: string, maxLength?: number) {
   const schema = z.string().trim().min(1);
@@ -32,6 +57,14 @@ export function requiredText(description: string, maxLength?: number) {
 
 export function goalText(description = 'User goal or requested outcome', maxLength = 100_000) {
   return textField(description, maxLength);
+}
+
+export function boundedFloat(description: string, minimum: number, maximum: number) {
+  return z.number().min(minimum).max(maximum).describe(description);
+}
+
+export function boundedInt(description: string, minimum: number, maximum: number) {
+  return z.int().min(minimum).max(maximum).describe(description);
 }
 
 function escapesRelativeRoot(value: string): boolean {
@@ -101,9 +134,14 @@ interface PublicHttpUrlArrayOptions {
   optional?: boolean;
 }
 
-export function publicHttpUrlArray(options: PublicHttpUrlArrayOptions) {
-  const { description, itemDescription, max, min, optional = false } = options;
-  let schema = z.array(publicHttpUrl(itemDescription));
+interface ArrayFieldOptions {
+  max?: number;
+  min?: number;
+}
+
+function buildArrayField<T extends z.ZodType>(itemSchema: T, options: ArrayFieldOptions) {
+  const { max, min } = options;
+  let schema = z.array(itemSchema);
 
   if (min !== undefined) {
     schema = schema.min(min);
@@ -113,7 +151,43 @@ export function publicHttpUrlArray(options: PublicHttpUrlArrayOptions) {
     schema = schema.max(max);
   }
 
-  return (optional ? schema.optional() : schema).describe(description);
+  return schema;
+}
+
+export function publicHttpUrlArray(
+  options: PublicHttpUrlArrayOptions & { optional: true },
+): z.ZodOptional<z.ZodArray<ReturnType<typeof publicHttpUrl>>>;
+export function publicHttpUrlArray(
+  options: PublicHttpUrlArrayOptions & { optional?: false | undefined },
+): z.ZodArray<ReturnType<typeof publicHttpUrl>>;
+export function publicHttpUrlArray(options: PublicHttpUrlArrayOptions) {
+  const { itemDescription, optional = false, ...rest } = options;
+  const schema = buildArrayField(publicHttpUrl(itemDescription), rest);
+  return optional
+    ? schema.optional().describe(rest.description)
+    : schema.describe(rest.description);
+}
+
+interface WorkspacePathArrayOptions {
+  description: string;
+  itemDescription: string;
+  max?: number;
+  min?: number;
+  optional?: boolean;
+}
+
+export function workspacePathArray(
+  options: WorkspacePathArrayOptions & { optional: true },
+): z.ZodOptional<z.ZodArray<ReturnType<typeof workspacePath>>>;
+export function workspacePathArray(
+  options: WorkspacePathArrayOptions & { optional?: false | undefined },
+): z.ZodArray<ReturnType<typeof workspacePath>>;
+export function workspacePathArray(options: WorkspacePathArrayOptions) {
+  const { itemDescription, optional = false, ...rest } = options;
+  const schema = buildArrayField(workspacePath(itemDescription), rest);
+  return optional
+    ? schema.optional().describe(rest.description)
+    : schema.describe(rest.description);
 }
 
 export function timestamp(description: string) {
@@ -125,9 +199,9 @@ export function sessionId(description: string) {
 }
 
 export function thinkingLevel(description = 'Thinking depth for reasoning.') {
-  return z.enum(THINKING_LEVELS).optional().describe(description);
+  return enumField(THINKING_LEVELS, description).optional();
 }
 
 export function mediaResolution(description: string) {
-  return z.enum(MEDIA_RESOLUTIONS).optional().describe(description);
+  return enumField(MEDIA_RESOLUTIONS, description).optional();
 }

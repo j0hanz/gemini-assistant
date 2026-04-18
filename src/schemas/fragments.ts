@@ -5,6 +5,7 @@ import { z } from 'zod/v4';
 import {
   completableCacheName,
   nonNegativeInt,
+  publicHttpUrl,
   publicHttpUrlArray,
   PublicHttpUrlSchema,
   sessionId,
@@ -146,9 +147,21 @@ interface UrlContextFieldOptions {
   optional?: boolean;
 }
 
+export function createUrlContextFields(options: UrlContextFieldOptions & { optional: true }): {
+  urls: z.ZodOptional<z.ZodArray<ReturnType<typeof publicHttpUrl>>>;
+};
+export function createUrlContextFields(
+  options: UrlContextFieldOptions & { optional?: false | undefined },
+): { urls: z.ZodArray<ReturnType<typeof publicHttpUrl>> };
 export function createUrlContextFields(options: UrlContextFieldOptions) {
+  if (options.optional === true) {
+    return {
+      urls: publicHttpUrlArray({ ...options, optional: true }),
+    };
+  }
+
   return {
-    urls: publicHttpUrlArray(options),
+    urls: publicHttpUrlArray({ ...options, optional: false }),
   };
 }
 

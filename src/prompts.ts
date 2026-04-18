@@ -3,7 +3,15 @@ import { completable } from '@modelcontextprotocol/server';
 
 import { z } from 'zod/v4';
 
-import { goalText, PublicJobNameSchema, textField } from './schemas/fields.js';
+import {
+  enumField,
+  goalText,
+  MEMORY_ACTION_OPTIONS,
+  PublicJobNameSchema,
+  RESEARCH_MODE_OPTIONS,
+  REVIEW_SUBJECT_OPTIONS,
+  textField,
+} from './schemas/fields.js';
 
 import { findWorkflowEntry } from './catalog.js';
 import type { PublicPromptName, PublicWorkflowName } from './public-contract.js';
@@ -80,22 +88,6 @@ function renderWorkflowSection(name: PublicWorkflowName): string {
   ].join('\n\n');
 }
 
-const RESEARCH_MODE_OPTIONS = ['quick', 'deep'] as const;
-const REVIEW_SUBJECT_OPTIONS = ['diff', 'comparison', 'failure'] as const;
-const MEMORY_ACTION_OPTIONS = [
-  'sessions.list',
-  'sessions.get',
-  'sessions.transcript',
-  'sessions.events',
-  'caches.list',
-  'caches.get',
-  'caches.create',
-  'caches.update',
-  'caches.delete',
-  'workspace.context',
-  'workspace.cache',
-] as const;
-
 function filterByPrefix<T extends string>(values: readonly T[], prefix: string): T[] {
   if (!prefix) return [...values];
   const lowered = prefix.toLowerCase();
@@ -116,7 +108,7 @@ export const ResearchPromptSchema = z
   .strictObject({
     goal: goalText('Research goal or question'),
     mode: completable(
-      z.enum(RESEARCH_MODE_OPTIONS).optional().describe('Research mode (quick or deep).'),
+      enumField(RESEARCH_MODE_OPTIONS, 'Research mode (quick or deep).').optional(),
       (value) => filterByPrefix(RESEARCH_MODE_OPTIONS, value ?? ''),
     ),
     deliverable: textField('Requested output form.').optional(),
@@ -126,10 +118,7 @@ export const ResearchPromptSchema = z
 export const ReviewPromptSchema = z
   .strictObject({
     subject: completable(
-      z
-        .enum(REVIEW_SUBJECT_OPTIONS)
-        .optional()
-        .describe('Review variant (diff, comparison, failure).'),
+      enumField(REVIEW_SUBJECT_OPTIONS, 'Review variant (diff, comparison, failure).').optional(),
       (value) => filterByPrefix(REVIEW_SUBJECT_OPTIONS, value ?? ''),
     ),
     focus: textField('Review priority (e.g. regressions, tests, security).').optional(),
@@ -139,7 +128,7 @@ export const ReviewPromptSchema = z
 export const MemoryPromptSchema = z
   .strictObject({
     action: completable(
-      z.enum(MEMORY_ACTION_OPTIONS).optional().describe('Memory action to focus on.'),
+      enumField(MEMORY_ACTION_OPTIONS, 'Memory action to focus on.').optional(),
       (value) => filterByPrefix(MEMORY_ACTION_OPTIONS, value ?? ''),
     ),
     task: textField('Task context.').optional(),

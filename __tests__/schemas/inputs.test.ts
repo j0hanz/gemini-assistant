@@ -6,6 +6,7 @@ import { completeCacheNames } from '../../src/client.js';
 import {
   AgenticSearchInputSchema,
   AnalyzeFileInputSchema,
+  AnalyzeInputSchema,
   AnalyzePrInputSchema,
   AnalyzeUrlInputSchema,
   AskInputSchema,
@@ -16,6 +17,7 @@ import {
   ExecuteCodeInputSchema,
   ExplainErrorInputSchema,
   GenerateDiagramInputSchema,
+  ResearchInputSchema,
   SearchInputSchema,
   UpdateCacheInputSchema,
 } from '../../src/schemas/inputs.js';
@@ -35,6 +37,25 @@ function getCompleter(schema: unknown) {
 describe('AskInputSchema', () => {
   it('accepts valid minimal input', () => {
     const result = AskInputSchema.safeParse({ message: 'hello' });
+    assert.ok(result.success);
+  });
+
+  it('accepts the explicit non-url tool profile branch', () => {
+    const result = AskInputSchema.safeParse({ message: 'hello', toolProfile: 'search' });
+    assert.ok(result.success);
+  });
+
+  it('accepts explicit none without urls', () => {
+    const result = AskInputSchema.safeParse({ message: 'hello', toolProfile: 'none' });
+    assert.ok(result.success);
+  });
+
+  it('accepts the explicit url-capable tool profile branch', () => {
+    const result = AskInputSchema.safeParse({
+      message: 'analyze these pages',
+      toolProfile: 'search_url',
+      urls: ['https://example.com/docs'],
+    });
     assert.ok(result.success);
   });
 
@@ -64,6 +85,23 @@ describe('AskInputSchema', () => {
     const result = AskInputSchema.safeParse({
       message: 'test',
       responseSchema: { foo: 'bar' },
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects urls without a url-capable tool profile', () => {
+    const result = AskInputSchema.safeParse({
+      message: 'analyze these pages',
+      urls: ['https://example.com/docs'],
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects urls on non-url tool profiles', () => {
+    const result = AskInputSchema.safeParse({
+      message: 'analyze these pages',
+      toolProfile: 'search',
+      urls: ['https://example.com/docs'],
     });
     assert.strictEqual(result.success, false);
   });
@@ -116,6 +154,14 @@ describe('ChatInputSchema', () => {
     const result = ChatInputSchema.safeParse({
       goal: 'continue this thread',
       session: { id: '   ' },
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects temperature above the bounded range', () => {
+    const result = ChatInputSchema.safeParse({
+      goal: 'help me debug this',
+      temperature: 2.1,
     });
     assert.strictEqual(result.success, false);
   });
@@ -212,6 +258,36 @@ describe('SearchInputSchema', () => {
 
   it('rejects unknown fields', () => {
     const result = SearchInputSchema.safeParse({ query: 'weather', extra: true });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('ResearchInputSchema', () => {
+  it('accepts quick research input', () => {
+    const result = ResearchInputSchema.safeParse({
+      mode: 'quick',
+      goal: 'What changed in Node.js 24?',
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts deep research input with the default search depth', () => {
+    const result = ResearchInputSchema.safeParse({
+      mode: 'deep',
+      goal: 'Trace the rollout plan',
+    });
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.searchDepth, 3);
+    }
+  });
+
+  it('rejects unknown fields', () => {
+    const result = ResearchInputSchema.safeParse({
+      mode: 'quick',
+      goal: 'test',
+      extra: true,
+    });
     assert.strictEqual(result.success, false);
   });
 });
@@ -600,6 +676,52 @@ describe('AnalyzeUrlInputSchema', () => {
     const result = AnalyzeUrlInputSchema.safeParse({
       urls: ['https://example.com'],
       question: 'Summarize this page',
+      extra: true,
+    });
+    assert.strictEqual(result.success, false);
+  });
+});
+
+describe('AnalyzeInputSchema', () => {
+  it('accepts a file summary request', () => {
+    const result = AnalyzeInputSchema.safeParse({
+      goal: 'Summarize this file',
+      targets: {
+        kind: 'file',
+        filePath: absolutePath('src', 'index.ts'),
+      },
+      output: {
+        kind: 'summary',
+      },
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts a diagram request for multiple files', () => {
+    const result = AnalyzeInputSchema.safeParse({
+      goal: 'Diagram the flow',
+      targets: {
+        kind: 'multi',
+        filePaths: [absolutePath('src', 'a.ts'), absolutePath('src', 'b.ts')],
+      },
+      output: {
+        kind: 'diagram',
+        diagramType: 'mermaid',
+      },
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects unknown fields', () => {
+    const result = AnalyzeInputSchema.safeParse({
+      goal: 'test',
+      targets: {
+        kind: 'file',
+        filePath: absolutePath('src', 'index.ts'),
+      },
+      output: {
+        kind: 'summary',
+      },
       extra: true,
     });
     assert.strictEqual(result.success, false);

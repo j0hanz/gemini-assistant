@@ -3,7 +3,13 @@ import { completable } from '@modelcontextprotocol/server';
 import { z } from 'zod/v4';
 
 import {
+  ASK_NON_URL_TOOL_PROFILES,
+  ASK_URL_TOOL_PROFILES,
+  boundedFloat,
+  boundedInt,
   completableCacheName,
+  DIAGRAM_TYPES,
+  enumField,
   goalText,
   mediaResolution,
   PublicJobNameSchema,
@@ -13,6 +19,7 @@ import {
   thinkingLevel,
   ttlSeconds,
   workspacePath,
+  workspacePathArray,
 } from './fields.js';
 import {
   createFilePairFields,
@@ -27,12 +34,7 @@ import {
   validateMeaningfulCacheCreateInput,
 } from './validators.js';
 
-const URL_TOOL_PROFILES = ['url', 'search_url'] as const;
-const NON_URL_TOOL_PROFILES = ['none', 'search', 'code', 'search_code'] as const;
 type SessionIdCompleter = (prefix?: string) => string[];
-type ThinkingLevelInput = z.infer<ReturnType<typeof thinkingLevel>>;
-type GeminiResponseInput = z.infer<typeof GeminiResponseSchema>;
-type MediaResolutionInput = z.infer<ReturnType<typeof mediaResolution>>;
 
 const thinkingLevelField = thinkingLevel();
 
@@ -46,10 +48,11 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
     ).optional(),
     thinkingLevel: thinkingLevel('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
     responseSchema: GeminiResponseSchema.optional().describe('JSON Schema for structured output.'),
-    temperature: z
-      .number()
-      .min(0)
-      .max(2)
+    temperature: boundedFloat(
+      'Sampling temperature (0.0 to 2.0). Lower is more deterministic.',
+      0,
+      2,
+    )
       .optional()
       .describe('Sampling temperature (0.0 to 2.0). Lower is more deterministic.'),
     seed: z.int().optional().describe('Fixed random seed for reproducible outputs.'),
@@ -78,10 +81,11 @@ const DeepResearchInputSchema = z.strictObject({
   mode: z.literal('deep').describe('Research mode selector (`deep`).'),
   goal: goalText('Topic or research goal for a deeper multi-step investigation'),
   deliverable: textField('Requested output form (brief, report, checklist, etc.).').optional(),
-  searchDepth: z
-    .int()
-    .min(1)
-    .max(5)
+  searchDepth: boundedInt(
+    'How many search-and-synthesis passes to perform. Use higher values for broader or more thorough deep research.',
+    1,
+    5,
+  )
     .optional()
     .default(3)
     .describe(
@@ -94,21 +98,7 @@ export const ResearchInputSchema = z.discriminatedUnion('mode', [
   QuickResearchInputSchema,
   DeepResearchInputSchema,
 ]);
-export type ResearchInput =
-  | {
-      mode: 'quick';
-      goal: string;
-      urls?: string[] | undefined;
-      systemInstruction?: string | undefined;
-      thinkingLevel?: ThinkingLevelInput;
-    }
-  | {
-      mode: 'deep';
-      goal: string;
-      deliverable?: string | undefined;
-      searchDepth: number;
-      thinkingLevel?: ThinkingLevelInput;
-    };
+export type ResearchInput = z.infer<typeof ResearchInputSchema>;
 
 const AnalyzeFileTargetsSchema = z.strictObject({
   kind: z.literal('file').describe('Target type (`file`).'),
@@ -127,11 +117,12 @@ const AnalyzeUrlTargetsSchema = z.strictObject({
 
 const AnalyzeMultiTargetsSchema = z.strictObject({
   kind: z.literal('multi').describe('Target type (`multi`).'),
-  filePaths: z
-    .array(workspacePath('Workspace-relative or absolute path to a local file'))
-    .min(2)
-    .max(5)
-    .describe('List of local files to analyze.'),
+  filePaths: workspacePathArray({
+    description: 'List of local files to analyze.',
+    itemDescription: 'Workspace-relative or absolute path to a local file',
+    min: 2,
+    max: 5,
+  }),
 });
 
 const AnalyzeTargetsSchema = z
@@ -148,7 +139,7 @@ const AnalyzeSummaryOutputSchema = z.strictObject({
 
 const AnalyzeDiagramOutputSchema = z.strictObject({
   kind: z.literal('diagram').describe('Analyze output selector (`diagram`).'),
-  diagramType: z.enum(['mermaid', 'plantuml']).describe('Diagram syntax to generate.'),
+  diagramType: enumField(DIAGRAM_TYPES, 'Diagram syntax to generate.'),
   validateSyntax: z
     .boolean()
     .optional()
@@ -169,33 +160,7 @@ export const AnalyzeInputSchema = z.strictObject({
     'Resolution for image/video processing. Higher = more detail, more tokens.',
   ),
 });
-export interface AnalyzeInput {
-  goal: string;
-  targets:
-    | {
-        kind: 'file';
-        filePath: string;
-      }
-    | {
-        kind: 'url';
-        urls: string[];
-      }
-    | {
-        kind: 'multi';
-        filePaths: string[];
-      };
-  output:
-    | {
-        kind: 'summary';
-      }
-    | {
-        kind: 'diagram';
-        diagramType: 'mermaid' | 'plantuml';
-        validateSyntax?: boolean | undefined;
-      };
-  thinkingLevel?: ThinkingLevelInput;
-  mediaResolution?: MediaResolutionInput;
-}
+export type AnalyzeInput = z.infer<typeof AnalyzeInputSchema>;
 
 const ReviewDiffSubjectSchema = z.strictObject({
   kind: z.literal('diff').describe('Subject type (`diff`).'),
@@ -361,10 +326,11 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
       true,
     ),
     responseSchema: GeminiResponseSchema.optional().describe('JSON Schema for structured output.'),
-    temperature: z
-      .number()
-      .min(0)
-      .max(2)
+    temperature: boundedFloat(
+      'Sampling temperature (0.0 to 2.0). Lower is more deterministic.',
+      0,
+      2,
+    )
       .optional()
       .describe('Sampling temperature (0.0 to 2.0). Lower is more deterministic.'),
     seed: z.int().optional().describe('Fixed random seed for reproducible outputs.'),
@@ -377,9 +343,20 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
   return z.union([
     z.strictObject({
       ...askCommonShape,
-      toolProfile: z
-        .enum(URL_TOOL_PROFILES)
-        .describe('Built-in tool preset (`url` or `search_url`).'),
+    }),
+    z.strictObject({
+      ...askCommonShape,
+      toolProfile: enumField(
+        ASK_NON_URL_TOOL_PROFILES,
+        'Built-in tool preset (`none`, `search`, `code`, or `search_code`).',
+      ),
+    }),
+    z.strictObject({
+      ...askCommonShape,
+      toolProfile: enumField(
+        ASK_URL_TOOL_PROFILES,
+        'Built-in tool preset (`url` or `search_url`).',
+      ),
       ...createUrlContextFields({
         itemDescription: 'Public URL to analyze with URL Context',
         description: 'URLs for URL Context when using toolProfile=url or search_url (max 20).',
@@ -387,44 +364,11 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
         max: 20,
       }),
     }),
-    z.strictObject({
-      ...askCommonShape,
-      toolProfile: z
-        .enum(NON_URL_TOOL_PROFILES)
-        .optional()
-        .describe('Built-in tool preset (search, code, etc.).'),
-      ...createUrlContextFields({
-        itemDescription: 'Public URL to analyze with URL Context',
-        description: 'URLs for URL Context when using toolProfile=url or search_url (max 20).',
-        max: 20,
-        optional: true,
-      }),
-    }),
   ]);
 }
 
 export const AskInputSchema = createAskInputSchema();
-interface AskCommonInput {
-  message: string;
-  sessionId?: string | undefined;
-  systemInstruction?: string | undefined;
-  thinkingLevel?: ThinkingLevelInput;
-  cacheName?: string | undefined;
-  responseSchema?: GeminiResponseInput | undefined;
-  temperature?: number | undefined;
-  seed?: number | undefined;
-  googleSearch?: boolean | undefined;
-}
-
-export type AskInput =
-  | (AskCommonInput & {
-      toolProfile: (typeof URL_TOOL_PROFILES)[number];
-      urls: string[];
-    })
-  | (AskCommonInput & {
-      toolProfile?: (typeof NON_URL_TOOL_PROFILES)[number] | undefined;
-      urls?: string[] | undefined;
-    });
+export type AskInput = z.infer<typeof AskInputSchema>;
 
 export const ExecuteCodeInputSchema = z.strictObject({
   task: requiredText('Code task to perform'),
@@ -448,19 +392,15 @@ export const SearchInputSchema = z.strictObject({
   }),
   thinkingLevel: thinkingLevelField,
 });
-export interface SearchInput {
-  query: string;
-  systemInstruction?: string | undefined;
-  urls?: string[] | undefined;
-  thinkingLevel?: ThinkingLevelInput;
-}
+export type SearchInput = z.infer<typeof SearchInputSchema>;
 
 export const AgenticSearchInputSchema = z.strictObject({
   topic: requiredText('Topic or question for deep multi-step research'),
-  searchDepth: z
-    .int()
-    .min(1)
-    .max(5)
+  searchDepth: boundedInt(
+    'How many search iterations to perform during deep research. Use higher values for more exhaustive investigation.',
+    1,
+    5,
+  )
     .optional()
     .default(3)
     .describe(
@@ -493,12 +433,7 @@ export const AnalyzeUrlInputSchema = z.strictObject({
   ).optional(),
   thinkingLevel: thinkingLevelField,
 });
-export interface AnalyzeUrlInput {
-  urls: string[];
-  question: string;
-  systemInstruction?: string | undefined;
-  thinkingLevel?: ThinkingLevelInput;
-}
+export type AnalyzeUrlInput = z.infer<typeof AnalyzeUrlInputSchema>;
 
 export const AnalyzePrInputSchema = z.strictObject({
   dryRun: z.boolean().describe('Skip model review, return diff snapshot only.').optional(),
@@ -510,10 +445,6 @@ export const AnalyzePrInputSchema = z.strictObject({
 });
 export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
 
-const createCacheFilePathsSchema = z
-  .array(workspacePath('Workspace-relative or absolute path to a file to cache'))
-  .max(50)
-  .describe('Workspace-relative or absolute paths to files to cache.');
 const createCacheSystemInstructionSchema = requiredText(
   'System instruction to store in the cache.',
 );
@@ -524,7 +455,12 @@ const createCacheSharedShape = {
 
 export const CreateCacheInputSchema = z
   .strictObject({
-    filePaths: createCacheFilePathsSchema.optional(),
+    filePaths: workspacePathArray({
+      description: 'Workspace-relative or absolute paths to files to cache.',
+      itemDescription: 'Workspace-relative or absolute path to a file to cache',
+      max: 50,
+      optional: true,
+    }),
     systemInstruction: createCacheSystemInstructionSchema.optional(),
     ...createCacheSharedShape,
   })
@@ -589,8 +525,7 @@ export type CompareFilesInput = z.infer<typeof CompareFilesInputSchema>;
 export const GenerateDiagramInputSchema = z
   .strictObject({
     description: requiredText('What to diagram: architecture, flow, sequence, etc.'),
-    diagramType: z
-      .enum(['mermaid', 'plantuml'])
+    diagramType: enumField(DIAGRAM_TYPES, 'Diagram syntax to generate.')
       .optional()
       .default('mermaid')
       .describe(
@@ -599,18 +534,15 @@ export const GenerateDiagramInputSchema = z
     sourceFilePath: workspacePath(
       'Workspace-relative or absolute path to a single source file to derive the diagram from',
     ).optional(),
-    sourceFilePaths: z
-      .array(
-        workspacePath(
-          'Workspace-relative or absolute path to a source file for diagram generation',
-        ),
-      )
-      .min(1)
-      .max(10)
-      .optional()
-      .describe(
+    sourceFilePaths: workspacePathArray({
+      description:
         'Multiple source files to derive the diagram from. Use when architecture or flow understanding depends on more than one file.',
-      ),
+      itemDescription:
+        'Workspace-relative or absolute path to a source file for diagram generation',
+      min: 1,
+      max: 10,
+      optional: true,
+    }),
     thinkingLevel: thinkingLevelField,
     googleSearch: z
       .boolean()

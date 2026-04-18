@@ -261,10 +261,20 @@ function hasExistingSessionResponseSchemaConflict(
   return !!responseSchema && !!sessionId && hasExistingSession;
 }
 
+function getAskToolProfile(args: AskArgs): ToolProfile | undefined {
+  return 'toolProfile' in args ? args.toolProfile : undefined;
+}
+
+function getAskUrls(args: AskArgs): readonly string[] | undefined {
+  return 'urls' in args ? args.urls : undefined;
+}
+
 function validateAskRequest(
-  { cacheName, responseSchema, seed, sessionId, systemInstruction, temperature, urls }: AskArgs,
+  args: AskArgs,
   deps: Pick<AskDependencies, 'getSessionEntry' | 'isEvicted'>,
 ): CallToolResult | undefined {
+  const { cacheName, responseSchema, seed, sessionId, systemInstruction, temperature } = args;
+  const urls = getAskUrls(args);
   const invalidUrlResult = validateUrls(urls);
   if (invalidUrlResult) {
     return invalidUrlResult;
@@ -310,17 +320,19 @@ function buildAskPrompt(message: string, urls?: readonly string[]): string {
 }
 
 function resolveAskTooling(args: AskArgs) {
+  const askToolProfile = getAskToolProfile(args);
+  const urls = getAskUrls(args);
   const orchestration = buildOrchestrationConfig({
     googleSearch: args.googleSearch,
-    toolProfile: args.toolProfile,
-    urls: args.urls,
+    toolProfile: askToolProfile,
+    urls,
   });
   const { toolProfile, ...toolConfig } = orchestration;
 
   return {
-    prompt: buildAskPrompt(args.message, orchestration.usesUrlContext ? args.urls : undefined),
+    prompt: buildAskPrompt(args.message, orchestration.usesUrlContext ? urls : undefined),
     toolProfile,
-    urls: orchestration.usesUrlContext ? [...(args.urls ?? [])] : undefined,
+    urls: orchestration.usesUrlContext ? [...(urls ?? [])] : undefined,
     ...toolConfig,
   };
 }

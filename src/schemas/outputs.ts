@@ -1,6 +1,16 @@
 import { z } from 'zod/v4';
 
-import { cacheName, nonNegativeInt, PublicHttpUrlSchema, timestamp } from './fields.js';
+import {
+  cacheName,
+  DIAGRAM_TYPES,
+  enumField,
+  MEMORY_ACTION_OPTIONS,
+  nonNegativeInt,
+  publicHttpUrlArray,
+  RESEARCH_MODE_OPTIONS,
+  REVIEW_SUBJECT_OPTIONS,
+  timestamp,
+} from './fields.js';
 import {
   UsageMetadataSchema as BaseUsageMetadataSchema,
   cacheSummaryFields,
@@ -66,7 +76,7 @@ const AnalyzeDiagramOutputSchema = z.strictObject({
   ...publicBaseOutputFields,
   kind: z.literal('diagram').describe('Analyze output selector (`diagram`)'),
   targetKind: z.enum(['file', 'url', 'multi']).describe('Analyze target discriminator'),
-  diagramType: z.enum(['mermaid', 'plantuml']).describe('Diagram syntax used for the output'),
+  diagramType: enumField(DIAGRAM_TYPES, 'Diagram syntax used for the output'),
   diagram: z.string().describe('Generated diagram source'),
   explanation: z.string().optional().describe('Short explanation or caveats for the diagram'),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
@@ -122,9 +132,12 @@ export const ChatOutputSchema = z.strictObject({
 
 export const ResearchOutputSchema = z.strictObject({
   ...publicBaseOutputFields,
-  mode: z.enum(['quick', 'deep']).describe('Research mode that handled the request'),
+  mode: enumField(RESEARCH_MODE_OPTIONS, 'Research mode that handled the request'),
   summary: z.string().describe('Grounded research summary'),
-  sources: z.array(PublicHttpUrlSchema).describe('Grounded source URLs'),
+  sources: publicHttpUrlArray({
+    description: 'Grounded source URLs',
+    itemDescription: 'Grounded source URL',
+  }),
   sourceDetails: z
     .array(SourceDetailSchema)
     .optional()
@@ -141,7 +154,7 @@ export const AnalyzeOutputSchema = z.discriminatedUnion('kind', [
 
 export const ReviewOutputSchema = z.strictObject({
   ...publicBaseOutputFields,
-  subjectKind: z.enum(['diff', 'comparison', 'failure']).describe('Review subject discriminator'),
+  subjectKind: enumField(REVIEW_SUBJECT_OPTIONS, 'Review subject discriminator'),
   summary: z.string().describe('Review result summary'),
   stats: z
     .strictObject(diffStatsFields)
@@ -187,21 +200,7 @@ const CacheListEntrySchema = z.strictObject(cacheSummaryFields);
 
 export const MemoryOutputSchema = z.strictObject({
   ...publicBaseOutputFields,
-  action: z
-    .enum([
-      'sessions.list',
-      'sessions.get',
-      'sessions.transcript',
-      'sessions.events',
-      'caches.list',
-      'caches.get',
-      'caches.create',
-      'caches.update',
-      'caches.delete',
-      'workspace.context',
-      'workspace.cache',
-    ])
-    .describe('Memory action that handled the request'),
+  action: enumField(MEMORY_ACTION_OPTIONS, 'Memory action that handled the request'),
   summary: z.string().describe('High-level result summary'),
   sessions: z.array(SessionSummarySchema).optional(),
   session: SessionSummarySchema.optional(),

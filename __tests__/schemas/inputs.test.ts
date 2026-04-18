@@ -18,6 +18,7 @@ import {
   ExplainErrorInputSchema,
   GenerateDiagramInputSchema,
   ResearchInputSchema,
+  ReviewInputSchema,
   SearchInputSchema,
   UpdateCacheInputSchema,
 } from '../../src/schemas/inputs.js';
@@ -148,6 +149,9 @@ describe('ChatInputSchema', () => {
   it('accepts valid minimal input', () => {
     const result = ChatInputSchema.safeParse({ goal: 'help me debug this' });
     assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.thinkingLevel, 'MEDIUM');
+    }
   });
 
   it('rejects empty session.id after trim', () => {
@@ -269,6 +273,9 @@ describe('ResearchInputSchema', () => {
       goal: 'What changed in Node.js 24?',
     });
     assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.thinkingLevel, 'MEDIUM');
+    }
   });
 
   it('accepts deep research input with the default search depth', () => {
@@ -574,6 +581,9 @@ describe('AnalyzePrInputSchema', () => {
   it('accepts valid minimal input', () => {
     const result = AnalyzePrInputSchema.safeParse({});
     assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.thinkingLevel, 'MEDIUM');
+    }
   });
 
   it('accepts supported fields', () => {
@@ -603,6 +613,30 @@ describe('AnalyzePrInputSchema', () => {
 
   it('keeps cacheName wired to live cache completion', () => {
     assert.strictEqual(getCompleter(AnalyzePrInputSchema.shape.cacheName), completeCacheNames);
+  });
+});
+
+describe('shared thinkingLevel defaults', () => {
+  it('defaults analyze input to MEDIUM', () => {
+    const result = AnalyzeInputSchema.safeParse({
+      goal: 'Summarize the architecture',
+      targets: { kind: 'file', filePath: 'src/index.ts' },
+      output: { kind: 'summary' },
+    });
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.thinkingLevel, 'MEDIUM');
+    }
+  });
+
+  it('defaults review input to MEDIUM', () => {
+    const result = ReviewInputSchema.safeParse({
+      subject: { kind: 'diff' },
+    });
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.thinkingLevel, 'MEDIUM');
+    }
   });
 });
 

@@ -221,7 +221,7 @@ async function searchWork(
         config: buildGenerateContentConfig(
           {
             systemInstruction: systemInstruction ?? prompt.systemInstruction,
-            thinkingLevel: thinkingLevel ?? 'LOW',
+            thinkingLevel,
             functionCallingMode,
             toolConfig,
             tools,
@@ -261,7 +261,7 @@ export async function analyzeUrlWork(
         config: buildGenerateContentConfig(
           {
             systemInstruction: systemInstruction ?? prompt.systemInstruction,
-            thinkingLevel: thinkingLevel ?? 'LOW',
+            thinkingLevel,
             ...buildOrchestrationConfig({ toolProfile: 'url' }),
           },
           ctx.mcpReq.signal,
@@ -309,7 +309,7 @@ async function agenticSearchWork(
         config: buildGenerateContentConfig(
           {
             systemInstruction: prompt.systemInstruction,
-            thinkingLevel: thinkingLevel ?? 'MEDIUM',
+            thinkingLevel,
             ...buildOrchestrationConfig({
               includeServerSideToolInvocations: true,
               toolProfile: 'search_code',

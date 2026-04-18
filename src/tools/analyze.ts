@@ -21,7 +21,7 @@ import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js
 import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 
-import { buildGenerateContentConfig, getAI, MODEL } from '../client.js';
+import { buildGenerateContentConfig, DEFAULT_THINKING_LEVEL, getAI, MODEL } from '../client.js';
 import { analyzeUrlWork } from './research-job.js';
 
 const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
@@ -147,7 +147,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
             config: buildGenerateContentConfig(
               {
                 systemInstruction,
-                thinkingLevel: thinkingLevel ?? 'LOW',
+                thinkingLevel,
                 ...(mediaResolution ? { mediaResolution } : {}),
               },
               ctx.mcpReq.signal,
@@ -203,7 +203,7 @@ async function analyzeMultiFileWork(
           config: buildGenerateContentConfig(
             {
               systemInstruction: prompt.systemInstruction,
-              thinkingLevel: thinkingLevel ?? 'MEDIUM',
+              thinkingLevel,
             },
             ctx.mcpReq.signal,
           ),
@@ -278,7 +278,7 @@ async function analyzeDiagramWork(
           config: buildGenerateContentConfig(
             {
               systemInstruction: prompt.systemInstruction,
-              thinkingLevel: args.thinkingLevel ?? 'LOW',
+              thinkingLevel: args.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
               ...buildOrchestrationConfig({
                 toolProfile:
                   args.targets.kind === 'url'

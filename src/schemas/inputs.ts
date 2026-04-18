@@ -46,7 +46,7 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
     systemInstruction: textField(
       'System instructions for response style, constraints, or behavior.',
     ).optional(),
-    thinkingLevel: thinkingLevel('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
+    thinkingLevel: thinkingLevelField,
     responseSchema: GeminiResponseSchema.optional().describe('JSON Schema for structured output.'),
     temperature: boundedFloat(
       'Sampling temperature (0.0 to 2.0). Lower is more deterministic.',
@@ -131,14 +131,14 @@ const AnalyzeTargetsSchema = z
     AnalyzeUrlTargetsSchema,
     AnalyzeMultiTargetsSchema,
   ])
-  .describe('Target selection for analysis.');
+  .describe('Targets to analyze.');
 
 const AnalyzeSummaryOutputSchema = z.strictObject({
-  kind: z.literal('summary').describe('Analyze output selector (`summary`).'),
+  kind: z.literal('summary').describe('Summary output (`summary`).'),
 });
 
 const AnalyzeDiagramOutputSchema = z.strictObject({
-  kind: z.literal('diagram').describe('Analyze output selector (`diagram`).'),
+  kind: z.literal('diagram').describe('Diagram output (`diagram`).'),
   diagramType: enumField(DIAGRAM_TYPES, 'Diagram syntax to generate.'),
   validateSyntax: z
     .boolean()
@@ -154,7 +154,7 @@ const AnalyzeOutputSchema = z.discriminatedUnion('kind', [
 export const AnalyzeInputSchema = z.strictObject({
   goal: goalText('Question or analysis goal for the selected targets'),
   targets: AnalyzeTargetsSchema,
-  output: AnalyzeOutputSchema.describe('Requested analysis output form.'),
+  output: AnalyzeOutputSchema.describe('Requested output format.'),
   thinkingLevel: thinkingLevelField,
   mediaResolution: mediaResolution(
     'Resolution for image/video processing. Higher = more detail, more tokens.',
@@ -198,7 +198,7 @@ const ReviewSubjectSchema = z
     ReviewComparisonSubjectSchema,
     ReviewFailureSubjectSchema,
   ])
-  .describe('Review subject details.');
+  .describe('What to review.');
 
 export const ReviewInputSchema = z.strictObject({
   subject: ReviewSubjectSchema,
@@ -320,7 +320,7 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
     systemInstruction: textField(
       'System instructions for response style, constraints, or behavior.',
     ).optional(),
-    thinkingLevel: thinkingLevel('Thinking depth. MINIMAL=fastest, LOW, MEDIUM, HIGH=deepest.'),
+    thinkingLevel: thinkingLevelField,
     cacheName: completableCacheName(
       'Cache name from memory action=caches.create. Cannot be applied to an existing chat session.',
       true,

@@ -104,6 +104,55 @@ function assertToolContract(
   }
 }
 
+function getObjectProperty(
+  schema: unknown,
+  propertyName: string,
+): Record<string, unknown> | undefined {
+  if (!schema || typeof schema !== 'object') {
+    return undefined;
+  }
+
+  const properties = (schema as { properties?: unknown }).properties;
+  if (!properties || typeof properties !== 'object') {
+    return undefined;
+  }
+
+  const property = (properties as Record<string, unknown>)[propertyName];
+  return property && typeof property === 'object'
+    ? (property as Record<string, unknown>)
+    : undefined;
+}
+
+function findPropertyInSchema(
+  schema: unknown,
+  propertyName: string,
+): Record<string, unknown> | undefined {
+  const directProperty = getObjectProperty(schema, propertyName);
+  if (directProperty) {
+    return directProperty;
+  }
+
+  if (!schema || typeof schema !== 'object') {
+    return undefined;
+  }
+
+  for (const branchKey of ['anyOf', 'oneOf']) {
+    const branches = (schema as Record<string, unknown>)[branchKey];
+    if (!Array.isArray(branches)) {
+      continue;
+    }
+
+    for (const branch of branches) {
+      const branchProperty = findPropertyInSchema(branch, propertyName);
+      if (branchProperty) {
+        return branchProperty;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 const READONLY_ANNOTATIONS = {
   destructiveHint: false,
   idempotentHint: true,
@@ -182,6 +231,24 @@ describe('MCP tool smoke coverage', () => {
 
       for (const [toolName, contract] of Object.entries(EXPECTED_TOOL_CONTRACTS)) {
         assertToolContract(toolMap.get(toolName), contract);
+      }
+
+      for (const toolName of ['chat', 'research', 'analyze', 'review']) {
+        const thinkingLevel = findPropertyInSchema(
+          toolMap.get(toolName)?.inputSchema,
+          'thinkingLevel',
+        );
+        assert.ok(thinkingLevel, `Expected ${toolName} to advertise thinkingLevel`);
+        assert.equal(
+          thinkingLevel.default,
+          'MEDIUM',
+          `Expected ${toolName}.thinkingLevel default to be MEDIUM`,
+        );
+        assert.equal(
+          thinkingLevel.description,
+          'Reasoning depth. Default: MEDIUM. MINIMAL is fastest; HIGH is deepest.',
+          `Expected ${toolName}.thinkingLevel description to stay consistent`,
+        );
       }
 
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);

@@ -6,7 +6,7 @@ import { z } from 'zod/v4';
 
 import { isPublicHttpUrl } from '../lib/validation.js';
 
-import { completeCacheNames, THINKING_LEVELS } from '../client.js';
+import { completeCacheNames, DEFAULT_THINKING_LEVEL, THINKING_LEVELS } from '../client.js';
 import { PUBLIC_TOOL_NAMES } from '../public-contract.js';
 
 const CACHE_NAME_PATTERN = /^cachedContents\/.+$/;
@@ -198,8 +198,14 @@ export function sessionId(description: string) {
   return textField(description, 256);
 }
 
-export function thinkingLevel(description = 'Thinking depth for reasoning.') {
-  return enumField(THINKING_LEVELS, description).optional();
+export function thinkingLevel(
+  description = 'Reasoning depth. Default: MEDIUM. MINIMAL is fastest; HIGH is deepest.',
+) {
+  return z
+    .enum(THINKING_LEVELS)
+    .meta({ default: DEFAULT_THINKING_LEVEL })
+    .default(DEFAULT_THINKING_LEVEL)
+    .describe(description);
 }
 
 export function mediaResolution(description: string) {

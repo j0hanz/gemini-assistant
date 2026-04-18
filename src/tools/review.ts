@@ -244,7 +244,7 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
             config: buildGenerateContentConfig(
               {
                 systemInstruction: prompt.systemInstruction,
-                thinkingLevel: thinkingLevel ?? 'MEDIUM',
+                thinkingLevel,
                 cacheName,
                 ...buildOrchestrationConfig({
                   toolProfile: googleSearch ? 'search' : 'none',
@@ -322,7 +322,7 @@ async function diagnoseFailureWork(
         config: buildGenerateContentConfig(
           {
             systemInstruction: prompt.systemInstruction,
-            thinkingLevel: thinkingLevel ?? 'MEDIUM',
+            thinkingLevel,
             cacheName,
             ...orchestration,
           },
@@ -991,7 +991,7 @@ export async function analyzePrWork(
         config: buildGenerateContentConfig(
           {
             systemInstruction: modelPrompt.systemInstruction,
-            thinkingLevel: thinkingLevel ?? 'HIGH',
+            thinkingLevel,
             cacheName,
           },
           ctx.mcpReq.signal,

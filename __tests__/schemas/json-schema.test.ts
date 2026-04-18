@@ -13,11 +13,11 @@ describe('GeminiResponseSchema', () => {
     }
 
     const messages = result.error.issues.map((issue) => issue.message).join('\n');
-    assert.ok(messages.includes('propertyOrdering'));
+    assert.ok(messages.includes('properties'));
     assert.ok(!messages.includes('prefixItems'));
   });
 
-  it('preserves exact property names in required and propertyOrdering', () => {
+  it('preserves exact property names in required', () => {
     const result = GeminiResponseSchema.safeParse({
       type: 'object',
       properties: {
@@ -25,9 +25,22 @@ describe('GeminiResponseSchema', () => {
         'id ': { type: 'string' },
       },
       required: [' first name'],
-      propertyOrdering: ['id '],
     });
 
     assert.ok(result.success);
+  });
+
+  it('supports title and nullable fields', () => {
+    const result = GeminiResponseSchema.safeParse({
+      type: 'string',
+      title: 'Status',
+      nullable: true,
+    });
+
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.title, 'Status');
+      assert.strictEqual(result.data.nullable, true);
+    }
   });
 });

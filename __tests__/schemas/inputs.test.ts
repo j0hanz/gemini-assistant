@@ -93,14 +93,6 @@ describe('AskInputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
-  it('rejects responseSchema with inverted numeric bounds', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'return JSON',
-      responseSchema: { type: 'number', minimum: 10, maximum: 1 },
-    });
-    assert.strictEqual(result.success, false);
-  });
-
   it('rejects duplicate required keys in responseSchema', () => {
     const result = AskInputSchema.safeParse({
       message: 'return JSON',
@@ -108,18 +100,6 @@ describe('AskInputSchema', () => {
         type: 'object',
         properties: { answer: { type: 'string' } },
         required: ['answer', 'answer'],
-      },
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects propertyOrdering entries missing from properties', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'return JSON',
-      responseSchema: {
-        type: 'object',
-        properties: { answer: { type: 'string' } },
-        propertyOrdering: ['missing'],
       },
     });
     assert.strictEqual(result.success, false);

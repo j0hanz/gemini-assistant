@@ -119,6 +119,40 @@ function markProgressEmission(
   lastEmitTime.set(buildThrottleKey(progressToken, message), now);
 }
 
+function updateProgressStateAfterNotify(
+  progressToken: string | number,
+  taskId: string | undefined,
+  message: string | undefined,
+  now: number,
+  isTerminal: boolean,
+): void {
+  if (isTerminal) {
+    clearProgressState(progressToken, taskId);
+    return;
+  }
+
+  markProgressEmission(progressToken, message, now);
+}
+
+async function bridgeProgressMessage(
+  ctx: ServerContext,
+  message: string | undefined,
+  isTerminal: boolean,
+): Promise<void> {
+  if (!message) {
+    return;
+  }
+
+  if (isTerminal) {
+    // Ensure the final status message reflects terminal state (completion or failure)
+    // so clients reading task.statusMessage see the real outcome, not the last step label.
+    await bridgeProgressToTask(ctx, message, { force: true });
+    return;
+  }
+
+  await bridgeProgressToTask(ctx, message);
+}
+
 async function logProgressFailure(ctx: ServerContext, err: unknown): Promise<void> {
   if (ctx.mcpReq.signal.aborted) {
     return;
@@ -151,22 +185,12 @@ export async function sendProgress(
 
   try {
     await ctx.mcpReq.notify(buildProgressNotification(progressToken, progress, total, message));
-    if (isTerminal) {
-      clearProgressState(progressToken, ctx.task?.id);
-    } else {
-      markProgressEmission(progressToken, message, now);
-    }
+    updateProgressStateAfterNotify(progressToken, ctx.task?.id, message, now, isTerminal);
   } catch (err: unknown) {
     await logProgressFailure(ctx, err);
   }
 
-  if (!isTerminal && message) {
-    await bridgeProgressToTask(ctx, message);
-  } else if (isTerminal && message) {
-    // Ensure the final status message reflects terminal state (completion or failure)
-    // so clients reading task.statusMessage see the real outcome, not the last step label.
-    await bridgeProgressToTask(ctx, message, { force: true });
-  }
+  await bridgeProgressMessage(ctx, message, isTerminal);
 }
 
 export function advanceProgress(current: number): number {

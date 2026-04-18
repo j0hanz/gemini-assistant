@@ -144,61 +144,79 @@ async function analyzeWork(
   args: AnalyzeInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const result =
-    args.targets.kind === 'file'
-      ? await fileWork(
-          {
-            filePath: args.targets.filePath,
-            question: args.goal,
-            thinkingLevel: args.thinkingLevel,
-            mediaResolution: args.mediaResolution,
-          },
-          ctx,
-        )
-      : args.targets.kind === 'url'
-        ? await analyzeUrlWork(
-            {
-              urls: args.targets.urls,
-              question: args.goal,
-              thinkingLevel: args.thinkingLevel,
-            },
-            ctx,
-          )
-        : await analyzeMultiFileWork(
-            rootsFetcher,
-            args.targets,
-            args.goal,
-            args.thinkingLevel,
-            ctx,
-          );
+  const result = await runAnalyzeTarget(rootsFetcher, fileWork, args, ctx);
 
   if (result.isError) {
     return result;
   }
 
   const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
-  const summary =
-    typeof structured.analysis === 'string'
-      ? structured.analysis
-      : typeof structured.answer === 'string'
-        ? structured.answer
-        : typeof structured.summary === 'string'
-          ? structured.summary
-          : '';
 
   return {
     ...result,
-    structuredContent: {
-      ...buildBaseStructuredOutput(ctx.task?.id),
-      targetKind: args.targets.kind,
-      summary,
-      ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
-      ...(args.targets.kind === 'multi' ? { analyzedPaths: args.targets.filePaths } : {}),
-      ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
-      ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
-      ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
-      ...(structured.usage ? { usage: structured.usage } : {}),
-    },
+    structuredContent: buildAnalyzeStructuredContent(args, ctx, structured),
+  };
+}
+
+async function runAnalyzeTarget(
+  rootsFetcher: RootsFetcher,
+  fileWork: ReturnType<typeof createAnalyzeFileWork>,
+  args: AnalyzeInput,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  if (args.targets.kind === 'file') {
+    return await fileWork(
+      {
+        filePath: args.targets.filePath,
+        question: args.goal,
+        thinkingLevel: args.thinkingLevel,
+        mediaResolution: args.mediaResolution,
+      },
+      ctx,
+    );
+  }
+
+  if (args.targets.kind === 'url') {
+    return await analyzeUrlWork(
+      {
+        urls: args.targets.urls,
+        question: args.goal,
+        thinkingLevel: args.thinkingLevel,
+      },
+      ctx,
+    );
+  }
+
+  return await analyzeMultiFileWork(rootsFetcher, args.targets, args.goal, args.thinkingLevel, ctx);
+}
+
+function extractAnalyzeSummary(structured: Record<string, unknown>): string {
+  if (typeof structured.analysis === 'string') {
+    return structured.analysis;
+  }
+
+  if (typeof structured.answer === 'string') {
+    return structured.answer;
+  }
+
+  return typeof structured.summary === 'string' ? structured.summary : '';
+}
+
+function buildAnalyzeStructuredContent(
+  args: AnalyzeInput,
+  ctx: ServerContext,
+  structured: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...buildBaseStructuredOutput(ctx.task?.id),
+    targetKind: args.targets.kind,
+    summary: extractAnalyzeSummary(structured),
+    ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
+    ...(args.targets.kind === 'multi' ? { analyzedPaths: args.targets.filePaths } : {}),
+    ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
+    ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
+    ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
+    ...(structured.usage ? { usage: structured.usage } : {}),
   };
 }
 

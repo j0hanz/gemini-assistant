@@ -53,6 +53,32 @@ function createDeps(overrides: Partial<Parameters<typeof createAskWork>[0]> = {}
 }
 
 describe('ask contract', () => {
+  it('returns the exact validation error for expired sessions', async () => {
+    const askWork = createAskWork(
+      createDeps({
+        isEvicted: (sessionId?: string) => sessionId === 'sess-expired',
+      }) as never,
+    );
+
+    const result = await askWork(
+      {
+        message: 'hello',
+        sessionId: 'sess-expired',
+      },
+      createContext(),
+    );
+
+    assert.deepStrictEqual(result, {
+      content: [
+        {
+          type: 'text',
+          text: "ask: Session 'sess-expired' has expired.",
+        },
+      ],
+      isError: true,
+    });
+  });
+
   it('returns the exact validation error for cacheName plus systemInstruction', async () => {
     const askWork = createAskWork(createDeps() as never);
 
@@ -70,6 +96,88 @@ describe('ask contract', () => {
         {
           type: 'text',
           text: 'ask: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via create_cache instead.',
+        },
+      ],
+      isError: true,
+    });
+  });
+
+  it('returns the exact validation error for cacheName plus existing session', async () => {
+    const askWork = createAskWork(
+      createDeps({
+        getSessionEntry: (sessionId?: string) =>
+          sessionId === 'sess-1' ? ({ id: 'sess-1' } as never) : undefined,
+      }) as never,
+    );
+
+    const result = await askWork(
+      {
+        message: 'hello',
+        sessionId: 'sess-1',
+        cacheName: 'cachedContents/abc123',
+      },
+      createContext(),
+    );
+
+    assert.deepStrictEqual(result, {
+      content: [
+        {
+          type: 'text',
+          text: 'ask: Cannot apply a cachedContent to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
+        },
+      ],
+      isError: true,
+    });
+  });
+
+  it('returns the exact validation error for cacheName plus generation controls', async () => {
+    const askWork = createAskWork(createDeps() as never);
+
+    const result = await askWork(
+      {
+        message: 'hello',
+        cacheName: 'cachedContents/abc123',
+        temperature: 0.4,
+      },
+      createContext(),
+    );
+
+    assert.deepStrictEqual(result, {
+      content: [
+        {
+          type: 'text',
+          text: 'ask: temperature and seed cannot be used with cacheName. Generation parameters are fixed at cache creation time.',
+        },
+      ],
+      isError: true,
+    });
+  });
+
+  it('returns the exact validation error for responseSchema plus existing session', async () => {
+    const askWork = createAskWork(
+      createDeps({
+        getSessionEntry: (sessionId?: string) =>
+          sessionId === 'sess-1' ? ({ id: 'sess-1' } as never) : undefined,
+      }) as never,
+    );
+
+    const result = await askWork(
+      {
+        message: 'hello',
+        sessionId: 'sess-1',
+        responseSchema: {
+          type: 'object',
+          properties: { answer: { type: 'string' } },
+        },
+      },
+      createContext(),
+    );
+
+    assert.deepStrictEqual(result, {
+      content: [
+        {
+          type: 'text',
+          text: 'ask: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
         },
       ],
       isError: true,

@@ -83,6 +83,30 @@ describe('AskInputSchema', () => {
     });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects duplicate required keys in responseSchema', () => {
+    const result = AskInputSchema.safeParse({
+      message: 'return JSON',
+      responseSchema: {
+        type: 'object',
+        properties: { answer: { type: 'string' } },
+        required: ['answer', 'answer'],
+      },
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects propertyOrdering entries missing from properties', () => {
+    const result = AskInputSchema.safeParse({
+      message: 'return JSON',
+      responseSchema: {
+        type: 'object',
+        properties: { answer: { type: 'string' } },
+        propertyOrdering: ['missing'],
+      },
+    });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('ExecuteCodeInputSchema', () => {

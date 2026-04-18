@@ -60,6 +60,66 @@ function hasDuplicates(values: readonly string[]): boolean {
   return new Set(values).size !== values.length;
 }
 
+function addCustomIssue(
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+  message: string,
+  path: (string | number)[],
+  input: unknown,
+): void {
+  ctx.addIssue({
+    code: 'custom',
+    message,
+    path,
+    input,
+  });
+}
+
+function validateBounds(
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+  minimum: number | undefined,
+  maximum: number | undefined,
+  maximumPath: 'maximum' | 'maxItems',
+  errorMessage: string,
+): void {
+  if (minimum === undefined || maximum === undefined || minimum <= maximum) {
+    return;
+  }
+
+  addCustomIssue(ctx, errorMessage, [maximumPath], maximum);
+}
+
+function validatePropertyKeyList(
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+  propertyNames: Set<string> | undefined,
+  values: string[] | undefined,
+  path: 'required' | 'propertyOrdering',
+  missingMessage: string,
+  duplicateMessage: string,
+): void {
+  if (!values) {
+    return;
+  }
+
+  if (!propertyNames) {
+    addCustomIssue(ctx, missingMessage, [path], values);
+  } else {
+    for (const [index, key] of values.entries()) {
+      if (!propertyNames.has(key)) {
+        addCustomIssue(
+          ctx,
+          `${path} ${path === 'required' ? 'property' : 'entry'} "${key}" is not defined in properties.`,
+          [path, index],
+          key,
+        );
+      }
+    }
+  }
+
+  if (hasDuplicates(values)) {
+    addCustomIssue(ctx, duplicateMessage, [path], values);
+  }
+}
+
 export function isGeminiResponseSchemaKeyword(key: string): boolean {
   return GEMINI_RESPONSE_SCHEMA_KEYWORD_SET.has(key);
 }
@@ -86,95 +146,39 @@ export const GeminiResponseSchema: z.ZodType<Record<string, unknown>> = z.lazy((
       propertyOrdering: z.array(z.string().min(1)).min(1).optional(),
     })
     .superRefine((schema, ctx) => {
-      if (
-        schema.minimum !== undefined &&
-        schema.maximum !== undefined &&
-        schema.minimum > schema.maximum
-      ) {
-        ctx.addIssue({
-          code: 'custom',
-          message: 'maximum must be greater than or equal to minimum.',
-          path: ['maximum'],
-          input: schema.maximum,
-        });
-      }
-
-      if (
-        schema.minItems !== undefined &&
-        schema.maxItems !== undefined &&
-        schema.minItems > schema.maxItems
-      ) {
-        ctx.addIssue({
-          code: 'custom',
-          message: 'maxItems must be greater than or equal to minItems.',
-          path: ['maxItems'],
-          input: schema.maxItems,
-        });
-      }
+      validateBounds(
+        ctx,
+        schema.minimum,
+        schema.maximum,
+        'maximum',
+        'maximum must be greater than or equal to minimum.',
+      );
+      validateBounds(
+        ctx,
+        schema.minItems,
+        schema.maxItems,
+        'maxItems',
+        'maxItems must be greater than or equal to minItems.',
+      );
 
       const propertyNames = schema.properties ? new Set(Object.keys(schema.properties)) : undefined;
 
-      if (schema.required) {
-        if (!propertyNames) {
-          ctx.addIssue({
-            code: 'custom',
-            message: 'required can only be used when properties is present.',
-            path: ['required'],
-            input: schema.required,
-          });
-        } else {
-          for (const [index, key] of schema.required.entries()) {
-            if (!propertyNames.has(key)) {
-              ctx.addIssue({
-                code: 'custom',
-                message: `required property "${key}" is not defined in properties.`,
-                path: ['required', index],
-                input: key,
-              });
-            }
-          }
-        }
-
-        if (hasDuplicates(schema.required)) {
-          ctx.addIssue({
-            code: 'custom',
-            message: 'required must not contain duplicate property names.',
-            path: ['required'],
-            input: schema.required,
-          });
-        }
-      }
-
-      if (schema.propertyOrdering) {
-        if (!propertyNames) {
-          ctx.addIssue({
-            code: 'custom',
-            message: 'propertyOrdering can only be used when properties is present.',
-            path: ['propertyOrdering'],
-            input: schema.propertyOrdering,
-          });
-        } else {
-          for (const [index, key] of schema.propertyOrdering.entries()) {
-            if (!propertyNames.has(key)) {
-              ctx.addIssue({
-                code: 'custom',
-                message: `propertyOrdering entry "${key}" is not defined in properties.`,
-                path: ['propertyOrdering', index],
-                input: key,
-              });
-            }
-          }
-        }
-
-        if (hasDuplicates(schema.propertyOrdering)) {
-          ctx.addIssue({
-            code: 'custom',
-            message: 'propertyOrdering must not contain duplicate property names.',
-            path: ['propertyOrdering'],
-            input: schema.propertyOrdering,
-          });
-        }
-      }
+      validatePropertyKeyList(
+        ctx,
+        propertyNames,
+        schema.required,
+        'required',
+        'required can only be used when properties is present.',
+        'required must not contain duplicate property names.',
+      );
+      validatePropertyKeyList(
+        ctx,
+        propertyNames,
+        schema.propertyOrdering,
+        'propertyOrdering',
+        'propertyOrdering can only be used when properties is present.',
+        'propertyOrdering must not contain duplicate property names.',
+      );
     })
     .refine(hasSchemaShape, {
       error:

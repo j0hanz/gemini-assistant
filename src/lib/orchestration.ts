@@ -108,33 +108,79 @@ function buildBuiltInTools(toolProfile: ToolProfile): ToolListUnion {
   return TOOL_PROFILE_CAPABILITIES[toolProfile].builtInTools.map((tool) => ({ ...tool }));
 }
 
+function hasFunctionDeclarations(
+  functionDeclarations: FunctionDeclaration[] | undefined,
+): functionDeclarations is FunctionDeclaration[] {
+  return (functionDeclarations?.length ?? 0) > 0;
+}
+
+function buildTools(
+  builtInTools: ToolListUnion,
+  functionDeclarations: FunctionDeclaration[] | undefined,
+): ToolListUnion {
+  if (!hasFunctionDeclarations(functionDeclarations)) {
+    return builtInTools;
+  }
+
+  return [...builtInTools, { functionDeclarations }];
+}
+
+function buildFunctionCallingMode(
+  hasBuiltInToolsForProfile: boolean,
+  functionDeclarations: FunctionDeclaration[] | undefined,
+): FunctionCallingConfigMode | undefined {
+  return hasBuiltInToolsForProfile && hasFunctionDeclarations(functionDeclarations)
+    ? FunctionCallingConfigMode.VALIDATED
+    : undefined;
+}
+
+function buildToolConfig(
+  includeServerSideToolInvocations: boolean | undefined,
+  hasBuiltInToolsForProfile: boolean,
+  functionDeclarations: FunctionDeclaration[] | undefined,
+): ToolConfig | undefined {
+  const shouldExposeServerTools =
+    includeServerSideToolInvocations === true ||
+    (hasBuiltInToolsForProfile && hasFunctionDeclarations(functionDeclarations));
+
+  return shouldExposeServerTools ? { includeServerSideToolInvocations: true } : undefined;
+}
+
 export function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationConfig {
   const toolProfile = normalizeToolProfile(request);
   const capabilities = TOOL_PROFILE_CAPABILITIES[toolProfile];
   const builtInTools = buildBuiltInTools(toolProfile);
   const functionDeclarations = request.functionDeclarations?.slice();
-  const tools: ToolListUnion = [
-    ...builtInTools,
-    ...(functionDeclarations && functionDeclarations.length > 0 ? [{ functionDeclarations }] : []),
-  ];
+  const hasBuiltInToolsForProfile = hasBuiltInTools(toolProfile);
+  const tools = buildTools(builtInTools, functionDeclarations);
+  const functionCallingMode = buildFunctionCallingMode(
+    hasBuiltInToolsForProfile,
+    functionDeclarations,
+  );
+  const toolConfig = buildToolConfig(
+    request.includeServerSideToolInvocations,
+    hasBuiltInToolsForProfile,
+    functionDeclarations,
+  );
 
-  const shouldExposeServerTools =
-    request.includeServerSideToolInvocations === true ||
-    (hasBuiltInTools(toolProfile) && (functionDeclarations?.length ?? 0) > 0);
-
-  const toolConfig: ToolConfig | undefined = shouldExposeServerTools
-    ? { includeServerSideToolInvocations: true }
-    : undefined;
-
-  return {
-    ...(functionDeclarations && functionDeclarations.length > 0 && hasBuiltInTools(toolProfile)
-      ? { functionCallingMode: FunctionCallingConfigMode.VALIDATED }
-      : {}),
-    ...(toolConfig ? { toolConfig } : {}),
+  const config: OrchestrationConfig = {
     toolProfile,
-    ...(tools.length > 0 ? { tools } : {}),
     usesCodeExecution: capabilities.usesCodeExecution,
     usesGoogleSearch: capabilities.usesGoogleSearch,
     usesUrlContext: capabilities.usesUrlContext,
   };
+
+  if (functionCallingMode) {
+    config.functionCallingMode = functionCallingMode;
+  }
+
+  if (toolConfig) {
+    config.toolConfig = toolConfig;
+  }
+
+  if (tools.length > 0) {
+    config.tools = tools;
+  }
+
+  return config;
 }

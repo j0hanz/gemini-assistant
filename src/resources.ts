@@ -377,30 +377,50 @@ export function renderSessionEventsMarkdown(
 
   const lines: string[] = [header, ''];
   for (const entry of data) {
-    const ts = new Date(entry.timestamp).toISOString();
-    const taskSuffix = entry.taskId ? ` · task \`${entry.taskId}\`` : '';
-    lines.push(`## ${ts}${taskSuffix}`, '');
-    lines.push(`- Message: ${entry.request.message}`);
-    if (entry.request.toolProfile) {
-      lines.push(`- Tool profile: \`${entry.request.toolProfile}\``);
-    }
-    if (entry.request.urls && entry.request.urls.length > 0) {
-      lines.push(`- URLs: ${entry.request.urls.join(', ')}`);
-    }
-    if (entry.response.text) {
-      lines.push('', '### Response', '', entry.response.text);
-    }
-    const toolEvents = entry.response.toolEvents;
-    if (toolEvents && toolEvents.length > 0) {
-      lines.push('', '### Tool events', '');
-      for (const toolEvent of toolEvents) {
-        const suffix = toolEvent.toolType ? ` (${toolEvent.toolType})` : '';
-        lines.push(`- ${toolEvent.kind}${suffix}`);
-      }
-    }
-    lines.push('');
+    appendSessionEventMarkdown(lines, entry);
   }
   return lines.join('\n').trimEnd() + '\n';
+}
+
+function appendSessionEventMarkdown(
+  lines: string[],
+  entry: SessionEventsResourceData[number],
+): void {
+  const ts = new Date(entry.timestamp).toISOString();
+  const taskSuffix = entry.taskId ? ` · task \`${entry.taskId}\`` : '';
+
+  lines.push(`## ${ts}${taskSuffix}`, '');
+  lines.push(`- Message: ${entry.request.message}`);
+
+  if (entry.request.toolProfile) {
+    lines.push(`- Tool profile: \`${entry.request.toolProfile}\``);
+  }
+
+  if (entry.request.urls && entry.request.urls.length > 0) {
+    lines.push(`- URLs: ${entry.request.urls.join(', ')}`);
+  }
+
+  if (entry.response.text) {
+    lines.push('', '### Response', '', entry.response.text);
+  }
+
+  appendSessionToolEventsMarkdown(lines, entry.response.toolEvents);
+  lines.push('');
+}
+
+function appendSessionToolEventsMarkdown(
+  lines: string[],
+  toolEvents: SessionEventsResourceData[number]['response']['toolEvents'],
+): void {
+  if (!toolEvents || toolEvents.length === 0) {
+    return;
+  }
+
+  lines.push('', '### Tool events', '');
+  for (const toolEvent of toolEvents) {
+    const suffix = toolEvent.toolType ? ` (${toolEvent.toolType})` : '';
+    lines.push(`- ${toolEvent.kind}${suffix}`);
+  }
 }
 
 export function readSessionEventsResource(

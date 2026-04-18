@@ -232,6 +232,44 @@ function validateAskConflict(condition: boolean, message: string): CallToolResul
   return condition ? new AppError('ask', message).toToolResult() : undefined;
 }
 
+function hasExpiredSession(
+  sessionId: string | undefined,
+  deps: Pick<AskDependencies, 'isEvicted'>,
+): boolean {
+  return !!sessionId && deps.isEvicted(sessionId);
+}
+
+function hasExistingSessionCacheConflict(
+  sessionId: string | undefined,
+  cacheName: string | undefined,
+  hasExistingSession: boolean,
+): boolean {
+  return !!sessionId && !!cacheName && hasExistingSession;
+}
+
+function hasCacheInstructionConflict(
+  cacheName: string | undefined,
+  systemInstruction: string | undefined,
+): boolean {
+  return !!cacheName && !!systemInstruction;
+}
+
+function hasCacheGenerationControlConflict(
+  cacheName: string | undefined,
+  temperature: number | undefined,
+  seed: number | undefined,
+): boolean {
+  return !!cacheName && (temperature !== undefined || seed !== undefined);
+}
+
+function hasExistingSessionResponseSchemaConflict(
+  responseSchema: GeminiResponseSchema | undefined,
+  sessionId: string | undefined,
+  hasExistingSession: boolean,
+): boolean {
+  return !!responseSchema && !!sessionId && hasExistingSession;
+}
+
 function validateAskRequest(
   { cacheName, responseSchema, seed, sessionId, systemInstruction, temperature, urls }: AskArgs,
   deps: Pick<AskDependencies, 'getSessionEntry' | 'isEvicted'>,
@@ -242,28 +280,34 @@ function validateAskRequest(
   }
 
   const hasExistingSession = sessionId ? deps.getSessionEntry(sessionId) !== undefined : false;
-  return (
-    validateAskConflict(
-      !!sessionId && deps.isEvicted(sessionId),
-      `ask: Session '${sessionId}' has expired.`,
-    ) ??
-    validateAskConflict(
-      !!sessionId && !!cacheName && hasExistingSession,
+  const conflicts: [boolean, string][] = [
+    [hasExpiredSession(sessionId, deps), `ask: Session '${sessionId}' has expired.`],
+    [
+      hasExistingSessionCacheConflict(sessionId, cacheName, hasExistingSession),
       'ask: Cannot apply a cachedContent to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
-    ) ??
-    validateAskConflict(
-      !!cacheName && !!systemInstruction,
+    ],
+    [
+      hasCacheInstructionConflict(cacheName, systemInstruction),
       'ask: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via create_cache instead.',
-    ) ??
-    validateAskConflict(
-      !!cacheName && (temperature !== undefined || seed !== undefined),
+    ],
+    [
+      hasCacheGenerationControlConflict(cacheName, temperature, seed),
       'ask: temperature and seed cannot be used with cacheName. Generation parameters are fixed at cache creation time.',
-    ) ??
-    validateAskConflict(
-      !!responseSchema && !!sessionId && hasExistingSession,
+    ],
+    [
+      hasExistingSessionResponseSchemaConflict(responseSchema, sessionId, hasExistingSession),
       'ask: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
-    )
-  );
+    ],
+  ];
+
+  for (const [condition, message] of conflicts) {
+    const conflict = validateAskConflict(condition, message);
+    if (conflict) {
+      return conflict;
+    }
+  }
+
+  return undefined;
 }
 
 function buildAskPrompt(message: string, urls?: readonly string[]): string {
@@ -475,25 +519,75 @@ function appendSessionTurn(
   const structured = getAskStructuredContent(askResult.result);
 
   deps.appendSessionEvent(sessionId, {
-    request: {
-      message: args.message,
-      ...(askResult.toolProfile !== 'none' ? { toolProfile: askResult.toolProfile } : {}),
-      ...(askResult.urls ? { urls: askResult.urls } : {}),
-    },
-    response: {
-      text: extractTextContent(askResult.result.content),
-      ...(structured?.data !== undefined ? { data: sanitizeSessionValue(structured.data) } : {}),
-      ...(structured?.functionCalls
-        ? { functionCalls: sanitizeFunctionCalls(structured.functionCalls) }
-        : {}),
-      ...(structured?.schemaWarnings ? { schemaWarnings: structured.schemaWarnings } : {}),
-      ...(structured?.thoughts ? { thoughts: structured.thoughts } : {}),
-      ...(structured?.toolEvents ? { toolEvents: sanitizeToolEvents(structured.toolEvents) } : {}),
-      ...(structured?.usage ? { usage: structured.usage } : {}),
-    },
+    request: buildSessionEventRequest(args.message, askResult),
+    response: buildSessionEventResponse(askResult.result, structured),
     timestamp: deps.now(),
     ...(taskId ? { taskId } : {}),
   });
+}
+
+function buildSessionEventRequest(
+  message: string,
+  askResult: AskExecutionResult,
+): SessionEventEntry['request'] {
+  return {
+    message,
+    ...(askResult.toolProfile !== 'none' ? { toolProfile: askResult.toolProfile } : {}),
+    ...(askResult.urls ? { urls: askResult.urls } : {}),
+  };
+}
+
+function buildSessionEventResponse(
+  result: CallToolResult,
+  structured: AskStructuredContent | undefined,
+): SessionEventEntry['response'] {
+  return {
+    text: extractTextContent(result.content),
+    ...buildSessionEventData(structured),
+    ...buildSessionEventFunctionCalls(structured),
+    ...buildSessionEventSchemaWarnings(structured),
+    ...buildSessionEventThoughts(structured),
+    ...buildSessionEventToolEvents(structured),
+    ...buildSessionEventUsage(structured),
+  };
+}
+
+function buildSessionEventData(
+  structured: AskStructuredContent | undefined,
+): Partial<SessionEventEntry['response']> {
+  return structured?.data !== undefined ? { data: sanitizeSessionValue(structured.data) } : {};
+}
+
+function buildSessionEventFunctionCalls(
+  structured: AskStructuredContent | undefined,
+): Partial<SessionEventEntry['response']> {
+  return structured?.functionCalls
+    ? { functionCalls: sanitizeFunctionCalls(structured.functionCalls) }
+    : {};
+}
+
+function buildSessionEventSchemaWarnings(
+  structured: AskStructuredContent | undefined,
+): Partial<SessionEventEntry['response']> {
+  return structured?.schemaWarnings ? { schemaWarnings: structured.schemaWarnings } : {};
+}
+
+function buildSessionEventThoughts(
+  structured: AskStructuredContent | undefined,
+): Partial<SessionEventEntry['response']> {
+  return structured?.thoughts ? { thoughts: structured.thoughts } : {};
+}
+
+function buildSessionEventToolEvents(
+  structured: AskStructuredContent | undefined,
+): Partial<SessionEventEntry['response']> {
+  return structured?.toolEvents ? { toolEvents: sanitizeToolEvents(structured.toolEvents) } : {};
+}
+
+function buildSessionEventUsage(
+  structured: AskStructuredContent | undefined,
+): Partial<SessionEventEntry['response']> {
+  return structured?.usage ? { usage: structured.usage } : {};
 }
 
 async function resolveWorkspaceCacheName(

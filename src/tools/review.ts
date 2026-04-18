@@ -914,56 +914,11 @@ export async function analyzePrWork(
   );
 }
 
-async function reviewWork(
-  compareWork: ReturnType<typeof createCompareFileWork>,
-  args: ReviewInput,
-  ctx: ServerContext,
-): Promise<CallToolResult> {
-  const result =
-    args.subject.kind === 'diff'
-      ? await analyzePrWork(
-          {
-            dryRun: args.subject.dryRun,
-            cacheName: args.cacheName,
-            language: args.subject.language,
-            thinkingLevel: args.thinkingLevel,
-          },
-          ctx,
-        )
-      : args.subject.kind === 'comparison'
-        ? await compareWork(
-            {
-              filePathA: args.subject.filePathA,
-              filePathB: args.subject.filePathB,
-              question: args.subject.question ?? args.focus,
-              thinkingLevel: args.thinkingLevel,
-              googleSearch: args.subject.googleSearch,
-              cacheName: args.cacheName,
-            },
-            ctx,
-          )
-        : await explainErrorWork(
-            {
-              error: args.subject.error,
-              codeContext: args.focus
-                ? [args.subject.codeContext, `Review focus: ${args.focus}`]
-                    .filter(Boolean)
-                    .join('\n\n')
-                : args.subject.codeContext,
-              language: args.subject.language,
-              thinkingLevel: args.thinkingLevel,
-              googleSearch: args.subject.googleSearch,
-              urls: args.subject.urls,
-              cacheName: args.cacheName,
-            },
-            ctx,
-          );
-
-  if (result.isError) {
-    return result;
-  }
-
-  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+function buildReviewStructuredContent(
+  taskId: string | undefined,
+  subjectKind: string,
+  structured: Record<string, unknown>,
+): Record<string, unknown> {
   const summary =
     typeof structured.analysis === 'string'
       ? structured.analysis
@@ -974,26 +929,79 @@ async function reviewWork(
           : '';
 
   return {
+    ...buildBaseStructuredOutput(taskId),
+    subjectKind,
+    summary,
+    ...(structured.stats ? { stats: structured.stats } : {}),
+    ...(structured.reviewedPaths ? { reviewedPaths: structured.reviewedPaths } : {}),
+    ...(structured.includedUntracked ? { includedUntracked: structured.includedUntracked } : {}),
+    ...(structured.skippedBinaryPaths ? { skippedBinaryPaths: structured.skippedBinaryPaths } : {}),
+    ...(structured.skippedLargePaths ? { skippedLargePaths: structured.skippedLargePaths } : {}),
+    ...(structured.omittedPaths ? { omittedPaths: structured.omittedPaths } : {}),
+    ...(typeof structured.empty === 'boolean' ? { empty: structured.empty } : {}),
+    ...(typeof structured.truncated === 'boolean' ? { truncated: structured.truncated } : {}),
+    ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
+    ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
+    ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
+    ...(structured.usage ? { usage: structured.usage } : {}),
+  };
+}
+
+async function reviewWork(
+  compareWork: ReturnType<typeof createCompareFileWork>,
+  args: ReviewInput,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  let result: CallToolResult;
+
+  if (args.subject.kind === 'diff') {
+    result = await analyzePrWork(
+      {
+        dryRun: args.subject.dryRun,
+        cacheName: args.cacheName,
+        language: args.subject.language,
+        thinkingLevel: args.thinkingLevel,
+      },
+      ctx,
+    );
+  } else if (args.subject.kind === 'comparison') {
+    result = await compareWork(
+      {
+        filePathA: args.subject.filePathA,
+        filePathB: args.subject.filePathB,
+        question: args.subject.question ?? args.focus,
+        thinkingLevel: args.thinkingLevel,
+        googleSearch: args.subject.googleSearch,
+        cacheName: args.cacheName,
+      },
+      ctx,
+    );
+  } else {
+    result = await explainErrorWork(
+      {
+        error: args.subject.error,
+        codeContext: args.focus
+          ? [args.subject.codeContext, 'Review focus: ' + args.focus].filter(Boolean).join('\n\n')
+          : args.subject.codeContext,
+        language: args.subject.language,
+        thinkingLevel: args.thinkingLevel,
+        googleSearch: args.subject.googleSearch,
+        urls: args.subject.urls,
+        cacheName: args.cacheName,
+      },
+      ctx,
+    );
+  }
+
+  if (result.isError) {
+    return result;
+  }
+
+  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+
+  return {
     ...result,
-    structuredContent: {
-      ...buildBaseStructuredOutput(ctx.task?.id),
-      subjectKind: args.subject.kind,
-      summary,
-      ...(structured.stats ? { stats: structured.stats } : {}),
-      ...(structured.reviewedPaths ? { reviewedPaths: structured.reviewedPaths } : {}),
-      ...(structured.includedUntracked ? { includedUntracked: structured.includedUntracked } : {}),
-      ...(structured.skippedBinaryPaths
-        ? { skippedBinaryPaths: structured.skippedBinaryPaths }
-        : {}),
-      ...(structured.skippedLargePaths ? { skippedLargePaths: structured.skippedLargePaths } : {}),
-      ...(structured.omittedPaths ? { omittedPaths: structured.omittedPaths } : {}),
-      ...(typeof structured.empty === 'boolean' ? { empty: structured.empty } : {}),
-      ...(typeof structured.truncated === 'boolean' ? { truncated: structured.truncated } : {}),
-      ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
-      ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
-      ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
-      ...(structured.usage ? { usage: structured.usage } : {}),
-    },
+    structuredContent: buildReviewStructuredContent(ctx.task?.id, args.subject.kind, structured),
   };
 }
 

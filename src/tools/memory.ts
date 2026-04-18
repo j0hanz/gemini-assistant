@@ -390,6 +390,285 @@ function sessionUris(sessionId: string): string[] {
   ];
 }
 
+function handleSessionsList(
+  sessionStore: SessionStore,
+  base: Record<string, unknown>,
+  action: string,
+): CallToolResult {
+  const sessions = sessionStore.listSessionEntries();
+  return {
+    content: [
+      { type: 'text', text: `Found ${String(sessions.length)} active session(s).` },
+      createResourceLink('memory://sessions', 'Chat Sessions'),
+    ],
+    structuredContent: {
+      ...base,
+      action,
+      summary: `Found ${String(sessions.length)} active session(s).`,
+      sessions,
+      resourceUris: ['memory://sessions'],
+    },
+  };
+}
+
+function handleSessionsGet(
+  sessionStore: SessionStore,
+  base: Record<string, unknown>,
+  action: string,
+  sessionId: string,
+): CallToolResult {
+  const session = sessionStore.getSessionEntry(sessionId);
+  if (!session) {
+    return new AppError('memory', `memory: Session '${sessionId}' not found.`).toToolResult();
+  }
+  return {
+    content: [
+      { type: 'text', text: `Session ${sessionId} is active.` },
+      ...sessionUris(sessionId).map((uri, index) =>
+        createResourceLink(uri, ['Session', 'Transcript', 'Events'][index] ?? uri),
+      ),
+    ],
+    structuredContent: {
+      ...base,
+      action,
+      summary: `Session ${sessionId} is active.`,
+      session,
+      resourceUris: sessionUris(sessionId),
+    },
+  };
+}
+
+function handleSessionsTranscript(
+  sessionStore: SessionStore,
+  base: Record<string, unknown>,
+  action: string,
+  sessionId: string,
+): CallToolResult {
+  const transcript = sessionStore.listSessionTranscriptEntries(sessionId);
+  if (!transcript) {
+    return new AppError('memory', `memory: Session '${sessionId}' not found.`).toToolResult();
+  }
+  return {
+    content: [
+      { type: 'text', text: `Transcript entries: ${String(transcript.length)}.` },
+      createResourceLink(`memory://sessions/${sessionId}/transcript`, `Transcript ${sessionId}`),
+    ],
+    structuredContent: {
+      ...base,
+      action,
+      summary: `Transcript entries: ${String(transcript.length)}.`,
+      transcript,
+      resourceUris: [`memory://sessions/${sessionId}/transcript`],
+    },
+  };
+}
+
+function handleSessionsEvents(
+  sessionStore: SessionStore,
+  base: Record<string, unknown>,
+  action: string,
+  sessionId: string,
+): CallToolResult {
+  const events = sessionStore.listSessionEventEntries(sessionId);
+  if (!events) {
+    return new AppError('memory', `memory: Session '${sessionId}' not found.`).toToolResult();
+  }
+  return {
+    content: [
+      { type: 'text', text: `Event entries: ${String(events.length)}.` },
+      createResourceLink(`memory://sessions/${sessionId}/events`, `Events ${sessionId}`),
+    ],
+    structuredContent: {
+      ...base,
+      action,
+      summary: `Event entries: ${String(events.length)}.`,
+      events,
+      resourceUris: [`memory://sessions/${sessionId}/events`],
+    },
+  };
+}
+
+async function handleCachesList(
+  base: Record<string, unknown>,
+  action: string,
+  signal?: AbortSignal,
+): Promise<CallToolResult> {
+  const caches = await listCacheSummaries(signal);
+  return {
+    content: [
+      { type: 'text', text: `Found ${String(caches.length)} active cache(s).` },
+      createResourceLink('memory://caches', 'Caches'),
+    ],
+    structuredContent: {
+      ...base,
+      action,
+      summary: `Found ${String(caches.length)} active cache(s).`,
+      caches,
+      resourceUris: ['memory://caches'],
+    },
+  };
+}
+
+async function handleCachesGet(
+  base: Record<string, unknown>,
+  action: string,
+  cacheName: string,
+  signal?: AbortSignal,
+): Promise<CallToolResult> {
+  let cache: CacheSummary;
+  try {
+    cache = await getCacheSummary(cacheName, signal);
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : String(err);
+    if (/not found|404/i.test(raw)) {
+      return new AppError('memory', `memory: Cache '${cacheName}' not found.`).toToolResult();
+    }
+    throw err;
+  }
+  return {
+    content: [
+      { type: 'text', text: `Cache ${cacheName} loaded.` },
+      createResourceLink(`memory://caches/${encodeURIComponent(cacheName)}`, cacheName),
+    ],
+    structuredContent: {
+      ...base,
+      action,
+      summary: `Cache ${cacheName} loaded.`,
+      cache,
+      resourceUris: [`memory://caches/${encodeURIComponent(cacheName)}`],
+    },
+  };
+}
+
+async function handleCachesCreate(
+  createCacheWork: ReturnType<typeof buildCreateCacheWork>,
+  base: Record<string, unknown>,
+  args: Extract<MemoryInput, { action: 'caches.create' }>,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const createArgs =
+    args.systemInstruction !== undefined
+      ? {
+          displayName: args.displayName,
+          filePaths: args.filePaths,
+          systemInstruction: args.systemInstruction,
+          ttl: args.ttl,
+        }
+      : {
+          displayName: args.displayName,
+          filePaths: args.filePaths ?? [],
+          ttl: args.ttl,
+        };
+  const result = await createCacheWork(createArgs, ctx);
+  if (result.isError) return result;
+  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const resourceUris =
+    typeof structured.name === 'string'
+      ? ['memory://caches', `memory://caches/${encodeURIComponent(structured.name)}`]
+      : ['memory://caches'];
+  return {
+    ...result,
+    structuredContent: {
+      ...base,
+      action: args.action,
+      summary:
+        typeof structured.name === 'string'
+          ? `Created cache ${structured.name}.`
+          : 'Created cache.',
+      cache: structured,
+      resourceUris,
+    },
+  };
+}
+
+async function handleCachesUpdate(
+  base: Record<string, unknown>,
+  args: Extract<MemoryInput, { action: 'caches.update' }>,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const result = await updateCacheWork({ cacheName: args.cacheName, ttl: args.ttl }, ctx);
+  if (result.isError) return result;
+  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  return {
+    ...result,
+    structuredContent: {
+      ...base,
+      action: args.action,
+      summary: `Updated cache ${args.cacheName}.`,
+      cache: structured,
+      resourceUris: [`memory://caches/${encodeURIComponent(args.cacheName)}`],
+    },
+  };
+}
+
+async function handleCachesDelete(
+  base: Record<string, unknown>,
+  args: Extract<MemoryInput, { action: 'caches.delete' }>,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const result = await deleteCacheWork({ cacheName: args.cacheName, confirm: args.confirm }, ctx);
+  if (result.isError) return result;
+  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  return {
+    ...result,
+    structuredContent: {
+      ...base,
+      action: args.action,
+      summary:
+        structured.deleted === true
+          ? `Deleted cache ${args.cacheName}.`
+          : structured.confirmationRequired === true
+            ? `Deletion for ${args.cacheName} requires confirmation.`
+            : `Did not delete cache ${args.cacheName}.`,
+      deleted: structured.deleted,
+      confirmationRequired: structured.confirmationRequired,
+      resourceUris: ['memory://caches'],
+    },
+  };
+}
+
+async function handleWorkspaceContext(
+  rootsFetcher: RootsFetcher,
+  base: Record<string, unknown>,
+  action: string,
+): Promise<CallToolResult> {
+  const roots = await getAllowedRoots(rootsFetcher);
+  const workspaceContext = await assembleWorkspaceContext(roots);
+  return {
+    content: [
+      {
+        type: 'text',
+        text: `Workspace context assembled from ${String(workspaceContext.sources.length)} source(s).`,
+      },
+      createResourceLink('memory://workspace/context', 'Workspace Context', 'text/markdown'),
+    ],
+    structuredContent: {
+      ...base,
+      action,
+      summary: `Workspace context assembled from ${String(workspaceContext.sources.length)} source(s).`,
+      workspaceContext,
+      resourceUris: ['memory://workspace/context'],
+    },
+  };
+}
+
+function handleWorkspaceCache(base: Record<string, unknown>, action: string): CallToolResult {
+  const workspaceCache = workspaceCacheManager.getCacheStatus();
+  return {
+    content: [
+      { type: 'text', text: 'Workspace cache status loaded.' },
+      createResourceLink('memory://workspace/cache', 'Workspace Cache'),
+    ],
+    structuredContent: {
+      ...base,
+      action,
+      summary: 'Workspace cache status loaded.',
+      workspaceCache,
+      resourceUris: ['memory://workspace/cache'],
+    },
+  };
+}
+
 async function memoryWork(
   sessionStore: SessionStore,
   rootsFetcher: RootsFetcher,
@@ -399,270 +678,22 @@ async function memoryWork(
 ): Promise<CallToolResult> {
   const base = buildBaseStructuredOutput(ctx.task?.id);
 
-  switch (args.action) {
-    case 'sessions.list': {
-      const sessions = sessionStore.listSessionEntries();
-      return {
-        content: [
-          { type: 'text', text: `Found ${String(sessions.length)} active session(s).` },
-          createResourceLink('memory://sessions', 'Chat Sessions'),
-        ],
-        structuredContent: {
-          ...base,
-          action: args.action,
-          summary: `Found ${String(sessions.length)} active session(s).`,
-          sessions,
-          resourceUris: ['memory://sessions'],
-        },
-      };
-    }
-
-    case 'sessions.get': {
-      const session = sessionStore.getSessionEntry(args.sessionId);
-      if (!session) {
-        return new AppError(
-          'memory',
-          `memory: Session '${args.sessionId}' not found.`,
-        ).toToolResult();
-      }
-      return {
-        content: [
-          { type: 'text', text: `Session ${args.sessionId} is active.` },
-          ...sessionUris(args.sessionId).map((uri, index) =>
-            createResourceLink(uri, ['Session', 'Transcript', 'Events'][index] ?? uri),
-          ),
-        ],
-        structuredContent: {
-          ...base,
-          action: args.action,
-          summary: `Session ${args.sessionId} is active.`,
-          session,
-          resourceUris: sessionUris(args.sessionId),
-        },
-      };
-    }
-
-    case 'sessions.transcript': {
-      const transcript = sessionStore.listSessionTranscriptEntries(args.sessionId);
-      if (!transcript) {
-        return new AppError(
-          'memory',
-          `memory: Session '${args.sessionId}' not found.`,
-        ).toToolResult();
-      }
-      return {
-        content: [
-          { type: 'text', text: `Transcript entries: ${String(transcript.length)}.` },
-          createResourceLink(
-            `memory://sessions/${args.sessionId}/transcript`,
-            `Transcript ${args.sessionId}`,
-          ),
-        ],
-        structuredContent: {
-          ...base,
-          action: args.action,
-          summary: `Transcript entries: ${String(transcript.length)}.`,
-          transcript,
-          resourceUris: [`memory://sessions/${args.sessionId}/transcript`],
-        },
-      };
-    }
-
-    case 'sessions.events': {
-      const events = sessionStore.listSessionEventEntries(args.sessionId);
-      if (!events) {
-        return new AppError(
-          'memory',
-          `memory: Session '${args.sessionId}' not found.`,
-        ).toToolResult();
-      }
-      return {
-        content: [
-          { type: 'text', text: `Event entries: ${String(events.length)}.` },
-          createResourceLink(
-            `memory://sessions/${args.sessionId}/events`,
-            `Events ${args.sessionId}`,
-          ),
-        ],
-        structuredContent: {
-          ...base,
-          action: args.action,
-          summary: `Event entries: ${String(events.length)}.`,
-          events,
-          resourceUris: [`memory://sessions/${args.sessionId}/events`],
-        },
-      };
-    }
-
-    case 'caches.list': {
-      const caches = await listCacheSummaries(ctx.mcpReq.signal);
-      return {
-        content: [
-          { type: 'text', text: `Found ${String(caches.length)} active cache(s).` },
-          createResourceLink('memory://caches', 'Caches'),
-        ],
-        structuredContent: {
-          ...base,
-          action: args.action,
-          summary: `Found ${String(caches.length)} active cache(s).`,
-          caches,
-          resourceUris: ['memory://caches'],
-        },
-      };
-    }
-
-    case 'caches.get': {
-      let cache: CacheSummary;
-      try {
-        cache = await getCacheSummary(args.cacheName, ctx.mcpReq.signal);
-      } catch (err) {
-        const raw = err instanceof Error ? err.message : String(err);
-        if (/not found|404/i.test(raw)) {
-          return new AppError(
-            'memory',
-            `memory: Cache '${args.cacheName}' not found.`,
-          ).toToolResult();
-        }
-        throw err;
-      }
-      return {
-        content: [
-          { type: 'text', text: `Cache ${args.cacheName} loaded.` },
-          createResourceLink(
-            `memory://caches/${encodeURIComponent(args.cacheName)}`,
-            args.cacheName,
-          ),
-        ],
-        structuredContent: {
-          ...base,
-          action: args.action,
-          summary: `Cache ${args.cacheName} loaded.`,
-          cache,
-          resourceUris: [`memory://caches/${encodeURIComponent(args.cacheName)}`],
-        },
-      };
-    }
-
-    case 'caches.create': {
-      const createArgs =
-        args.systemInstruction !== undefined
-          ? {
-              displayName: args.displayName,
-              filePaths: args.filePaths,
-              systemInstruction: args.systemInstruction,
-              ttl: args.ttl,
-            }
-          : {
-              displayName: args.displayName,
-              filePaths: args.filePaths ?? [],
-              ttl: args.ttl,
-            };
-      const result = await createCacheWork(createArgs, ctx);
-      if (result.isError) return result;
-      const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
-      const resourceUris =
-        typeof structured.name === 'string'
-          ? ['memory://caches', `memory://caches/${encodeURIComponent(structured.name)}`]
-          : ['memory://caches'];
-      return {
-        ...result,
-        structuredContent: {
-          ...base,
-          action: args.action,
-          summary:
-            typeof structured.name === 'string'
-              ? `Created cache ${structured.name}.`
-              : 'Created cache.',
-          cache: structured,
-          resourceUris,
-        },
-      };
-    }
-
-    case 'caches.update': {
-      const result = await updateCacheWork({ cacheName: args.cacheName, ttl: args.ttl }, ctx);
-      if (result.isError) return result;
-      const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
-      return {
-        ...result,
-        structuredContent: {
-          ...base,
-          action: args.action,
-          summary: `Updated cache ${args.cacheName}.`,
-          cache: structured,
-          resourceUris: [`memory://caches/${encodeURIComponent(args.cacheName)}`],
-        },
-      };
-    }
-
-    case 'caches.delete': {
-      const result = await deleteCacheWork(
-        { cacheName: args.cacheName, confirm: args.confirm },
-        ctx,
-      );
-      if (result.isError) return result;
-      const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
-      return {
-        ...result,
-        structuredContent: {
-          ...base,
-          action: args.action,
-          summary:
-            structured.deleted === true
-              ? `Deleted cache ${args.cacheName}.`
-              : structured.confirmationRequired === true
-                ? `Deletion for ${args.cacheName} requires confirmation.`
-                : `Did not delete cache ${args.cacheName}.`,
-          deleted: structured.deleted,
-          confirmationRequired: structured.confirmationRequired,
-          resourceUris: ['memory://caches'],
-        },
-      };
-    }
-
-    case 'workspace.context': {
-      const roots = await getAllowedRoots(rootsFetcher);
-      const workspaceContext = await assembleWorkspaceContext(roots);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Workspace context assembled from ${String(workspaceContext.sources.length)} source(s).`,
-          },
-          createResourceLink('memory://workspace/context', 'Workspace Context', 'text/markdown'),
-        ],
-        structuredContent: {
-          ...base,
-          action: args.action,
-          summary: `Workspace context assembled from ${String(workspaceContext.sources.length)} source(s).`,
-          workspaceContext,
-          resourceUris: ['memory://workspace/context'],
-        },
-      };
-    }
-
-    case 'workspace.cache': {
-      const workspaceCache = workspaceCacheManager.getCacheStatus();
-      return {
-        content: [
-          { type: 'text', text: 'Workspace cache status loaded.' },
-          createResourceLink('memory://workspace/cache', 'Workspace Cache'),
-        ],
-        structuredContent: {
-          ...base,
-          action: args.action,
-          summary: 'Workspace cache status loaded.',
-          workspaceCache,
-          resourceUris: ['memory://workspace/cache'],
-        },
-      };
-    }
-  }
-
-  return new AppError(
-    'memory',
-    `memory: Unsupported action ${(args as { action?: string }).action ?? ''}.`,
-  ).toToolResult();
+  if (args.action === 'sessions.list') return handleSessionsList(sessionStore, base, args.action);
+  if (args.action === 'sessions.get')
+    return handleSessionsGet(sessionStore, base, args.action, args.sessionId);
+  if (args.action === 'sessions.transcript')
+    return handleSessionsTranscript(sessionStore, base, args.action, args.sessionId);
+  if (args.action === 'sessions.events')
+    return handleSessionsEvents(sessionStore, base, args.action, args.sessionId);
+  if (args.action === 'caches.list') return handleCachesList(base, args.action, ctx.mcpReq.signal);
+  if (args.action === 'caches.get')
+    return handleCachesGet(base, args.action, args.cacheName, ctx.mcpReq.signal);
+  if (args.action === 'caches.create') return handleCachesCreate(createCacheWork, base, args, ctx);
+  if (args.action === 'caches.update') return handleCachesUpdate(base, args, ctx);
+  if (args.action === 'caches.delete') return handleCachesDelete(base, args, ctx);
+  if (args.action === 'workspace.context')
+    return handleWorkspaceContext(rootsFetcher, base, args.action);
+  return handleWorkspaceCache(base, args.action);
 }
 
 export function registerMemoryTool(

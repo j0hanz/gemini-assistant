@@ -62,7 +62,7 @@ export function promptBlockedError(toolName: string, blockReason?: string): Call
   return new SafetyError(toolName, 'prompt_blocked', blockReason).toToolResult();
 }
 
-export interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
+interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
   contextUsed?: ContextUsed;
   functionCalls?: TFunctionCall[];
   thoughts?: string;

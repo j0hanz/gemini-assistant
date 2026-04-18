@@ -3,15 +3,9 @@ import { INVALID_PARAMS, ProtocolError } from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
 
-export {
-  ProgressReporter,
-  reportCompletion,
-  reportFailure,
-  resetProgressThrottle,
-  sendProgress,
-} from './progress.js';
+export { resetProgressThrottle, sendProgress } from './progress.js';
 
-export type AppErrorCategory = 'client' | 'server' | 'safety' | 'cancelled' | 'internal';
+type AppErrorCategory = 'client' | 'server' | 'safety' | 'cancelled' | 'internal';
 
 // ── Error Formatting ──────────────────────────────────────────────────
 
@@ -73,15 +67,13 @@ export class AppError extends Error {
     }
 
     if (hasHttpStatus(err)) {
-      return new GeminiError(toolName, err);
+      return AppError.fromHttpError(toolName, err);
     }
 
     return new AppError(toolName, `${toolName} failed: ${AppError.formatMessage(err)}`);
   }
-}
 
-export class GeminiError extends AppError {
-  private static readonly STATUS_MESSAGES: Record<number, string> = {
+  private static readonly HTTP_STATUS_MESSAGES: Record<number, string> = {
     400: 'Bad request',
     403: 'Permission denied / invalid API key',
     404: 'Resource or model not found',
@@ -91,15 +83,12 @@ export class GeminiError extends AppError {
     504: 'Gemini request timed out',
   };
 
-  constructor(toolName: string, cause: Error & { status?: number }) {
-    const statusCode = typeof cause.status === 'number' ? cause.status : undefined;
-    const retryable = statusCode !== undefined && RETRYABLE_STATUS_CODES.has(statusCode);
+  private static fromHttpError(toolName: string, cause: Error & { status: number }): AppError {
+    const statusCode = cause.status;
+    const retryable = RETRYABLE_STATUS_CODES.has(statusCode);
     const category: AppErrorCategory = retryable ? 'server' : 'client';
-    const hint =
-      statusCode !== undefined
-        ? (GeminiError.STATUS_MESSAGES[statusCode] ?? `HTTP ${statusCode}`)
-        : 'Gemini error';
-    super(
+    const hint = AppError.HTTP_STATUS_MESSAGES[statusCode] ?? `HTTP ${statusCode}`;
+    return new AppError(
       toolName,
       `${toolName} failed: ${hint} — ${cause.message}`,
       category,

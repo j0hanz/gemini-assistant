@@ -1,23 +1,29 @@
-import type {
-  CallToolResult,
-  McpServer,
-  ServerContext,
-  TaskMessageQueue,
-} from '@modelcontextprotocol/server';
+import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 
 import { buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
-import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { validateUrls } from '../lib/validation.js';
-import { type ExplainErrorInput, ExplainErrorInputSchema } from '../schemas/inputs.js';
-import { ExplainErrorOutputSchema } from '../schemas/outputs.js';
+import type { ExplainErrorInput } from '../schemas/inputs.js';
 
 import { buildGenerateContentConfig } from '../client.js';
 import { getAI, MODEL } from '../client.js';
 
 const TOOL_LABEL = 'Explain Error';
+
+async function runToolStream(
+  ctx: ServerContext,
+  initialMsg: string,
+  logMsg: string,
+  startFn: () => Promise<AsyncGenerator<import('@google/genai').GenerateContentResponse>>,
+  resultFn: Parameters<typeof executor.runStream>[4],
+): Promise<CallToolResult> {
+  const progress = new ProgressReporter(ctx, TOOL_LABEL);
+  await progress.send(0, undefined, initialMsg);
+  await ctx.mcpReq.log('info', logMsg);
+  return executor.runStream(ctx, 'explain_error', TOOL_LABEL, startFn, resultFn);
+}
 
 export async function explainErrorWork(
   { error, codeContext, language, thinkingLevel, googleSearch, urls, cacheName }: ExplainErrorInput,
@@ -25,10 +31,6 @@ export async function explainErrorWork(
 ): Promise<CallToolResult> {
   const invalidUrlResult = validateUrls(urls);
   if (invalidUrlResult) return invalidUrlResult;
-
-  const progress = new ProgressReporter(ctx, TOOL_LABEL);
-  await progress.send(0, undefined, 'Diagnosing');
-  await ctx.mcpReq.log('info', `Explaining error (${error.length} chars)`);
 
   const prompt = buildErrorDiagnosisPrompt({
     cacheName,
@@ -49,10 +51,10 @@ export async function explainErrorWork(
             : 'none',
   });
 
-  return await executor.runStream(
+  return runToolStream(
     ctx,
-    'explain_error',
-    TOOL_LABEL,
+    'Diagnosing',
+    `Explaining error (${error.length} chars)`,
     () =>
       getAI().models.generateContentStream({
         model: MODEL,
@@ -72,27 +74,5 @@ export async function explainErrorWork(
         explanation: textContent || '',
       },
     }),
-  );
-}
-
-export function registerExplainErrorTool(
-  server: McpServer,
-  taskMessageQueue: TaskMessageQueue,
-): void {
-  registerTaskTool(
-    server,
-    'explain_error',
-    {
-      title: TOOL_LABEL,
-      description:
-        'Diagnose an error from a stack trace, log output, or error message. ' +
-        'Returns root cause, explanation, and suggested fix. ' +
-        'Optionally uses Google Search for docs/issues and URL Context for reference links.',
-      inputSchema: ExplainErrorInputSchema,
-      outputSchema: ExplainErrorOutputSchema,
-      annotations: READONLY_ANNOTATIONS,
-    },
-    taskMessageQueue,
-    explainErrorWork,
   );
 }

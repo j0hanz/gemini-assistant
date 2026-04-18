@@ -29,19 +29,9 @@ import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { getAllowedRoots, validateUrls } from '../lib/validation.js';
 import { workspaceCacheManager } from '../lib/workspace-context.js';
-import {
-  type AskInput,
-  type ChatInput,
-  createAskInputSchema,
-  createChatInputSchema,
-} from '../schemas/inputs.js';
+import { type AskInput, type ChatInput, createChatInputSchema } from '../schemas/inputs.js';
 import { type GeminiResponseSchema } from '../schemas/json-schema.js';
-import {
-  AskOutputSchema,
-  ChatOutputSchema,
-  type ContextUsed,
-  type UsageMetadata,
-} from '../schemas/outputs.js';
+import { ChatOutputSchema, type ContextUsed, type UsageMetadata } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, EXPOSE_THOUGHTS, getAI, MODEL } from '../client.js';
 import { getWorkspaceCacheEnabled } from '../config.js';
@@ -55,7 +45,7 @@ import {
 
 type AskArgs = AskInput;
 
-export interface AskStructuredContent extends Record<string, unknown> {
+interface AskStructuredContent extends Record<string, unknown> {
   answer: string;
   contextUsed?: ContextUsed;
   data?: unknown;
@@ -616,7 +606,7 @@ async function resolveWorkspaceCacheName(
   }
 }
 
-export function createDefaultAskDependencies(sessionStore: SessionStore): AskDependencies {
+function createDefaultAskDependencies(sessionStore: SessionStore): AskDependencies {
   return {
     appendSessionEvent: sessionStore.appendSessionEvent.bind(sessionStore),
     appendSessionTranscript: sessionStore.appendSessionTranscript.bind(sessionStore),
@@ -704,26 +694,50 @@ async function askNewSession(
   return askResult.result;
 }
 
+interface PreparedAskRequest {
+  effectiveArgs: AskArgs;
+  contextUsed: ContextUsed;
+}
+
+async function prepareAskRequest(
+  args: AskArgs,
+  deps: AskDependencies,
+  signal: AbortSignal,
+): Promise<PreparedAskRequest | CallToolResult> {
+  const validationError = validateAskRequest(args, deps);
+  if (validationError) return validationError;
+
+  const canUseWorkspaceCache =
+    !args.sessionId || deps.getSessionEntry(args.sessionId) === undefined;
+  const workspaceCacheName = canUseWorkspaceCache
+    ? await resolveWorkspaceCacheName(args, signal)
+    : undefined;
+  const contextUsed = workspaceCacheName
+    ? buildContextUsed(
+        [{ kind: 'workspace-cache', name: workspaceCacheName, tokens: 0, relevanceScore: 1 }],
+        0,
+        true,
+      )
+    : emptyContextUsed();
+  const effectiveArgs = workspaceCacheName ? { ...args, cacheName: workspaceCacheName } : args;
+
+  return { effectiveArgs, contextUsed };
+}
+
+function isPreparedRequest(
+  value: PreparedAskRequest | CallToolResult,
+): value is PreparedAskRequest {
+  return 'effectiveArgs' in value;
+}
+
 export function createAskWork(
   deps: AskDependencies = createDefaultAskDependencies(createSessionStore()),
 ) {
   return async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
-    const validationError = validateAskRequest(args, deps);
-    if (validationError) return validationError;
+    const prepared = await prepareAskRequest(args, deps, ctx.mcpReq.signal);
+    if (!isPreparedRequest(prepared)) return prepared;
 
-    const canUseWorkspaceCache =
-      !args.sessionId || deps.getSessionEntry(args.sessionId) === undefined;
-    const workspaceCacheName = canUseWorkspaceCache
-      ? await resolveWorkspaceCacheName(args, ctx.mcpReq.signal)
-      : undefined;
-    const contextUsed = workspaceCacheName
-      ? buildContextUsed(
-          [{ kind: 'workspace-cache', name: workspaceCacheName, tokens: 0, relevanceScore: 1 }],
-          0,
-          true,
-        )
-      : emptyContextUsed();
-    const effectiveArgs = workspaceCacheName ? { ...args, cacheName: workspaceCacheName } : args;
+    const { effectiveArgs, contextUsed } = prepared;
 
     if (!effectiveArgs.sessionId) {
       const askResult = await deps.runWithoutSession(effectiveArgs, ctx);
@@ -745,27 +759,6 @@ export function createAskWork(
       contextUsed,
     );
   };
-}
-
-export function registerAskTool(
-  server: McpServer,
-  sessionStore: SessionStore,
-  taskMessageQueue: TaskMessageQueue,
-): void {
-  const askWork = createAskWork(createDefaultAskDependencies(sessionStore));
-  registerTaskTool(
-    server,
-    'ask',
-    {
-      title: 'Ask Gemini',
-      description: 'Send a message to Gemini. Supports multi-turn chat via sessionId.',
-      inputSchema: createAskInputSchema(sessionStore.completeSessionIds.bind(sessionStore)),
-      outputSchema: AskOutputSchema,
-      annotations: MUTABLE_ANNOTATIONS,
-    },
-    taskMessageQueue,
-    askWork,
-  );
 }
 
 function extractSessionId(
@@ -795,6 +788,46 @@ function sessionResources(sessionId: string) {
   };
 }
 
+function assembleChatOutput(
+  result: CallToolResult,
+  sessionIdHint: string | undefined,
+  taskId: string | undefined,
+): CallToolResult {
+  if (result.isError) {
+    return result;
+  }
+
+  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const answer =
+    typeof structured.answer === 'string' ? structured.answer : extractTextContent(result.content);
+  const warnings = Array.isArray(structured.schemaWarnings)
+    ? structured.schemaWarnings.filter((value): value is string => typeof value === 'string')
+    : undefined;
+  const sessionId = extractSessionId(result, sessionIdHint);
+
+  return {
+    ...result,
+    structuredContent: {
+      ...buildBaseStructuredOutput(taskId, warnings),
+      answer,
+      ...(structured.data !== undefined ? { data: structured.data } : {}),
+      ...(sessionId
+        ? {
+            session: {
+              id: sessionId,
+              resources: sessionResources(sessionId),
+            },
+          }
+        : {}),
+      ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
+      ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
+      ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
+      ...(structured.usage ? { usage: structured.usage } : {}),
+      ...(structured.contextUsed ? { contextUsed: structured.contextUsed } : {}),
+    },
+  };
+}
+
 async function chatWork(
   askWork: ReturnType<typeof createAskWork>,
   args: ChatInput,
@@ -814,39 +847,7 @@ async function chatWork(
     ctx,
   );
 
-  if (result.isError) {
-    return result;
-  }
-
-  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
-  const answer =
-    typeof structured.answer === 'string' ? structured.answer : extractTextContent(result.content);
-  const warnings = Array.isArray(structured.schemaWarnings)
-    ? structured.schemaWarnings.filter((value): value is string => typeof value === 'string')
-    : undefined;
-  const sessionId = extractSessionId(result, args.session?.id);
-
-  return {
-    ...result,
-    structuredContent: {
-      ...buildBaseStructuredOutput(ctx.task?.id, warnings),
-      answer,
-      ...(structured.data !== undefined ? { data: structured.data } : {}),
-      ...(sessionId
-        ? {
-            session: {
-              id: sessionId,
-              resources: sessionResources(sessionId),
-            },
-          }
-        : {}),
-      ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
-      ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
-      ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
-      ...(structured.usage ? { usage: structured.usage } : {}),
-      ...(structured.contextUsed ? { contextUsed: structured.contextUsed } : {}),
-    },
-  };
+  return assembleChatOutput(result, args.session?.id, ctx.task?.id);
 }
 
 export function registerChatTool(

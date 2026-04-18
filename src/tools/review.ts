@@ -23,18 +23,11 @@ import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
 import {
   type AnalyzePrInput,
-  AnalyzePrInputSchema,
   type CompareFilesInput,
-  CompareFilesInputSchema,
   type ReviewInput,
   ReviewInputSchema,
 } from '../schemas/inputs.js';
-import {
-  AnalyzePrOutputSchema,
-  CompareFilesOutputSchema,
-  ReviewOutputSchema,
-} from '../schemas/outputs.js';
-import { withCurrentWorkspaceRoot } from '../schemas/shared.js';
+import { ReviewOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, getAI, MODEL } from '../client.js';
 import { explainErrorWork } from './explain-error.js';
@@ -206,7 +199,7 @@ interface GitDiffArgsOptions {
   staged?: boolean;
 }
 
-export function createCompareFileWork(rootsFetcher: RootsFetcher) {
+function createCompareFileWork(rootsFetcher: RootsFetcher) {
   return async function compareFileWork(
     { filePathA, filePathB, question, thinkingLevel, googleSearch, cacheName }: CompareFilesInput,
     ctx: ServerContext,
@@ -1003,48 +996,6 @@ async function reviewWork(
     ...result,
     structuredContent: buildReviewStructuredContent(ctx.task?.id, args.subject.kind, structured),
   };
-}
-
-export function registerCompareFilesTool(
-  server: McpServer,
-  taskMessageQueue: TaskMessageQueue,
-): void {
-  registerTaskTool(
-    server,
-    'compare_files',
-    {
-      title: COMPARE_FILE_TOOL_LABEL,
-      description: withCurrentWorkspaceRoot(
-        'Upload two files to Gemini and get a structured comparison analysis. ' +
-          'Supports code, documents, configs, and other file types. ' +
-          'Optionally uses Google Search for best practices or migration context.',
-      ),
-      inputSchema: CompareFilesInputSchema,
-      outputSchema: CompareFilesOutputSchema,
-      annotations: READONLY_ANNOTATIONS,
-    },
-    taskMessageQueue,
-    createCompareFileWork(buildServerRootsFetcher(server)),
-  );
-}
-
-export function registerAnalyzePrTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
-  registerTaskTool(
-    server,
-    'analyze_pr',
-    {
-      title: REVIEW_DIFF_TOOL_LABEL,
-      description:
-        'Inspect the current local git repository, auto-generate a diff of all local changes, ' +
-        'and review that generated diff with Gemini. Use dryRun to preview the generated diff ' +
-        'without AI analysis. Use cacheName to provide project context during review.',
-      inputSchema: AnalyzePrInputSchema,
-      outputSchema: AnalyzePrOutputSchema,
-      annotations: READONLY_ANNOTATIONS,
-    },
-    taskMessageQueue,
-    analyzePrWork,
-  );
 }
 
 export function registerReviewTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {

@@ -30,10 +30,10 @@ export const MUTABLE_ANNOTATIONS = {
 const TASK_EXECUTION = { taskSupport: 'optional' } as const;
 
 type TaskContext = NonNullable<ServerContext['task']>;
-export type ExtendedTaskContext = TaskContext & { queue: TaskMessageQueue };
-export type ExtendedServerContext = ServerContext & { task?: ExtendedTaskContext };
+type ExtendedTaskContext = TaskContext & { queue: TaskMessageQueue };
+type ExtendedServerContext = ServerContext & { task?: ExtendedTaskContext };
 
-export type TaskWork<TArgs> = (args: TArgs, ctx: ExtendedServerContext) => Promise<CallToolResult>;
+type TaskWork<TArgs> = (args: TArgs, ctx: ExtendedServerContext) => Promise<CallToolResult>;
 
 interface ToolTaskHandlers<TArgs> {
   createTask: (args: TArgs, ctx: ServerContext) => Promise<CreateTaskResult>;
@@ -89,7 +89,7 @@ export async function elicitTaskInput(
   }
 }
 
-export function requireTaskContext(ctx: ServerContext | ExtendedServerContext): TaskContext {
+function requireTaskContext(ctx: ServerContext | ExtendedServerContext): TaskContext {
   const taskContext = ctx.task;
   if (!taskContext) {
     throw new Error('Task context is unavailable for this tool execution.');

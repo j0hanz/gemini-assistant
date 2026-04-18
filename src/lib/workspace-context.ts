@@ -40,14 +40,14 @@ const SCAN_FILE_NAMES = new Set([
 
 // ── Types ─────────────────────────────────────────────────────────────
 
-export interface WorkspaceContextResult {
+interface WorkspaceContextResult {
   content: string;
   fileCount: number;
   estimatedTokens: number;
   sources: string[];
 }
 
-export interface WorkspaceCacheStatus {
+interface WorkspaceCacheStatus {
   enabled: boolean;
   cacheName: string | undefined;
   contentHash: string | undefined;

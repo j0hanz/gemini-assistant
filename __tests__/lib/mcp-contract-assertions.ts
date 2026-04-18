@@ -30,21 +30,6 @@ export function schemaRequiresField(schema: JsonSchemaLike | undefined, field: s
   return false;
 }
 
-export function assertProtocolValidationError(
-  response: JsonRpcResponse,
-  expectedCode: number,
-  expectedMessagePattern: RegExp,
-): void {
-  assert.equal(isJsonRpcFailure(response), true, 'Expected a JSON-RPC failure response');
-
-  if (!isJsonRpcFailure(response)) {
-    return;
-  }
-
-  assert.equal(response.error.code, expectedCode);
-  assert.match(response.error.message, expectedMessagePattern);
-}
-
 export function assertRequestValidationFailure(
   response: JsonRpcResponse,
   expectedCode: number,

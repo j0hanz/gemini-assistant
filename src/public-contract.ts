@@ -49,7 +49,7 @@ export interface WorkflowEntry {
   relatedResources: PublicResourceUri[];
 }
 
-export interface JobMetadata {
+interface JobMetadata {
   name: PublicJobName;
   title: string;
   summary: string;

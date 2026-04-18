@@ -11,28 +11,6 @@ const JSON_SCHEMA_TYPE_SCHEMA = z.enum([
   'null',
 ]);
 
-export const GEMINI_RESPONSE_SCHEMA_KEYWORDS = [
-  'type',
-  'properties',
-  'required',
-  'additionalProperties',
-  'enum',
-  'format',
-  'minimum',
-  'maximum',
-  'items',
-  'prefixItems',
-  'minItems',
-  'maxItems',
-  'title',
-  'description',
-  'anyOf',
-  'oneOf',
-  'allOf',
-  'propertyOrdering',
-] as const;
-
-const GEMINI_RESPONSE_SCHEMA_KEYWORD_SET = new Set<string>(GEMINI_RESPONSE_SCHEMA_KEYWORDS);
 const RESPONSE_SCHEMA_SHAPE_KEYS = [
   'type',
   'properties',
@@ -118,10 +96,6 @@ function validatePropertyKeyList(
   if (hasDuplicates(values)) {
     addCustomIssue(ctx, duplicateMessage, [path], values);
   }
-}
-
-export function isGeminiResponseSchemaKeyword(key: string): boolean {
-  return GEMINI_RESPONSE_SCHEMA_KEYWORD_SET.has(key);
 }
 
 export const GeminiResponseSchema: z.ZodType<Record<string, unknown>> = z.lazy(() =>

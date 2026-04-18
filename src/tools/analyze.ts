@@ -15,14 +15,8 @@ import { buildBaseStructuredOutput } from '../lib/response.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
-import {
-  type AnalyzeFileInput,
-  AnalyzeFileInputSchema,
-  type AnalyzeInput,
-  AnalyzeInputSchema,
-} from '../schemas/inputs.js';
-import { AnalyzeFileOutputSchema, AnalyzeOutputSchema } from '../schemas/outputs.js';
-import { withCurrentWorkspaceRoot } from '../schemas/shared.js';
+import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
+import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, getAI, MODEL } from '../client.js';
 import { analyzeUrlWork } from './research-job.js';
@@ -30,7 +24,7 @@ import { analyzeUrlWork } from './research-job.js';
 const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
 const ANALYZE_TOOL_LABEL = 'Analyze';
 
-export function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
+function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
   return async function analyzeFileWork(
     { filePath, question, thinkingLevel, mediaResolution }: AnalyzeFileInput,
     ctx: ServerContext,
@@ -236,26 +230,5 @@ export function registerAnalyzeTool(server: McpServer, taskMessageQueue: TaskMes
     },
     taskMessageQueue,
     (args: AnalyzeInput, ctx: ServerContext) => analyzeWork(rootsFetcher, fileWork, args, ctx),
-  );
-}
-
-export function registerAnalyzeFileTool(
-  server: McpServer,
-  taskMessageQueue: TaskMessageQueue,
-): void {
-  registerTaskTool(
-    server,
-    'analyze_file',
-    {
-      title: ANALYZE_FILE_TOOL_LABEL,
-      description: withCurrentWorkspaceRoot(
-        'Upload a file to Gemini and ask questions about it (PDFs, images, code files, etc.).',
-      ),
-      inputSchema: AnalyzeFileInputSchema,
-      outputSchema: AnalyzeFileOutputSchema,
-      annotations: READONLY_ANNOTATIONS,
-    },
-    taskMessageQueue,
-    createAnalyzeFileWork(buildServerRootsFetcher(server)),
   );
 }

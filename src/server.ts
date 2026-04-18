@@ -37,7 +37,7 @@ interface ServerServices {
 
 type ServerRegistrar = (server: McpServer, services: ServerServices) => void;
 
-export const SERVER_TOOL_REGISTRARS = [
+const SERVER_TOOL_REGISTRARS = [
   (server, services) => {
     registerChatTool(server, services.sessionStore, services.taskMessageQueue);
   },

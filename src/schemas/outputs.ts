@@ -11,8 +11,6 @@ export const UsageMetadataSchema = z.strictObject({
 
 export type UsageMetadata = z.infer<typeof UsageMetadataSchema>;
 
-export const PublicOutputStatusSchema = z.literal('completed');
-
 const FunctionCallEntrySchema = z.strictObject({
   name: z.string().describe('Function/tool name'),
   args: z.record(z.string(), z.unknown()).describe('Function call arguments').optional(),
@@ -66,13 +64,11 @@ const streamMetadataOutputFields = {
 };
 
 const publicBaseOutputFields = {
-  status: PublicOutputStatusSchema.describe('Stable status for successful tool executions'),
+  status: z.literal('completed').describe('Stable status for successful tool executions'),
   requestId: z.string().describe('Server-side request or task identifier').optional(),
   warnings: z.array(z.string()).describe('Non-fatal warnings for the result').optional(),
   ...streamMetadataOutputFields,
 };
-
-export const PublicBaseOutputSchema = z.strictObject(publicBaseOutputFields);
 
 export const AskOutputSchema = z.strictObject({
   answer: z.string().describe('Generated response'),
@@ -232,25 +228,6 @@ export const DeleteCacheOutputSchema = z.strictObject({
 export const UpdateCacheOutputSchema = z.strictObject({
   cacheName: cacheName('Cache resource name'),
   expireTime: timestamp('New expiration timestamp').optional(),
-});
-
-export const ExplainErrorOutputSchema = z.strictObject({
-  explanation: z
-    .string()
-    .describe('Structured error diagnosis with root cause, explanation, and suggested fix'),
-  ...streamMetadataOutputFields,
-});
-
-export const CompareFilesOutputSchema = z.strictObject({
-  comparison: z.string().describe('Structured comparison analysis'),
-  ...streamMetadataOutputFields,
-});
-
-export const GenerateDiagramOutputSchema = z.strictObject({
-  diagram: z.string().describe('Generated diagram markup (Mermaid or PlantUML)'),
-  diagramType: z.enum(['mermaid', 'plantuml']).describe('Diagram format used'),
-  explanation: z.string().describe('Brief explanation of the diagram structure').optional(),
-  ...streamMetadataOutputFields,
 });
 
 const SessionResourceLinksSchema = z.strictObject({

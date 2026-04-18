@@ -13,8 +13,6 @@ const DISCOVERY_KIND_ORDER: Record<DiscoveryKind, number> = {
   resource: 2,
 };
 
-export type WorkflowName = (typeof WORKFLOW_ENTRIES)[number]['name'];
-
 function compareDiscoveryEntries(left: DiscoveryEntry, right: DiscoveryEntry): number {
   const kindOrder = DISCOVERY_KIND_ORDER[left.kind] - DISCOVERY_KIND_ORDER[right.kind];
   if (kindOrder !== 0) return kindOrder;

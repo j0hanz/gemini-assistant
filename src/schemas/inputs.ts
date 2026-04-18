@@ -25,22 +25,6 @@ const thinkingLevelField = z
   .optional()
   .describe('Thinking depth for reasoning.');
 
-export const ResearchModeSchema = z.enum(['quick', 'deep']);
-export const ReviewSubjectKindSchema = z.enum(['diff', 'comparison', 'failure']);
-export const MemoryActionSchema = z.enum([
-  'sessions.list',
-  'sessions.get',
-  'sessions.transcript',
-  'sessions.events',
-  'caches.list',
-  'caches.get',
-  'caches.create',
-  'caches.update',
-  'caches.delete',
-  'workspace.context',
-  'workspace.cache',
-]);
-
 export function createChatInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
   return z.strictObject({
     goal: goalText(),
@@ -135,7 +119,7 @@ const AnalyzeMultiTargetsSchema = z.strictObject({
     .describe('Small set of local files to analyze together.'),
 });
 
-export const AnalyzeTargetsSchema = z.discriminatedUnion('kind', [
+const AnalyzeTargetsSchema = z.discriminatedUnion('kind', [
   AnalyzeFileTargetsSchema,
   AnalyzeUrlTargetsSchema,
   AnalyzeMultiTargetsSchema,
@@ -185,7 +169,7 @@ const ReviewFailureSubjectSchema = z.strictObject({
     .describe('Optional public URLs for additional failure context.'),
 });
 
-export const ReviewSubjectSchema = z.discriminatedUnion('kind', [
+const ReviewSubjectSchema = z.discriminatedUnion('kind', [
   ReviewDiffSubjectSchema,
   ReviewComparisonSubjectSchema,
   ReviewFailureSubjectSchema,
@@ -302,7 +286,7 @@ export const DiscoverInputSchema = z.strictObject({
 });
 export type DiscoverInput = z.infer<typeof DiscoverInputSchema>;
 
-export function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
+function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
   const askCommonShape = {
     message: requiredText('User message or prompt', 100_000),
     sessionId: completable(

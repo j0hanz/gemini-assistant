@@ -273,7 +273,7 @@ function buildCreateCacheResult(cache: {
   };
 }
 
-export function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
+function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
   return async function createCacheWork(
     { filePaths, systemInstruction, ttl, displayName }: CreateCacheInput,
     ctx: ServerContext,
@@ -312,7 +312,7 @@ export function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
   };
 }
 
-export async function deleteCacheWork(
+async function deleteCacheWork(
   { cacheName, confirm }: DeleteCacheInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -354,7 +354,7 @@ export async function deleteCacheWork(
   };
 }
 
-export async function updateCacheWork(
+async function updateCacheWork(
   { cacheName, ttl }: UpdateCacheInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {

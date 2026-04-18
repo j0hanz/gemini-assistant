@@ -1,11 +1,11 @@
 import type { Part } from '@google/genai';
 
-export interface ResolvedTextPrompt {
+interface ResolvedTextPrompt {
   promptText: string;
   systemInstruction: string | undefined;
 }
 
-export interface ResolvedPartPrompt {
+interface ResolvedPartPrompt {
   promptParts: Part[];
   systemInstruction: string | undefined;
 }

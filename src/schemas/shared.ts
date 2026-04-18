@@ -9,11 +9,6 @@ import { PUBLIC_TOOL_NAMES } from '../public-contract.js';
 const CACHE_NAME_PATTERN = /^cachedContents\/.+$/;
 const TTL_SECONDS_PATTERN = /^[1-9]\d*s$/;
 const PUBLIC_HTTP_URL_ERROR = 'URL must be a valid public http:// or https:// URL';
-export const CURRENT_WORKSPACE_ROOT = normalize(process.cwd()).replaceAll('\\', '/');
-
-export function withCurrentWorkspaceRoot(description: string) {
-  return `${description} (${CURRENT_WORKSPACE_ROOT})`;
-}
 
 export function requiredText(description: string, maxLength?: number) {
   const schema = z.string().trim().min(1);
@@ -36,19 +31,6 @@ export const MemoryRefSchema = z
   })
   .optional()
   .describe('Reusable memory inputs for the current request.');
-
-export const SessionRefSchema = z
-  .strictObject({
-    id: z
-      .string()
-      .trim()
-      .min(1)
-      .max(256)
-      .optional()
-      .describe('Server-managed in-memory session identifier.'),
-  })
-  .optional()
-  .describe('Optional server-managed chat session reference.');
 
 function escapesRelativeRoot(value: string): boolean {
   const normalized = normalize(value);
@@ -97,8 +79,6 @@ export function publicHttpUrl(description: string) {
   return PublicHttpUrlSchema.describe(description);
 }
 
-export const TimestampSchema = z.iso.datetime({ offset: true });
-
 export function timestamp(description: string) {
-  return TimestampSchema.describe(description);
+  return z.iso.datetime({ offset: true }).describe(description);
 }

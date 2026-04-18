@@ -10,7 +10,7 @@ export interface JsonRpcNotification {
   params?: Record<string, unknown>;
 }
 
-export interface JsonRpcRequest extends JsonRpcNotification {
+interface JsonRpcRequest extends JsonRpcNotification {
   id: number;
 }
 
@@ -65,14 +65,14 @@ type HandlerResult =
 
 type ServerRequestHandler = (request: JsonRpcRequest) => Promise<HandlerResult>;
 
-export interface JsonRpcTestClientOptions {
+interface JsonRpcTestClientOptions {
   capabilities?: Record<string, unknown>;
   clientInfo?: { name: string; version: string };
   roots?: readonly { name: string; uri: string }[];
   serverRequestHandlers?: Record<string, ServerRequestHandler>;
 }
 
-export interface ServerHarness {
+interface ServerHarness {
   client: JsonRpcTestClient;
   close: () => Promise<void>;
 }
@@ -81,13 +81,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-export function isJsonRpcResponse(message: unknown): message is JsonRpcResponse {
+function isJsonRpcResponse(message: unknown): message is JsonRpcResponse {
   return (
     isRecord(message) && message.jsonrpc === '2.0' && 'id' in message && !('method' in message)
   );
 }
 
-export function isJsonRpcServerRequest(message: unknown): message is JsonRpcRequest {
+function isJsonRpcServerRequest(message: unknown): message is JsonRpcRequest {
   return isRecord(message) && message.jsonrpc === '2.0' && 'id' in message && 'method' in message;
 }
 

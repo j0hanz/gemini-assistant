@@ -82,7 +82,7 @@ export function validateHostHeader(hostHeader: string | null, allowedHosts: stri
 
 export type RootsFetcher = () => Promise<string[]>;
 
-export interface ResolvedWorkspacePath {
+interface ResolvedWorkspacePath {
   resolvedPath: string;
   displayPath: string;
   workspaceRoot: string | undefined;
@@ -413,7 +413,7 @@ function isPrivateIpv6(hostname: string): boolean {
   );
 }
 
-export function isRejectedHost(hostname: string): boolean {
+function isRejectedHost(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
   if (
     normalized === 'localhost' ||

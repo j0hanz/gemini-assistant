@@ -70,7 +70,7 @@ interface OrchestrationRequest {
   urls?: readonly string[] | undefined;
 }
 
-export interface OrchestrationConfig {
+interface OrchestrationConfig {
   functionCallingMode?: FunctionCallingConfigMode;
   toolConfig?: ToolConfig;
   toolProfile: ToolProfile;
@@ -94,10 +94,6 @@ export function normalizeToolProfile({
   }
 
   return 'none';
-}
-
-export function isUrlCapableToolProfile(toolProfile: ToolProfile): boolean {
-  return toolProfile === 'url' || toolProfile === 'search_url';
 }
 
 function hasBuiltInTools(toolProfile: ToolProfile): boolean {

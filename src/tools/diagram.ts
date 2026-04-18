@@ -13,17 +13,15 @@ import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
-import { MUTABLE_ANNOTATIONS, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
-import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
+import { type RootsFetcher } from '../lib/validation.js';
 import {
   type ExecuteCodeInput,
   ExecuteCodeInputSchema,
   type GenerateDiagramInput,
-  GenerateDiagramInputSchema,
 } from '../schemas/inputs.js';
-import { ExecuteCodeOutputSchema, GenerateDiagramOutputSchema } from '../schemas/outputs.js';
-import { withCurrentWorkspaceRoot } from '../schemas/shared.js';
+import { ExecuteCodeOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig } from '../client.js';
 import { getAI, MODEL } from '../client.js';
@@ -255,7 +253,7 @@ export function createDiagramWork(rootsFetcher: RootsFetcher) {
   };
 }
 
-export async function executeCodeWork(
+async function executeCodeWork(
   { task, language, thinkingLevel }: ExecuteCodeInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -315,29 +313,6 @@ export async function executeCodeWork(
         reportMessage: summary.executionFailed ? 'execution failed' : 'completed',
       };
     },
-  );
-}
-
-export function registerGenerateDiagramTool(
-  server: McpServer,
-  taskMessageQueue: TaskMessageQueue,
-): void {
-  registerTaskTool(
-    server,
-    'generate_diagram',
-    {
-      title: DIAGRAM_TOOL_LABEL,
-      description: withCurrentWorkspaceRoot(
-        'Generate a Mermaid or PlantUML diagram from a text description or source files. ' +
-          'Supports single or multiple source files for architecture diagrams. ' +
-          'Optionally validates syntax via code execution and uses Google Search for patterns.',
-      ),
-      inputSchema: GenerateDiagramInputSchema,
-      outputSchema: GenerateDiagramOutputSchema,
-      annotations: READONLY_ANNOTATIONS,
-    },
-    taskMessageQueue,
-    createDiagramWork(buildServerRootsFetcher(server)),
   );
 }
 

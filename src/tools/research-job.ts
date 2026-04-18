@@ -50,6 +50,28 @@ const SEARCH_TOOL_LABEL = 'Web Search';
 const ANALYZE_URL_TOOL_LABEL = 'Analyze URL';
 const AGENTIC_SEARCH_TOOL_LABEL = 'Agentic Search';
 
+type StreamGenerator = () => Promise<
+  AsyncGenerator<import('@google/genai').GenerateContentResponse>
+>;
+type StreamResponseBuilder<T extends Record<string, unknown>> = Parameters<
+  typeof executor.runStream<T>
+>[4];
+
+async function runToolStream<T extends Record<string, unknown>>(
+  ctx: ServerContext,
+  toolKey: string,
+  label: string,
+  initialMsg: string,
+  logMsg: string,
+  startFn: StreamGenerator,
+  resultFn?: StreamResponseBuilder<T>,
+): Promise<CallToolResult> {
+  const progress = new ProgressReporter(ctx, label);
+  await progress.send(0, undefined, initialMsg);
+  await ctx.mcpReq.log('info', logMsg);
+  return executor.runStream(ctx, toolKey, label, startFn, resultFn);
+}
+
 function buildSourceReportMessage(sourceCount: number): string {
   return sourceCount > 0 ? `${formatCountLabel(sourceCount, 'source')} found` : 'completed';
 }
@@ -128,7 +150,7 @@ export function buildAgenticSearchResult(streamResult: StreamResult, textContent
   };
 }
 
-export function buildSearchResult(streamResult: StreamResult, textContent: string) {
+function buildSearchResult(streamResult: StreamResult, textContent: string) {
   const groundedSources = collectGroundedSources(streamResult.groundingMetadata);
   const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
   const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
@@ -162,7 +184,7 @@ export function buildSearchResult(streamResult: StreamResult, textContent: strin
   };
 }
 
-export function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) {
+function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) {
   const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
   const contentAdditions: CallToolResult['content'] = [];
 
@@ -180,7 +202,7 @@ export function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: s
   };
 }
 
-export async function searchWork(
+async function searchWork(
   { query, systemInstruction, urls, thinkingLevel }: SearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -189,18 +211,17 @@ export async function searchWork(
     return invalidUrlResult;
   }
 
-  const progress = new ProgressReporter(ctx, SEARCH_TOOL_LABEL);
-  await progress.send(0, undefined, 'Starting');
-  await ctx.mcpReq.log('info', `Search: ${query}`);
   const { functionCallingMode, toolConfig, tools } = buildOrchestrationConfig({
     toolProfile: (urls?.length ?? 0) > 0 ? 'search_url' : 'search',
   });
   const prompt = buildGroundedAnswerPrompt(query, urls);
 
-  return await executor.runStream(
+  return runToolStream(
     ctx,
     'search',
     SEARCH_TOOL_LABEL,
+    'Starting',
+    `Search: ${query}`,
     () =>
       getAI().models.generateContentStream({
         model: MODEL,
@@ -229,19 +250,18 @@ export async function analyzeUrlWork(
     return invalidUrlResult;
   }
 
-  const progress = new ProgressReporter(ctx, ANALYZE_URL_TOOL_LABEL);
-  await progress.send(0, undefined, 'Fetching');
-  await ctx.mcpReq.log('info', `Analyzing ${String(urls.length)} URL(s)`);
   const prompt = buildFileAnalysisPrompt({
     goal: question,
     kind: 'url',
     urls,
   });
 
-  return await executor.runStream(
+  return runToolStream(
     ctx,
     'analyze_url',
     ANALYZE_URL_TOOL_LABEL,
+    'Fetching',
+    `Analyzing ${String(urls.length)} URL(s)`,
     () =>
       getAI().models.generateContentStream({
         model: MODEL,
@@ -259,7 +279,7 @@ export async function analyzeUrlWork(
   );
 }
 
-export async function agenticSearchWork(
+async function agenticSearchWork(
   { topic, searchDepth, thinkingLevel }: AgenticSearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -278,19 +298,18 @@ export async function agenticSearchWork(
     }
   }
 
-  const progress = new ProgressReporter(ctx, AGENTIC_SEARCH_TOOL_LABEL);
-  await progress.send(0, undefined, 'Starting deep research');
-  await ctx.mcpReq.log('info', `Agentic search: ${topic}`);
   const enrichedTopic = await enrichTopicWithSampling(topic, ctx);
   const prompt = buildAgenticResearchPrompt({
     searchDepth,
     topic: enrichedTopic,
   });
 
-  return await executor.runStream(
+  return runToolStream(
     ctx,
     'agentic_search',
     AGENTIC_SEARCH_TOOL_LABEL,
+    'Starting deep research',
+    `Agentic search: ${topic}`,
     () =>
       getAI().models.generateContentStream({
         model: MODEL,

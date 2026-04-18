@@ -186,7 +186,7 @@ export function readDiscoverWorkflowsResource(
   return dualContentResource(toResourceUri(uri), entries, renderWorkflowCatalogMarkdown(entries));
 }
 
-export interface ServerContextSnapshot {
+interface ServerContextSnapshot {
   workspace: {
     roots: string[];
     scannedFiles: string[];
@@ -306,7 +306,7 @@ export async function readDiscoverContextResource(
   return dualContentResource(toResourceUri(uri), snapshot, renderServerContextMarkdown(snapshot));
 }
 
-export function renderSessionTranscriptMarkdown(
+function renderSessionTranscriptMarkdown(
   sessionId: string | undefined,
   data: SessionTranscriptResourceData,
 ): string {
@@ -365,7 +365,7 @@ export function readSessionTranscriptResource(
   return dualContentResource(toResourceUri(uri), data, renderSessionTranscriptMarkdown(id, data));
 }
 
-export function renderSessionEventsMarkdown(
+function renderSessionEventsMarkdown(
   sessionId: string | undefined,
   data: SessionEventsResourceData,
 ): string {

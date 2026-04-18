@@ -386,6 +386,161 @@ async function handleThoughtPart(
   state.currentProgress = state.thoughtHeaderState.currentProgress;
 }
 
+async function handleExecutableCodePart(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  part: Part,
+): Promise<boolean> {
+  if (!part.executableCode) {
+    return false;
+  }
+
+  appendToolEvent(state, {
+    kind: 'executable_code',
+    ...(part.executableCode.code ? { code: part.executableCode.code } : {}),
+    ...(part.executableCode.id ? { id: part.executableCode.id } : {}),
+    ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+  });
+  await recordToolActivity(ctx, state, msg, 'Executing code', 'codeExecution');
+  return true;
+}
+
+async function handleCodeExecutionResultPart(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  part: Part,
+): Promise<boolean> {
+  if (!part.codeExecutionResult) {
+    return false;
+  }
+
+  appendToolEvent(state, {
+    kind: 'code_execution_result',
+    ...(part.codeExecutionResult.id ? { id: part.codeExecutionResult.id } : {}),
+    ...(part.codeExecutionResult.outcome ? { outcome: part.codeExecutionResult.outcome } : {}),
+    ...(part.codeExecutionResult.output ? { output: part.codeExecutionResult.output } : {}),
+    ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+  });
+  await recordToolActivity(ctx, state, msg, 'Code executed');
+  return true;
+}
+
+async function handleToolProtocolPart(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  part: Part,
+): Promise<boolean> {
+  if (part.toolCall) {
+    await handleToolCallPart(ctx, state, msg, part);
+    return true;
+  }
+
+  if (part.toolResponse) {
+    await handleToolResponsePart(ctx, state, msg, part);
+    return true;
+  }
+
+  return false;
+}
+
+async function handleFunctionProtocolPart(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  part: Part,
+): Promise<boolean> {
+  if (part.functionCall) {
+    await handleFunctionCallPart(ctx, state, msg, part);
+    return true;
+  }
+
+  if (!part.functionResponse) {
+    return false;
+  }
+
+  appendToolEvent(state, {
+    kind: 'function_response',
+    ...(part.functionResponse.id ? { id: part.functionResponse.id } : {}),
+    ...(part.functionResponse.name ? { name: part.functionResponse.name } : {}),
+    ...(part.functionResponse.response ? { response: part.functionResponse.response } : {}),
+    ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+  });
+  return true;
+}
+
+async function handleThoughtOrSignaturePart(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  part: Part,
+): Promise<boolean> {
+  const partText = part.text;
+  if (part.thought) {
+    await handleThoughtPart(ctx, state, msg, partText);
+    return true;
+  }
+
+  if (!part.thoughtSignature || (partText !== undefined && partText.length > 0)) {
+    return false;
+  }
+
+  appendToolEvent(state, {
+    kind: 'part',
+    ...(partText !== undefined ? { text: partText } : {}),
+    thoughtSignature: part.thoughtSignature,
+  });
+  return partText === undefined;
+}
+
+function getTaskQueueContext(
+  ctx: ServerContext,
+): (NonNullable<ServerContext['task']> & { queue?: TaskMessageQueue }) | undefined {
+  return ctx.task as
+    | (NonNullable<ServerContext['task']> & { queue?: TaskMessageQueue })
+    | undefined;
+}
+
+function enqueueStreamText(
+  taskContext: ReturnType<typeof getTaskQueueContext>,
+  partText: string,
+): void {
+  if (!taskContext?.queue || !taskContext.id) {
+    return;
+  }
+
+  try {
+    void taskContext.queue.enqueue(taskContext.id, {
+      type: 'notification',
+      message: {
+        jsonrpc: '2.0',
+        method: 'notifications/message',
+        params: { level: 'info', logger: 'stream', data: partText },
+      },
+      timestamp: Date.now(),
+    } satisfies QueuedMessage);
+  } catch {
+    // Ignore queue overflow or enqueue errors
+  }
+}
+
+async function handleTextPart(
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  partText: string | undefined,
+): Promise<void> {
+  if (partText === undefined) {
+    return;
+  }
+
+  await transitionToGenerating(ctx, state, msg);
+  state.text += partText;
+  enqueueStreamText(getTaskQueueContext(ctx), partText);
+}
+
 async function handleStreamPart(
   ctx: ServerContext,
   state: StreamProcessingState,
@@ -394,101 +549,27 @@ async function handleStreamPart(
 ): Promise<void> {
   state.parts.push(part);
 
-  if (part.executableCode) {
-    appendToolEvent(state, {
-      kind: 'executable_code',
-      ...(part.executableCode.code ? { code: part.executableCode.code } : {}),
-      ...(part.executableCode.id ? { id: part.executableCode.id } : {}),
-      ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
-    });
-    await recordToolActivity(ctx, state, msg, 'Executing code', 'codeExecution');
+  if (await handleExecutableCodePart(ctx, state, msg, part)) {
     return;
   }
 
-  if (part.codeExecutionResult) {
-    appendToolEvent(state, {
-      kind: 'code_execution_result',
-      ...(part.codeExecutionResult.id ? { id: part.codeExecutionResult.id } : {}),
-      ...(part.codeExecutionResult.outcome ? { outcome: part.codeExecutionResult.outcome } : {}),
-      ...(part.codeExecutionResult.output ? { output: part.codeExecutionResult.output } : {}),
-      ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
-    });
-    await recordToolActivity(ctx, state, msg, 'Code executed');
+  if (await handleCodeExecutionResultPart(ctx, state, msg, part)) {
     return;
   }
 
-  if (part.toolCall) {
-    await handleToolCallPart(ctx, state, msg, part);
+  if (await handleToolProtocolPart(ctx, state, msg, part)) {
     return;
   }
 
-  if (part.toolResponse) {
-    await handleToolResponsePart(ctx, state, msg, part);
+  if (await handleFunctionProtocolPart(ctx, state, msg, part)) {
     return;
   }
 
-  if (part.functionCall) {
-    await handleFunctionCallPart(ctx, state, msg, part);
+  if (await handleThoughtOrSignaturePart(ctx, state, msg, part)) {
     return;
   }
 
-  if (part.functionResponse) {
-    appendToolEvent(state, {
-      kind: 'function_response',
-      ...(part.functionResponse.id ? { id: part.functionResponse.id } : {}),
-      ...(part.functionResponse.name ? { name: part.functionResponse.name } : {}),
-      ...(part.functionResponse.response ? { response: part.functionResponse.response } : {}),
-      ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
-    });
-    return;
-  }
-
-  const partText = part.text;
-  if (part.thought) {
-    await handleThoughtPart(ctx, state, msg, partText);
-    return;
-  }
-
-  if (part.thoughtSignature && (partText === undefined || partText.length === 0)) {
-    appendToolEvent(state, {
-      kind: 'part',
-      ...(partText !== undefined ? { text: partText } : {}),
-      thoughtSignature: part.thoughtSignature,
-    });
-    if (partText === undefined) {
-      return;
-    }
-  }
-
-  if (partText === undefined) {
-    return;
-  }
-
-  await transitionToGenerating(ctx, state, msg);
-  state.text += partText;
-
-  // Stream LLM token chunks to task-aware clients via the task message queue.
-  // The SDK drains this queue and forwards each entry to `transport.send`, so the
-  // `message` field must be a fully-formed JSON-RPC notification envelope;
-  // otherwise `JSON.stringify(undefined)` ends up on stdout as "undefined\n".
-  const taskContext = ctx.task as
-    | (NonNullable<ServerContext['task']> & { queue?: TaskMessageQueue })
-    | undefined;
-  if (taskContext?.queue && taskContext.id) {
-    try {
-      void taskContext.queue.enqueue(taskContext.id, {
-        type: 'notification',
-        message: {
-          jsonrpc: '2.0',
-          method: 'notifications/message',
-          params: { level: 'info', logger: 'stream', data: partText },
-        },
-        timestamp: Date.now(),
-      } satisfies QueuedMessage);
-    } catch {
-      // Ignore queue overflow or enqueue errors
-    }
-  }
+  await handleTextPart(ctx, state, msg, part.text);
 }
 
 function finalizeStreamResult(state: StreamProcessingState): StreamResult {

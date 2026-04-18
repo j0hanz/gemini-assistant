@@ -1,4 +1,5 @@
 import type { ServerContext } from '@modelcontextprotocol/server';
+import type { QueuedMessage } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
@@ -362,6 +363,77 @@ describe('consumeStreamWithProgress', () => {
     const messages = progressCalls.map((c) => c.message);
     assert.ok(messages.includes('Built-in tool: googleSearch'));
     assert.ok(messages.includes('Built-in result: googleSearch'));
+  });
+
+  it('captures function responses as tool events without adding toolsUsed entries', async () => {
+    const { ctx } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk(
+        [
+          {
+            functionResponse: {
+              id: 'fn-1',
+              name: 'lookupWeather',
+              response: { forecast: 'sunny' },
+            },
+            thoughtSignature: 'sig-function-response',
+          },
+          { text: 'done' },
+        ],
+        FinishReason.STOP,
+      ),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.deepStrictEqual(result.toolEvents[0], {
+      kind: 'function_response',
+      id: 'fn-1',
+      name: 'lookupWeather',
+      response: { forecast: 'sunny' },
+      thoughtSignature: 'sig-function-response',
+    });
+    assert.deepStrictEqual(result.toolsUsed, []);
+    assert.strictEqual(result.text, 'done');
+  });
+
+  it('streams text chunks to the task message queue when task queue context exists', async () => {
+    const queued: QueuedMessage[] = [];
+    const ctx = {
+      mcpReq: {
+        _meta: { progressToken: 'queue-token' },
+        signal: new AbortController().signal,
+        log: Object.assign(async () => {}, {
+          debug: async () => {},
+          info: async () => {},
+          warning: async () => {},
+          error: async () => {},
+        }),
+        notify: async () => {},
+      },
+      task: {
+        id: 'task-queue',
+        queue: {
+          enqueue: (_taskId: string, message: QueuedMessage) => {
+            queued.push(message);
+          },
+        },
+      },
+    } as unknown as ServerContext;
+
+    const stream = fakeStream([makeChunk([{ text: 'stream me' }], FinishReason.STOP)]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.strictEqual(result.text, 'stream me');
+    assert.strictEqual(queued.length, 1);
+    const firstQueued = queued[0];
+    assert.ok(firstQueued);
+    assert.deepStrictEqual(firstQueued.message, {
+      jsonrpc: '2.0',
+      method: 'notifications/message',
+      params: { level: 'info', logger: 'stream', data: 'stream me' },
+    });
   });
 
   it('captures signature-only parts even when they have no text', async () => {

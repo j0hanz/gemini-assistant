@@ -311,56 +311,78 @@ export async function agenticSearchWork(
   );
 }
 
+async function runQuickResearch(
+  args: Extract<ResearchInput, { mode: 'quick' }>,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  return await searchWork(
+    {
+      query: args.goal,
+      systemInstruction: args.systemInstruction,
+      thinkingLevel: args.thinkingLevel,
+      urls: args.urls,
+    },
+    ctx,
+  );
+}
+
+async function runDeepResearch(
+  args: Extract<ResearchInput, { mode: 'deep' }>,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  return await agenticSearchWork(
+    {
+      topic: args.deliverable
+        ? `${args.goal}\n\nRequested deliverable: ${args.deliverable}`
+        : args.goal,
+      searchDepth: args.searchDepth,
+      thinkingLevel: args.thinkingLevel,
+    },
+    ctx,
+  );
+}
+
+function extractResearchSummary(structured: Record<string, unknown>): string {
+  if (typeof structured.answer === 'string') {
+    return structured.answer;
+  }
+
+  return typeof structured.report === 'string' ? structured.report : '';
+}
+
+function buildResearchStructuredContent(
+  args: ResearchInput,
+  ctx: ServerContext,
+  structured: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...buildBaseStructuredOutput(ctx.task?.id),
+    mode: args.mode,
+    summary: extractResearchSummary(structured),
+    sources: Array.isArray(structured.sources) ? structured.sources : [],
+    ...(structured.sourceDetails ? { sourceDetails: structured.sourceDetails } : {}),
+    ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
+    ...(structured.toolsUsed ? { toolsUsed: structured.toolsUsed } : {}),
+    ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
+    ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
+    ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
+    ...(structured.usage ? { usage: structured.usage } : {}),
+  };
+}
+
 async function researchWork(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {
   const result =
-    args.mode === 'quick'
-      ? await searchWork(
-          {
-            query: args.goal,
-            systemInstruction: args.systemInstruction,
-            thinkingLevel: args.thinkingLevel,
-            urls: args.urls,
-          },
-          ctx,
-        )
-      : await agenticSearchWork(
-          {
-            topic: args.deliverable
-              ? `${args.goal}\n\nRequested deliverable: ${args.deliverable}`
-              : args.goal,
-            searchDepth: args.searchDepth,
-            thinkingLevel: args.thinkingLevel,
-          },
-          ctx,
-        );
+    args.mode === 'quick' ? await runQuickResearch(args, ctx) : await runDeepResearch(args, ctx);
 
   if (result.isError) {
     return result;
   }
 
   const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
-  const summary =
-    typeof structured.answer === 'string'
-      ? structured.answer
-      : typeof structured.report === 'string'
-        ? structured.report
-        : '';
 
   return {
     ...result,
-    structuredContent: {
-      ...buildBaseStructuredOutput(ctx.task?.id),
-      mode: args.mode,
-      summary,
-      sources: Array.isArray(structured.sources) ? structured.sources : [],
-      ...(structured.sourceDetails ? { sourceDetails: structured.sourceDetails } : {}),
-      ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
-      ...(structured.toolsUsed ? { toolsUsed: structured.toolsUsed } : {}),
-      ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
-      ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
-      ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
-      ...(structured.usage ? { usage: structured.usage } : {}),
-    },
+    structuredContent: buildResearchStructuredContent(args, ctx, structured),
   };
 }
 

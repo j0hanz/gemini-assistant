@@ -4,10 +4,15 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { getAI } from '../../src/client.js';
-import { AgenticSearchOutputSchema, SearchOutputSchema } from '../../src/schemas/outputs.js';
+import {
+  AgenticSearchOutputSchema,
+  ResearchOutputSchema,
+  SearchOutputSchema,
+} from '../../src/schemas/outputs.js';
 import {
   registerAgenticSearchTool,
   registerAnalyzeUrlTool,
+  registerResearchTool,
   registerSearchTool,
 } from '../../src/tools/research-job.js';
 
@@ -89,6 +94,7 @@ function getHandlers() {
   registerSearchTool(server);
   registerAnalyzeUrlTool(server);
   registerAgenticSearchTool(server);
+  registerResearchTool(server);
 
   return {
     agentic_search: handlers.agentic_search as ToolTaskHandler<{
@@ -99,6 +105,14 @@ function getHandlers() {
     analyze_url: handlers.analyze_url as ToolTaskHandler<{
       question: string;
       urls: string[];
+    }>,
+    research: handlers.research as ToolTaskHandler<{
+      deliverable?: string;
+      goal: string;
+      mode: 'deep' | 'quick';
+      searchDepth?: number;
+      thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
+      urls?: string[];
     }>,
     search: handlers.search as ToolTaskHandler<{
       query: string;
@@ -255,6 +269,106 @@ describe('research tool contracts', () => {
         functionCalls: [{ name: 'rankSources', args: { limit: 3 } }],
         toolEvents: [{ kind: 'function_call', name: 'rankSources', args: { limit: 3 } }],
       });
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
+  it('stores a schema-valid quick research result with normalized mode and summary', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'Quick research answer' }] },
+              finishReason: 'STOP',
+              groundingMetadata: {
+                groundingChunks: [{ web: { title: 'Example', uri: 'https://example.com' } }],
+              },
+            },
+          ],
+        },
+      ]);
+
+    try {
+      await research.createTask(
+        { goal: 'latest release', mode: 'quick', urls: ['https://example.com'] },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+
+      assert.strictEqual(store.stored[0]?.status, 'completed');
+      const structured = store.stored[0]?.result.structuredContent;
+      const parsed = ResearchOutputSchema.safeParse(structured);
+      assert.ok(parsed.success);
+      assert.ok(structured && typeof structured === 'object');
+      assert.strictEqual((structured as Record<string, unknown>).mode, 'quick');
+      assert.strictEqual((structured as Record<string, unknown>).summary, 'Quick research answer');
+      assert.deepStrictEqual((structured as Record<string, unknown>).sources, [
+        'https://example.com',
+      ]);
+      assert.deepStrictEqual((structured as Record<string, unknown>).sourceDetails, [
+        { title: 'Example', url: 'https://example.com' },
+      ]);
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
+  it('stores a schema-valid deep research result with deliverable text folded into the summary', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'Deep research report' }] },
+              finishReason: 'STOP',
+              groundingMetadata: {
+                groundingChunks: [{ web: { title: 'Docs', uri: 'https://example.com/docs' } }],
+              },
+            },
+          ],
+        },
+      ]);
+
+    try {
+      await research.createTask(
+        {
+          goal: 'compare approaches',
+          deliverable: 'return a short memo',
+          mode: 'deep',
+          searchDepth: 2,
+        },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+
+      assert.strictEqual(store.stored[0]?.status, 'completed');
+      const structured = store.stored[0]?.result.structuredContent;
+      const parsed = ResearchOutputSchema.safeParse(structured);
+      assert.ok(parsed.success);
+      assert.ok(structured && typeof structured === 'object');
+      assert.strictEqual((structured as Record<string, unknown>).mode, 'deep');
+      assert.strictEqual((structured as Record<string, unknown>).summary, 'Deep research report');
+      assert.deepStrictEqual((structured as Record<string, unknown>).sources, [
+        'https://example.com/docs',
+      ]);
+      assert.deepStrictEqual((structured as Record<string, unknown>).sourceDetails, [
+        { title: 'Docs', url: 'https://example.com/docs' },
+      ]);
+      assert.deepStrictEqual((structured as Record<string, unknown>).toolsUsed, ['googleSearch']);
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
     }

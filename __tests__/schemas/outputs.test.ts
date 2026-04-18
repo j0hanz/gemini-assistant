@@ -2,17 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
-  AgenticSearchOutputSchema,
-  AnalyzeFileOutputSchema,
-  AnalyzePrOutputSchema,
-  AnalyzeUrlOutputSchema,
+  AnalyzeOutputSchema,
   AskOutputSchema,
   ContextUsedSchema,
   CreateCacheOutputSchema,
   DeleteCacheOutputSchema,
-  ExecuteCodeOutputSchema,
   ListCachesOutputSchema,
-  SearchOutputSchema,
+  ResearchOutputSchema,
+  ReviewOutputSchema,
   UpdateCacheOutputSchema,
   UsageMetadataSchema,
 } from '../../src/schemas/outputs.js';
@@ -143,244 +140,60 @@ describe('ContextUsedSchema', () => {
   });
 });
 
-describe('AnalyzePrOutputSchema', () => {
-  it('accepts valid generated diff metadata', () => {
-    const result = AnalyzePrOutputSchema.safeParse({
-      analysis: 'Review text',
-      stats: { files: 1, additions: 10, deletions: 5 },
-      reviewedPaths: ['src/index.ts'],
-      includedUntracked: ['src/new-file.ts'],
-      skippedBinaryPaths: ['assets/logo.png'],
-      skippedLargePaths: ['fixtures/big.json'],
-      omittedPaths: ['src/overflow.ts'],
-      empty: false,
+describe('AnalyzeOutputSchema', () => {
+  it('accepts summary output', () => {
+    const result = AnalyzeOutputSchema.safeParse({
+      kind: 'summary',
+      status: 'completed',
+      targetKind: 'file',
+      summary: 'File analysis',
+      usage: { totalTokenCount: 200 },
     });
     assert.ok(result.success);
   });
 
-  it('accepts empty review output', () => {
-    const result = AnalyzePrOutputSchema.safeParse({
-      analysis: 'No local changes to review.',
-      stats: { files: 0, additions: 0, deletions: 0 },
-      reviewedPaths: [],
-      includedUntracked: [],
-      skippedBinaryPaths: [],
-      skippedLargePaths: [],
-      empty: true,
+  it('accepts diagram output', () => {
+    const result = AnalyzeOutputSchema.safeParse({
+      kind: 'diagram',
+      status: 'completed',
+      targetKind: 'multi',
+      diagramType: 'mermaid',
+      diagram: 'flowchart TD\nA-->B',
+      explanation: 'Diagram generated from the provided files.',
     });
     assert.ok(result.success);
   });
 
-  it('rejects missing reviewedPaths', () => {
-    const result = AnalyzePrOutputSchema.safeParse({
-      analysis: 'Review text',
-      stats: { files: 1, additions: 10, deletions: 5 },
-      includedUntracked: [],
-      skippedBinaryPaths: [],
-      skippedLargePaths: [],
-      empty: false,
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects negative diff stats', () => {
-    const result = AnalyzePrOutputSchema.safeParse({
-      analysis: 'Review text',
-      stats: { files: -1, additions: 10, deletions: 5 },
-      reviewedPaths: ['src/index.ts'],
-      includedUntracked: [],
-      skippedBinaryPaths: [],
-      skippedLargePaths: [],
-      empty: false,
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown stats fields', () => {
-    const result = AnalyzePrOutputSchema.safeParse({
-      analysis: 'Review text',
-      stats: { files: 1, additions: 10, deletions: 5, extra: 1 },
-      reviewedPaths: ['src/index.ts'],
-      includedUntracked: [],
-      skippedBinaryPaths: [],
-      skippedLargePaths: [],
-      empty: false,
+  it('rejects missing output kind', () => {
+    const result = AnalyzeOutputSchema.safeParse({
+      status: 'completed',
+      targetKind: 'file',
+      summary: 'File analysis',
     });
     assert.strictEqual(result.success, false);
   });
 });
 
-describe('ExecuteCodeOutputSchema', () => {
-  it('accepts valid structured output', () => {
-    const result = ExecuteCodeOutputSchema.safeParse({
-      code: 'print("hello")',
-      output: 'hello',
-      explanation: 'Prints hello to stdout',
-      runtime: 'python',
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts empty strings', () => {
-    const result = ExecuteCodeOutputSchema.safeParse({
-      code: '',
-      output: '',
-      explanation: '',
-      runtime: 'python',
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts an advisory requestedLanguage', () => {
-    const result = ExecuteCodeOutputSchema.safeParse({
-      code: 'print("hello")',
-      output: 'hello',
-      explanation: 'Prints hello to stdout',
-      runtime: 'python',
-      requestedLanguage: 'typescript',
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects missing code', () => {
-    const result = ExecuteCodeOutputSchema.safeParse({
-      output: 'hello',
-      explanation: 'x',
-      runtime: 'python',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects missing output', () => {
-    const result = ExecuteCodeOutputSchema.safeParse({
-      code: 'x',
-      explanation: 'x',
-      runtime: 'python',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects missing explanation', () => {
-    const result = ExecuteCodeOutputSchema.safeParse({
-      code: 'x',
-      output: 'x',
-      runtime: 'python',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects non-string values', () => {
-    const result = ExecuteCodeOutputSchema.safeParse({
-      code: 123,
-      output: 'x',
-      explanation: 'x',
-      runtime: 'python',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown properties', () => {
-    const result = ExecuteCodeOutputSchema.safeParse({
-      code: 'x',
-      output: 'y',
-      explanation: 'z',
-      runtime: 'python',
-      extra: 'should be stripped',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects a non-python runtime', () => {
-    const result = ExecuteCodeOutputSchema.safeParse({
-      code: 'x',
-      output: 'y',
-      explanation: 'z',
-      runtime: 'javascript',
-    });
-    assert.strictEqual(result.success, false);
-  });
-});
-
-describe('SearchOutputSchema', () => {
-  it('accepts valid output without urlMetadata', () => {
-    const result = SearchOutputSchema.safeParse({
-      answer: 'The answer is 42',
+describe('ResearchOutputSchema', () => {
+  it('accepts quick research output', () => {
+    const result = ResearchOutputSchema.safeParse({
+      status: 'completed',
+      mode: 'quick',
+      summary: 'Quick answer',
       sources: ['https://example.com'],
     });
     assert.ok(result.success);
   });
-
-  it('accepts output with urlMetadata', () => {
-    const result = SearchOutputSchema.safeParse({
-      answer: 'Analysis result',
-      sources: ['https://example.com'],
-      sourceDetails: [{ title: 'Example', url: 'https://example.com' }],
-      urlMetadata: [{ url: 'https://example.com', status: 'URL_RETRIEVAL_STATUS_SUCCESS' }],
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts empty sources and no urlMetadata', () => {
-    const result = SearchOutputSchema.safeParse({
-      answer: 'No sources found',
-      sources: [],
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects non-url source entries', () => {
-    const result = SearchOutputSchema.safeParse({
-      answer: 'Result',
-      sources: ['Example: https://example.com'],
-    });
-    assert.strictEqual(result.success, false);
-  });
 });
 
-describe('AnalyzeUrlOutputSchema', () => {
-  it('accepts valid output', () => {
-    const result = AnalyzeUrlOutputSchema.safeParse({
-      answer: 'The page discusses X',
+describe('ReviewOutputSchema', () => {
+  it('accepts failure diagnosis output', () => {
+    const result = ReviewOutputSchema.safeParse({
+      status: 'completed',
+      subjectKind: 'failure',
+      summary: 'Likely root cause',
     });
     assert.ok(result.success);
-  });
-
-  it('accepts output with urlMetadata', () => {
-    const result = AnalyzeUrlOutputSchema.safeParse({
-      answer: 'Analysis result',
-      urlMetadata: [{ url: 'https://example.com', status: 'URL_RETRIEVAL_STATUS_SUCCESS' }],
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects missing answer', () => {
-    const result = AnalyzeUrlOutputSchema.safeParse({});
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects non-string answer', () => {
-    const result = AnalyzeUrlOutputSchema.safeParse({ answer: 123 });
-    assert.strictEqual(result.success, false);
-  });
-});
-
-describe('AnalyzeFileOutputSchema', () => {
-  it('accepts valid output', () => {
-    const result = AnalyzeFileOutputSchema.safeParse({ analysis: 'File contains...' });
-    assert.ok(result.success);
-  });
-
-  it('accepts output with usage', () => {
-    const result = AnalyzeFileOutputSchema.safeParse({
-      analysis: 'File analysis',
-      usage: { promptTokenCount: 100, totalTokenCount: 200 },
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects missing analysis', () => {
-    const result = AnalyzeFileOutputSchema.safeParse({});
-    assert.strictEqual(result.success, false);
   });
 });
 
@@ -541,50 +354,6 @@ describe('UpdateCacheOutputSchema', () => {
 
   it('rejects missing cacheName', () => {
     const result = UpdateCacheOutputSchema.safeParse({ expireTime: '2026-04-14T00:00:00Z' });
-    assert.strictEqual(result.success, false);
-  });
-});
-
-describe('AgenticSearchOutputSchema', () => {
-  it('accepts valid output', () => {
-    const result = AgenticSearchOutputSchema.safeParse({
-      report: '# Report\n\nFindings here.',
-      sources: ['https://example.com/source1', 'https://example.com/source2'],
-      sourceDetails: [{ url: 'https://example.com/source1', title: 'Source 1' }],
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts with optional thoughts and usage', () => {
-    const result = AgenticSearchOutputSchema.safeParse({
-      report: 'Report content',
-      sources: [],
-      thoughts: 'Thinking about the approach...',
-      usage: { totalTokenCount: 5000 },
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts with optional toolsUsed', () => {
-    const result = AgenticSearchOutputSchema.safeParse({
-      report: 'Report content',
-      sources: [],
-      toolsUsed: ['googleSearch', 'codeExecution'],
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects missing report', () => {
-    const result = AgenticSearchOutputSchema.safeParse({
-      sources: [],
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects missing sources', () => {
-    const result = AgenticSearchOutputSchema.safeParse({
-      report: 'Report',
-    });
     assert.strictEqual(result.success, false);
   });
 });

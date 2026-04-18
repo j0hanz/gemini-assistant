@@ -1,4 +1,4 @@
-export type PublicJobName = 'chat' | 'research' | 'analyze' | 'review' | 'memory' | 'discover';
+export type PublicJobName = 'chat' | 'research' | 'analyze' | 'review' | 'memory';
 export type PublicPromptName = 'discover' | 'research' | 'review' | 'memory';
 export type PublicWorkflowName =
   | 'start-here'
@@ -62,7 +62,6 @@ export const PUBLIC_TOOL_NAMES = [
   'analyze',
   'review',
   'memory',
-  'discover',
 ] as const satisfies readonly PublicJobName[];
 
 export const PUBLIC_PROMPT_NAMES = [
@@ -123,12 +122,6 @@ export const JOB_METADATA = [
     title: 'Memory',
     summary: 'Inspect and manage sessions, caches, and workspace memory resources.',
     recommendedPrompt: 'memory',
-  },
-  {
-    name: 'discover',
-    title: 'Discover',
-    summary: 'Get guided entry points, workflows, limitations, and related prompts/resources.',
-    recommendedPrompt: 'discover',
   },
 ] as const satisfies readonly JobMetadata[];
 
@@ -192,11 +185,12 @@ export const DISCOVERY_ENTRIES = [
     name: 'analyze',
     kind: 'tool',
     title: 'Analyze',
-    bestFor: 'Focused analysis of one local file, one or more public URLs, or a small file set.',
-    whenToUse: 'Use for bounded artifact analysis.',
-    inputs: ['goal', 'targets', 'thinkingLevel?', 'mediaResolution?'],
+    bestFor:
+      'Focused analysis of one local file, one or more public URLs, a small file set, or diagram generation from known artifacts.',
+    whenToUse: 'Use for bounded artifact analysis or diagram generation.',
+    inputs: ['goal', 'targets', 'output', 'thinkingLevel?', 'mediaResolution?'],
     returns:
-      'An analysis summary tied to the requested target kind with optional URL retrieval metadata.',
+      'An analysis summary or diagram tied to the requested target kind with optional URL retrieval metadata.',
     limitations: [
       'Multi-target analysis is intentionally small and file-oriented to keep prompts bounded.',
       'URL targets require public http/https addresses.',
@@ -255,33 +249,15 @@ export const DISCOVERY_ENTRIES = [
   },
   {
     name: 'discover',
-    kind: 'tool',
-    title: 'Discover',
-    bestFor: 'Orienting a client to the six public jobs, workflows, prompts, and memory resources.',
-    whenToUse: 'Use to get recommendations or limitations before choosing a tool.',
-    inputs: ['job?', 'goal?'],
-    returns:
-      'Guidance, related workflows, prompts, resources, and limitation notes derived from the shared public contract.',
-    limitations: [
-      'Discovery is guidance only; it does not execute research, review, or memory mutations directly.',
-    ],
-    related: [
-      { kind: 'prompt', name: 'discover' },
-      { kind: 'resource', name: 'discover://catalog' },
-      { kind: 'resource', name: 'discover://workflows' },
-    ],
-  },
-  {
-    name: 'discover',
     kind: 'prompt',
     title: 'Discover Prompt',
-    bestFor: 'Orienting a user to the six public jobs and the most relevant starting point.',
+    bestFor: 'Orienting a user to the five public jobs and the most relevant starting point.',
     whenToUse: 'Use to guide a client on which public job to use.',
     inputs: ['job?', 'goal?'],
     returns: 'A single prompt that frames the discover workflow and related public resources.',
     related: [
-      { kind: 'tool', name: 'discover' },
       { kind: 'resource', name: 'discover://catalog' },
+      { kind: 'resource', name: 'discover://workflows' },
     ],
   },
   {
@@ -452,15 +428,14 @@ export const DISCOVERY_ENTRIES = [
 export const WORKFLOW_ENTRIES = [
   {
     name: 'start-here',
-    goal: 'Orient a new client to the six public jobs and the recommended next step.',
+    goal: 'Orient a new client to the five public jobs and the recommended next step.',
     whenToUse: 'Use when the user asks what this server does.',
     steps: [
       'Read discover://catalog for the current public surface.',
       'Read discover://workflows for the guided entry points.',
-      'Call discover with or without a preferred job to get a focused recommendation.',
       'Use chat for direct conversation once the starting point is clear.',
     ],
-    recommendedTools: ['discover', 'chat'],
+    recommendedTools: ['chat'],
     recommendedPrompts: ['discover'],
     relatedResources: ['discover://catalog', 'discover://workflows', 'memory://sessions'],
   },
@@ -489,9 +464,9 @@ export const WORKFLOW_ENTRIES = [
     steps: [
       'Pick research.mode=quick for one grounded answer.',
       'Pick research.mode=deep when the task needs synthesis across multiple search steps.',
-      'Use discover if you need a recommendation before committing to a mode.',
+      'Use discover://catalog if you need a recommendation before committing to a mode.',
     ],
-    recommendedTools: ['research', 'discover'],
+    recommendedTools: ['research'],
     recommendedPrompts: ['research'],
     relatedResources: ['discover://catalog', 'discover://workflows'],
   },
@@ -503,6 +478,7 @@ export const WORKFLOW_ENTRIES = [
       'Choose analyze.targets.kind=file for one file.',
       'Choose analyze.targets.kind=url for one or more public URLs.',
       'Choose analyze.targets.kind=multi for a small file set when the answer needs local cross-file context.',
+      'Choose analyze.output.kind=diagram when you want a diagram instead of a summary.',
     ],
     recommendedTools: ['analyze'],
     recommendedPrompts: ['discover'],

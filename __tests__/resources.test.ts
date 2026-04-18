@@ -47,7 +47,6 @@ describe('discovery resources', () => {
       [
         'tool:analyze',
         'tool:chat',
-        'tool:discover',
         'tool:memory',
         'tool:research',
         'tool:review',

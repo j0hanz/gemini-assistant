@@ -6,10 +6,13 @@ import type {
 } from '@modelcontextprotocol/server';
 
 import { createPartFromUri } from '@google/genai';
+import type { Part } from '@google/genai';
 
 import { cleanupErrorLogger } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { buildFileAnalysisPrompt } from '../lib/model-prompts.js';
+import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
+import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput } from '../lib/response.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
@@ -23,6 +26,93 @@ import { analyzeUrlWork } from './research-job.js';
 
 const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
 const ANALYZE_TOOL_LABEL = 'Analyze';
+const ANALYZE_DIAGRAM_TOOL_LABEL = 'Analyze Diagram';
+
+interface AnalyzeDiagramInput {
+  goal: string;
+  mediaResolution?: AnalyzeInput['mediaResolution'];
+  output: {
+    diagramType: 'mermaid' | 'plantuml';
+    kind: 'diagram';
+    validateSyntax?: boolean | undefined;
+  };
+  targets:
+    | {
+        kind: 'file';
+        filePath: string;
+      }
+    | {
+        kind: 'multi';
+        filePaths: string[];
+      }
+    | {
+        kind: 'url';
+        urls: string[];
+      };
+  thinkingLevel?: AnalyzeInput['thinkingLevel'];
+}
+
+const DIAGRAM_FENCED_PATTERN = /```(?:mermaid|plantuml)?\s*\n([\s\S]*?)```/;
+
+function extractDiagram(text: string): { diagram: string; explanation: string } {
+  const match = DIAGRAM_FENCED_PATTERN.exec(text);
+
+  if (match?.[1]) {
+    const diagram = match[1].trimEnd();
+    const explanation = text.replace(DIAGRAM_FENCED_PATTERN, '').trim();
+    return { diagram, explanation };
+  }
+
+  return { diagram: text, explanation: '' };
+}
+
+function formatAnalyzeDiagramMarkdown(
+  diagram: string,
+  diagramType: 'mermaid' | 'plantuml',
+  explanation: string,
+): string {
+  const sections = [`### Diagram\n\n\`\`\`${diagramType}\n${diagram}\n\`\`\``];
+  if (explanation) {
+    sections.push(`### Explanation\n\n${explanation}`);
+  }
+  return sections.join('\n\n');
+}
+
+function collectDiagramSourceFiles(
+  sourceFilePath: string | undefined,
+  sourceFilePaths: string[] | undefined,
+): string[] {
+  return [...(sourceFilePath ? [sourceFilePath] : []), ...(sourceFilePaths ?? [])];
+}
+
+async function uploadDiagramSourceFiles(
+  filesToUpload: string[],
+  ctx: ServerContext,
+  rootsFetcher: RootsFetcher,
+  uploadedNames: string[],
+): Promise<Part[]> {
+  const contentParts: Part[] = [];
+  const totalSteps = filesToUpload.length + 1;
+  const progress = new ProgressReporter(ctx, ANALYZE_DIAGRAM_TOOL_LABEL);
+
+  for (let index = 0; index < filesToUpload.length; index++) {
+    if (ctx.mcpReq.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    const filePath = filesToUpload[index];
+    if (!filePath) continue;
+
+    await progress.step(
+      index,
+      totalSteps,
+      `Uploading ${filePath.split(/[\\/]/).pop() ?? filePath} (${String(index + 1)}/${String(filesToUpload.length)})`,
+    );
+    const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
+    uploadedNames.push(uploaded.name);
+    contentParts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
+    contentParts.push({ text: `Source file: ${uploaded.displayPath}` });
+  }
+
+  return contentParts;
+}
 
 function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
   return async function analyzeFileWork(
@@ -132,13 +222,109 @@ async function analyzeMultiFileWork(
   }
 }
 
+async function analyzeDiagramWork(
+  rootsFetcher: RootsFetcher,
+  args: AnalyzeDiagramInput,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const uploadedNames: string[] = [];
+  const progress = new ProgressReporter(ctx, ANALYZE_DIAGRAM_TOOL_LABEL);
+
+  try {
+    let attachedParts: Part[] = [];
+
+    if (args.targets.kind === 'file' || args.targets.kind === 'multi') {
+      const filesToUpload = collectDiagramSourceFiles(
+        args.targets.kind === 'file' ? args.targets.filePath : undefined,
+        args.targets.kind === 'multi' ? args.targets.filePaths : undefined,
+      );
+      attachedParts = await uploadDiagramSourceFiles(
+        filesToUpload,
+        ctx,
+        rootsFetcher,
+        uploadedNames,
+      );
+    } else {
+      attachedParts = [
+        {
+          text: `URLs:\n${args.targets.urls.join('\n')}`,
+        },
+      ];
+    }
+
+    const totalSteps = attachedParts.length > 0 ? attachedParts.length + 1 : 1;
+    await progress.send(
+      attachedParts.length,
+      totalSteps,
+      `Generating ${args.output.diagramType} diagram`,
+    );
+    await ctx.mcpReq.log('info', `Generating ${args.output.diagramType} diagram`);
+
+    const prompt = buildDiagramGenerationPrompt({
+      attachedParts,
+      description: args.goal,
+      diagramType: args.output.diagramType,
+      validateSyntax: args.output.validateSyntax,
+    });
+
+    return await executor.runStream(
+      ctx,
+      'analyze_diagram',
+      ANALYZE_DIAGRAM_TOOL_LABEL,
+      () =>
+        getAI().models.generateContentStream({
+          model: MODEL,
+          contents: prompt.promptParts,
+          config: buildGenerateContentConfig(
+            {
+              systemInstruction: prompt.systemInstruction,
+              thinkingLevel: args.thinkingLevel ?? 'LOW',
+              ...buildOrchestrationConfig({
+                toolProfile:
+                  args.targets.kind === 'url'
+                    ? 'url'
+                    : args.output.validateSyntax
+                      ? 'code'
+                      : 'none',
+              }),
+            },
+            ctx.mcpReq.signal,
+          ),
+        }),
+      (_streamResult, textContent: string) => {
+        const { diagram, explanation } = extractDiagram(textContent);
+        const diagramType = args.output.diagramType;
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: formatAnalyzeDiagramMarkdown(diagram, diagramType, explanation),
+            },
+          ],
+          structuredContent: {
+            diagram,
+            diagramType,
+            ...(explanation ? { explanation } : {}),
+          },
+        };
+      },
+    );
+  } finally {
+    await deleteUploadedFiles(uploadedNames, cleanupErrorLogger(ctx));
+  }
+}
+
 async function analyzeWork(
   rootsFetcher: RootsFetcher,
   fileWork: ReturnType<typeof createAnalyzeFileWork>,
   args: AnalyzeInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const result = await runAnalyzeTarget(rootsFetcher, fileWork, args, ctx);
+  const result =
+    args.output.kind === 'diagram'
+      ? await analyzeDiagramWork(rootsFetcher, args as AnalyzeDiagramInput, ctx)
+      : await runAnalyzeTarget(rootsFetcher, fileWork, args, ctx);
 
   if (result.isError) {
     return result;
@@ -201,16 +387,43 @@ function buildAnalyzeStructuredContent(
   ctx: ServerContext,
   structured: Record<string, unknown>,
 ): Record<string, unknown> {
-  return {
+  const base = {
     ...buildBaseStructuredOutput(ctx.task?.id),
-    targetKind: args.targets.kind,
-    summary: extractAnalyzeSummary(structured),
-    ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
-    ...(args.targets.kind === 'multi' ? { analyzedPaths: args.targets.filePaths } : {}),
     ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
     ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
     ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
     ...(structured.usage ? { usage: structured.usage } : {}),
+  };
+
+  if (args.output.kind === 'diagram') {
+    return {
+      ...base,
+      kind: 'diagram',
+      targetKind: args.targets.kind,
+      diagramType: args.output.diagramType,
+      diagram:
+        typeof structured.diagram === 'string' && structured.diagram
+          ? structured.diagram
+          : extractAnalyzeSummary(structured),
+      ...(typeof structured.explanation === 'string' && structured.explanation
+        ? { explanation: structured.explanation }
+        : {}),
+      ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
+      ...(args.targets.kind === 'file'
+        ? { analyzedPaths: [args.targets.filePath] }
+        : args.targets.kind === 'multi'
+          ? { analyzedPaths: args.targets.filePaths }
+          : {}),
+    };
+  }
+
+  return {
+    ...base,
+    kind: 'summary',
+    targetKind: args.targets.kind,
+    summary: extractAnalyzeSummary(structured),
+    ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
+    ...(args.targets.kind === 'multi' ? { analyzedPaths: args.targets.filePaths } : {}),
   };
 }
 
@@ -223,7 +436,8 @@ export function registerAnalyzeTool(server: McpServer, taskMessageQueue: TaskMes
     'analyze',
     {
       title: 'Analyze',
-      description: 'Analyze one file, one or more public URLs, or a small file set.',
+      description:
+        'Analyze one file, one or more public URLs, a small file set, or generate a diagram.',
       inputSchema: AnalyzeInputSchema,
       outputSchema: AnalyzeOutputSchema,
       annotations: READONLY_ANNOTATIONS,

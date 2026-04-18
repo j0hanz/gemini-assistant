@@ -28,20 +28,12 @@ import { executor } from '../lib/tool-executor.js';
 import { validateUrls } from '../lib/validation.js';
 import {
   type AgenticSearchInput,
-  AgenticSearchInputSchema,
   type AnalyzeUrlInput,
-  AnalyzeUrlInputSchema,
   type ResearchInput,
   ResearchInputSchema,
   type SearchInput,
-  SearchInputSchema,
 } from '../schemas/inputs.js';
-import {
-  AgenticSearchOutputSchema,
-  AnalyzeUrlOutputSchema,
-  ResearchOutputSchema,
-  SearchOutputSchema,
-} from '../schemas/outputs.js';
+import { ResearchOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig } from '../client.js';
 import { getAI, MODEL } from '../client.js';
@@ -418,66 +410,5 @@ export function registerResearchTool(server: McpServer, taskMessageQueue: TaskMe
     },
     taskMessageQueue,
     researchWork,
-  );
-}
-
-export function registerSearchTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
-  registerTaskTool(
-    server,
-    'search',
-    {
-      title: SEARCH_TOOL_LABEL,
-      description:
-        'Answer questions with Google Search grounding. ' +
-        'Optionally include URLs for deep analysis via URL Context.',
-      inputSchema: SearchInputSchema,
-      outputSchema: SearchOutputSchema,
-      annotations: READONLY_ANNOTATIONS,
-    },
-    taskMessageQueue,
-    searchWork,
-  );
-}
-
-export function registerAnalyzeUrlTool(
-  server: McpServer,
-  taskMessageQueue: TaskMessageQueue,
-): void {
-  registerTaskTool(
-    server,
-    'analyze_url',
-    {
-      title: ANALYZE_URL_TOOL_LABEL,
-      description:
-        'Fetch and analyze one or more public URLs via Gemini URL Context (max 20). ' +
-        'Supports web pages, PDFs, images, and other public content.',
-      inputSchema: AnalyzeUrlInputSchema,
-      outputSchema: AnalyzeUrlOutputSchema,
-      annotations: READONLY_ANNOTATIONS,
-    },
-    taskMessageQueue,
-    analyzeUrlWork,
-  );
-}
-
-export function registerAgenticSearchTool(
-  server: McpServer,
-  taskMessageQueue: TaskMessageQueue,
-): void {
-  registerTaskTool(
-    server,
-    'agentic_search',
-    {
-      title: AGENTIC_SEARCH_TOOL_LABEL,
-      description:
-        'Deep research with Google Search grounding and code execution. ' +
-        'Uses tool combination to let Gemini autonomously search multiple aspects ' +
-        'and compile a comprehensive report. Emits progress notifications.',
-      inputSchema: AgenticSearchInputSchema,
-      outputSchema: AgenticSearchOutputSchema,
-      annotations: READONLY_ANNOTATIONS,
-    },
-    taskMessageQueue,
-    agenticSearchWork,
   );
 }

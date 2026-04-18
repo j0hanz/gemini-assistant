@@ -106,11 +106,7 @@ export const DiscoverPromptSchema = z
   .strictObject({
     job: completable(
       PublicJobNameSchema.optional().describe('Public job to focus discovery guidance on.'),
-      (value) =>
-        filterByPrefix(
-          ['chat', 'research', 'analyze', 'review', 'memory', 'discover'],
-          value ?? '',
-        ),
+      (value) => filterByPrefix(['chat', 'research', 'analyze', 'review', 'memory'], value ?? ''),
     ),
     goal: textField('User outcome to optimize for.').optional(),
   })

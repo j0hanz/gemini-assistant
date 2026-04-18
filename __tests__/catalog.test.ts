@@ -13,7 +13,6 @@ import {
   AnalyzeInputSchema,
   ChatInputSchema,
   createMemoryInputSchema,
-  DiscoverInputSchema,
   ResearchInputSchema,
   ReviewInputSchema,
 } from '../src/schemas/inputs.js';
@@ -77,7 +76,6 @@ const toolSchemas = new Map<string, string[]>([
   ['analyze', schemaInputs(AnalyzeInputSchema)],
   ['review', schemaInputs(ReviewInputSchema)],
   ['memory', schemaInputs(createMemoryInputSchema(() => []))],
-  ['discover', schemaInputs(DiscoverInputSchema)],
 ]);
 
 const promptSchemas = new Map(
@@ -184,7 +182,7 @@ describe('catalog', () => {
   });
 
   it('documents limitations for contract-sensitive jobs', () => {
-    for (const toolName of ['chat', 'research', 'analyze', 'review', 'memory', 'discover']) {
+    for (const toolName of ['chat', 'research', 'analyze', 'review', 'memory']) {
       const entry = findDiscoveryEntry('tool', toolName);
       assert.ok(entry, `Missing tool entry for ${toolName}`);
       assert.ok(entry?.limitations && entry.limitations.length > 0);

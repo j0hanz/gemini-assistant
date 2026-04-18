@@ -21,13 +21,6 @@ import { createServerInstance } from '../src/server.js';
 
 process.env.API_KEY ??= 'test-key-for-mcp-tools';
 
-const DISCOVER_ANNOTATIONS = {
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: false,
-  readOnlyHint: true,
-} as const;
-
 async function createHarness() {
   return await createServerHarness(
     createServerInstance,
@@ -128,8 +121,8 @@ const MUTABLE_ANNOTATIONS = {
 const EXPECTED_TOOL_CONTRACTS = {
   analyze: {
     annotations: READONLY_ANNOTATIONS,
-    requiredInput: ['goal', 'targets'],
-    requiredOutput: ['status', 'targetKind', 'summary'],
+    requiredInput: ['goal', 'targets', 'output'],
+    requiredOutput: ['status', 'kind', 'targetKind'],
     taskSupport: 'optional',
     title: 'Analyze',
   },
@@ -139,18 +132,6 @@ const EXPECTED_TOOL_CONTRACTS = {
     requiredOutput: ['status', 'answer'],
     taskSupport: 'optional',
     title: 'Chat',
-  },
-  discover: {
-    annotations: DISCOVER_ANNOTATIONS,
-    requiredOutput: [
-      'status',
-      'summary',
-      'recommendedTools',
-      'recommendedPrompts',
-      'relatedResources',
-    ],
-    taskSupport: 'forbidden',
-    title: 'Discover',
   },
   memory: {
     annotations: MUTABLE_ANNOTATIONS,
@@ -196,7 +177,7 @@ describe('MCP tool smoke coverage', () => {
 
       assert.deepStrictEqual(
         [...toolMap.keys()],
-        ['chat', 'research', 'analyze', 'review', 'memory', 'discover'],
+        ['chat', 'research', 'analyze', 'review', 'memory'],
       );
 
       for (const [toolName, contract] of Object.entries(EXPECTED_TOOL_CONTRACTS)) {
@@ -269,13 +250,48 @@ describe('MCP tool smoke coverage', () => {
           filePath: 'src/client.ts',
           kind: 'file',
         },
+        output: {
+          kind: 'summary',
+        },
       });
       expectSuccess(analyzeResult);
+      assert.strictEqual(analyzeResult.structuredContent.kind, 'summary');
       assert.strictEqual(analyzeResult.structuredContent.targetKind, 'file');
       assert.match(String(analyzeResult.structuredContent.summary), /Gemini client factory/);
       const analyzeTool = toolMap.get('analyze');
       assert.ok(analyzeTool);
       assertAdvertisedOutputSchema(analyzeTool, analyzeResult);
+
+      env.queueStream(
+        makeChunk(
+          [
+            {
+              text: '```mermaid\nflowchart TD\nA-->B\n```',
+            },
+          ],
+          FinishReason.STOP,
+        ),
+      );
+
+      const diagramResult = await callTool(harness.client, 'analyze', {
+        goal: 'Show the request flow',
+        targets: {
+          filePath: 'src/client.ts',
+          kind: 'file',
+        },
+        output: {
+          kind: 'diagram',
+          diagramType: 'mermaid',
+          validateSyntax: true,
+        },
+      });
+      expectSuccess(diagramResult);
+      assert.strictEqual(diagramResult.structuredContent.kind, 'diagram');
+      assert.strictEqual(diagramResult.structuredContent.diagramType, 'mermaid');
+      assert.match(String(diagramResult.structuredContent.diagram), /flowchart TD/);
+      const diagramTool = toolMap.get('analyze');
+      assert.ok(diagramTool);
+      assertAdvertisedOutputSchema(diagramTool, diagramResult);
 
       env.queueStream(
         makeChunk(
@@ -301,17 +317,6 @@ describe('MCP tool smoke coverage', () => {
       const reviewTool = toolMap.get('review');
       assert.ok(reviewTool);
       assertAdvertisedOutputSchema(reviewTool, reviewResult);
-
-      const discoverResult = await callTool(harness.client, 'discover', {
-        goal: 'I need to inspect reusable state',
-        job: 'memory',
-      });
-      expectSuccess(discoverResult);
-      assert.strictEqual(discoverResult.structuredContent.job, 'memory');
-      assert.ok(Array.isArray(discoverResult.structuredContent.relatedResources));
-      const discoverTool = toolMap.get('discover');
-      assert.ok(discoverTool);
-      assertAdvertisedOutputSchema(discoverTool, discoverResult);
 
       const sessionListResult = await callTool(harness.client, 'memory', {
         action: 'sessions.list',
@@ -382,6 +387,9 @@ describe('MCP tool smoke coverage', () => {
           targets: {
             kind: 'url',
             urls: ['http://localhost/private'],
+          },
+          output: {
+            kind: 'summary',
           },
         },
         name: 'analyze',

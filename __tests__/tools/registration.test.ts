@@ -11,7 +11,6 @@ process.env.API_KEY ??= 'test-key-for-registration';
 
 const { registerAnalyzeTool } = await import('../../src/tools/analyze.js');
 const { registerChatTool } = await import('../../src/tools/chat.js');
-const { registerDiscoverTool } = await import('../../src/tools/discover.js');
 const { registerMemoryTool } = await import('../../src/tools/memory.js');
 const { registerResearchTool } = await import('../../src/tools/research-job.js');
 const { registerReviewTool } = await import('../../src/tools/review.js');
@@ -66,11 +65,6 @@ describe('tool registration', () => {
     assert.doesNotThrow(() => registerMemoryTool(server, sessionStore, queue));
   });
 
-  it('registers discover without error', () => {
-    const server = createServer();
-    assert.doesNotThrow(() => registerDiscoverTool(server));
-  });
-
   it('registers resources without error', () => {
     const server = createServer();
     assert.doesNotThrow(() => registerResources(server));
@@ -89,7 +83,6 @@ describe('tool registration', () => {
       registerAnalyzeTool(server, queue);
       registerReviewTool(server, queue);
       registerMemoryTool(server, sessionStore, queue);
-      registerDiscoverTool(server);
       registerPrompts(server);
       registerResources(server);
     });
@@ -118,7 +111,7 @@ describe('tool registration', () => {
     );
     assert.deepStrictEqual(
       [...PUBLIC_TOOL_NAMES],
-      ['chat', 'research', 'analyze', 'review', 'memory', 'discover'],
+      ['chat', 'research', 'analyze', 'review', 'memory'],
     );
   });
 });

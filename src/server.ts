@@ -17,7 +17,6 @@ import { registerResources } from './resources.js';
 import { createSessionStore, type SessionChangeEvent, type SessionStore } from './sessions.js';
 import { registerAnalyzeTool } from './tools/analyze.js';
 import { registerChatTool } from './tools/chat.js';
-import { registerDiscoverTool } from './tools/discover.js';
 import { registerMemoryTool } from './tools/memory.js';
 import { type CacheChangeEvent, subscribeCacheChange } from './tools/memory.js';
 import { registerResearchTool } from './tools/research-job.js';
@@ -53,23 +52,19 @@ const SERVER_TOOL_REGISTRARS = [
   (server, services) => {
     registerMemoryTool(server, services.sessionStore, services.taskMessageQueue);
   },
-  (server) => {
-    registerDiscoverTool(server);
-  },
 ] as const satisfies readonly ServerRegistrar[];
 
 const SERVER_DESCRIPTION =
-  'Gemini AI assistant with six job-first public tools: chat, research, analyze, review, memory, and discover.';
+  'Gemini AI assistant with five job-first public tools: chat, research, analyze, review, and memory.';
 
 const SERVER_INSTRUCTIONS =
   'Public tools: ' +
   'chat (direct Gemini chat with optional in-memory sessions and cache memory; ' +
   'chat sessions are server-memory only, expire/evict over time, and require a stateful transport path), ' +
   'research (explicit quick or deep grounded research), ' +
-  'analyze (file, URL, or small file-set analysis), ' +
+  'analyze (file, URL, small file-set analysis, or diagram generation), ' +
   'review (diff review, file comparison, or failure diagnosis), ' +
-  'memory (sessions, caches, and workspace memory inspection/mutation), ' +
-  'discover (guidance, workflows, prompts, resources, and limitation notes). ' +
+  'memory (sessions, caches, and workspace memory inspection/mutation). ' +
   'Use discover://catalog and discover://workflows for the canonical public surface.';
 
 const ALLOWED_URI_SCHEMES = ['memory://', 'discover://'];

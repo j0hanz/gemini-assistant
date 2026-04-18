@@ -1,7 +1,7 @@
 # Gemini Assistant
 
 `gemini-assistant` is an MCP server that exposes a job-first public surface over Google Gemini.
-The public contract is six tools:
+The public contract is five tools:
 
 - `chat`
 - `research`
@@ -16,7 +16,7 @@ Recommended first-run flow:
 
 1. Read `discover://catalog` for the full public catalog.
 2. Read `discover://workflows` for guided entry points.
-3. Call `discover` if you want a recommendation before choosing a job.
+3. Use the `discover` prompt if you want a recommendation before choosing a job.
 4. Use `chat` once the right starting point is clear.
 
 Public prompts:
@@ -53,10 +53,9 @@ Workflow entries:
 
 - Direct Gemini chat with optional server-managed sessions: `chat`
 - Quick or deep research with grounded results: `research`
-- Analyze a local file, public URLs, or a small file set: `analyze`
-- Review a diff, compare files, or diagnose a failure: `review`
+- Analyze a local file, public URLs, a small file set, or generate a diagram: `analyze`
+- Review a diff, compare files, or diagnose a failure through `review.subject.kind="failure"`: `review`
 - Inspect or mutate sessions, caches, and workspace memory state: `memory`
-- Get contract-aware guidance before choosing another tool: `discover`
 
 ## Sessions And Caches
 
@@ -79,8 +78,11 @@ Server context state is exposed through `discover://context`.
 The job-first surface is intentionally opinionated:
 
 - `research.mode` is required and chooses between quick lookup and deeper multi-step research.
+- `analyze.output.kind` is required and chooses between summary analysis and diagram generation.
+- `review.subject.kind="failure"` is the public failure-diagnosis path.
 - `memory.action` is a discriminated union; it does not accept generic target/input bags.
 - `chat.responseSchema` is intended for single-turn calls and brand-new sessions.
+- The public surface does not expose the legacy `discover` callable tool or the retired standalone `search`, `analyze_url`, `agentic_search`, `explain_error`, `diagram`, or `execute_code` tools.
 - The public surface does not expose Gemini File Search stores or Live API sessions.
 
 ## Requirements

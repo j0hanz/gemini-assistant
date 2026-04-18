@@ -5,7 +5,6 @@ import { FinishReason } from '@google/genai';
 
 import {
   assertAdvertisedOutputSchema,
-  assertRequestValidationFailure,
   assertToolExecutionError,
 } from './lib/mcp-contract-assertions.js';
 import {
@@ -79,14 +78,7 @@ describe('public MCP task lifecycle', () => {
       for (const toolName of ['chat', 'research', 'analyze', 'review', 'memory'] as const) {
         assert.equal(tools.get(toolName)?.execution?.taskSupport, 'optional');
       }
-      assert.equal(tools.get('discover')?.execution?.taskSupport, 'forbidden');
-
-      const discoverTaskCall = await harness.client.requestRaw('tools/call', {
-        arguments: {},
-        name: 'discover',
-        task: { ttl: 60_000 },
-      });
-      assertRequestValidationFailure(discoverTaskCall, -32602, /task|discover/i);
+      assert.strictEqual(tools.has('discover'), false);
     } finally {
       await harness.close();
     }

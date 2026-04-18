@@ -142,9 +142,28 @@ const AnalyzeTargetsSchema = z
   ])
   .describe('Target selection for analysis.');
 
+const AnalyzeSummaryOutputSchema = z.strictObject({
+  kind: z.literal('summary').describe('Analyze output selector (`summary`).'),
+});
+
+const AnalyzeDiagramOutputSchema = z.strictObject({
+  kind: z.literal('diagram').describe('Analyze output selector (`diagram`).'),
+  diagramType: z.enum(['mermaid', 'plantuml']).describe('Diagram syntax to generate.'),
+  validateSyntax: z
+    .boolean()
+    .optional()
+    .describe('Validate generated diagram syntax in an execution sandbox.'),
+});
+
+const AnalyzeOutputSchema = z.discriminatedUnion('kind', [
+  AnalyzeSummaryOutputSchema,
+  AnalyzeDiagramOutputSchema,
+]);
+
 export const AnalyzeInputSchema = z.strictObject({
   goal: goalText('Question or analysis goal for the selected targets'),
   targets: AnalyzeTargetsSchema,
+  output: AnalyzeOutputSchema.describe('Requested analysis output form.'),
   thinkingLevel: thinkingLevelField,
   mediaResolution: mediaResolution(
     'Resolution for image/video processing. Higher = more detail, more tokens.',
@@ -164,6 +183,15 @@ export interface AnalyzeInput {
     | {
         kind: 'multi';
         filePaths: string[];
+      };
+  output:
+    | {
+        kind: 'summary';
+      }
+    | {
+        kind: 'diagram';
+        diagramType: 'mermaid' | 'plantuml';
+        validateSyntax?: boolean | undefined;
       };
   thinkingLevel?: ThinkingLevelInput;
   mediaResolution?: MediaResolutionInput;

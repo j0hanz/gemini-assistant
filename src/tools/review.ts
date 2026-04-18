@@ -14,13 +14,14 @@ import { createPartFromUri } from '@google/genai';
 
 import { cleanupErrorLogger } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
+import { buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { buildDiffReviewPrompt } from '../lib/model-prompts.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput } from '../lib/response.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
-import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
+import { buildServerRootsFetcher, type RootsFetcher, validateUrls } from '../lib/validation.js';
 import {
   type AnalyzePrInput,
   type CompareFilesInput,
@@ -30,7 +31,6 @@ import {
 import { ReviewOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, getAI, MODEL } from '../client.js';
-import { explainErrorWork } from './explain-error.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -263,6 +263,78 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
       await deleteUploadedFiles(uploadedNames, cleanupErrorLogger(ctx));
     }
   };
+}
+
+interface FailureReviewSubject {
+  codeContext?: string | undefined;
+  error: string;
+  googleSearch?: boolean | undefined;
+  kind: 'failure';
+  language?: string | undefined;
+  urls?: readonly string[] | undefined;
+}
+
+async function diagnoseFailureWork(
+  subject: FailureReviewSubject,
+  focus: string | undefined,
+  cacheName: string | undefined,
+  thinkingLevel: ReviewInput['thinkingLevel'],
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const { urls, error, codeContext, language, googleSearch } = subject;
+
+  const invalidUrlResult = validateUrls(urls);
+  if (invalidUrlResult) return invalidUrlResult;
+
+  const prompt = buildErrorDiagnosisPrompt({
+    cacheName,
+    codeContext: focus
+      ? [codeContext, 'Review focus: ' + focus].filter(Boolean).join('\n\n')
+      : codeContext,
+    error,
+    language,
+    urls,
+  });
+
+  const orchestration = buildOrchestrationConfig({
+    toolProfile:
+      googleSearch && (urls?.length ?? 0) > 0
+        ? 'search_url'
+        : googleSearch
+          ? 'search'
+          : (urls?.length ?? 0) > 0
+            ? 'url'
+            : 'none',
+  });
+
+  const progress = new ProgressReporter(ctx, 'Review Failure');
+  await progress.send(0, undefined, 'Diagnosing');
+  await ctx.mcpReq.log('info', `Review failure: ${error.length} chars`);
+
+  return await executor.runStream(
+    ctx,
+    'review_failure',
+    'Review Failure',
+    () =>
+      getAI().models.generateContentStream({
+        model: MODEL,
+        contents: prompt.promptText,
+        config: buildGenerateContentConfig(
+          {
+            systemInstruction: prompt.systemInstruction,
+            thinkingLevel: thinkingLevel ?? 'MEDIUM',
+            cacheName,
+            ...orchestration,
+          },
+          ctx.mcpReq.signal,
+        ),
+      }),
+    (_streamResult, textContent: string) => ({
+      structuredContent: {
+        explanation: textContent || '',
+      },
+    }),
+  );
 }
 
 export function matchesNoisyPath(filePath: string): boolean {
@@ -1001,18 +1073,18 @@ async function reviewWork(
       ctx,
     );
   } else {
-    result = await explainErrorWork(
+    result = await diagnoseFailureWork(
       {
         error: args.subject.error,
-        codeContext: args.focus
-          ? [args.subject.codeContext, 'Review focus: ' + args.focus].filter(Boolean).join('\n\n')
-          : args.subject.codeContext,
+        codeContext: args.subject.codeContext,
+        kind: 'failure',
         language: args.subject.language,
-        thinkingLevel: args.thinkingLevel,
         googleSearch: args.subject.googleSearch,
         urls: args.subject.urls,
-        cacheName: args.cacheName,
       },
+      args.focus,
+      args.cacheName,
+      args.thinkingLevel,
       ctx,
     );
   }

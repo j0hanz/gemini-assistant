@@ -49,79 +49,29 @@ export const ContextUsedSchema = z
 
 export type ContextUsed = z.infer<typeof ContextUsedSchema>;
 
-export const ExecuteCodeOutputSchema = z.strictObject({
-  code: z.string().describe('Generated code'),
-  output: z.string().describe('Execution output'),
-  explanation: z.string().describe('Model explanation'),
-  runtime: z.literal('python').describe('Actual Gemini execution runtime'),
-  requestedLanguage: z
-    .string()
-    .optional()
-    .describe('Requested language hint when the caller supplied one'),
-  ...streamMetadataOutputFields,
-});
-
 export type UrlMetadataEntry = z.infer<typeof UrlMetadataEntrySchema>;
 export type SourceDetail = z.infer<typeof SourceDetailSchema>;
 
-export const SearchOutputSchema = z.strictObject({
-  answer: z.string().describe('Grounded answer'),
-  sources: z.array(PublicHttpUrlSchema).describe('Source URLs from search'),
-  sourceDetails: z
-    .array(SourceDetailSchema)
-    .optional()
-    .describe('Structured grounded source entries for client consumption'),
-  urlMetadata: z.array(UrlMetadataEntrySchema).describe('URL retrieval status').optional(),
-  ...streamMetadataOutputFields,
+const AnalyzeSummaryOutputSchema = z.strictObject({
+  ...publicBaseOutputFields,
+  kind: z.literal('summary').describe('Analyze output selector (`summary`)'),
+  targetKind: z.enum(['file', 'url', 'multi']).describe('Analyze target discriminator'),
+  summary: z.string().describe('Grounded analysis summary'),
+  urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
+  analyzedPaths: z.array(z.string()).optional().describe('Local files included in the analysis'),
+  contextUsed: ContextUsedSchema.optional(),
 });
 
-export const AnalyzeUrlOutputSchema = z.strictObject({
-  answer: z.string().describe('URL content analysis'),
-  urlMetadata: z.array(UrlMetadataEntrySchema).describe('Retrieval status per URL').optional(),
-  ...streamMetadataOutputFields,
-});
-
-export const AnalyzeFileOutputSchema = z.strictObject({
-  analysis: z.string().describe('File analysis result'),
-  ...streamMetadataOutputFields,
-});
-
-export const AgenticSearchOutputSchema = z.strictObject({
-  report: z.string().describe('Compiled markdown research report'),
-  sources: z.array(PublicHttpUrlSchema).describe('Aggregated source URLs'),
-  sourceDetails: z
-    .array(SourceDetailSchema)
-    .optional()
-    .describe('Structured grounded source entries for client consumption'),
-  toolsUsed: z
-    .array(z.string())
-    .optional()
-    .describe('Tools invoked during research (e.g. googleSearch, codeExecution)'),
-  ...streamMetadataOutputFields,
-});
-
-export const AnalyzePrOutputSchema = z.strictObject({
-  analysis: z.string().describe('Comprehensive local diff review'),
-  stats: z.strictObject(diffStatsFields).describe('Local diff statistics'),
-  reviewedPaths: z
-    .array(z.string())
-    .describe('Relative file paths included in the local diff review'),
-  includedUntracked: z
-    .array(z.string())
-    .describe('Relative untracked text files synthesized into the generated diff'),
-  skippedBinaryPaths: z
-    .array(z.string())
-    .describe('Relative untracked binary files skipped from the generated diff'),
-  skippedLargePaths: z
-    .array(z.string())
-    .describe('Relative untracked files skipped due to diff size limit.'),
-  omittedPaths: z
-    .array(z.string())
-    .optional()
-    .describe('Relative diff paths omitted from review due to budget.'),
-  empty: z.boolean().describe('Whether there were any local changes to review'),
-  truncated: z.boolean().describe('Whether the diff was truncated due to size').optional(),
-  ...streamMetadataOutputFields,
+const AnalyzeDiagramOutputSchema = z.strictObject({
+  ...publicBaseOutputFields,
+  kind: z.literal('diagram').describe('Analyze output selector (`diagram`)'),
+  targetKind: z.enum(['file', 'url', 'multi']).describe('Analyze target discriminator'),
+  diagramType: z.enum(['mermaid', 'plantuml']).describe('Diagram syntax used for the output'),
+  diagram: z.string().describe('Generated diagram source'),
+  explanation: z.string().optional().describe('Short explanation or caveats for the diagram'),
+  urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
+  analyzedPaths: z.array(z.string()).optional().describe('Local files included in the analysis'),
+  contextUsed: ContextUsedSchema.optional(),
 });
 
 export const CreateCacheOutputSchema = z.strictObject({
@@ -184,14 +134,10 @@ export const ResearchOutputSchema = z.strictObject({
   contextUsed: ContextUsedSchema.optional(),
 });
 
-export const AnalyzeOutputSchema = z.strictObject({
-  ...publicBaseOutputFields,
-  targetKind: z.enum(['file', 'url', 'multi']).describe('Analyze target discriminator'),
-  summary: z.string().describe('Grounded analysis summary'),
-  urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
-  analyzedPaths: z.array(z.string()).optional().describe('Local files included in the analysis'),
-  contextUsed: ContextUsedSchema.optional(),
-});
+export const AnalyzeOutputSchema = z.discriminatedUnion('kind', [
+  AnalyzeSummaryOutputSchema,
+  AnalyzeDiagramOutputSchema,
+]);
 
 export const ReviewOutputSchema = z.strictObject({
   ...publicBaseOutputFields,
@@ -274,35 +220,4 @@ export const MemoryOutputSchema = z.strictObject({
     .optional(),
   workspaceCache: z.record(z.string(), z.unknown()).optional(),
   resourceUris: z.array(z.string()).optional(),
-});
-
-const DiscoverCatalogEntrySchema = z.strictObject({
-  kind: z.enum(['tool', 'prompt', 'resource']),
-  name: z.string(),
-  title: z.string(),
-});
-
-const DiscoverWorkflowEntrySchema = z.strictObject({
-  name: z.string(),
-  goal: z.string(),
-  whenToUse: z.string(),
-});
-
-export const DiscoverOutputSchema = z.strictObject({
-  ...publicBaseOutputFields,
-  summary: z.string().describe('Discovery guidance summary'),
-  job: z
-    .enum(['chat', 'research', 'analyze', 'review', 'memory', 'discover'])
-    .optional()
-    .describe('Requested job focus when supplied'),
-  recommendedTools: z
-    .array(z.enum(['chat', 'research', 'analyze', 'review', 'memory', 'discover']))
-    .describe('Recommended public jobs to call next'),
-  recommendedPrompts: z
-    .array(z.enum(['discover', 'research', 'review', 'memory']))
-    .describe('Related public prompts'),
-  relatedResources: z.array(z.string()).describe('Related public resource URIs'),
-  limitations: z.array(z.string()).optional().describe('Contract-aware limitation notes'),
-  catalog: z.array(DiscoverCatalogEntrySchema).optional(),
-  workflows: z.array(DiscoverWorkflowEntrySchema).optional(),
 });

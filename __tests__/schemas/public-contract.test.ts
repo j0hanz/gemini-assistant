@@ -4,7 +4,6 @@ import { describe, it } from 'node:test';
 import {
   AnalyzeInputSchema,
   ChatInputSchema,
-  DiscoverInputSchema,
   MemoryInputSchema,
   ResearchInputSchema,
   ReviewInputSchema,
@@ -12,7 +11,6 @@ import {
 import {
   AnalyzeOutputSchema,
   ChatOutputSchema,
-  DiscoverOutputSchema,
   MemoryOutputSchema,
   ResearchOutputSchema,
   ReviewOutputSchema,
@@ -59,7 +57,15 @@ describe('public contract schemas', () => {
       MemoryInputSchema.safeParse({ action: 'caches.list', cacheName: 'legacy' }).success,
       false,
     );
-    assert.strictEqual(DiscoverInputSchema.safeParse({ googleSearch: true }).success, false);
+    assert.strictEqual(
+      AnalyzeInputSchema.safeParse({
+        goal: 'x',
+        targets: { kind: 'file', filePath: 'src/index.ts' },
+        output: { kind: 'summary' },
+        question: 'legacy',
+      }).success,
+      false,
+    );
   });
 
   it('parses shared base output fields on every public output schema', () => {
@@ -91,8 +97,23 @@ describe('public contract schemas', () => {
       'research output should parse',
     );
     assert.ok(
-      AnalyzeOutputSchema.safeParse({ ...base, summary: 'x', targetKind: 'file' }).success,
+      AnalyzeOutputSchema.safeParse({
+        ...base,
+        kind: 'summary',
+        summary: 'x',
+        targetKind: 'file',
+      }).success,
       'analyze output should parse',
+    );
+    assert.ok(
+      AnalyzeOutputSchema.safeParse({
+        ...base,
+        kind: 'diagram',
+        diagram: 'flowchart TD\nA-->B',
+        diagramType: 'mermaid',
+        targetKind: 'multi',
+      }).success,
+      'diagram analyze output should parse',
     );
     assert.ok(
       ReviewOutputSchema.safeParse({ ...base, subjectKind: 'failure', summary: 'x' }).success,
@@ -101,16 +122,6 @@ describe('public contract schemas', () => {
     assert.ok(
       MemoryOutputSchema.safeParse({ ...base, action: 'sessions.list', summary: 'x' }).success,
       'memory output should parse',
-    );
-    assert.ok(
-      DiscoverOutputSchema.safeParse({
-        ...base,
-        recommendedPrompts: ['discover'],
-        recommendedTools: ['discover'],
-        relatedResources: ['discover://catalog'],
-        summary: 'x',
-      }).success,
-      'discover output should parse',
     );
   });
 });

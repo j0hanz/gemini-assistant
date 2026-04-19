@@ -221,6 +221,15 @@ interface FlatReviewInput {
   urls?: string[] | undefined;
 }
 
+interface FlatResearchInput {
+  deliverable?: string | undefined;
+  goal: string;
+  mode: 'quick' | 'deep';
+  searchDepth?: number | undefined;
+  systemInstruction?: string | undefined;
+  urls?: string[] | undefined;
+}
+
 export function validateFlatReviewInput(
   value: FlatReviewInput,
   ctx: z.core.$RefinementCtx<Record<string, unknown>>,
@@ -284,6 +293,188 @@ export function validateFlatReviewInput(
   ] as const) {
     if (input !== undefined) {
       addForbiddenFieldIssue(ctx, field, 'subjectKind', value.subjectKind, input);
+    }
+  }
+}
+
+export function validateFlatResearchInput(
+  value: FlatResearchInput,
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+): void {
+  if (value.mode === 'quick') {
+    for (const [field, input] of [
+      ['deliverable', value.deliverable],
+      ['searchDepth', value.searchDepth],
+    ] as const) {
+      if (input !== undefined) {
+        addForbiddenFieldIssue(ctx, field, 'mode', value.mode, input);
+      }
+    }
+    return;
+  }
+
+  for (const [field, input] of [
+    ['urls', value.urls],
+    ['systemInstruction', value.systemInstruction],
+  ] as const) {
+    if (input !== undefined) {
+      addForbiddenFieldIssue(ctx, field, 'mode', value.mode, input);
+    }
+  }
+}
+
+interface FlatMemoryInput {
+  action:
+    | 'sessions.list'
+    | 'sessions.get'
+    | 'sessions.transcript'
+    | 'sessions.events'
+    | 'caches.list'
+    | 'caches.get'
+    | 'caches.create'
+    | 'caches.update'
+    | 'caches.delete'
+    | 'workspace.context'
+    | 'workspace.cache';
+  cacheName?: string | undefined;
+  confirm?: boolean | undefined;
+  displayName?: string | undefined;
+  filePaths?: string[] | undefined;
+  sessionId?: string | undefined;
+  systemInstruction?: string | undefined;
+  ttl?: string | undefined;
+}
+
+export function validateFlatMemoryInput(
+  value: FlatMemoryInput,
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+): void {
+  switch (value.action) {
+    case 'sessions.list':
+    case 'caches.list':
+    case 'workspace.context':
+    case 'workspace.cache': {
+      for (const [field, input] of [
+        ['sessionId', value.sessionId],
+        ['cacheName', value.cacheName],
+        ['filePaths', value.filePaths],
+        ['systemInstruction', value.systemInstruction],
+        ['ttl', value.ttl],
+        ['displayName', value.displayName],
+        ['confirm', value.confirm],
+      ] as const) {
+        if (input !== undefined) {
+          addForbiddenFieldIssue(ctx, field, 'action', value.action, input);
+        }
+      }
+      return;
+    }
+    case 'sessions.get':
+    case 'sessions.transcript':
+    case 'sessions.events': {
+      if (!value.sessionId) {
+        addCustomIssue(
+          ctx,
+          `sessionId is required when action=${value.action}.`,
+          ['sessionId'],
+          value.sessionId,
+        );
+      }
+      for (const [field, input] of [
+        ['cacheName', value.cacheName],
+        ['filePaths', value.filePaths],
+        ['systemInstruction', value.systemInstruction],
+        ['ttl', value.ttl],
+        ['displayName', value.displayName],
+        ['confirm', value.confirm],
+      ] as const) {
+        if (input !== undefined) {
+          addForbiddenFieldIssue(ctx, field, 'action', value.action, input);
+        }
+      }
+      return;
+    }
+    case 'caches.get': {
+      if (!value.cacheName) {
+        addCustomIssue(
+          ctx,
+          'cacheName is required when action=caches.get.',
+          ['cacheName'],
+          value.cacheName,
+        );
+      }
+      for (const [field, input] of [
+        ['sessionId', value.sessionId],
+        ['filePaths', value.filePaths],
+        ['systemInstruction', value.systemInstruction],
+        ['ttl', value.ttl],
+        ['displayName', value.displayName],
+        ['confirm', value.confirm],
+      ] as const) {
+        if (input !== undefined) {
+          addForbiddenFieldIssue(ctx, field, 'action', value.action, input);
+        }
+      }
+      return;
+    }
+    case 'caches.create': {
+      validateMeaningfulCacheCreateInput(value, ctx);
+      for (const [field, input] of [
+        ['sessionId', value.sessionId],
+        ['cacheName', value.cacheName],
+        ['confirm', value.confirm],
+      ] as const) {
+        if (input !== undefined) {
+          addForbiddenFieldIssue(ctx, field, 'action', value.action, input);
+        }
+      }
+      return;
+    }
+    case 'caches.update': {
+      if (!value.cacheName) {
+        addCustomIssue(
+          ctx,
+          'cacheName is required when action=caches.update.',
+          ['cacheName'],
+          value.cacheName,
+        );
+      }
+      if (!value.ttl) {
+        addCustomIssue(ctx, 'ttl is required when action=caches.update.', ['ttl'], value.ttl);
+      }
+      for (const [field, input] of [
+        ['sessionId', value.sessionId],
+        ['filePaths', value.filePaths],
+        ['systemInstruction', value.systemInstruction],
+        ['displayName', value.displayName],
+        ['confirm', value.confirm],
+      ] as const) {
+        if (input !== undefined) {
+          addForbiddenFieldIssue(ctx, field, 'action', value.action, input);
+        }
+      }
+      return;
+    }
+    case 'caches.delete': {
+      if (!value.cacheName) {
+        addCustomIssue(
+          ctx,
+          'cacheName is required when action=caches.delete.',
+          ['cacheName'],
+          value.cacheName,
+        );
+      }
+      for (const [field, input] of [
+        ['sessionId', value.sessionId],
+        ['filePaths', value.filePaths],
+        ['systemInstruction', value.systemInstruction],
+        ['ttl', value.ttl],
+        ['displayName', value.displayName],
+      ] as const) {
+        if (input !== undefined) {
+          addForbiddenFieldIssue(ctx, field, 'action', value.action, input);
+        }
+      }
     }
   }
 }

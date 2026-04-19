@@ -29,7 +29,7 @@ describe('public contract schemas', () => {
     );
   });
 
-  it('keeps memory.action as a discriminated union with per-action validation', () => {
+  it('keeps memory.action flat with per-action validation', () => {
     assert.strictEqual(MemoryInputSchema.safeParse({ action: 'sessions.get' }).success, false);
     assert.strictEqual(
       MemoryInputSchema.safeParse({ action: 'caches.get', cacheName: 'cachedContents/test' })

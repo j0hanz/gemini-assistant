@@ -548,7 +548,9 @@ async function handleCachesGet(
 async function handleCachesCreate(
   createCacheWork: ReturnType<typeof buildCreateCacheWork>,
   base: Record<string, unknown>,
-  args: Extract<MemoryInput, { action: 'caches.create' }>,
+  args: MemoryInput & {
+    action: 'caches.create';
+  },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const createArgs =
@@ -588,7 +590,11 @@ async function handleCachesCreate(
 
 async function handleCachesUpdate(
   base: Record<string, unknown>,
-  args: Extract<MemoryInput, { action: 'caches.update' }>,
+  args: MemoryInput & {
+    action: 'caches.update';
+    cacheName: string;
+    ttl: string;
+  },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const result = await updateCacheWork({ cacheName: args.cacheName, ttl: args.ttl }, ctx);
@@ -608,7 +614,10 @@ async function handleCachesUpdate(
 
 async function handleCachesDelete(
   base: Record<string, unknown>,
-  args: Extract<MemoryInput, { action: 'caches.delete' }>,
+  args: MemoryInput & {
+    action: 'caches.delete';
+    cacheName: string;
+  },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const result = await deleteCacheWork({ cacheName: args.cacheName, confirm: args.confirm }, ctx);
@@ -674,6 +683,31 @@ function handleWorkspaceCache(base: Record<string, unknown>, action: string): Ca
   };
 }
 
+function isMemoryAction<TAction extends MemoryInput['action']>(
+  args: MemoryInput,
+  action: TAction,
+): args is MemoryInput & { action: TAction } {
+  return args.action === action;
+}
+
+function hasSessionId(args: MemoryInput): args is MemoryInput & {
+  sessionId: string;
+} {
+  return typeof args.sessionId === 'string';
+}
+
+function hasCacheName(args: MemoryInput): args is MemoryInput & {
+  cacheName: string;
+} {
+  return typeof args.cacheName === 'string';
+}
+
+function hasTtl(args: MemoryInput): args is MemoryInput & {
+  ttl: string;
+} {
+  return typeof args.ttl === 'string';
+}
+
 async function memoryWork(
   sessionStore: SessionStore,
   rootsFetcher: RootsFetcher,
@@ -684,25 +718,25 @@ async function memoryWork(
   const base = buildBaseStructuredOutput(ctx.task?.id);
   let result: CallToolResult;
 
-  if (args.action === 'sessions.list') {
+  if (isMemoryAction(args, 'sessions.list')) {
     result = handleSessionsList(sessionStore, base, args.action);
-  } else if (args.action === 'sessions.get') {
+  } else if (isMemoryAction(args, 'sessions.get') && hasSessionId(args)) {
     result = handleSessionsGet(sessionStore, base, args.action, args.sessionId);
-  } else if (args.action === 'sessions.transcript') {
+  } else if (isMemoryAction(args, 'sessions.transcript') && hasSessionId(args)) {
     result = handleSessionsTranscript(sessionStore, base, args.action, args.sessionId);
-  } else if (args.action === 'sessions.events') {
+  } else if (isMemoryAction(args, 'sessions.events') && hasSessionId(args)) {
     result = handleSessionsEvents(sessionStore, base, args.action, args.sessionId);
-  } else if (args.action === 'caches.list') {
+  } else if (isMemoryAction(args, 'caches.list')) {
     result = await handleCachesList(base, args.action, ctx.mcpReq.signal);
-  } else if (args.action === 'caches.get') {
+  } else if (isMemoryAction(args, 'caches.get') && hasCacheName(args)) {
     result = await handleCachesGet(base, args.action, args.cacheName, ctx.mcpReq.signal);
-  } else if (args.action === 'caches.create') {
+  } else if (isMemoryAction(args, 'caches.create')) {
     result = await handleCachesCreate(createCacheWork, base, args, ctx);
-  } else if (args.action === 'caches.update') {
+  } else if (isMemoryAction(args, 'caches.update') && hasCacheName(args) && hasTtl(args)) {
     result = await handleCachesUpdate(base, args, ctx);
-  } else if (args.action === 'caches.delete') {
+  } else if (isMemoryAction(args, 'caches.delete') && hasCacheName(args)) {
     result = await handleCachesDelete(base, args, ctx);
-  } else if (args.action === 'workspace.context') {
+  } else if (isMemoryAction(args, 'workspace.context')) {
     result = await handleWorkspaceContext(rootsFetcher, base, args.action);
   } else {
     result = handleWorkspaceCache(base, args.action);

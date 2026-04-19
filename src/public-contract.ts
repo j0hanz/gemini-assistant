@@ -166,9 +166,9 @@ export const DISCOVERY_ENTRIES = [
       'goal',
       'urls?',
       'systemInstruction?',
-      'thinkingLevel?',
       'deliverable?',
       'searchDepth?',
+      'thinkingLevel?',
     ],
     returns:
       'A grounded summary with sources and, for deep mode, tool-usage details from the multi-step research path.',

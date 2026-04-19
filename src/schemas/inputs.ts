@@ -33,6 +33,8 @@ import { GeminiResponseSchema } from './json-schema.js';
 import {
   validateExclusiveSourceFileFields,
   validateFlatAnalyzeInput,
+  validateFlatMemoryInput,
+  validateFlatResearchInput,
   validateFlatReviewInput,
   validateMeaningfulCacheCreateInput,
 } from './validators.js';
@@ -100,36 +102,32 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
 export const ChatInputSchema = createChatInputSchema();
 export type ChatInput = z.infer<typeof ChatInputSchema>;
 
-const QuickResearchInputSchema = z.strictObject({
-  mode: z.literal('quick').describe('Research mode selector (`quick`).'),
-  goal: goalText('Question or research goal to answer quickly'),
-  ...createUrlContextFields({
-    itemDescription: 'Public URL to analyze alongside search results',
-    description: 'Public URLs to inspect alongside web search results.',
-    max: 20,
-    optional: true,
-  }),
-  systemInstruction: optionalField(
-    textField('Instructions for output presentation (format, audience, tone).'),
-  ),
-  thinkingLevel: thinkingLevelField,
-});
-
-const DeepResearchInputSchema = z.strictObject({
-  mode: z.literal('deep').describe('Research mode selector (`deep`).'),
-  goal: goalText('Topic or research goal for a deeper multi-step investigation'),
-  deliverable: optionalField(textField('Requested output form (brief, report, checklist, etc.).')),
-  searchDepth: withFieldMetadata(
-    z.int().min(1).max(5).optional().default(3),
-    'How many search-and-synthesis passes to perform. Use higher values for broader or more thorough deep research.',
-  ),
-  thinkingLevel: thinkingLevelField,
-});
-
-export const ResearchInputSchema = z.discriminatedUnion('mode', [
-  QuickResearchInputSchema,
-  DeepResearchInputSchema,
-]);
+export const ResearchInputSchema = z
+  .strictObject({
+    mode: enumField(['quick', 'deep'], 'Research mode selector (`quick` or `deep`).'),
+    goal: goalText('Question or research goal to answer quickly'),
+    ...createUrlContextFields({
+      itemDescription: 'Public URL to analyze alongside search results',
+      description: 'Public URLs to inspect alongside web search results.',
+      max: 20,
+      optional: true,
+    }),
+    systemInstruction: optionalField(
+      textField('Instructions for output presentation (format, audience, tone).'),
+    ),
+    deliverable: optionalField(
+      textField('Requested output form (brief, report, checklist, etc.).'),
+    ),
+    searchDepth: withFieldMetadata(
+      z.int().min(1).max(5).optional(),
+      'How many search-and-synthesis passes to perform. Use higher values for broader or more thorough deep research.',
+    ),
+    thinkingLevel: thinkingLevelField,
+  })
+  .superRefine(validateFlatResearchInput)
+  .transform((value) =>
+    value.mode === 'deep' && value.searchDepth === undefined ? { ...value, searchDepth: 3 } : value,
+  );
 export type ResearchInput = z.infer<typeof ResearchInputSchema>;
 
 export const AnalyzeInputSchema = z
@@ -217,43 +215,30 @@ export const ReviewInputSchema = z
   .superRefine(validateFlatReviewInput);
 export type ReviewInput = z.infer<typeof ReviewInputSchema>;
 
-const MemorySessionsListSchema = z.strictObject({
-  action: z.literal('sessions.list').describe('Memory action (`sessions.list`).'),
-});
-
 export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
-  const memorySessionIdField = completable(
-    sessionId('Session identifier to inspect'),
-    completeSessionIds,
-  );
-
-  const memorySessionsGetSchema = z.strictObject({
-    action: z.literal('sessions.get').describe('Memory action (`sessions.get`).'),
-    sessionId: memorySessionIdField,
-  });
-
-  const memorySessionsTranscriptSchema = z.strictObject({
-    action: z.literal('sessions.transcript').describe('Memory action (`sessions.transcript`).'),
-    sessionId: memorySessionIdField,
-  });
-
-  const memorySessionsEventsSchema = z.strictObject({
-    action: z.literal('sessions.events').describe('Memory action (`sessions.events`).'),
-    sessionId: memorySessionIdField,
-  });
-
-  const memoryCachesListSchema = z.strictObject({
-    action: z.literal('caches.list').describe('Memory action (`caches.list`).'),
-  });
-
-  const memoryCachesGetSchema = z.strictObject({
-    action: z.literal('caches.get').describe('Memory action (`caches.get`).'),
-    cacheName: completableCacheName('Cache resource name to inspect'),
-  });
-
-  const memoryCachesCreateSchema = z
+  return z
     .strictObject({
-      action: z.literal('caches.create').describe('Memory action (`caches.create`).'),
+      action: enumField(
+        [
+          'sessions.list',
+          'sessions.get',
+          'sessions.transcript',
+          'sessions.events',
+          'caches.list',
+          'caches.get',
+          'caches.create',
+          'caches.update',
+          'caches.delete',
+          'workspace.context',
+          'workspace.cache',
+        ],
+        'Memory action selector.',
+      ),
+      sessionId: completable(
+        optionalField(sessionId('Session identifier to inspect')),
+        completeSessionIds,
+      ),
+      cacheName: completableCacheName('Cache resource name to inspect', true),
       filePaths: workspacePathArray({
         description: 'Files to include in the cache.',
         itemDescription: 'Workspace-relative or absolute path to a file to cache',
@@ -265,50 +250,12 @@ export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter =
       ),
       ttl: optionalField(ttlSeconds('Time-to-live for the cache (e.g. "3600s").')),
       displayName: optionalField(textField('Human-readable label for the cache.')),
-    })
-    .superRefine(validateMeaningfulCacheCreateInput)
-    .describe('Create a Gemini cache from files and/or a system instruction.');
-
-  const memoryCachesUpdateSchema = z.strictObject({
-    action: z.literal('caches.update').describe('Memory action (`caches.update`).'),
-    cacheName: completableCacheName('Cache resource name to update'),
-    ttl: ttlSeconds('New TTL from now (e.g. "7200s" for 2 hours)'),
-  });
-
-  const memoryCachesDeleteSchema = z.strictObject({
-    action: z.literal('caches.delete').describe('Memory action (`caches.delete`).'),
-    cacheName: completableCacheName('Cache resource name to delete'),
-    confirm: withFieldMetadata(
-      z.boolean().optional(),
-      'Confirmation override for non-interactive clients.',
-    ),
-  });
-
-  const memoryWorkspaceContextSchema = z.strictObject({
-    action: z.literal('workspace.context').describe('Memory action (`workspace.context`).'),
-  });
-
-  const memoryWorkspaceCacheSchema = z.strictObject({
-    action: z
-      .literal('workspace.cache')
-      .describe(
-        'Memory action to perform. Use `workspace.cache` to inspect workspace cache state and metadata.',
+      confirm: withFieldMetadata(
+        z.boolean().optional(),
+        'Confirmation override for non-interactive clients.',
       ),
-  });
-
-  return z.discriminatedUnion('action', [
-    MemorySessionsListSchema,
-    memorySessionsGetSchema,
-    memorySessionsTranscriptSchema,
-    memorySessionsEventsSchema,
-    memoryCachesListSchema,
-    memoryCachesGetSchema,
-    memoryCachesCreateSchema,
-    memoryCachesUpdateSchema,
-    memoryCachesDeleteSchema,
-    memoryWorkspaceContextSchema,
-    memoryWorkspaceCacheSchema,
-  ]);
+    })
+    .superRefine(validateFlatMemoryInput);
 }
 
 export const MemoryInputSchema = createMemoryInputSchema();

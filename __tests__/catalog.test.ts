@@ -38,7 +38,15 @@ function isUnionLikeSchema(schema: unknown): schema is { options: unknown[] } {
   );
 }
 
+function isPipeLikeSchema(schema: unknown): schema is { in: unknown } {
+  return !!schema && typeof schema === 'object' && 'in' in schema;
+}
+
 function schemaInputs(schema: unknown): string[] {
+  if (isPipeLikeSchema(schema)) {
+    return schemaInputs(schema.in);
+  }
+
   if (isObjectLikeSchema(schema)) {
     return schema.keyof().options.map((key) => (schema.shape[key]?.isOptional() ? `${key}?` : key));
   }

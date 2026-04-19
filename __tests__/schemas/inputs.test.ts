@@ -385,6 +385,24 @@ describe('ResearchInputSchema', () => {
     });
     assert.strictEqual(result.success, false);
   });
+
+  it('rejects deep-only fields in quick mode', () => {
+    const result = ResearchInputSchema.safeParse({
+      mode: 'quick',
+      goal: 'test',
+      searchDepth: 3,
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects quick-only fields in deep mode', () => {
+    const result = ResearchInputSchema.safeParse({
+      mode: 'deep',
+      goal: 'test',
+      urls: ['https://example.com'],
+    });
+    assert.strictEqual(result.success, false);
+  });
 });
 
 describe('AgenticSearchInputSchema', () => {

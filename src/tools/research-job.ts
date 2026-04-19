@@ -324,7 +324,9 @@ async function agenticSearchWork(
 }
 
 async function runQuickResearch(
-  args: Extract<ResearchInput, { mode: 'quick' }>,
+  args: ResearchInput & {
+    mode: 'quick';
+  },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   return await searchWork(
@@ -338,20 +340,23 @@ async function runQuickResearch(
   );
 }
 
-async function runDeepResearch(
-  args: Extract<ResearchInput, { mode: 'deep' }>,
-  ctx: ServerContext,
-): Promise<CallToolResult> {
+async function runDeepResearch(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {
   return await agenticSearchWork(
     {
       topic: args.deliverable
         ? `${args.goal}\n\nRequested deliverable: ${args.deliverable}`
         : args.goal,
-      searchDepth: args.searchDepth,
+      searchDepth: args.searchDepth ?? 3,
       thinkingLevel: args.thinkingLevel,
     },
     ctx,
   );
+}
+
+function isQuickResearchInput(args: ResearchInput): args is ResearchInput & {
+  mode: 'quick';
+} {
+  return args.mode === 'quick';
 }
 
 function extractResearchSummary(structured: Record<string, unknown>): string {
@@ -383,8 +388,9 @@ function buildResearchStructuredContent(
 }
 
 async function researchWork(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {
-  const result =
-    args.mode === 'quick' ? await runQuickResearch(args, ctx) : await runDeepResearch(args, ctx);
+  const result = isQuickResearchInput(args)
+    ? await runQuickResearch(args, ctx)
+    : await runDeepResearch(args, ctx);
 
   if (result.isError) {
     return result;

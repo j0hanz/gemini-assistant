@@ -126,6 +126,48 @@ export function validateStructuredContent<TSchema extends z.ZodType>(
   );
 }
 
+interface SafeParseSchema {
+  safeParse: (input: unknown) => { success: true; data: unknown } | { success: false };
+}
+
+function hasSafeParse(outputSchema: unknown): outputSchema is SafeParseSchema {
+  return (
+    typeof outputSchema === 'object' &&
+    outputSchema !== null &&
+    'safeParse' in outputSchema &&
+    typeof outputSchema.safeParse === 'function'
+  );
+}
+
+export function validateStructuredToolResult(
+  toolName: string,
+  outputSchema: unknown,
+  result: CallToolResult,
+): CallToolResult {
+  if (result.isError || result.structuredContent === undefined || !hasSafeParse(outputSchema)) {
+    return result;
+  }
+
+  const parsed = outputSchema.safeParse(result.structuredContent);
+  if (parsed.success) {
+    return {
+      ...result,
+      structuredContent: parsed.data as CallToolResult['structuredContent'],
+    };
+  }
+
+  return {
+    content: [
+      ...result.content,
+      {
+        type: 'text',
+        text: `Internal ${toolName} output validation failed: structuredContent did not match outputSchema.`,
+      },
+    ],
+    isError: true,
+  };
+}
+
 function appendBulletListSection(
   content: CallToolResult['content'],
   heading: string,

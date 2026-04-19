@@ -9,6 +9,7 @@ import type {
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
 
+import { validateStructuredToolResult } from './response.js';
 import { executor } from './tool-executor.js';
 
 const DEFAULT_TTL = 300_000;
@@ -197,12 +198,16 @@ export function registerTaskTool<TArgs>(
   const toolLabel = config.title ?? name;
   const handler = createToolTaskHandlers(
     async (args: TArgs, ctx: ExtendedServerContext) =>
-      await executor.run(
-        ctx,
+      validateStructuredToolResult(
         name,
-        toolLabel,
-        args,
-        work as unknown as (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
+        config.outputSchema,
+        await executor.run(
+          ctx,
+          name,
+          toolLabel,
+          args,
+          work as unknown as (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
+        ),
       ),
     taskMessageQueue,
   ) as TaskToolHandler;

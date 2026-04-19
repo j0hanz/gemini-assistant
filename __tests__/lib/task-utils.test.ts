@@ -9,9 +9,12 @@ import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { z } from 'zod/v4';
+
 import {
   createToolTaskHandlers,
   elicitTaskInput,
+  registerTaskTool,
   runToolAsTask,
   taskTtl,
 } from '../../src/lib/task-utils.js';
@@ -451,5 +454,111 @@ describe('elicitTaskInput', () => {
       { status: 'input_required', statusMessage: 'Waiting for user input' },
       { status: 'working' },
     ]);
+  });
+});
+
+describe('registerTaskTool', () => {
+  function makeMockServer() {
+    let capturedHandler:
+      | {
+          createTask: (args: { msg: string }, ctx: ServerContext) => Promise<{ task: Task }>;
+        }
+      | undefined;
+
+    const server = {
+      experimental: {
+        tasks: {
+          registerToolTask: (_name: string, _config: unknown, handler: typeof capturedHandler) => {
+            capturedHandler = handler;
+          },
+        },
+      },
+    } as unknown as { experimental: { tasks: { registerToolTask: typeof Function } } };
+
+    return {
+      server: server as never,
+      getHandler: () => {
+        assert.ok(capturedHandler);
+        return capturedHandler;
+      },
+    };
+  }
+
+  it('stores failed status when central validation rejects structured content', async () => {
+    const store = makeMockStore();
+    const ctx = makeMockContext({ taskStore: store });
+    const queue = new InMemoryTaskMessageQueue();
+    const { server, getHandler } = makeMockServer();
+
+    registerTaskTool(
+      server,
+      'test-tool',
+      {
+        title: 'Test Tool',
+        description: 'test',
+        inputSchema: z.strictObject({ msg: z.string() }),
+        outputSchema: z.strictObject({
+          status: z.literal('completed'),
+          summary: z.string(),
+        }),
+        annotations: {} as never,
+      },
+      queue,
+      async ({ msg }: { msg: string }) => ({
+        content: [{ type: 'text', text: msg }],
+        structuredContent: { status: 'completed', explanation: 'wrong field' },
+      }),
+    );
+
+    await getHandler().createTask({ msg: 'hello' }, ctx);
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(store.stored.length, 1);
+    const entry = store.stored[0];
+    assert.ok(entry);
+    assert.strictEqual(entry.status, 'failed');
+    assert.strictEqual(entry.result.isError, true);
+    assert.strictEqual(entry.result.structuredContent, undefined);
+    assert.match(entry.result.content[1]?.text ?? '', /output validation failed/i);
+  });
+
+  it('stores completed status when central validation accepts structured content', async () => {
+    const store = makeMockStore();
+    const ctx = makeMockContext({ taskStore: store });
+    const queue = new InMemoryTaskMessageQueue();
+    const { server, getHandler } = makeMockServer();
+
+    registerTaskTool(
+      server,
+      'test-tool',
+      {
+        title: 'Test Tool',
+        description: 'test',
+        inputSchema: z.strictObject({ msg: z.string() }),
+        outputSchema: z.strictObject({
+          status: z.literal('completed'),
+          summary: z.string(),
+        }),
+        annotations: {} as never,
+      },
+      queue,
+      async ({ msg }: { msg: string }) => ({
+        content: [{ type: 'text', text: msg }],
+        structuredContent: { status: 'completed', summary: 'ok' },
+      }),
+    );
+
+    await getHandler().createTask({ msg: 'hello' }, ctx);
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(store.stored.length, 1);
+    const entry = store.stored[0];
+    assert.ok(entry);
+    assert.strictEqual(entry.status, 'completed');
+    assert.strictEqual(entry.result.isError, undefined);
+    assert.deepStrictEqual(entry.result.structuredContent, {
+      status: 'completed',
+      summary: 'ok',
+    });
   });
 });

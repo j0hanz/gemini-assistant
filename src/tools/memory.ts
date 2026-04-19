@@ -12,11 +12,7 @@ import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { logger } from '../lib/logger.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from '../lib/resource-uris.js';
-import {
-  buildBaseStructuredOutput,
-  createResourceLink,
-  validateStructuredContent,
-} from '../lib/response.js';
+import { buildBaseStructuredOutput, createResourceLink } from '../lib/response.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from '../lib/validation.js';
 import { assembleWorkspaceContext, workspaceCacheManager } from '../lib/workspace-context.js';
@@ -746,14 +742,7 @@ async function memoryWork(
     return result;
   }
 
-  return {
-    ...result,
-    structuredContent: validateStructuredContent(
-      'memory',
-      MemoryOutputSchema,
-      result.structuredContent,
-    ),
-  };
+  return result;
 }
 
 export function registerMemoryTool(

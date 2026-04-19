@@ -14,6 +14,7 @@ import {
   extractTextOrError,
   formatCountLabel,
   validateStructuredContent,
+  validateStructuredToolResult,
 } from '../../src/lib/response.js';
 
 function makeResponse(overrides: Partial<GenerateContentResponse> = {}): GenerateContentResponse {
@@ -273,5 +274,79 @@ describe('validateStructuredContent', () => {
         ),
       /does not match outputSchema/,
     );
+  });
+});
+
+describe('validateStructuredToolResult', () => {
+  it('returns parsed structured content when it matches the schema', () => {
+    const result = validateStructuredToolResult(
+      'test-tool',
+      z.strictObject({
+        status: z.literal('completed'),
+        summary: z.string(),
+      }),
+      {
+        content: [{ type: 'text', text: 'ok' }],
+        structuredContent: {
+          status: 'completed',
+          summary: 'ok',
+        },
+      },
+    );
+
+    assert.deepStrictEqual(result.structuredContent, {
+      status: 'completed',
+      summary: 'ok',
+    });
+    assert.strictEqual(result.isError, undefined);
+  });
+
+  it('converts invalid structured content into a normal tool error', () => {
+    const result = validateStructuredToolResult(
+      'test-tool',
+      z.strictObject({
+        status: z.literal('completed'),
+        summary: z.string(),
+      }),
+      {
+        content: [{ type: 'text', text: 'ok' }],
+        structuredContent: {
+          status: 'completed',
+          explanation: 'wrong field',
+        },
+      },
+    );
+
+    assert.strictEqual(result.isError, true);
+    assert.strictEqual(result.structuredContent, undefined);
+    assert.strictEqual(result.content[0]?.text, 'ok');
+    assert.match(
+      result.content[1]?.text ?? '',
+      /Internal test-tool output validation failed: structuredContent did not match outputSchema\./,
+    );
+  });
+
+  it('is a no-op for error results, missing structured content, and missing safeParse', () => {
+    const errorResult = {
+      content: [{ type: 'text' as const, text: 'bad' }],
+      isError: true,
+      structuredContent: { status: 'completed', summary: 'ignored' },
+    };
+    assert.deepStrictEqual(
+      validateStructuredToolResult('test-tool', z.string(), errorResult),
+      errorResult,
+    );
+
+    const noStructured = { content: [{ type: 'text' as const, text: 'ok' }] };
+    assert.deepStrictEqual(
+      validateStructuredToolResult('test-tool', z.string(), noStructured),
+      noStructured,
+    );
+
+    const nonSchema = {
+      content: [{ type: 'text' as const, text: 'ok' }],
+      structuredContent: { status: 'completed', summary: 'ok' },
+    };
+    assert.deepStrictEqual(validateStructuredToolResult('test-tool', {}, nonSchema), nonSchema);
   });
 });

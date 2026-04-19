@@ -6,9 +6,11 @@ import { beforeEach, describe, it } from 'node:test';
 
 import { FinishReason } from '@google/genai';
 import type { GenerateContentResponse, Part } from '@google/genai';
+import { z } from 'zod/v4';
 
 import { resetProgressThrottle } from '../../src/lib/errors.js';
 import { Logger } from '../../src/lib/logger.js';
+import { validateStructuredToolResult } from '../../src/lib/response.js';
 import { ToolExecutor } from '../../src/lib/tool-executor.js';
 
 function makeChunk(parts: Part[], finishReason?: FinishReason): GenerateContentResponse {
@@ -177,6 +179,76 @@ describe('ToolExecutor', () => {
       answer: 'answer',
       functionCalls: [{ name: 'lookupDocs', args: { topic: 'mcp' } }],
       toolEvents: [{ kind: 'function_call', name: 'lookupDocs', args: { topic: 'mcp' } }],
+    });
+  });
+
+  it('runStream merged metadata remains valid for central output enforcement', async () => {
+    const executor = createExecutor();
+    const { ctx } = makeMockContext();
+
+    const result = await executor.runStream(
+      ctx,
+      'search',
+      'Web Search',
+      async () =>
+        fakeStream([
+          makeChunk([{ functionCall: { name: 'lookupDocs', args: { topic: 'mcp' } } }]),
+          makeChunk([{ text: 'answer' }], FinishReason.STOP),
+        ]),
+      (_streamResult, text) => ({
+        structuredContent: {
+          answer: text,
+          usage: {
+            candidatesTokenCount: 2,
+            promptTokenCount: 1,
+            totalTokenCount: 3,
+          },
+        },
+      }),
+    );
+
+    const validated = validateStructuredToolResult(
+      'search',
+      z.strictObject({
+        answer: z.string(),
+        functionCalls: z
+          .array(
+            z.strictObject({
+              name: z.string(),
+              args: z.record(z.string(), z.unknown()),
+            }),
+          )
+          .optional(),
+        toolEvents: z
+          .array(
+            z.strictObject({
+              kind: z.literal('function_call'),
+              name: z.string(),
+              args: z.record(z.string(), z.unknown()),
+            }),
+          )
+          .optional(),
+        usage: z
+          .strictObject({
+            candidatesTokenCount: z.number().optional(),
+            promptTokenCount: z.number().optional(),
+            totalTokenCount: z.number().optional(),
+          })
+          .optional(),
+      }),
+      result,
+    );
+
+    assert.strictEqual(validated.isError, undefined);
+    assert.deepStrictEqual(validated.structuredContent, {
+      answer: 'answer',
+      functionCalls: [{ name: 'lookupDocs', args: { topic: 'mcp' } }],
+      toolEvents: [{ kind: 'function_call', name: 'lookupDocs', args: { topic: 'mcp' } }],
+      usage: {
+        candidatesTokenCount: 2,
+        promptTokenCount: 1,
+        totalTokenCount: 3,
+      },
     });
   });
 });

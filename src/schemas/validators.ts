@@ -198,13 +198,6 @@ export function validateFlatAnalyzeInput(
         value.validateSyntax,
       );
     }
-  } else if (!value.diagramType) {
-    addCustomIssue(
-      ctx,
-      'diagramType is required when outputKind=diagram.',
-      ['diagramType'],
-      value.diagramType,
-    );
   }
 }
 

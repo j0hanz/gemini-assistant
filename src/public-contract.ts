@@ -162,7 +162,7 @@ export const DISCOVERY_ENTRIES = [
     bestFor: 'Web-grounded lookup with an explicit quick or deep research mode.',
     whenToUse: 'Use for tasks requiring current public information.',
     inputs: [
-      'mode',
+      'mode?',
       'goal',
       'urls?',
       'systemInstruction?',
@@ -173,7 +173,7 @@ export const DISCOVERY_ENTRIES = [
     returns:
       'A grounded summary with sources and, for deep mode, tool-usage details from the multi-step research path.',
     limitations: [
-      'Mode is required; this contract does not accept legacy top-level query or topic fields.',
+      'Mode defaults to quick; this contract does not accept legacy top-level query or topic fields.',
       'Grounding uses Google Search and optional URL Context, not persistent File Search indexes.',
     ],
     related: [
@@ -190,11 +190,11 @@ export const DISCOVERY_ENTRIES = [
     whenToUse: 'Use for bounded artifact analysis or diagram generation.',
     inputs: [
       'goal',
-      'targetKind',
+      'targetKind?',
       'filePath?',
       'urls?',
       'filePaths?',
-      'outputKind',
+      'outputKind?',
       'diagramType?',
       'validateSyntax?',
       'thinkingLevel?',
@@ -218,7 +218,7 @@ export const DISCOVERY_ENTRIES = [
     bestFor: 'Reviewing local diffs, comparing two files, or diagnosing a failing change.',
     whenToUse: 'Use for evaluative tasks (bugs, regressions, root causes).',
     inputs: [
-      'subjectKind',
+      'subjectKind?',
       'dryRun?',
       'language?',
       'filePathA?',

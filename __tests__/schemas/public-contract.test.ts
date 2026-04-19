@@ -17,8 +17,12 @@ import {
 } from '../../src/schemas/outputs.js';
 
 describe('public contract schemas', () => {
-  it('requires research.mode and rejects legacy top-level fields', () => {
-    assert.strictEqual(ResearchInputSchema.safeParse({ goal: 'Current events' }).success, false);
+  it('defaults research.mode and rejects legacy top-level fields', () => {
+    const result = ResearchInputSchema.safeParse({ goal: 'Current events' });
+    assert.strictEqual(result.success, true);
+    if (result.success) {
+      assert.strictEqual(result.data.mode, 'quick');
+    }
     assert.strictEqual(
       ResearchInputSchema.safeParse({ mode: 'quick', goal: 'x', query: 'legacy' }).success,
       false,

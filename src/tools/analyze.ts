@@ -168,7 +168,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
               {
                 systemInstruction,
                 thinkingLevel,
-                ...(mediaResolution ? { mediaResolution } : {}),
+                mediaResolution,
               },
               ctx.mcpReq.signal,
             ),

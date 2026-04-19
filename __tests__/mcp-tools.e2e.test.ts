@@ -170,7 +170,7 @@ const MUTABLE_ANNOTATIONS = {
 const EXPECTED_TOOL_CONTRACTS = {
   analyze: {
     annotations: READONLY_ANNOTATIONS,
-    requiredInput: ['goal', 'targetKind', 'outputKind'],
+    requiredInput: ['goal'],
     requiredOutput: ['status', 'kind', 'targetKind'],
     taskSupport: 'optional',
     title: 'Analyze',
@@ -191,14 +191,14 @@ const EXPECTED_TOOL_CONTRACTS = {
   },
   research: {
     annotations: READONLY_ANNOTATIONS,
-    requiredInput: ['mode', 'goal'],
+    requiredInput: ['goal'],
     requiredOutput: ['status', 'mode', 'summary', 'sources'],
     taskSupport: 'optional',
     title: 'Research',
   },
   review: {
     annotations: READONLY_ANNOTATIONS,
-    requiredInput: ['subjectKind'],
+    requiredInput: [],
     requiredOutput: ['status', 'subjectKind', 'summary'],
     taskSupport: 'optional',
     title: 'Review',
@@ -292,18 +292,28 @@ describe('MCP tool smoke coverage', () => {
       const analyzeSchema = toolMap.get('analyze')?.inputSchema;
       const analyzeTargetKind = getObjectProperty(analyzeSchema, 'targetKind');
       const analyzeOutputKind = getObjectProperty(analyzeSchema, 'outputKind');
+      const analyzeMediaResolution = getObjectProperty(analyzeSchema, 'mediaResolution');
 
       assert.ok(analyzeTargetKind);
       assert.equal(
         analyzeTargetKind.description,
         'What to analyze: one file, one or more public URLs, or a small local file set.',
       );
+      assert.equal(analyzeTargetKind.default, 'file');
 
       assert.ok(analyzeOutputKind);
       assert.equal(
         analyzeOutputKind.description,
         'Requested output format: summary text or a generated diagram.',
       );
+      assert.equal(analyzeOutputKind.default, 'summary');
+
+      assert.ok(analyzeMediaResolution);
+      assert.equal(
+        analyzeMediaResolution.description,
+        'Resolution for image/video processing. Higher = more detail, more tokens.',
+      );
+      assert.equal(analyzeMediaResolution.default, 'MEDIA_RESOLUTION_MEDIUM');
 
       const reviewSchema = toolMap.get('review')?.inputSchema;
       const reviewSubjectKind = getObjectProperty(reviewSchema, 'subjectKind');
@@ -319,10 +329,12 @@ describe('MCP tool smoke coverage', () => {
       );
       assert.ok(researchMode);
       assert.equal(researchMode.description, 'Research mode selector (`quick` or `deep`).');
+      assert.equal(researchMode.default, 'quick');
       assert.equal((researchSchema as { oneOf?: unknown }).oneOf, undefined);
       assert.ok(memoryAction);
       assert.equal(memoryAction.description, 'Memory action selector.');
       assert.equal((memorySchema as { oneOf?: unknown }).oneOf, undefined);
+      assert.equal(reviewSubjectKind.default, 'diff');
 
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);
     } finally {
@@ -414,7 +426,6 @@ describe('MCP tool smoke coverage', () => {
         targetKind: 'file',
         filePath: 'src/client.ts',
         outputKind: 'diagram',
-        diagramType: 'mermaid',
         validateSyntax: true,
       });
       expectSuccess(diagramResult);
@@ -505,11 +516,11 @@ describe('MCP tool smoke coverage', () => {
     const harness = await createHarness();
 
     try {
-      const missingResearchMode = await harness.client.requestRaw('tools/call', {
-        arguments: { goal: 'Tell me something current' },
-        name: 'research',
+      const invalidAnalyzeShape = await harness.client.requestRaw('tools/call', {
+        arguments: { goal: 'Summarize this file' },
+        name: 'analyze',
       });
-      assertRequestValidationFailure(missingResearchMode, -32602, /mode/i);
+      assertRequestValidationFailure(invalidAnalyzeShape, -32602, /filePath/i);
 
       const invalidAnalyzeTargets = await harness.client.requestRaw('tools/call', {
         arguments: {

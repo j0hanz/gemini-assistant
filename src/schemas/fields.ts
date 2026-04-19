@@ -22,6 +22,8 @@ export const DIAGRAM_TYPES = ['mermaid', 'plantuml'] as const;
 export const ASK_URL_TOOL_PROFILES = ['url', 'search_url'] as const;
 export const ASK_NON_URL_TOOL_PROFILES = ['none', 'search', 'code', 'search_code'] as const;
 export const RESEARCH_MODE_OPTIONS = ['quick', 'deep'] as const;
+export const ANALYZE_TARGET_KIND_OPTIONS = ['file', 'url', 'multi'] as const;
+export const ANALYZE_OUTPUT_KIND_OPTIONS = ['summary', 'diagram'] as const;
 export const REVIEW_SUBJECT_OPTIONS = ['diff', 'comparison', 'failure'] as const;
 export const MEMORY_ACTION_OPTIONS = [
   'sessions.list',
@@ -222,6 +224,37 @@ export function thinkingLevel(
   return withFieldMetadata(z.enum(THINKING_LEVELS).default(DEFAULT_THINKING_LEVEL), description);
 }
 
+export function researchMode(description = 'Research mode selector (`quick` or `deep`).') {
+  return withFieldMetadata(z.enum(RESEARCH_MODE_OPTIONS).default('quick'), description);
+}
+
+export function analyzeTargetKind(
+  description = 'What to analyze: one file, one or more public URLs, or a small local file set.',
+) {
+  return withFieldMetadata(z.enum(ANALYZE_TARGET_KIND_OPTIONS).default('file'), description);
+}
+
+export function analyzeOutputKind(
+  description = 'Requested output format: summary text or a generated diagram.',
+) {
+  return withFieldMetadata(z.enum(ANALYZE_OUTPUT_KIND_OPTIONS).default('summary'), description);
+}
+
+export function analyzeDiagramType(
+  description = 'Diagram syntax to generate when outputKind=diagram.',
+) {
+  return withFieldMetadata(z.enum(DIAGRAM_TYPES), description);
+}
+
 export function mediaResolution(description: string) {
-  return withFieldMetadata(z.enum(MEDIA_RESOLUTIONS).optional(), description);
+  return withFieldMetadata(
+    z.enum(MEDIA_RESOLUTIONS).default('MEDIA_RESOLUTION_MEDIUM'),
+    description,
+  );
+}
+
+export function reviewSubjectKind(
+  description = 'What to review: the current diff, a file comparison, or a failure report.',
+) {
+  return withFieldMetadata(z.enum(REVIEW_SUBJECT_OPTIONS).default('diff'), description);
 }

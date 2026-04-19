@@ -4,6 +4,9 @@ import { z } from 'zod/v4';
 import type { ParsePayload } from 'zod/v4/core';
 
 import {
+  analyzeDiagramType,
+  analyzeOutputKind,
+  analyzeTargetKind,
   ASK_NON_URL_TOOL_PROFILES,
   ASK_URL_TOOL_PROFILES,
   boundedFloat,
@@ -15,7 +18,8 @@ import {
   optionalField,
   PublicJobNameSchema,
   requiredText,
-  REVIEW_SUBJECT_OPTIONS,
+  researchMode,
+  reviewSubjectKind,
   sessionId,
   textField,
   thinkingLevel,
@@ -104,7 +108,7 @@ export type ChatInput = z.infer<typeof ChatInputSchema>;
 
 export const ResearchInputSchema = z
   .strictObject({
-    mode: enumField(['quick', 'deep'], 'Research mode selector (`quick` or `deep`).'),
+    mode: researchMode(),
     goal: goalText('Question or research goal to answer quickly'),
     ...createUrlContextFields({
       itemDescription: 'Public URL to analyze alongside search results',
@@ -133,10 +137,7 @@ export type ResearchInput = z.infer<typeof ResearchInputSchema>;
 export const AnalyzeInputSchema = z
   .strictObject({
     goal: goalText('Question or analysis goal for the selected targets'),
-    targetKind: enumField(
-      ['file', 'url', 'multi'],
-      'What to analyze: one file, one or more public URLs, or a small local file set.',
-    ),
+    targetKind: analyzeTargetKind(),
     filePath: optionalField(
       workspacePath('Workspace-relative or absolute path to analyze when targetKind=file'),
     ),
@@ -154,13 +155,8 @@ export const AnalyzeInputSchema = z
       max: 5,
       optional: true,
     }),
-    outputKind: enumField(
-      ['summary', 'diagram'],
-      'Requested output format: summary text or a generated diagram.',
-    ),
-    diagramType: optionalField(
-      enumField(DIAGRAM_TYPES, 'Diagram syntax to generate when outputKind=diagram.'),
-    ),
+    outputKind: analyzeOutputKind(),
+    diagramType: optionalField(analyzeDiagramType()),
     validateSyntax: z
       .boolean()
       .optional()
@@ -170,14 +166,16 @@ export const AnalyzeInputSchema = z
       'Resolution for image/video processing. Higher = more detail, more tokens.',
     ),
   })
-  .superRefine(validateFlatAnalyzeInput);
+  .superRefine(validateFlatAnalyzeInput)
+  .transform((value) =>
+    value.outputKind === 'diagram' && value.diagramType === undefined
+      ? { ...value, diagramType: 'mermaid' as const }
+      : value,
+  );
 export type AnalyzeInput = z.infer<typeof AnalyzeInputSchema>;
 export const ReviewInputSchema = z
   .strictObject({
-    subjectKind: enumField(
-      REVIEW_SUBJECT_OPTIONS,
-      'What to review: the current diff, a file comparison, or a failure report.',
-    ),
+    subjectKind: reviewSubjectKind(),
     dryRun: withFieldMetadata(z.boolean().optional(), 'Skip model review for subjectKind=diff.'),
     language: optionalField(textField('Primary language hint for diff or failure review.')),
     filePathA: optionalField(

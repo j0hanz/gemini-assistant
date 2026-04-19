@@ -118,11 +118,11 @@ describe('in-memory MCP server e2e', () => {
 
     await harness.client.initialize();
 
-    const missingResearchMode = await harness.client.requestRaw('tools/call', {
-      arguments: { goal: 'Tell me something current' },
-      name: 'research',
+    const invalidAnalyzeRequest = await harness.client.requestRaw('tools/call', {
+      arguments: { goal: 'Summarize this file' },
+      name: 'analyze',
     });
-    assertRequestValidationFailure(missingResearchMode, -32602, /mode/i);
+    assertRequestValidationFailure(invalidAnalyzeRequest, -32602, /filePath/i);
 
     const invalidChatSchema = await harness.client.requestRaw('tools/call', {
       arguments: {

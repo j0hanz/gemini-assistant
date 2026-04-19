@@ -36,11 +36,11 @@ describe('public MCP error taxonomy', () => {
 
     try {
       const response = await harness.client.requestRaw('tools/call', {
-        arguments: { goal: 'Current events' },
-        name: 'research',
+        arguments: { goal: 'Summarize this file' },
+        name: 'analyze',
       });
 
-      assertRequestValidationFailure(response, -32602, /mode/i);
+      assertRequestValidationFailure(response, -32602, /filePath/i);
     } finally {
       await harness.close();
     }

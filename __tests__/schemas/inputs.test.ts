@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { z } from 'zod/v4';
+
 import { completeCacheNames } from '../../src/client.js';
 import {
   AgenticSearchInputSchema,
@@ -25,6 +27,18 @@ import {
 
 const absolutePath = (...segments: string[]) => join(process.cwd(), ...segments);
 const COMPLETABLE_SYMBOL = Symbol.for('mcp.completable');
+
+function getObjectShape(schema: unknown): Record<string, z.ZodType> {
+  if (schema && typeof schema === 'object' && 'shape' in schema) {
+    return (schema as { shape: Record<string, z.ZodType> }).shape;
+  }
+
+  if (schema && typeof schema === 'object' && 'in' in schema) {
+    return getObjectShape((schema as { in: unknown }).in);
+  }
+
+  throw new Error('Expected object-like schema');
+}
 
 function getCompleter(schema: unknown) {
   if (!schema || typeof schema !== 'object') {
@@ -357,11 +371,11 @@ describe('SearchInputSchema', () => {
 describe('ResearchInputSchema', () => {
   it('accepts quick research input', () => {
     const result = ResearchInputSchema.safeParse({
-      mode: 'quick',
       goal: 'What changed in Node.js 24?',
     });
     assert.ok(result.success);
     if (result.success) {
+      assert.strictEqual(result.data.mode, 'quick');
       assert.strictEqual(result.data.thinkingLevel, 'MEDIUM');
     }
   });
@@ -747,14 +761,57 @@ describe('shared thinkingLevel defaults', () => {
   });
 
   it('keeps shared thinkingLevel metadata consistent across public tools', () => {
-    const chatThinking = ChatInputSchema.shape.thinkingLevel;
-    const analyzeThinking = AnalyzeInputSchema.shape.thinkingLevel;
-    const reviewThinking = ReviewInputSchema.shape.thinkingLevel;
+    const chatThinking = getObjectShape(ChatInputSchema).thinkingLevel;
+    const analyzeThinking = getObjectShape(AnalyzeInputSchema).thinkingLevel;
+    const reviewThinking = getObjectShape(ReviewInputSchema).thinkingLevel;
 
     assert.strictEqual(analyzeThinking.description, chatThinking.description);
     assert.strictEqual(reviewThinking.description, chatThinking.description);
     assert.strictEqual(analyzeThinking.safeParse(undefined).data, 'MEDIUM');
     assert.strictEqual(reviewThinking.safeParse(undefined).data, 'MEDIUM');
+  });
+});
+
+describe('shared selector defaults', () => {
+  it('defaults research mode to quick', () => {
+    const result = ResearchInputSchema.safeParse({ goal: 'Summarize the latest release notes' });
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.mode, 'quick');
+    }
+  });
+
+  it('defaults analyze selectors to file and summary', () => {
+    const summaryResult = AnalyzeInputSchema.safeParse({
+      goal: 'Summarize the architecture',
+      filePath: 'src/index.ts',
+    });
+    assert.ok(summaryResult.success);
+    if (summaryResult.success) {
+      assert.strictEqual(summaryResult.data.targetKind, 'file');
+      assert.strictEqual(summaryResult.data.outputKind, 'summary');
+      assert.strictEqual(summaryResult.data.mediaResolution, 'MEDIA_RESOLUTION_MEDIUM');
+    }
+  });
+
+  it('defaults analyze diagramType to mermaid when outputKind=diagram', () => {
+    const result = AnalyzeInputSchema.safeParse({
+      goal: 'Diagram this file',
+      filePath: 'src/index.ts',
+      outputKind: 'diagram',
+    });
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.diagramType, 'mermaid');
+    }
+  });
+
+  it('defaults review subjectKind to diff', () => {
+    const result = ReviewInputSchema.safeParse({});
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.subjectKind, 'diff');
+    }
   });
 });
 
@@ -838,9 +895,7 @@ describe('AnalyzeInputSchema', () => {
   it('accepts a file summary request', () => {
     const result = AnalyzeInputSchema.safeParse({
       goal: 'Summarize this file',
-      targetKind: 'file',
       filePath: absolutePath('src', 'index.ts'),
-      outputKind: 'summary',
     });
     assert.ok(result.success);
   });
@@ -890,20 +945,30 @@ describe('AnalyzeInputSchema', () => {
   });
 
   it('keeps standard descriptions for flat selector fields', () => {
+    const analyzeShape = getObjectShape(AnalyzeInputSchema);
+
     assert.strictEqual(
-      AnalyzeInputSchema.shape.targetKind.description,
+      analyzeShape.targetKind?.description,
       'What to analyze: one file, one or more public URLs, or a small local file set.',
     );
     assert.strictEqual(
-      AnalyzeInputSchema.shape.outputKind.description,
+      analyzeShape.outputKind?.description,
       'Requested output format: summary text or a generated diagram.',
+    );
+    assert.strictEqual(
+      analyzeShape.diagramType?.description,
+      'Diagram syntax to generate when outputKind=diagram.',
+    );
+    assert.strictEqual(
+      analyzeShape.mediaResolution?.description,
+      'Resolution for image/video processing. Higher = more detail, more tokens.',
     );
   });
 });
 
 describe('ReviewInputSchema', () => {
   it('accepts the flat diff selection shape', () => {
-    const result = ReviewInputSchema.safeParse({ subjectKind: 'diff' });
+    const result = ReviewInputSchema.safeParse({});
     assert.ok(result.success);
   });
 

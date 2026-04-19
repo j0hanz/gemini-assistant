@@ -98,14 +98,6 @@ function requireTaskContext(ctx: ServerContext | ExtendedServerContext): TaskCon
   return taskContext;
 }
 
-function requireTaskId(ctx: ServerContext | ExtendedServerContext): string {
-  const taskId = requireTaskContext(ctx).id;
-  if (!taskId) {
-    throw new Error('Task ID is unavailable for this tool execution.');
-  }
-  return taskId;
-}
-
 async function isTaskCancelled(store: RequestTaskStore, taskId: string): Promise<boolean> {
   try {
     const current = await store.getTask(taskId);
@@ -178,12 +170,14 @@ export function createToolTaskHandlers<TArgs>(
       return { task };
     },
     getTask: async (_args, ctx) => {
-      const taskContext = requireTaskContext(ctx);
-      return (await taskContext.store.getTask(requireTaskId(ctx))) as GetTaskResult;
+      const { store, id } = requireTaskContext(ctx);
+      if (!id) throw new Error('Task ID is unavailable');
+      return (await store.getTask(id)) as GetTaskResult;
     },
     getTaskResult: async (_args, ctx) => {
-      const taskContext = requireTaskContext(ctx);
-      return (await taskContext.store.getTaskResult(requireTaskId(ctx))) as CallToolResult;
+      const { store, id } = requireTaskContext(ctx);
+      if (!id) throw new Error('Task ID is unavailable');
+      return (await store.getTaskResult(id)) as CallToolResult;
     },
   };
 }

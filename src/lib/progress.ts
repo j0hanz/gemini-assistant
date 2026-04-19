@@ -251,13 +251,11 @@ export class ProgressReporter {
 
   /** Report successful completion (progress = 100/100). */
   async complete(detail: string): Promise<void> {
-    await sendProgress(this.ctx, 100, 100, `${this.label}: ${detail}`);
+    await reportCompletion(this.ctx, this.label, detail);
   }
 
   /** Report failure as terminal progress (progress = 100/100). */
   async fail(error: unknown): Promise<void> {
-    const raw = error instanceof Error ? error.message : String(error);
-    const short = raw.length > 80 ? raw.substring(0, 77) : raw;
-    await sendProgress(this.ctx, 100, 100, `${this.label}: failed — ${short}`);
+    await reportFailure(this.ctx, this.label, error);
   }
 }

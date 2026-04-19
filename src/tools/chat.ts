@@ -19,6 +19,7 @@ import {
   buildSharedStructuredMetadata,
   createResourceLink,
   extractTextContent,
+  validateStructuredContent,
 } from '../lib/response.js';
 import {
   extractUsage,
@@ -825,27 +826,28 @@ function assembleChatOutput(
     ? structured.schemaWarnings.filter((value): value is string => typeof value === 'string')
     : undefined;
   const sessionId = extractSessionId(result, sessionIdHint);
+  const structuredContent = validateStructuredContent('chat', ChatOutputSchema, {
+    ...buildBaseStructuredOutput(taskId, warnings),
+    answer,
+    ...(structured.data !== undefined ? { data: structured.data } : {}),
+    ...(sessionId
+      ? {
+          session: {
+            id: sessionId,
+            resources: sessionResources(sessionId),
+          },
+        }
+      : {}),
+    ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
+    ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
+    ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
+    ...(structured.usage ? { usage: structured.usage } : {}),
+    ...(structured.contextUsed ? { contextUsed: structured.contextUsed } : {}),
+  });
 
   return {
     ...result,
-    structuredContent: {
-      ...buildBaseStructuredOutput(taskId, warnings),
-      answer,
-      ...(structured.data !== undefined ? { data: structured.data } : {}),
-      ...(sessionId
-        ? {
-            session: {
-              id: sessionId,
-              resources: sessionResources(sessionId),
-            },
-          }
-        : {}),
-      ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
-      ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
-      ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
-      ...(structured.usage ? { usage: structured.usage } : {}),
-      ...(structured.contextUsed ? { contextUsed: structured.contextUsed } : {}),
-    },
+    structuredContent,
   };
 }
 

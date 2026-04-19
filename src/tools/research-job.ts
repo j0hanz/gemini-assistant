@@ -21,6 +21,7 @@ import {
   collectUrlMetadata,
   formatCountLabel,
   pickDefined,
+  validateStructuredContent,
 } from '../lib/response.js';
 import { type StreamResult } from '../lib/streaming.js';
 import { elicitTaskInput, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
@@ -390,10 +391,15 @@ async function researchWork(args: ResearchInput, ctx: ServerContext): Promise<Ca
   }
 
   const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const structuredContent = validateStructuredContent(
+    'research',
+    ResearchOutputSchema,
+    buildResearchStructuredContent(args, ctx, structured),
+  );
 
   return {
     ...result,
-    structuredContent: buildResearchStructuredContent(args, ctx, structured),
+    structuredContent,
   };
 }
 

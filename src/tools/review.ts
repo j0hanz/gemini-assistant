@@ -18,7 +18,7 @@ import { buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { buildDiffReviewPrompt } from '../lib/model-prompts.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
-import { buildBaseStructuredOutput } from '../lib/response.js';
+import { buildBaseStructuredOutput, validateStructuredContent } from '../lib/response.js';
 import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher, validateUrls } from '../lib/validation.js';
@@ -1110,10 +1110,15 @@ async function reviewWork(
   }
 
   const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const structuredContent = validateStructuredContent(
+    'review',
+    ReviewOutputSchema,
+    buildReviewStructuredContent(ctx.task?.id, args.subjectKind, structured),
+  );
 
   return {
     ...result,
-    structuredContent: buildReviewStructuredContent(ctx.task?.id, args.subjectKind, structured),
+    structuredContent,
   };
 }
 

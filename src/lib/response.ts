@@ -1,6 +1,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 
 import type { GenerateContentResponse, GroundingMetadata, UrlMetadata } from '@google/genai';
+import { z } from 'zod/v4';
 
 import type {
   ContextUsed,
@@ -107,6 +108,22 @@ export function buildBaseStructuredOutput(
     requestId,
     warnings: warnings && warnings.length > 0 ? [...warnings] : undefined,
   });
+}
+
+export function validateStructuredContent<TSchema extends z.ZodType>(
+  toolName: string,
+  outputSchema: TSchema,
+  structuredContent: unknown,
+): z.infer<TSchema> {
+  const parsed = outputSchema.safeParse(structuredContent);
+  if (parsed.success) {
+    return parsed.data;
+  }
+
+  throw new Error(
+    `${toolName} produced structuredContent that does not match outputSchema.\n` +
+      z.prettifyError(parsed.error),
+  );
 }
 
 function appendBulletListSection(

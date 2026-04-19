@@ -257,6 +257,29 @@ describe('createToolTaskHandlers', () => {
     assert.strictEqual(entry.status, 'completed');
   });
 
+  it('createTask stores a failed result when work rejects after task creation', async () => {
+    const store = makeMockStore();
+    const ctx = makeMockContext({ taskStore: store });
+    const queue = new InMemoryTaskMessageQueue();
+
+    const handlers = createToolTaskHandlers(async () => {
+      throw new Error('outputSchema mismatch');
+    }, queue);
+
+    const result = await handlers.createTask({}, ctx);
+    assert.ok(result.task);
+    assert.strictEqual(result.task.taskId, 'task-1');
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(store.stored.length, 1);
+    const entry = store.stored[0];
+    assert.ok(entry);
+    assert.strictEqual(entry.status, 'failed');
+    assert.strictEqual(entry.result.isError, true);
+    assert.match(entry.result.content[0]?.text ?? '', /outputSchema mismatch/);
+  });
+
   it('createTask uses requested TTL', async () => {
     let capturedTtl: number | undefined;
     const store = makeMockStore({

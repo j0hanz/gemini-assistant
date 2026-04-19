@@ -12,7 +12,11 @@ import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { logger } from '../lib/logger.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from '../lib/resource-uris.js';
-import { buildBaseStructuredOutput, createResourceLink } from '../lib/response.js';
+import {
+  buildBaseStructuredOutput,
+  createResourceLink,
+  validateStructuredContent,
+} from '../lib/response.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from '../lib/validation.js';
 import { assembleWorkspaceContext, workspaceCacheManager } from '../lib/workspace-context.js';
@@ -678,23 +682,44 @@ async function memoryWork(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const base = buildBaseStructuredOutput(ctx.task?.id);
+  let result: CallToolResult;
 
-  if (args.action === 'sessions.list') return handleSessionsList(sessionStore, base, args.action);
-  if (args.action === 'sessions.get')
-    return handleSessionsGet(sessionStore, base, args.action, args.sessionId);
-  if (args.action === 'sessions.transcript')
-    return handleSessionsTranscript(sessionStore, base, args.action, args.sessionId);
-  if (args.action === 'sessions.events')
-    return handleSessionsEvents(sessionStore, base, args.action, args.sessionId);
-  if (args.action === 'caches.list') return handleCachesList(base, args.action, ctx.mcpReq.signal);
-  if (args.action === 'caches.get')
-    return handleCachesGet(base, args.action, args.cacheName, ctx.mcpReq.signal);
-  if (args.action === 'caches.create') return handleCachesCreate(createCacheWork, base, args, ctx);
-  if (args.action === 'caches.update') return handleCachesUpdate(base, args, ctx);
-  if (args.action === 'caches.delete') return handleCachesDelete(base, args, ctx);
-  if (args.action === 'workspace.context')
-    return handleWorkspaceContext(rootsFetcher, base, args.action);
-  return handleWorkspaceCache(base, args.action);
+  if (args.action === 'sessions.list') {
+    result = handleSessionsList(sessionStore, base, args.action);
+  } else if (args.action === 'sessions.get') {
+    result = handleSessionsGet(sessionStore, base, args.action, args.sessionId);
+  } else if (args.action === 'sessions.transcript') {
+    result = handleSessionsTranscript(sessionStore, base, args.action, args.sessionId);
+  } else if (args.action === 'sessions.events') {
+    result = handleSessionsEvents(sessionStore, base, args.action, args.sessionId);
+  } else if (args.action === 'caches.list') {
+    result = await handleCachesList(base, args.action, ctx.mcpReq.signal);
+  } else if (args.action === 'caches.get') {
+    result = await handleCachesGet(base, args.action, args.cacheName, ctx.mcpReq.signal);
+  } else if (args.action === 'caches.create') {
+    result = await handleCachesCreate(createCacheWork, base, args, ctx);
+  } else if (args.action === 'caches.update') {
+    result = await handleCachesUpdate(base, args, ctx);
+  } else if (args.action === 'caches.delete') {
+    result = await handleCachesDelete(base, args, ctx);
+  } else if (args.action === 'workspace.context') {
+    result = await handleWorkspaceContext(rootsFetcher, base, args.action);
+  } else {
+    result = handleWorkspaceCache(base, args.action);
+  }
+
+  if (result.isError) {
+    return result;
+  }
+
+  return {
+    ...result,
+    structuredContent: validateStructuredContent(
+      'memory',
+      MemoryOutputSchema,
+      result.structuredContent,
+    ),
+  };
 }
 
 export function registerMemoryTool(

@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { FinishReason } from '@google/genai';
 import type { GenerateContentResponse } from '@google/genai';
+import { z } from 'zod/v4';
 
 import {
   appendSources,
@@ -12,6 +13,7 @@ import {
   createResourceLink,
   extractTextOrError,
   formatCountLabel,
+  validateStructuredContent,
 } from '../../src/lib/response.js';
 
 function makeResponse(overrides: Partial<GenerateContentResponse> = {}): GenerateContentResponse {
@@ -232,5 +234,44 @@ describe('formatCountLabel', () => {
     assert.strictEqual(formatCountLabel(1, 'source'), '1 source');
     assert.strictEqual(formatCountLabel(2, 'source'), '2 sources');
     assert.strictEqual(formatCountLabel(0, 'URL'), '0 URLs');
+  });
+});
+
+describe('validateStructuredContent', () => {
+  it('returns parsed structured content when it matches the schema', () => {
+    const parsed = validateStructuredContent(
+      'test-tool',
+      z.strictObject({
+        status: z.literal('completed'),
+        summary: z.string(),
+      }),
+      {
+        status: 'completed',
+        summary: 'ok',
+      },
+    );
+
+    assert.deepStrictEqual(parsed, {
+      status: 'completed',
+      summary: 'ok',
+    });
+  });
+
+  it('throws when structured content does not match the schema', () => {
+    assert.throws(
+      () =>
+        validateStructuredContent(
+          'test-tool',
+          z.strictObject({
+            status: z.literal('completed'),
+            summary: z.string(),
+          }),
+          {
+            status: 'completed',
+            explanation: 'wrong field',
+          },
+        ),
+      /does not match outputSchema/,
+    );
   });
 });

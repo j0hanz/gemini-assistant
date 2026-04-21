@@ -69,7 +69,7 @@ const enum Phase {
   Generating = 2,
 }
 
-const THOUGHT_HEADER_PATTERN = /\*\*([^*]+)\*\*/g;
+const THOUGHT_HEADER_PATTERN = /\*\*([^*]+)\*\*/;
 const THOUGHT_FALLBACK_CHUNK_THRESHOLD = 5;
 
 interface ThoughtHeaderState {
@@ -100,10 +100,12 @@ async function emitThoughtHeaders(
   ctx: ServerContext,
   msg: (m: string) => string,
 ): Promise<void> {
-  THOUGHT_HEADER_PATTERN.lastIndex = state.scanIndex;
+  const tail = thoughtText.slice(state.scanIndex);
+  const pattern = new RegExp(THOUGHT_HEADER_PATTERN.source, 'g');
   let match: RegExpExecArray | null;
+  let lastLocalIndex = 0;
   let foundHeader = false;
-  while ((match = THOUGHT_HEADER_PATTERN.exec(thoughtText)) !== null) {
+  while ((match = pattern.exec(tail)) !== null) {
     const header = match[1]?.trim();
     if (header) {
       foundHeader = true;
@@ -111,7 +113,11 @@ async function emitThoughtHeaders(
       state.currentProgress = advanceProgress(state.currentProgress);
       await sendProgress(ctx, Math.floor(state.currentProgress), PROGRESS_TOTAL, msg(header));
     }
-    state.scanIndex = THOUGHT_HEADER_PATTERN.lastIndex;
+    lastLocalIndex = pattern.lastIndex;
+  }
+
+  if (foundHeader) {
+    state.scanIndex += lastLocalIndex;
   }
 
   if (!foundHeader) {
@@ -521,16 +527,17 @@ function getTaskQueueContext(
   return ctx.task;
 }
 
-function enqueueStreamText(
+async function enqueueStreamText(
+  ctx: ServerContext,
   taskContext: ReturnType<typeof getTaskQueueContext>,
   partText: string,
-): void {
+): Promise<void> {
   if (!taskContext?.queue || !taskContext.id) {
     return;
   }
 
   try {
-    void taskContext.queue.enqueue(taskContext.id, {
+    await taskContext.queue.enqueue(taskContext.id, {
       type: 'notification',
       message: {
         jsonrpc: '2.0',
@@ -539,8 +546,11 @@ function enqueueStreamText(
       },
       timestamp: Date.now(),
     } satisfies QueuedMessage);
-  } catch {
-    // Ignore queue overflow or enqueue errors
+  } catch (err) {
+    await ctx.mcpReq.log(
+      'warning',
+      `Dropped streamed chunk for task ${taskContext.id}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
@@ -556,7 +566,7 @@ async function handleTextPart(
 
   await transitionToGenerating(ctx, state, msg);
   state.text += partText;
-  enqueueStreamText(getTaskQueueContext(ctx), partText);
+  await enqueueStreamText(ctx, getTaskQueueContext(ctx), partText);
 }
 
 async function handleStreamPart(

@@ -14,6 +14,10 @@ describe('orchestration', () => {
     );
   });
 
+  it('normalizes urls-only requests to the url profile', () => {
+    assert.strictEqual(normalizeToolProfile({ urls: ['https://example.com'] }), 'url');
+  });
+
   it('builds search-only orchestration', () => {
     const result = buildOrchestrationConfig({ toolProfile: 'search' });
 
@@ -26,6 +30,14 @@ describe('orchestration', () => {
     const result = buildOrchestrationConfig({ toolProfile: 'url' });
 
     assert.strictEqual(result.toolProfile, 'url');
+    assert.deepStrictEqual(result.tools, [{ urlContext: {} }]);
+  });
+
+  it('infers url orchestration from urls-only input', () => {
+    const result = buildOrchestrationConfig({ urls: ['https://example.com'] });
+
+    assert.strictEqual(result.toolProfile, 'url');
+    assert.strictEqual(result.usesUrlContext, true);
     assert.deepStrictEqual(result.tools, [{ urlContext: {} }]);
   });
 

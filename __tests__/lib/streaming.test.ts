@@ -152,6 +152,90 @@ describe('consumeStreamWithProgress', () => {
     assert.strictEqual(result.parts.length, 0);
     assert.strictEqual(result.finishReason, undefined);
 
+    it('keeps thought header parsing isolated across concurrent streams', async () => {
+      let releaseAlphaHeader: (() => void) | undefined;
+      const alphaHeaderBlocked = new Promise<void>((resolve) => {
+        releaseAlphaHeader = resolve;
+      });
+      let alphaHeaderSeen = false;
+
+      function makeConcurrentContext() {
+        const progressCalls: { progress: number; total?: number; message?: string }[] = [];
+        const ctx = {
+          mcpReq: {
+            _meta: { progressToken: 'test-token' },
+            signal: new AbortController().signal,
+            log: Object.assign(async () => {}, {
+              debug: async () => {},
+              info: async () => {},
+              warning: async () => {},
+              error: async () => {},
+            }),
+            notify: async (notification: unknown) => {
+              const n = notification as {
+                params: { progress: number; total?: number; message?: string };
+              };
+              const message = n.params.message;
+
+              progressCalls.push({
+                progress: n.params.progress,
+                ...(n.params.total !== undefined ? { total: n.params.total } : {}),
+                ...(message ? { message } : {}),
+              });
+
+              if (message === 'Alpha') {
+                alphaHeaderSeen = true;
+                await alphaHeaderBlocked;
+              }
+            },
+          },
+        } as unknown as ServerContext;
+
+        return { ctx, progressCalls };
+      }
+
+      const first = makeConcurrentContext();
+      const second = makeConcurrentContext();
+
+      const firstRun = consumeStreamWithProgress(
+        fakeStream([
+          makeChunk([{ text: '**Alpha**\n\nfirst\n\n**Beta**\n\nsecond', thought: true }]),
+          makeChunk([{ text: 'done one' }], FinishReason.STOP),
+        ]),
+        first.ctx,
+      );
+
+      await new Promise<void>((resolve) => {
+        const check = () => {
+          if (alphaHeaderSeen) {
+            resolve();
+            return;
+          }
+
+          queueMicrotask(check);
+        };
+
+        check();
+      });
+
+      const secondRun = await consumeStreamWithProgress(
+        fakeStream([
+          makeChunk([{ text: '**Gamma**\n\nthird\n\n**Delta**\n\nfourth', thought: true }]),
+          makeChunk([{ text: 'done two' }], FinishReason.STOP),
+        ]),
+        second.ctx,
+      );
+
+      releaseAlphaHeader?.();
+      const firstRunResult = await firstRun;
+
+      assert.strictEqual(firstRunResult.text, 'done one');
+      assert.strictEqual(secondRun.text, 'done two');
+      assert.ok(first.progressCalls.some((call) => call.message === 'Alpha'));
+      assert.ok(first.progressCalls.some((call) => call.message === 'Beta'));
+      assert.ok(second.progressCalls.some((call) => call.message === 'Gamma'));
+      assert.ok(second.progressCalls.some((call) => call.message === 'Delta'));
+    });
     const messages = progressCalls.map((c) => c.message);
     assert.ok(messages.includes('Evaluating prompt'));
     assert.ok(!messages.includes('Complete'));
@@ -434,6 +518,48 @@ describe('consumeStreamWithProgress', () => {
       method: 'notifications/message',
       params: { level: 'info', logger: 'stream', data: 'stream me' },
     });
+  });
+
+  it('logs queue enqueue failures without failing the stream', async () => {
+    const logCalls: { level: string; message: string }[] = [];
+    const log = Object.assign(
+      async (level: string, message: string) => {
+        logCalls.push({ level, message });
+      },
+      {
+        debug: async () => {},
+        info: async () => {},
+        warning: async () => {},
+        error: async () => {},
+      },
+    );
+
+    const ctx = {
+      mcpReq: {
+        _meta: { progressToken: 'queue-token' },
+        signal: new AbortController().signal,
+        log,
+        notify: async () => {},
+      },
+      task: {
+        id: 'task-queue',
+        queue: {
+          enqueue: async () => {
+            throw new Error('queue full');
+          },
+        },
+      },
+    } as unknown as ServerContext;
+
+    const result = await consumeStreamWithProgress(
+      fakeStream([makeChunk([{ text: 'stream me' }], FinishReason.STOP)]),
+      ctx,
+    );
+
+    assert.strictEqual(result.text, 'stream me');
+    assert.deepStrictEqual(logCalls, [
+      { level: 'warning', message: 'Dropped streamed chunk for task task-queue: queue full' },
+    ]);
   });
 
   it('captures signature-only parts even when they have no text', async () => {

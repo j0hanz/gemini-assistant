@@ -89,8 +89,14 @@ export function normalizeToolProfile({
     return toolProfile;
   }
 
+  const hasUrls = (urls?.length ?? 0) > 0;
+
   if (googleSearch) {
-    return urls && urls.length > 0 ? 'search_url' : 'search';
+    return hasUrls ? 'search_url' : 'search';
+  }
+
+  if (hasUrls) {
+    return 'url';
   }
 
   return 'none';

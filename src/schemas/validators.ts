@@ -139,6 +139,21 @@ function addForbiddenFieldIssue(
   addCustomIssue(ctx, `${field} is not allowed when ${selector}=${selectorValue}.`, [field], input);
 }
 
+function forbidFields(
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+  value: unknown,
+  fields: readonly string[],
+  selector: string,
+  selectorValue: string,
+): void {
+  const obj = value as Record<string, unknown>;
+  for (const field of fields) {
+    if (obj[field] !== undefined) {
+      addForbiddenFieldIssue(ctx, field, selector, selectorValue, obj[field]);
+    }
+  }
+}
+
 export function validateFlatAnalyzeInput(
   value: FlatAnalyzeInput,
   ctx: z.core.$RefinementCtx<Record<string, unknown>>,
@@ -152,22 +167,12 @@ export function validateFlatAnalyzeInput(
         value.filePath,
       );
     }
-    if (value.urls !== undefined) {
-      addForbiddenFieldIssue(ctx, 'urls', 'targetKind', value.targetKind, value.urls);
-    }
-    if (value.filePaths !== undefined) {
-      addForbiddenFieldIssue(ctx, 'filePaths', 'targetKind', value.targetKind, value.filePaths);
-    }
+    forbidFields(ctx, value, ['urls', 'filePaths'], 'targetKind', value.targetKind);
   } else if (value.targetKind === 'url') {
     if (!value.urls) {
       addCustomIssue(ctx, 'urls is required when targetKind=url.', ['urls'], value.urls);
     }
-    if (value.filePath !== undefined) {
-      addForbiddenFieldIssue(ctx, 'filePath', 'targetKind', value.targetKind, value.filePath);
-    }
-    if (value.filePaths !== undefined) {
-      addForbiddenFieldIssue(ctx, 'filePaths', 'targetKind', value.targetKind, value.filePaths);
-    }
+    forbidFields(ctx, value, ['filePath', 'filePaths'], 'targetKind', value.targetKind);
   } else {
     if (!value.filePaths) {
       addCustomIssue(
@@ -177,27 +182,11 @@ export function validateFlatAnalyzeInput(
         value.filePaths,
       );
     }
-    if (value.filePath !== undefined) {
-      addForbiddenFieldIssue(ctx, 'filePath', 'targetKind', value.targetKind, value.filePath);
-    }
-    if (value.urls !== undefined) {
-      addForbiddenFieldIssue(ctx, 'urls', 'targetKind', value.targetKind, value.urls);
-    }
+    forbidFields(ctx, value, ['filePath', 'urls'], 'targetKind', value.targetKind);
   }
 
   if (value.outputKind === 'summary') {
-    if (value.diagramType !== undefined) {
-      addForbiddenFieldIssue(ctx, 'diagramType', 'outputKind', value.outputKind, value.diagramType);
-    }
-    if (value.validateSyntax !== undefined) {
-      addForbiddenFieldIssue(
-        ctx,
-        'validateSyntax',
-        'outputKind',
-        value.outputKind,
-        value.validateSyntax,
-      );
-    }
+    forbidFields(ctx, value, ['diagramType', 'validateSyntax'], 'outputKind', value.outputKind);
   }
 }
 
@@ -228,19 +217,13 @@ export function validateFlatReviewInput(
   ctx: z.core.$RefinementCtx<Record<string, unknown>>,
 ): void {
   if (value.subjectKind === 'diff') {
-    for (const [field, input] of [
-      ['filePathA', value.filePathA],
-      ['filePathB', value.filePathB],
-      ['question', value.question],
-      ['error', value.error],
-      ['codeContext', value.codeContext],
-      ['googleSearch', value.googleSearch],
-      ['urls', value.urls],
-    ] as const) {
-      if (input !== undefined) {
-        addForbiddenFieldIssue(ctx, field, 'subjectKind', value.subjectKind, input);
-      }
-    }
+    forbidFields(
+      ctx,
+      value,
+      ['filePathA', 'filePathB', 'question', 'error', 'codeContext', 'googleSearch', 'urls'],
+      'subjectKind',
+      value.subjectKind,
+    );
     return;
   }
 
@@ -261,33 +244,26 @@ export function validateFlatReviewInput(
         value.filePathB,
       );
     }
-    for (const [field, input] of [
-      ['dryRun', value.dryRun],
-      ['language', value.language],
-      ['error', value.error],
-      ['codeContext', value.codeContext],
-      ['urls', value.urls],
-    ] as const) {
-      if (input !== undefined) {
-        addForbiddenFieldIssue(ctx, field, 'subjectKind', value.subjectKind, input);
-      }
-    }
+    forbidFields(
+      ctx,
+      value,
+      ['dryRun', 'language', 'error', 'codeContext', 'urls'],
+      'subjectKind',
+      value.subjectKind,
+    );
     return;
   }
 
   if (!value.error) {
     addCustomIssue(ctx, 'error is required when subjectKind=failure.', ['error'], value.error);
   }
-  for (const [field, input] of [
-    ['dryRun', value.dryRun],
-    ['filePathA', value.filePathA],
-    ['filePathB', value.filePathB],
-    ['question', value.question],
-  ] as const) {
-    if (input !== undefined) {
-      addForbiddenFieldIssue(ctx, field, 'subjectKind', value.subjectKind, input);
-    }
-  }
+  forbidFields(
+    ctx,
+    value,
+    ['dryRun', 'filePathA', 'filePathB', 'question'],
+    'subjectKind',
+    value.subjectKind,
+  );
 }
 
 export function validateFlatResearchInput(
@@ -295,25 +271,11 @@ export function validateFlatResearchInput(
   ctx: z.core.$RefinementCtx<Record<string, unknown>>,
 ): void {
   if (value.mode === 'quick') {
-    for (const [field, input] of [
-      ['deliverable', value.deliverable],
-      ['searchDepth', value.searchDepth],
-    ] as const) {
-      if (input !== undefined) {
-        addForbiddenFieldIssue(ctx, field, 'mode', value.mode, input);
-      }
-    }
+    forbidFields(ctx, value, ['deliverable', 'searchDepth'], 'mode', value.mode);
     return;
   }
 
-  for (const [field, input] of [
-    ['urls', value.urls],
-    ['systemInstruction', value.systemInstruction],
-  ] as const) {
-    if (input !== undefined) {
-      addForbiddenFieldIssue(ctx, field, 'mode', value.mode, input);
-    }
-  }
+  forbidFields(ctx, value, ['urls', 'systemInstruction'], 'mode', value.mode);
 }
 
 interface FlatMemoryInput {
@@ -347,19 +309,21 @@ export function validateFlatMemoryInput(
     case 'caches.list':
     case 'workspace.context':
     case 'workspace.cache': {
-      for (const [field, input] of [
-        ['sessionId', value.sessionId],
-        ['cacheName', value.cacheName],
-        ['filePaths', value.filePaths],
-        ['systemInstruction', value.systemInstruction],
-        ['ttl', value.ttl],
-        ['displayName', value.displayName],
-        ['confirm', value.confirm],
-      ] as const) {
-        if (input !== undefined) {
-          addForbiddenFieldIssue(ctx, field, 'action', value.action, input);
-        }
-      }
+      forbidFields(
+        ctx,
+        value,
+        [
+          'sessionId',
+          'cacheName',
+          'filePaths',
+          'systemInstruction',
+          'ttl',
+          'displayName',
+          'confirm',
+        ],
+        'action',
+        value.action,
+      );
       return;
     }
     case 'sessions.get':
@@ -373,18 +337,13 @@ export function validateFlatMemoryInput(
           value.sessionId,
         );
       }
-      for (const [field, input] of [
-        ['cacheName', value.cacheName],
-        ['filePaths', value.filePaths],
-        ['systemInstruction', value.systemInstruction],
-        ['ttl', value.ttl],
-        ['displayName', value.displayName],
-        ['confirm', value.confirm],
-      ] as const) {
-        if (input !== undefined) {
-          addForbiddenFieldIssue(ctx, field, 'action', value.action, input);
-        }
-      }
+      forbidFields(
+        ctx,
+        value,
+        ['cacheName', 'filePaths', 'systemInstruction', 'ttl', 'displayName', 'confirm'],
+        'action',
+        value.action,
+      );
       return;
     }
     case 'caches.get': {
@@ -396,31 +355,18 @@ export function validateFlatMemoryInput(
           value.cacheName,
         );
       }
-      for (const [field, input] of [
-        ['sessionId', value.sessionId],
-        ['filePaths', value.filePaths],
-        ['systemInstruction', value.systemInstruction],
-        ['ttl', value.ttl],
-        ['displayName', value.displayName],
-        ['confirm', value.confirm],
-      ] as const) {
-        if (input !== undefined) {
-          addForbiddenFieldIssue(ctx, field, 'action', value.action, input);
-        }
-      }
+      forbidFields(
+        ctx,
+        value,
+        ['sessionId', 'filePaths', 'systemInstruction', 'ttl', 'displayName', 'confirm'],
+        'action',
+        value.action,
+      );
       return;
     }
     case 'caches.create': {
       validateMeaningfulCacheCreateInput(value, ctx);
-      for (const [field, input] of [
-        ['sessionId', value.sessionId],
-        ['cacheName', value.cacheName],
-        ['confirm', value.confirm],
-      ] as const) {
-        if (input !== undefined) {
-          addForbiddenFieldIssue(ctx, field, 'action', value.action, input);
-        }
-      }
+      forbidFields(ctx, value, ['sessionId', 'cacheName', 'confirm'], 'action', value.action);
       return;
     }
     case 'caches.update': {
@@ -435,17 +381,13 @@ export function validateFlatMemoryInput(
       if (!value.ttl) {
         addCustomIssue(ctx, 'ttl is required when action=caches.update.', ['ttl'], value.ttl);
       }
-      for (const [field, input] of [
-        ['sessionId', value.sessionId],
-        ['filePaths', value.filePaths],
-        ['systemInstruction', value.systemInstruction],
-        ['displayName', value.displayName],
-        ['confirm', value.confirm],
-      ] as const) {
-        if (input !== undefined) {
-          addForbiddenFieldIssue(ctx, field, 'action', value.action, input);
-        }
-      }
+      forbidFields(
+        ctx,
+        value,
+        ['sessionId', 'filePaths', 'systemInstruction', 'displayName', 'confirm'],
+        'action',
+        value.action,
+      );
       return;
     }
     case 'caches.delete': {
@@ -457,17 +399,13 @@ export function validateFlatMemoryInput(
           value.cacheName,
         );
       }
-      for (const [field, input] of [
-        ['sessionId', value.sessionId],
-        ['filePaths', value.filePaths],
-        ['systemInstruction', value.systemInstruction],
-        ['ttl', value.ttl],
-        ['displayName', value.displayName],
-      ] as const) {
-        if (input !== undefined) {
-          addForbiddenFieldIssue(ctx, field, 'action', value.action, input);
-        }
-      }
+      forbidFields(
+        ctx,
+        value,
+        ['sessionId', 'filePaths', 'systemInstruction', 'ttl', 'displayName'],
+        'action',
+        value.action,
+      );
     }
   }
 }

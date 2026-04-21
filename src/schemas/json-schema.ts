@@ -1,6 +1,7 @@
 import { z } from 'zod/v4';
 
 import { textField } from './fields.js';
+import { validatePropertyKeyList } from './validators.js';
 
 const JSON_LITERAL_SCHEMA = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 
@@ -67,36 +68,14 @@ export const GeminiResponseSchema: z.ZodType<Record<string, unknown>> = z.lazy((
     })
     .superRefine((schema, ctx) => {
       if (schema.required) {
-        if (!schema.properties) {
-          ctx.addIssue({
-            code: 'custom',
-            message: 'required can only be used when properties is present.',
-            path: ['required'],
-          });
-          return;
-        }
-
-        const propertyNames = new Set(Object.keys(schema.properties));
-        const seenRequired = new Set<string>();
-
-        schema.required.forEach((req, idx) => {
-          if (seenRequired.has(req)) {
-            ctx.addIssue({
-              code: 'custom',
-              message: 'required must not contain duplicate property names.',
-              path: ['required', idx],
-            });
-          }
-          seenRequired.add(req);
-
-          if (!propertyNames.has(req)) {
-            ctx.addIssue({
-              code: 'custom',
-              message: `Required property '${req}' is not defined in properties.`,
-              path: ['required', idx],
-            });
-          }
-        });
+        validatePropertyKeyList(
+          ctx,
+          schema.properties ? new Set(Object.keys(schema.properties)) : undefined,
+          schema.required,
+          'required',
+          'required can only be used when properties is present.',
+          'required must not contain duplicate property names.',
+        );
       }
     })
     .refine(hasSchemaShape, {

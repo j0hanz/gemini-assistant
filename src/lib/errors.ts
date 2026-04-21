@@ -119,11 +119,8 @@ export class SafetyError extends AppError {
   }
 }
 
-export class ValidationError extends AppError {
-  constructor(message: string) {
-    super('validation', message, 'client', false);
-    throw new ProtocolError(INVALID_PARAMS, message);
-  }
+export function throwValidationError(message: string): never {
+  throw new ProtocolError(INVALID_PARAMS, message);
 }
 
 export class CancelledError extends AppError {

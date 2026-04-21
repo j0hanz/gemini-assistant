@@ -14,7 +14,7 @@ import {
 import type { TranscriptEntry } from '../sessions.js';
 import { withRetry } from './errors.js';
 import { logger } from './logger.js';
-import { isPathWithinRoot } from './validation.js';
+import { isPathWithinRoot, normalizePathForComparison } from './validation.js';
 
 const TOKENS_PER_CHAR = 4;
 
@@ -249,10 +249,21 @@ type CacheChangeCallback = (status: WorkspaceCacheStatus) => void;
 
 function normalizeRootsKey(roots: readonly string[]): string {
   return [
-    ...new Set(roots.filter((root) => root && isAbsolute(root)).map((root) => root.toLowerCase())),
+    ...new Set(roots.filter((root) => root && isAbsolute(root)).map(normalizePathForComparison)),
   ]
     .sort((a, b) => a.localeCompare(b))
     .join('\n');
+}
+
+function isAbortError(err: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) {
+    return true;
+  }
+
+  return (
+    (err instanceof Error && err.name === 'AbortError') ||
+    (err instanceof DOMException && err.name === 'AbortError')
+  );
 }
 
 function hashContent(content: string): string {
@@ -601,6 +612,10 @@ class WorkspaceCacheManagerImpl {
 
       return this.cacheName;
     } catch (err) {
+      if (isAbortError(err, signal)) {
+        throw err;
+      }
+
       log.error(`Failed to create workspace cache: ${String(err)}`);
       return undefined;
     }

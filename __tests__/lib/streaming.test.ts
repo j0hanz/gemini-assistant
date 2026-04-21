@@ -579,6 +579,48 @@ describe('consumeStreamWithProgress', () => {
     });
   });
 
+  it('does not transition to generating or enqueue queue messages for empty signature-only parts', async () => {
+    const queued: QueuedMessage[] = [];
+    const { ctx, progressCalls } = makeMockContext();
+    (ctx as unknown as Record<string, unknown>).task = {
+      id: 'task-signature-only',
+      queue: {
+        enqueue: (_taskId: string, message: QueuedMessage) => {
+          queued.push(message);
+        },
+      },
+    };
+
+    const result = await consumeStreamWithProgress(
+      fakeStream([makeChunk([{ text: '', thoughtSignature: 'sig-empty' }], FinishReason.STOP)]),
+      ctx,
+    );
+
+    assert.strictEqual(result.text, '');
+    assert.deepStrictEqual(result.toolEvents, [
+      { kind: 'part', text: '', thoughtSignature: 'sig-empty' },
+    ]);
+    assert.strictEqual(queued.length, 0);
+    const messages = progressCalls.map((call) => call.message);
+    assert.ok(!messages.includes('Generating response'));
+  });
+
+  it('does not transition to generating for undefined-text signature-only parts', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+
+    const result = await consumeStreamWithProgress(
+      fakeStream([makeChunk([{ thoughtSignature: 'sig-undefined' }], FinishReason.STOP)]),
+      ctx,
+    );
+
+    assert.strictEqual(result.text, '');
+    assert.deepStrictEqual(result.toolEvents, [
+      { kind: 'part', thoughtSignature: 'sig-undefined' },
+    ]);
+    const messages = progressCalls.map((call) => call.message);
+    assert.ok(!messages.includes('Generating response'));
+  });
+
   it('tracks multiple tool types in toolsUsed', async () => {
     const { ctx, progressCalls } = makeMockContext();
     const searchChunk = makeChunk([{ text: 'found data' }]);

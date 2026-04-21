@@ -354,6 +354,72 @@ describe('resolveWorkspacePath', () => {
       await rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it('resolves duplicate relative paths against the allowed root intersection first', async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'gemini-assistant-allowed-roots-'));
+    const rootA = join(tempRoot, 'root-a');
+    const rootB = join(tempRoot, 'root-b');
+
+    try {
+      await mkdir(join(rootA, 'src'), { recursive: true });
+      await mkdir(join(rootB, 'src'), { recursive: true });
+      await writeFile(join(rootA, 'src', 'shared.ts'), 'export const a = 1;\n');
+      await writeFile(join(rootB, 'src', 'shared.ts'), 'export const b = 2;\n');
+
+      setAllowedFileRootsEnv(rootA);
+      const fetcher = async () => [rootA, rootB];
+
+      const result = await resolveWorkspacePath('src/shared.ts', fetcher);
+
+      assert.strictEqual(result.workspaceRoot, rootA);
+      assert.strictEqual(result.displayPath, 'src/shared.ts');
+      assert.strictEqual(result.resolvedPath, join(rootA, 'src', 'shared.ts'));
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects relative paths outside the allowed roots after resolution', async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'gemini-assistant-outside-roots-'));
+    const rootA = join(tempRoot, 'root-a');
+    const rootB = join(tempRoot, 'root-b');
+
+    try {
+      await mkdir(join(rootA, 'src'), { recursive: true });
+      await mkdir(join(rootB, 'src'), { recursive: true });
+      await writeFile(join(rootB, 'src', 'shared.ts'), 'export const b = 2;\n');
+
+      setAllowedFileRootsEnv(rootA);
+      const fetcher = async () => [rootB];
+
+      await assert.rejects(() => resolveWorkspacePath('src/shared.ts', fetcher), {
+        message: /outside allowed directories/,
+      });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects absolute paths outside the allowed roots', async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'gemini-assistant-absolute-roots-'));
+    const allowedRoot = join(tempRoot, 'allowed');
+    const outsideRoot = join(tempRoot, 'outside');
+    const outsidePath = join(outsideRoot, 'src', 'shared.ts');
+
+    try {
+      await mkdir(join(allowedRoot, 'src'), { recursive: true });
+      await mkdir(join(outsideRoot, 'src'), { recursive: true });
+      await writeFile(outsidePath, 'export const value = 1;\n');
+
+      setAllowedFileRootsEnv(allowedRoot);
+
+      await assert.rejects(() => resolveWorkspacePath(outsidePath), {
+        message: /outside allowed directories/,
+      });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('isPathWithinRoot', () => {

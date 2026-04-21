@@ -589,5 +589,141 @@ describe('workspace-context', () => {
         await rm(rootB, { recursive: true, force: true });
       }
     });
+
+    it('rethrows aborts during cache creation without storing cache state', async () => {
+      process.env.WORKSPACE_CACHE_ENABLED = 'true';
+      process.env.WORKSPACE_AUTO_SCAN = 'true';
+      process.env.API_KEY = 'test-key';
+
+      const root = await createWorkspaceFile(`ws-cache-abort-${Date.now()}`, 'a'.repeat(130_000));
+      const ai = getAI();
+      const originalCreate = ai.caches.create.bind(ai.caches);
+      const controller = new AbortController();
+      let seenSignal: AbortSignal | undefined;
+
+      ai.caches.create = async ({ config }: { config?: { abortSignal?: AbortSignal } }) => {
+        seenSignal = config?.abortSignal;
+        controller.abort();
+        throw new DOMException('Aborted', 'AbortError');
+      };
+
+      try {
+        await assert.rejects(
+          () => workspaceCacheManager.getOrCreateCache([root], controller.signal),
+          {
+            name: 'AbortError',
+          },
+        );
+        assert.strictEqual(seenSignal, controller.signal);
+        assert.strictEqual(workspaceCacheManager.getCacheStatus().cacheName, undefined);
+      } finally {
+        ai.caches.create = originalCreate;
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('rethrows aborts while waiting to retry cache creation', async () => {
+      process.env.WORKSPACE_CACHE_ENABLED = 'true';
+      process.env.WORKSPACE_AUTO_SCAN = 'true';
+      process.env.API_KEY = 'test-key';
+
+      const root = await createWorkspaceFile(
+        `ws-cache-retry-abort-${Date.now()}`,
+        'a'.repeat(130_000),
+      );
+      const ai = getAI();
+      const originalCreate = ai.caches.create.bind(ai.caches);
+      const originalSetTimeout = globalThis.setTimeout;
+      const originalClearTimeout = globalThis.clearTimeout;
+      const controller = new AbortController();
+      let createCalls = 0;
+      let scheduledRetry = false;
+
+      ai.caches.create = async () => {
+        createCalls++;
+        const err = new Error('rate limited') as Error & { status: number };
+        err.status = 429;
+        throw err;
+      };
+
+      globalThis.setTimeout = ((handler: TimerHandler) => {
+        scheduledRetry = true;
+        queueMicrotask(() => {
+          controller.abort();
+        });
+        return { handler } as unknown as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout;
+      globalThis.clearTimeout = () => {
+        return undefined;
+      };
+
+      try {
+        await assert.rejects(
+          () => workspaceCacheManager.getOrCreateCache([root], controller.signal),
+          {
+            name: 'AbortError',
+          },
+        );
+        assert.strictEqual(scheduledRetry, true);
+        assert.strictEqual(createCalls, 1);
+        assert.strictEqual(workspaceCacheManager.getCacheStatus().cacheName, undefined);
+      } finally {
+        globalThis.setTimeout = originalSetTimeout;
+        globalThis.clearTimeout = originalClearTimeout;
+        ai.caches.create = originalCreate;
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('treats differently cased roots according to the current platform', async () => {
+      process.env.WORKSPACE_CACHE_ENABLED = 'true';
+      process.env.WORKSPACE_AUTO_SCAN = 'true';
+      process.env.API_KEY = 'test-key';
+
+      const tempRoot = await createWorkspaceFile(
+        `ws-cache-case-${Date.now()}`,
+        'a'.repeat(130_000),
+      );
+      const caseVariantRoot =
+        process.platform === 'win32'
+          ? `${tempRoot.slice(0, 1).toUpperCase()}${tempRoot.slice(1).toLowerCase()}`
+          : await createWorkspaceFile(`ws-cache-case-alt-${Date.now()}`, 'b'.repeat(130_000));
+      const ai = getAI();
+      const originalCreate = ai.caches.create.bind(ai.caches);
+      const originalDelete = ai.caches.delete.bind(ai.caches);
+      const deletedNames: string[] = [];
+      const createdNames = ['cachedContents/case-a', 'cachedContents/case-b'];
+
+      ai.caches.create = async () => ({
+        name: createdNames.shift() ?? 'cachedContents/fallback',
+      });
+      ai.caches.delete = (async ({ name }: { name: string }) => {
+        deletedNames.push(name);
+      }) as typeof ai.caches.delete;
+
+      try {
+        assert.strictEqual(
+          await workspaceCacheManager.getOrCreateCache([tempRoot]),
+          'cachedContents/case-a',
+        );
+        assert.strictEqual(
+          await workspaceCacheManager.getOrCreateCache([caseVariantRoot]),
+          process.platform === 'win32' ? 'cachedContents/case-a' : 'cachedContents/case-b',
+        );
+
+        if (process.platform === 'win32') {
+          assert.deepStrictEqual(deletedNames, []);
+        } else {
+          assert.deepStrictEqual(deletedNames, ['cachedContents/case-a']);
+        }
+      } finally {
+        ai.caches.create = originalCreate;
+        ai.caches.delete = originalDelete;
+        await rm(tempRoot, { recursive: true, force: true });
+        if (process.platform !== 'win32') {
+          await rm(caseVariantRoot, { recursive: true, force: true });
+        }
+      }
+    });
   });
 });

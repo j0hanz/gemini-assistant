@@ -101,7 +101,7 @@ function parseRootUri(uri: string): string | undefined {
   }
 }
 
-function normalizePathForComparison(filePath: string): string {
+export function normalizePathForComparison(filePath: string): string {
   const resolved = resolve(normalize(filePath));
   const root = parse(resolved).root;
   const trimmed = resolved.length > root.length ? resolved.replace(/[\\/]+$/, '') : resolved;
@@ -148,6 +148,21 @@ function getDefaultWorkspaceRoot(): string {
 
 function getEffectiveWorkspaceRoots(clientRoots: string[]): string[] {
   return clientRoots.length > 0 ? clientRoots : [getDefaultWorkspaceRoot()];
+}
+
+function getEffectiveAllowedWorkspaceRoots(
+  workspaceRoots: string[],
+  allowedRoots: string[],
+): string[] {
+  const intersectedRoots = intersectRoots(workspaceRoots, allowedRoots);
+
+  if (intersectedRoots.length > 0) {
+    return intersectedRoots;
+  }
+
+  return workspaceRoots.length === 1 && workspaceRoots[0] === getDefaultWorkspaceRoot()
+    ? allowedRoots
+    : workspaceRoots;
 }
 
 interface WorkspaceCandidate {
@@ -319,20 +334,21 @@ export async function resolveWorkspacePath(
 ): Promise<ResolvedWorkspacePath> {
   const clientRoots = await getClientRoots(rootsFetcher);
   const workspaceRoots = getEffectiveWorkspaceRoots(clientRoots);
+  const allowedRoots = await getAllowedRoots(rootsFetcher);
+  const allowedWorkspaceRoots = getEffectiveAllowedWorkspaceRoots(workspaceRoots, allowedRoots);
 
   let resolvedPath: string;
   let workspaceRoot: string | undefined;
 
   if (isAbsolute(filePath)) {
     resolvedPath = await canonicalizePath(filePath);
-    workspaceRoot = chooseDisplayRoot(resolvedPath, workspaceRoots);
+    workspaceRoot = chooseDisplayRoot(resolvedPath, allowedWorkspaceRoots);
   } else {
-    const selected = await resolveRelativeWorkspaceCandidate(filePath, workspaceRoots);
+    const selected = await resolveRelativeWorkspaceCandidate(filePath, allowedWorkspaceRoots);
     resolvedPath = await canonicalizePath(selected.candidate);
     workspaceRoot = selected.root;
   }
 
-  const allowedRoots = await getAllowedRoots(rootsFetcher);
   const isUnderAllowedRoot =
     allowedRoots.length > 0 && allowedRoots.some((root) => isPathWithinRoot(resolvedPath, root));
 

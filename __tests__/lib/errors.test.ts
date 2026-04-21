@@ -11,8 +11,8 @@ import {
   resetProgressThrottle,
   SafetyError,
   sendProgress,
+  throwValidationError,
   TruncationError,
-  ValidationError,
   withRetry,
 } from '../../src/lib/errors.js';
 
@@ -147,10 +147,10 @@ describe('finishReasonToError', () => {
   });
 });
 
-describe('ValidationError', () => {
+describe('throwValidationError', () => {
   it('throws ProtocolError with INVALID_PARAMS code', () => {
     assert.throws(
-      () => new ValidationError('bad input'),
+      () => throwValidationError('bad input'),
       (err: unknown) =>
         err instanceof ProtocolError && err.code === INVALID_PARAMS && err.message === 'bad input',
     );

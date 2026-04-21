@@ -509,7 +509,7 @@ async function handleThoughtOrSignaturePart(
     return true;
   }
 
-  if (!part.thoughtSignature || (partText !== undefined && partText.length > 0)) {
+  if (!part.thoughtSignature || (typeof partText === 'string' && partText.length > 0)) {
     return false;
   }
 
@@ -518,7 +518,7 @@ async function handleThoughtOrSignaturePart(
     ...(partText !== undefined ? { text: partText } : {}),
     thoughtSignature: part.thoughtSignature,
   });
-  return partText === undefined;
+  return true;
 }
 
 function getTaskQueueContext(

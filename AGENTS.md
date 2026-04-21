@@ -22,13 +22,11 @@
 
 ## Commands
 
-- **Dev**: `npm run start`
 - **Format**: `npm run format`
 - **Test**: `npm run test`
 - **Lint**: `npm run lint`
 - **Type Check**: `npm run type-check`
 - **Build**: `npm run build`
-- **Deploy**: N/A
 
 ## Safety Boundaries
 

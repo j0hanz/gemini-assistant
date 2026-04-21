@@ -109,16 +109,7 @@ export class Logger {
   }
 
   protected log(level: LogLevel, context: string, message: string, data?: unknown) {
-    const traceId = logContext.getStore();
-    const entry: LogEntry = {
-      timestamp: new Date().toISOString(),
-      level,
-      ...(traceId ? { traceId } : {}),
-      context,
-      message,
-      ...(data !== undefined ? { data } : {}),
-    };
-
+    const entry = this.buildEntry(level, context, message, data);
     this.writeEntry(entry);
     this.broadcastToServers(level, context, entry);
   }

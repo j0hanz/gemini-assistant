@@ -226,15 +226,8 @@ function getRelativeWorkspaceCandidates(
 async function getExistingWorkspaceCandidates(
   candidates: readonly WorkspaceCandidate[],
 ): Promise<WorkspaceCandidate[]> {
-  const existingCandidates: WorkspaceCandidate[] = [];
-
-  for (const candidate of candidates) {
-    if (await pathExists(candidate.candidate)) {
-      existingCandidates.push(candidate);
-    }
-  }
-
-  return existingCandidates;
+  const flags = await Promise.all(candidates.map((c) => pathExists(c.candidate)));
+  return candidates.filter((_, i) => flags[i]);
 }
 
 async function resolveRelativeWorkspaceCandidate(

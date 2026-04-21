@@ -199,6 +199,22 @@ function computeDelay(attempt: number, retryAfterMs?: number): number {
   return exponential + jitter;
 }
 
+function delayWithAbort(delayMs: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 export async function withRetry<T>(
   fn: () => Promise<T>,
   options?: {
@@ -216,25 +232,9 @@ export async function withRetry<T>(
       if (attempt >= maxRetries || !isRetryableError(err)) throw err;
       if (options?.signal?.aborted) throw err;
 
-      await new Promise<void>((resolve, reject) => {
-        const delay = computeDelay(attempt, extractRetryAfterMs(err));
-
-        options?.onRetry?.(attempt + 1, maxRetries, Math.round(delay));
-
-        const onAbort = () => {
-          clearTimeout(timer);
-          reject(new DOMException('Aborted', 'AbortError'));
-        };
-
-        const timer = setTimeout(() => {
-          options?.signal?.removeEventListener('abort', onAbort);
-          resolve();
-        }, delay);
-
-        if (options?.signal) {
-          options.signal.addEventListener('abort', onAbort, { once: true });
-        }
-      });
+      const delay = computeDelay(attempt, extractRetryAfterMs(err));
+      options?.onRetry?.(attempt + 1, maxRetries, Math.round(delay));
+      await delayWithAbort(delay, options?.signal);
     }
   }
 }

@@ -226,6 +226,23 @@ function appendToolEvent(state: StreamProcessingState, event: ToolEvent): void {
   state.toolEvents.push(event);
 }
 
+/**
+ * Builds a ToolEvent by dropping falsy (undefined/empty-string/null) fields,
+ * preserving the exact semantics of the previous `...(x ? {k:x} : {})` spreads.
+ */
+function toolEvent(
+  kind: ToolEvent['kind'],
+  fields: {
+    [K in Exclude<keyof ToolEvent, 'kind'>]?: ToolEvent[K] | undefined;
+  },
+): ToolEvent {
+  const ev: Record<string, unknown> = { kind };
+  for (const [k, v] of Object.entries(fields)) {
+    if (v) ev[k] = v;
+  }
+  return ev as unknown as ToolEvent;
+}
+
 async function maybeReportBuiltInToolProgress(
   ctx: ServerContext,
   candidate: NonNullable<GenerateContentResponse['candidates']>[number],
@@ -289,18 +306,19 @@ async function handleFunctionCallPart(
   }
 
   const fnName = functionCall.name ?? 'tool';
-  state.functionCalls.push({
-    ...(functionCall.id ? { id: functionCall.id } : {}),
-    name: fnName,
-    ...(functionCall.args ? { args: functionCall.args } : {}),
-  });
-  appendToolEvent(state, {
-    kind: 'function_call',
-    ...(functionCall.args ? { args: functionCall.args } : {}),
-    ...(functionCall.id ? { id: functionCall.id } : {}),
-    name: fnName,
-    ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
-  });
+  const fnEntry: FunctionCallEntry = { name: fnName };
+  if (functionCall.id) fnEntry.id = functionCall.id;
+  if (functionCall.args) fnEntry.args = functionCall.args;
+  state.functionCalls.push(fnEntry);
+  appendToolEvent(
+    state,
+    toolEvent('function_call', {
+      args: functionCall.args,
+      id: functionCall.id,
+      name: fnName,
+      thoughtSignature: part.thoughtSignature,
+    }),
+  );
   await recordToolActivity(ctx, state, msg, `Tool: ${fnName}`, fnName);
 }
 
@@ -316,13 +334,15 @@ async function handleToolCallPart(
   }
 
   const normalizedToolName = normalizeToolName(toolCall.toolType);
-  appendToolEvent(state, {
-    kind: 'tool_call',
-    ...(toolCall.args ? { args: toolCall.args } : {}),
-    ...(toolCall.id ? { id: toolCall.id } : {}),
-    ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
-    ...(toolCall.toolType ? { toolType: toolCall.toolType } : {}),
-  });
+  appendToolEvent(
+    state,
+    toolEvent('tool_call', {
+      args: toolCall.args,
+      id: toolCall.id,
+      thoughtSignature: part.thoughtSignature,
+      toolType: toolCall.toolType,
+    }),
+  );
   await recordToolActivity(
     ctx,
     state,
@@ -344,13 +364,15 @@ async function handleToolResponsePart(
   }
 
   const normalizedToolName = normalizeToolName(toolResponse.toolType);
-  appendToolEvent(state, {
-    kind: 'tool_response',
-    ...(toolResponse.id ? { id: toolResponse.id } : {}),
-    ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
-    ...(toolResponse.response ? { response: toolResponse.response } : {}),
-    ...(toolResponse.toolType ? { toolType: toolResponse.toolType } : {}),
-  });
+  appendToolEvent(
+    state,
+    toolEvent('tool_response', {
+      id: toolResponse.id,
+      response: toolResponse.response,
+      thoughtSignature: part.thoughtSignature,
+      toolType: toolResponse.toolType,
+    }),
+  );
   await recordToolActivity(
     ctx,
     state,
@@ -388,12 +410,14 @@ async function handleExecutableCodePart(
     return false;
   }
 
-  appendToolEvent(state, {
-    kind: 'executable_code',
-    ...(part.executableCode.code ? { code: part.executableCode.code } : {}),
-    ...(part.executableCode.id ? { id: part.executableCode.id } : {}),
-    ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
-  });
+  appendToolEvent(
+    state,
+    toolEvent('executable_code', {
+      code: part.executableCode.code,
+      id: part.executableCode.id,
+      thoughtSignature: part.thoughtSignature,
+    }),
+  );
   await recordToolActivity(ctx, state, msg, 'Executing code', 'codeExecution');
   return true;
 }
@@ -408,13 +432,15 @@ async function handleCodeExecutionResultPart(
     return false;
   }
 
-  appendToolEvent(state, {
-    kind: 'code_execution_result',
-    ...(part.codeExecutionResult.id ? { id: part.codeExecutionResult.id } : {}),
-    ...(part.codeExecutionResult.outcome ? { outcome: part.codeExecutionResult.outcome } : {}),
-    ...(part.codeExecutionResult.output ? { output: part.codeExecutionResult.output } : {}),
-    ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
-  });
+  appendToolEvent(
+    state,
+    toolEvent('code_execution_result', {
+      id: part.codeExecutionResult.id,
+      outcome: part.codeExecutionResult.outcome,
+      output: part.codeExecutionResult.output,
+      thoughtSignature: part.thoughtSignature,
+    }),
+  );
   await recordToolActivity(ctx, state, msg, 'Code executed');
   return true;
 }
@@ -453,13 +479,15 @@ async function handleFunctionProtocolPart(
     return false;
   }
 
-  appendToolEvent(state, {
-    kind: 'function_response',
-    ...(part.functionResponse.id ? { id: part.functionResponse.id } : {}),
-    ...(part.functionResponse.name ? { name: part.functionResponse.name } : {}),
-    ...(part.functionResponse.response ? { response: part.functionResponse.response } : {}),
-    ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
-  });
+  appendToolEvent(
+    state,
+    toolEvent('function_response', {
+      id: part.functionResponse.id,
+      name: part.functionResponse.name,
+      response: part.functionResponse.response,
+      thoughtSignature: part.thoughtSignature,
+    }),
+  );
   return true;
 }
 

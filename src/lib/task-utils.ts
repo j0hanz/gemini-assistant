@@ -258,6 +258,16 @@ export function wrapTaskSafeWork<TArgs>(toolName: string, work: TaskWork<TArgs>)
   };
 }
 
+async function validateAndExecute<TResult extends CallToolResult | CreateTaskResult>(
+  server: InternalMcpServer,
+  tool: RegisteredTaskTool,
+  request: TaskCallRequest,
+  ctx: ServerContext,
+): Promise<TResult> {
+  const args = await server.validateToolInput(tool, request.params.arguments, request.params.name);
+  return (await server.executeToolHandler(tool, args, ctx)) as TResult;
+}
+
 async function handleStandardToolCall(
   server: InternalMcpServer,
   tool: RegisteredTaskTool,
@@ -265,12 +275,7 @@ async function handleStandardToolCall(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   try {
-    const args = await server.validateToolInput(
-      tool,
-      request.params.arguments,
-      request.params.name,
-    );
-    const result = (await server.executeToolHandler(tool, args, ctx)) as CallToolResult;
+    const result = await validateAndExecute<CallToolResult>(server, tool, request, ctx);
     await server.validateToolOutput(tool, result, request.params.name);
     return result;
   } catch (error) {
@@ -289,12 +294,7 @@ async function handleTaskAugmentedToolCall(
   ctx: ServerContext,
 ): Promise<CreateTaskResult> {
   try {
-    const args = await server.validateToolInput(
-      tool,
-      request.params.arguments,
-      request.params.name,
-    );
-    return (await server.executeToolHandler(tool, args, ctx)) as CreateTaskResult;
+    return await validateAndExecute<CreateTaskResult>(server, tool, request, ctx);
   } catch (error) {
     if (error instanceof UrlElicitationRequiredError) {
       throw error;

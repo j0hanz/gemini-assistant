@@ -128,20 +128,21 @@ export class InMemoryEventStore implements EventStore {
     }
 
     if (!oldestStreamId) return;
+    this._removeStream(oldestStreamId);
+  }
 
-    const state = this._streams.get(oldestStreamId);
-    if (state) {
-      for (const e of state.events) this._eventToStream.delete(e.eventId);
-    }
-    this._streams.delete(oldestStreamId);
+  private _removeStream(streamId: StreamId): void {
+    const state = this._streams.get(streamId);
+    if (!state) return;
+    for (const e of state.events) this._eventToStream.delete(e.eventId);
+    this._streams.delete(streamId);
   }
 
   private _sweepStaleStreams(ttlMs: number): void {
     const cutoff = Date.now() - ttlMs;
     for (const [streamId, state] of this._streams) {
       if (state.lastActivity < cutoff) {
-        for (const e of state.events) this._eventToStream.delete(e.eventId);
-        this._streams.delete(streamId);
+        this._removeStream(streamId);
       }
     }
   }

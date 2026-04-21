@@ -200,20 +200,30 @@ async function analyzeMultiFileWork(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const uploadedNames: string[] = [];
+  const progress = new ProgressReporter(ctx, ANALYZE_TOOL_LABEL);
+  const totalSteps = filePaths.length + 1;
 
   try {
+    const contents: ({ text: string } | ReturnType<typeof createPartFromUri>)[] = [];
+    for (const [index, filePath] of filePaths.entries()) {
+      await progress.step(
+        index,
+        totalSteps,
+        `Uploading ${filePath.split(/[\\/]/).pop() ?? filePath}`,
+      );
+      const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
+      uploadedNames.push(uploaded.name);
+      contents.push({ text: `File: ${uploaded.displayPath}` });
+      contents.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
+    }
+
+    await progress.step(filePaths.length, totalSteps, 'Analyzing content');
+
     return await executor.runStream(
       ctx,
       'analyze',
       ANALYZE_TOOL_LABEL,
-      async () => {
-        const contents: ({ text: string } | ReturnType<typeof createPartFromUri>)[] = [];
-        for (const filePath of filePaths) {
-          const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
-          uploadedNames.push(uploaded.name);
-          contents.push({ text: `File: ${uploaded.displayPath}` });
-          contents.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
-        }
+      () => {
         const prompt = buildFileAnalysisPrompt({
           attachedParts: contents,
           goal,

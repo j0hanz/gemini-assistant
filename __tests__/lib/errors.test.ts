@@ -532,4 +532,27 @@ describe('withRetry', () => {
     assert.strictEqual(result, 'recovered');
     assert.strictEqual(calls, 2);
   });
+
+  it('awaits async onRetry before the next attempt', async () => {
+    const events: string[] = [];
+    let calls = 0;
+    const result = await withRetry(
+      () => {
+        events.push(`call:${String(calls + 1)}`);
+        calls++;
+        if (calls < 2) throw createStatusError(500);
+        return Promise.resolve('ok');
+      },
+      {
+        maxRetries: 2,
+        onRetry: async (attempt) => {
+          events.push(`retry-start:${String(attempt)}`);
+          await new Promise((resolve) => setImmediate(resolve));
+          events.push(`retry-end:${String(attempt)}`);
+        },
+      },
+    );
+    assert.strictEqual(result, 'ok');
+    assert.deepStrictEqual(events, ['call:1', 'retry-start:1', 'retry-end:1', 'call:2']);
+  });
 });

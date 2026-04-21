@@ -685,8 +685,8 @@ export async function executeToolStream(
 ): Promise<{ streamResult: StreamResult; result: CallToolResult }> {
   const stream = await withRetry(streamGenerator, {
     signal: ctx.mcpReq.signal,
-    onRetry: (attempt, max, delayMs) => {
-      void sendProgress(
+    onRetry: async (attempt, max, delayMs) => {
+      await sendProgress(
         ctx,
         0,
         undefined,

@@ -217,8 +217,8 @@ async function createCacheWithRetry(
       }),
     {
       signal: ctx.mcpReq.signal,
-      onRetry: (attempt, max, delayMs) => {
-        void progress.send(
+      onRetry: async (attempt, max, delayMs) => {
+        await progress.send(
           totalSteps - 1,
           totalSteps,
           `Retrying cache creation (${attempt}/${max}, ~${Math.round(delayMs / 1000)}s)`,

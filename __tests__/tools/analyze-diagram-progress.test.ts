@@ -272,4 +272,95 @@ describe('analyze diagram progress', () => {
       client.models.generateContentStream = originalGenerate;
     }
   });
+
+  it('emits per-file upload steps and analyzing step for multi-file analyze', async () => {
+    const { analyze } = getHandlers();
+    const store = makeMockStore();
+    const { ctx, progressCalls } = makeMockContext(store);
+    const client = getAI();
+    const originalUpload = client.files.upload.bind(client.files);
+    const originalDelete = client.files.delete.bind(client.files);
+    const originalGenerate = client.models.generateContentStream.bind(client.models);
+    let uploadCount = 0;
+
+    // @ts-expect-error test override
+    client.files.upload = async (opts: { file: string; config?: { mimeType?: string } }) => {
+      uploadCount += 1;
+      return {
+        uri: `gs://files/${basename(opts.file)}`,
+        mimeType: opts.config?.mimeType ?? 'text/plain',
+        name: `uploaded-${uploadCount}`,
+      };
+    };
+    // @ts-expect-error test override
+    client.files.delete = async () => undefined;
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'summary' }] },
+              finishReason: FinishReason.STOP,
+            },
+          ],
+        } as GenerateContentResponse,
+      ]);
+
+    try {
+      await analyze.createTask(
+        {
+          goal: 'Summarize these files',
+          outputKind: 'summary',
+          targetKind: 'multi',
+          filePaths: ['package.json', 'tsconfig.json'],
+        },
+        ctx,
+      );
+      await flushTaskWork(() => store.stored.length > 0);
+
+      assert.strictEqual(store.stored[0]?.status, 'completed');
+
+      const uploadCalls = progressCalls.filter((call) =>
+        call.message?.startsWith('Analyze: Uploading '),
+      );
+      assert.deepStrictEqual(
+        uploadCalls.map((call) => ({
+          progress: call.progress,
+          total: call.total,
+          message: call.message,
+        })),
+        [
+          { progress: 0, total: 3, message: 'Analyze: Uploading package.json' },
+          { progress: 1, total: 3, message: 'Analyze: Uploading tsconfig.json' },
+        ],
+      );
+
+      const analyzingCall = progressCalls.find(
+        (call) => call.message === 'Analyze: Analyzing content',
+      );
+      assert.deepStrictEqual(analyzingCall, {
+        progress: 2,
+        total: 3,
+        message: 'Analyze: Analyzing content',
+      });
+
+      const terminalCalls = progressCalls.filter(
+        (call) => call.progress === 100 && call.total === 100,
+      );
+      assert.strictEqual(terminalCalls.length, 1);
+
+      const uploadIdx = progressCalls.findIndex(
+        (call) => call.message === 'Analyze: Uploading tsconfig.json',
+      );
+      const analyzingIdx = progressCalls.findIndex(
+        (call) => call.message === 'Analyze: Analyzing content',
+      );
+      assert.ok(uploadIdx >= 0 && analyzingIdx > uploadIdx);
+    } finally {
+      client.files.upload = originalUpload;
+      client.files.delete = originalDelete;
+      client.models.generateContentStream = originalGenerate;
+    }
+  });
 });

@@ -217,7 +217,7 @@ export async function withRetry<T>(
   options?: {
     maxRetries?: number;
     signal?: AbortSignal;
-    onRetry?: (attempt: number, maxRetries: number, delayMs: number) => void;
+    onRetry?: (attempt: number, maxRetries: number, delayMs: number) => void | Promise<void>;
   },
 ): Promise<T> {
   const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -230,7 +230,7 @@ export async function withRetry<T>(
       if (options?.signal?.aborted) throw err;
 
       const delay = computeDelay(attempt, extractRetryAfterMs(err));
-      options?.onRetry?.(attempt + 1, maxRetries, Math.round(delay));
+      await options?.onRetry?.(attempt + 1, maxRetries, Math.round(delay));
       await delayWithAbort(delay, options?.signal);
     }
   }

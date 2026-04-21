@@ -3,7 +3,18 @@ import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontex
 
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
-import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from './lib/resource-uris.js';
+import {
+  cacheDetailUri,
+  DISCOVER_CATALOG_URI,
+  DISCOVER_CONTEXT_URI,
+  DISCOVER_WORKFLOWS_URI,
+  MEMORY_CACHES_URI,
+  MEMORY_WORKSPACE_CACHE_URI,
+  MEMORY_WORKSPACE_CONTEXT_URI,
+  sessionDetailUri,
+  sessionEventsUri,
+  sessionTranscriptUri,
+} from './lib/resource-uris.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from './lib/validation.js';
 import {
   assembleWorkspaceContext,
@@ -45,17 +56,17 @@ type SessionTranscriptResourceData = {
 type SessionEventsResourceData = NonNullable<ReturnType<SessionStore['listSessionEventEntries']>>;
 
 const DISCOVER_CATALOG_RESOURCE: ResourceListEntry = {
-  uri: 'discover://catalog',
+  uri: DISCOVER_CATALOG_URI,
   name: 'Discovery catalog for tools, prompts, and resources',
 };
 
 const DISCOVER_WORKFLOWS_RESOURCE: ResourceListEntry = {
-  uri: 'discover://workflows',
+  uri: DISCOVER_WORKFLOWS_URI,
   name: 'Guided workflows for common gemini-assistant jobs',
 };
 
 const DISCOVER_CONTEXT_RESOURCE: ResourceListEntry = {
-  uri: 'discover://context',
+  uri: DISCOVER_CONTEXT_URI,
   name: 'Server context dashboard showing workspace, sessions, caches, and config',
 };
 
@@ -88,11 +99,12 @@ function dualContentResource(uri: string, data: unknown, markdown: string): Read
   };
 }
 
-function textResource(uri: string, text: string): ReadResourceResult {
+function textResource(uri: string, text: string, mimeType = 'text/plain'): ReadResourceResult {
   return {
     contents: [
       {
         uri,
+        mimeType,
         text,
       },
     ],
@@ -105,7 +117,18 @@ function normalizeTemplateParam(value: string | string[] | undefined): string | 
 
 function decodeTemplateParam(value: string | string[] | undefined): string | undefined {
   const normalized = normalizeTemplateParam(value);
-  return normalized ? decodeURIComponent(normalized) : normalized;
+  if (!normalized) {
+    return normalized;
+  }
+
+  try {
+    return decodeURIComponent(normalized);
+  } catch {
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      'Invalid percent-encoding in resource URI parameter',
+    );
+  }
 }
 
 function toResourceUri(uri: URL | string): string {
@@ -143,7 +166,7 @@ export function readWorkspaceContextResource(
   uri: URL | string,
   data: WorkspaceContextResourceData,
 ): ReadResourceResult {
-  return textResource(toResourceUri(uri), renderWorkspaceContextMarkdown(data));
+  return textResource(toResourceUri(uri), renderWorkspaceContextMarkdown(data), 'text/markdown');
 }
 
 function sessionDetailResources(sessionStore: SessionStore): ResourceListEntry[] {
@@ -173,9 +196,39 @@ function cacheDetailResources(
   return caches
     .filter((cache): cache is typeof cache & { name: string } => typeof cache.name === 'string')
     .map((cache) => ({
-      uri: `memory://caches/${encodeURIComponent(cache.name)}`,
+      uri: cacheDetailUri(cache.name),
       name: cache.displayName ?? cache.name,
     }));
+}
+
+export async function readCacheDetailResource(
+  uri: URL | string,
+  cacheName: string | string[] | undefined,
+  getCacheSummaryImpl: (
+    name: string,
+  ) => Promise<Awaited<ReturnType<typeof getCacheSummary>> | null | undefined> = getCacheSummary,
+): Promise<ReadResourceResult> {
+  const log = logger.child('resources');
+  const decoded = decodeTemplateParam(cacheName);
+  if (!decoded) {
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Cache name required');
+  }
+
+  try {
+    const summary = await getCacheSummaryImpl(decoded);
+    if (!summary) {
+      throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Cache '${decoded}' not found`);
+    }
+
+    return jsonResource(toResourceUri(uri), summary);
+  } catch (err) {
+    if (err instanceof ProtocolError) {
+      throw err;
+    }
+
+    log.error(`Failed to get cache '${decoded}': ${AppError.formatMessage(err)}`);
+    throw new ProtocolError(ProtocolErrorCode.InternalError, `Failed to read cache '${decoded}'`);
+  }
 }
 
 export function readDiscoverCatalogResource(
@@ -531,7 +584,7 @@ function registerCacheResources(server: McpServer): void {
 
   server.registerResource(
     'memory-caches',
-    'memory://caches',
+    MEMORY_CACHES_URI,
     {
       title: 'Gemini Context Caches',
       description: 'List of active Gemini context caches with name, model, and expiry.',
@@ -553,7 +606,7 @@ function registerCacheResources(server: McpServer): void {
 
   server.registerResource(
     'memory-cache-detail',
-    new ResourceTemplate('memory://caches/{cacheName}', {
+    new ResourceTemplate(`${MEMORY_CACHES_URI}/{cacheName}`, {
       list: async () => ({ resources: cacheDetailResources(await listCacheSummaries()) }),
       complete: {
         cacheName: completeCacheNames,
@@ -568,26 +621,14 @@ function registerCacheResources(server: McpServer): void {
         priority: 0.7,
       },
     },
-    async (uri, { cacheName }) => {
-      const name = normalizeTemplateParam(cacheName);
-      if (!name) {
-        throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Cache name required');
-      }
-      const decoded = decodeURIComponent(name);
-      try {
-        return jsonResource(uri.href, await getCacheSummary(decoded));
-      } catch (err) {
-        log.error(`Failed to get cache '${decoded}': ${AppError.formatMessage(err)}`);
-        throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Cache '${decoded}' not found`);
-      }
-    },
+    async (uri, { cacheName }) => await readCacheDetailResource(uri, cacheName),
   );
 }
 
 function registerDiscoveryResources(server: McpServer): void {
   server.registerResource(
     'discover-catalog',
-    'discover://catalog',
+    DISCOVER_CATALOG_URI,
     {
       title: 'Discovery Catalog',
       description:
@@ -604,7 +645,7 @@ function registerDiscoveryResources(server: McpServer): void {
 
   server.registerResource(
     'discover-workflows',
-    'discover://workflows',
+    DISCOVER_WORKFLOWS_URI,
     {
       title: 'Workflow Catalog',
       description:
@@ -627,7 +668,7 @@ function registerContextResource(
 ): void {
   server.registerResource(
     'discover-context',
-    'discover://context',
+    DISCOVER_CONTEXT_URI,
     {
       title: 'Server Context Dashboard',
       description:
@@ -649,7 +690,7 @@ function registerWorkspaceResources(server: McpServer, rootsFetcher: RootsFetche
 
   server.registerResource(
     'memory-workspace-context',
-    'memory://workspace/context',
+    MEMORY_WORKSPACE_CONTEXT_URI,
     {
       title: 'Workspace Context',
       description: 'Assembled project context from workspace files for Gemini.',
@@ -680,7 +721,7 @@ function registerWorkspaceResources(server: McpServer, rootsFetcher: RootsFetche
 
   server.registerResource(
     'memory-workspace-cache',
-    'memory://workspace/cache',
+    MEMORY_WORKSPACE_CACHE_URI,
     {
       title: 'Workspace Cache Status',
       description: 'Current status of the Gemini workspace context cache.',

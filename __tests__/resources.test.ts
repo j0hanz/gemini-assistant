@@ -1,3 +1,5 @@
+import { ProtocolError } from '@modelcontextprotocol/server';
+
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -5,12 +7,22 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { listDiscoveryEntries, listWorkflowEntries } from '../src/catalog.js';
+import {
+  cacheDetailUri,
+  DISCOVER_CATALOG_URI,
+  DISCOVER_CONTEXT_URI,
+  DISCOVER_WORKFLOWS_URI,
+  MEMORY_CACHES_URI,
+  MEMORY_WORKSPACE_CACHE_URI,
+  MEMORY_WORKSPACE_CONTEXT_URI,
+} from '../src/lib/resource-uris.js';
 import { workspaceCacheManager } from '../src/lib/workspace-context.js';
 import { PUBLIC_RESOURCE_URIS, PUBLIC_WORKFLOW_NAMES } from '../src/public-contract.js';
 import {
   buildServerContextSnapshot,
   getSessionEventsResourceData,
   getSessionTranscriptResourceData,
+  readCacheDetailResource,
   readDiscoverCatalogResource,
   readDiscoverContextResource,
   readDiscoverWorkflowsResource,
@@ -189,6 +201,7 @@ describe('workspace context resource', () => {
     });
 
     assert.strictEqual(result.contents[0]?.uri, 'memory://workspace/context');
+    assert.strictEqual(result.contents[0]?.mimeType, 'text/markdown');
     assert.match(result.contents[0]?.text ?? '', /^# Workspace Context/m);
     assert.throws(() => {
       JSON.parse(result.contents[0]?.text ?? '');
@@ -328,6 +341,16 @@ describe('session transcript resource', () => {
       message: /not found/i,
     });
   });
+
+  it('maps malformed transcript URI encoding to InvalidParams', () => {
+    const store = createStore();
+    store.setSession('sess-resource-transcript', mockChat('resource-transcript'));
+
+    assert.throws(
+      () => readSessionTranscriptResource(store, 'memory://sessions/%E0%A4/transcript', '%E0%A4'),
+      (error) => error instanceof ProtocolError && /percent-encoding/i.test(error.message),
+    );
+  });
 });
 
 describe('session events resource', () => {
@@ -399,5 +422,56 @@ describe('session events resource', () => {
     assert.throws(() => getSessionEventsResourceData(store, 'missing-session'), {
       message: /not found/i,
     });
+  });
+});
+
+describe('cache detail resource', () => {
+  it('maps malformed cache URI encoding to InvalidParams', async () => {
+    await assert.rejects(
+      () => readCacheDetailResource('memory://caches/%E0%A4', '%E0%A4'),
+      (error) => error instanceof ProtocolError && /percent-encoding/i.test(error.message),
+    );
+  });
+
+  it('maps cache backend failures to InternalError', async () => {
+    await assert.rejects(
+      () =>
+        readCacheDetailResource(
+          'memory://caches/cachedContents%2Fworkspace-1',
+          'cachedContents%2Fworkspace-1',
+          async () => {
+            throw new Error('boom');
+          },
+        ),
+      (error) => error instanceof ProtocolError && /failed to read cache/i.test(error.message),
+    );
+  });
+
+  it('maps missing cache summaries to ResourceNotFound', async () => {
+    await assert.rejects(
+      () =>
+        readCacheDetailResource(
+          'memory://caches/cachedContents%2Fworkspace-1',
+          'cachedContents%2Fworkspace-1',
+          async () => null,
+        ),
+      (error) => error instanceof ProtocolError && /not found/i.test(error.message),
+    );
+  });
+});
+
+describe('resource URI constants', () => {
+  it('match the concrete and templated resource contract strings', () => {
+    assert.strictEqual(DISCOVER_CATALOG_URI, 'discover://catalog');
+    assert.strictEqual(DISCOVER_WORKFLOWS_URI, 'discover://workflows');
+    assert.strictEqual(DISCOVER_CONTEXT_URI, 'discover://context');
+    assert.strictEqual(MEMORY_CACHES_URI, 'memory://caches');
+    assert.strictEqual(MEMORY_WORKSPACE_CONTEXT_URI, 'memory://workspace/context');
+    assert.strictEqual(MEMORY_WORKSPACE_CACHE_URI, 'memory://workspace/cache');
+    assert.strictEqual(
+      cacheDetailUri('cachedContents/workspace-1'),
+      'memory://caches/cachedContents%2Fworkspace-1',
+    );
+    assert.ok(PUBLIC_RESOURCE_URIS.includes(`${MEMORY_CACHES_URI}/{cacheName}`));
   });
 });

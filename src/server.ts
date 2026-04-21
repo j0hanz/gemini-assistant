@@ -10,6 +10,11 @@ import { join } from 'node:path';
 import { AppError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
+import {
+  DISCOVER_CONTEXT_URI,
+  MEMORY_CACHES_URI,
+  MEMORY_WORKSPACE_CACHE_URI,
+} from './lib/resource-uris.js';
 import { installTaskSafeToolCallHandler } from './lib/task-utils.js';
 import { buildServerRootsFetcher } from './lib/validation.js';
 import { subscribeWorkspaceCacheChange } from './lib/workspace-context.js';
@@ -103,13 +108,13 @@ function sendResourceChanged(listUri: string, detailUris: readonly string[] = []
 }
 
 function handleCacheChange({ detailUris }: CacheChangeEvent): void {
-  sendResourceChanged('memory://caches', detailUris);
-  sendResourceChanged('discover://context');
+  sendResourceChanged(MEMORY_CACHES_URI, detailUris);
+  sendResourceChanged(DISCOVER_CONTEXT_URI);
 }
 
 function handleWorkspaceCacheChange(): void {
-  sendResourceChanged('memory://workspace/cache');
-  sendResourceChanged('discover://context');
+  sendResourceChanged(MEMORY_WORKSPACE_CACHE_URI);
+  sendResourceChanged(DISCOVER_CONTEXT_URI);
 }
 
 export function createServerInstance(): ServerInstance {
@@ -146,7 +151,7 @@ export function createServerInstance(): ServerInstance {
         ...transcriptUris,
         ...eventUris,
       ]);
-      sendResourceChangedForServer(server, 'discover://context');
+      sendResourceChangedForServer(server, DISCOVER_CONTEXT_URI);
     },
   );
   const unsubscribeCacheChange = subscribeCacheChange(handleCacheChange);

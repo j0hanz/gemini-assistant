@@ -9,7 +9,9 @@ import {
   createPromptDefinitions,
   DiscoverPromptSchema,
   MemoryPromptSchema,
+  PUBLIC_JOB_OPTIONS,
   PUBLIC_PROMPT_NAMES,
+  renderWorkflowSection,
   ResearchPromptSchema,
   ReviewPromptSchema,
 } from '../src/prompts.js';
@@ -51,6 +53,17 @@ describe('discover prompt', () => {
     assert.match(text, /discover:\/\/catalog/);
     assert.match(text, /discover:\/\/workflows/);
     assert.match(text, /Workflow: `start-here`/);
+  });
+
+  it('derives the public job options from the public job schema', () => {
+    assert.deepStrictEqual(PUBLIC_JOB_OPTIONS, ['chat', 'research', 'analyze', 'review', 'memory']);
+  });
+
+  it('gracefully degrades when a workflow entry is unavailable', () => {
+    const text = renderWorkflowSection('missing-workflow' as never);
+    assert.match(text, /Workflow: `missing-workflow`/);
+    assert.match(text, /discover:\/\/workflows/);
+    assert.match(text, /Catalog entry unavailable/);
   });
 });
 

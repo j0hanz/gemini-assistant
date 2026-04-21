@@ -23,19 +23,28 @@ interface PartPromptPolicy {
 }
 
 function resolveTextPrompt(policy: TextPromptPolicy, cacheName?: string): ResolvedTextPrompt {
+  const useCacheText = Boolean(cacheName && policy.cacheText);
   return {
-    promptText: cacheName ? joinNonEmpty([policy.cacheText, policy.promptText]) : policy.promptText,
-    systemInstruction: cacheName ? undefined : policy.systemInstruction,
+    promptText: useCacheText
+      ? joinNonEmpty([policy.cacheText, policy.promptText])
+      : policy.promptText,
+    systemInstruction: useCacheText ? undefined : policy.systemInstruction,
   };
 }
 
 function resolvePartPrompt(policy: PartPromptPolicy, cacheName?: string): ResolvedPartPrompt {
+  const useCacheText = Boolean(cacheName && policy.cacheText);
+
+  if (useCacheText && policy.cacheText !== undefined) {
+    return {
+      promptParts: [{ text: policy.cacheText }, ...policy.promptParts],
+      systemInstruction: undefined,
+    };
+  }
+
   return {
-    promptParts:
-      cacheName && policy.cacheText
-        ? [{ text: policy.cacheText }, ...policy.promptParts]
-        : policy.promptParts,
-    systemInstruction: cacheName ? undefined : policy.systemInstruction,
+    promptParts: policy.promptParts,
+    systemInstruction: policy.systemInstruction,
   };
 }
 

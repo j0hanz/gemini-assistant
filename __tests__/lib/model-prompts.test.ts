@@ -29,9 +29,20 @@ describe('model-prompts', () => {
       'cachedContents/workspace-1',
     );
 
-    assert.strictEqual(prompt.systemInstruction, undefined);
+    assert.ok(prompt.systemInstruction?.includes('grounded search results only'));
     assert.ok(prompt.promptText.includes('latest release'));
     assert.ok(!prompt.promptText.includes('Answer from grounded search results only'));
+  });
+
+  it('keeps file-analysis system instructions when cache mode has no cache text', () => {
+    const prompt = buildFileAnalysisPrompt({
+      cacheName: 'cachedContents/workspace-1',
+      goal: 'Summarize the file',
+      kind: 'single',
+    });
+
+    assert.ok(prompt.systemInstruction?.includes('provided file only'));
+    assert.strictEqual(prompt.promptText, 'Summarize the file');
   });
 
   it('builds file-analysis prompts for all supported modes', () => {
@@ -148,7 +159,7 @@ describe('model-prompts', () => {
       topic: 'MCP adoption',
     });
 
-    assert.strictEqual(prompt.systemInstruction, undefined);
+    assert.ok(prompt.systemInstruction?.includes('Research with Google Search and Code Execution'));
     assert.ok(prompt.promptText.includes('Topic: MCP adoption'));
     assert.ok(
       prompt.promptText.includes('Exhaustive: cover as many relevant aspects as possible.'),

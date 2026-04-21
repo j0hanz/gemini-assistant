@@ -18,6 +18,8 @@ import type { PublicPromptName, PublicWorkflowName } from './public-contract.js'
 
 export { PUBLIC_PROMPT_NAMES } from './public-contract.js';
 
+export const PUBLIC_JOB_OPTIONS = [...PublicJobNameSchema.options];
+
 type PromptMessageResult = ReturnType<typeof userPromptMessage>;
 type BuildMessageResult = PromptMessageResult | Promise<PromptMessageResult>;
 
@@ -71,10 +73,14 @@ function userPromptMessage(text: string) {
   };
 }
 
-function renderWorkflowSection(name: PublicWorkflowName): string {
+export function renderWorkflowSection(name: PublicWorkflowName): string {
   const workflow = findWorkflowEntry(name);
   if (!workflow) {
-    throw new Error(`Unknown workflow: ${name}`);
+    return [
+      `Workflow: \`${name}\``,
+      'Catalog entry unavailable.',
+      'Read `discover://workflows` for the latest workflow details.',
+    ].join('\n\n');
   }
 
   return [
@@ -98,7 +104,7 @@ export const DiscoverPromptSchema = z
   .strictObject({
     job: completable(
       PublicJobNameSchema.optional().describe('Public job to focus discovery guidance on.'),
-      (value) => filterByPrefix(['chat', 'research', 'analyze', 'review', 'memory'], value ?? ''),
+      (value) => filterByPrefix(PUBLIC_JOB_OPTIONS, value ?? ''),
     ),
     goal: textField('User outcome to optimize for.').optional(),
   })

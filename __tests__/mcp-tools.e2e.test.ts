@@ -167,9 +167,19 @@ const MUTABLE_ANNOTATIONS = {
   readOnlyHint: false,
 } as const;
 
+const DESTRUCTIVE_MUTABLE_ANNOTATIONS = {
+  ...MUTABLE_ANNOTATIONS,
+  destructiveHint: true,
+} as const;
+
+const READONLY_NON_IDEMPOTENT_ANNOTATIONS = {
+  ...READONLY_ANNOTATIONS,
+  idempotentHint: false,
+} as const;
+
 const EXPECTED_TOOL_CONTRACTS = {
   analyze: {
-    annotations: READONLY_ANNOTATIONS,
+    annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     requiredInput: ['goal'],
     requiredOutput: ['status', 'kind', 'targetKind'],
     taskSupport: 'optional',
@@ -183,7 +193,7 @@ const EXPECTED_TOOL_CONTRACTS = {
     title: 'Chat',
   },
   memory: {
-    annotations: MUTABLE_ANNOTATIONS,
+    annotations: DESTRUCTIVE_MUTABLE_ANNOTATIONS,
     requiredInput: ['action'],
     requiredOutput: ['status', 'action', 'summary'],
     taskSupport: 'optional',

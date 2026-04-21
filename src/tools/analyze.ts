@@ -15,7 +15,7 @@ import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput, validateStructuredContent } from '../lib/response.js';
-import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
 import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
@@ -322,14 +322,12 @@ async function analyzeDiagramWork(
       (_streamResult, textContent: string) => {
         const { diagram, explanation } = extractDiagram(textContent);
         const diagramType = args.diagramType;
+        const formatted = formatAnalyzeDiagramMarkdown(diagram, diagramType, explanation);
 
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: formatAnalyzeDiagramMarkdown(diagram, diagramType, explanation),
-            },
-          ],
+          resultMod: () => ({
+            content: [{ type: 'text' as const, text: formatted }],
+          }),
           structuredContent: {
             diagram,
             diagramType,
@@ -481,7 +479,7 @@ export function registerAnalyzeTool(server: McpServer, taskMessageQueue: TaskMes
         'Analyze one file, one or more public URLs, a small file set, or generate a diagram.',
       inputSchema: AnalyzeInputSchema,
       outputSchema: AnalyzeOutputSchema,
-      annotations: READONLY_ANNOTATIONS,
+      annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
     taskMessageQueue,
     (args: AnalyzeInput, ctx: ServerContext) => analyzeWork(rootsFetcher, fileWork, args, ctx),

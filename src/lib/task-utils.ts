@@ -28,6 +28,13 @@ export const READONLY_ANNOTATIONS = {
   openWorldHint: true,
 } as const;
 
+export const READONLY_NON_IDEMPOTENT_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true,
+} as const;
+
 export const MUTABLE_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: false,

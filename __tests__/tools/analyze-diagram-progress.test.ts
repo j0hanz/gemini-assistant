@@ -363,4 +363,63 @@ describe('analyze diagram progress', () => {
       client.models.generateContentStream = originalGenerate;
     }
   });
+
+  it('returns formatted fenced diagram markdown as the primary content text', async () => {
+    const { analyze } = getHandlers();
+    const store = makeMockStore();
+    const { ctx } = makeMockContext(store);
+    const client = getAI();
+    const originalGenerate = client.models.generateContentStream.bind(client.models);
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream([
+        {
+          candidates: [
+            {
+              content: {
+                parts: [{ text: '```mermaid\nflowchart TD\nA-->B\n```\n\nExplanation text.' }],
+              },
+              finishReason: FinishReason.STOP,
+            },
+          ],
+        } as GenerateContentResponse,
+      ]);
+
+    try {
+      await analyze.createTask(
+        {
+          goal: 'Generate a diagram',
+          outputKind: 'diagram',
+          diagramType: 'mermaid',
+          targetKind: 'url',
+          urls: ['https://example.com'],
+        },
+        ctx,
+      );
+      await flushTaskWork(() => store.stored.length > 0);
+
+      const stored = store.stored[0];
+      assert.ok(stored);
+      assert.strictEqual(stored.status, 'completed');
+
+      const firstText = stored.result.content.find(
+        (part) => part.type === 'text' && typeof part.text === 'string',
+      );
+      assert.ok(firstText?.text);
+      assert.match(firstText.text, /^### Diagram\n\n```mermaid\nflowchart TD\nA-->B\n```/);
+      assert.match(firstText.text, /### Explanation\n\nExplanation text\./);
+
+      const structured = stored.result.structuredContent as {
+        diagram: string;
+        diagramType: string;
+        explanation?: string;
+      };
+      assert.strictEqual(structured.diagramType, 'mermaid');
+      assert.strictEqual(structured.diagram, 'flowchart TD\nA-->B');
+      assert.strictEqual(structured.explanation, 'Explanation text.');
+    } finally {
+      client.models.generateContentStream = originalGenerate;
+    }
+  });
 });

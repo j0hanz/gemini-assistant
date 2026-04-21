@@ -248,7 +248,10 @@ function buildCreateCacheResult(cache: {
   model?: string;
   expireTime?: string;
 }): CallToolResult {
-  const cacheName = cache.name ?? 'N/A';
+  if (!cache.name) {
+    throw new AppError('memory', 'memory: Gemini returned a cache with no resource name.');
+  }
+  const cacheName = cache.name;
   const shortName = truncateName(cacheName);
 
   return {
@@ -274,7 +277,7 @@ function buildCreateCacheResult(cache: {
   };
 }
 
-function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
+export function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
   return async function createCacheWork(
     { filePaths, systemInstruction, ttl, displayName }: CreateCacheInput,
     ctx: ServerContext,
@@ -322,7 +325,7 @@ async function deleteCacheWork(
     if (confirmation === 'declined') {
       return {
         content: [{ type: 'text', text: 'Cache deletion cancelled.' }],
-        structuredContent: { cacheName, deleted: false },
+        structuredContent: { cacheName, deleted: false, confirmationRequired: false },
       };
     }
 
@@ -737,11 +740,9 @@ export async function memoryWork(
   } else if (isMemoryAction(args, 'workspace.cache')) {
     result = handleWorkspaceCache(base, args.action);
   } else {
-    result = new AppError('memory', `memory: Unsupported action '${args.action}'.`).toToolResult();
-  }
-
-  if (result.isError) {
-    return result;
+    throw new Error(
+      `memory: Unhandled action '${args.action}'. Enum validation failed upstream.`,
+    );
   }
 
   return result;
@@ -763,7 +764,7 @@ export function registerMemoryTool(
       description: 'Inspect and manage sessions, caches, and workspace memory state.',
       inputSchema: createMemoryInputSchema(sessionStore.completeSessionIds.bind(sessionStore)),
       outputSchema: MemoryOutputSchema,
-      annotations: MUTABLE_ANNOTATIONS,
+      annotations: { ...MUTABLE_ANNOTATIONS, destructiveHint: true },
     },
     taskMessageQueue,
     (args: MemoryInput, ctx: ServerContext) =>

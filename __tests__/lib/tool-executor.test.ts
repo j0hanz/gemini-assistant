@@ -223,6 +223,18 @@ describe('ToolExecutor', () => {
     });
   });
 
+  it('runStream does not synthesize structuredContent when the caller does not provide it', async () => {
+    const executor = createExecutor();
+    const { ctx } = makeMockContext();
+
+    const result = await executor.runStream(ctx, 'search', 'Web Search', async () =>
+      fakeStream([makeChunk([{ text: 'answer' }], FinishReason.STOP)]),
+    );
+
+    assert.strictEqual(result.isError, undefined);
+    assert.strictEqual(result.structuredContent, undefined);
+  });
+
   it('runStream merges shared structured metadata including functionCalls', async () => {
     const executor = createExecutor();
     const { ctx } = makeMockContext();

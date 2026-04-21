@@ -85,6 +85,14 @@ export function maybeSummarizePayload(value: unknown, verbosePayloads: boolean):
   return verbosePayloads ? value : summarizeLogValue(value);
 }
 
+function isNodeTestProcess(): boolean {
+  return process.execArgv.includes('--test');
+}
+
+function defaultLogFileName(): string {
+  return isNodeTestProcess() ? 'test-app.log' : 'app.log';
+}
+
 export class Logger {
   private readonly attachedServers = new Set<McpServer>();
   private readonly verbosePayloads: boolean;
@@ -143,7 +151,7 @@ export class Logger {
         mkdirSync(logDir, { recursive: true });
       }
 
-      const stream = createWriteStream(join(logDir, 'app.log'), { flags: 'a' });
+      const stream = createWriteStream(join(logDir, defaultLogFileName()), { flags: 'a' });
       stream.once('error', (error) => {
         if (this.fileSinkErrorHandled) {
           return;

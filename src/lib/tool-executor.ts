@@ -114,9 +114,7 @@ export class ToolExecutor {
     toolName: string,
     toolLabel: string,
     streamGenerator: () => Promise<AsyncGenerator<import('@google/genai').GenerateContentResponse>>,
-    responseBuilder: StreamResponseBuilder<T> = (_streamResult, text) => ({
-      structuredContent: { answer: text } as unknown as T,
-    }),
+    responseBuilder: StreamResponseBuilder<T> = () => ({}),
     options?: ExecutionOptions,
   ): Promise<CallToolResult> {
     return this.executeWithTracing(
@@ -144,21 +142,29 @@ export class ToolExecutor {
         };
 
         const usage = extractUsage(streamResult.usageMetadata);
+        const existingStructuredContent =
+          finalResult.structuredContent && typeof finalResult.structuredContent === 'object'
+            ? (finalResult.structuredContent as Record<string, unknown>)
+            : undefined;
+
+        const mergedStructuredContent =
+          existingStructuredContent || built.structuredContent
+            ? {
+                ...(existingStructuredContent ?? {}),
+                ...(built.structuredContent ?? {}),
+                ...buildSharedStructuredMetadata({
+                  functionCalls: streamResult.functionCalls,
+                  includeThoughts: EXPOSE_THOUGHTS,
+                  thoughtText: streamResult.thoughtText,
+                  toolEvents: streamResult.toolEvents,
+                  usage,
+                }),
+              }
+            : undefined;
+
         const mergedResult: CallToolResult = {
           ...finalResult,
-          structuredContent: {
-            ...(finalResult.structuredContent && typeof finalResult.structuredContent === 'object'
-              ? finalResult.structuredContent
-              : {}),
-            ...(built.structuredContent ?? {}),
-            ...buildSharedStructuredMetadata({
-              functionCalls: streamResult.functionCalls,
-              includeThoughts: EXPOSE_THOUGHTS,
-              thoughtText: streamResult.thoughtText,
-              toolEvents: streamResult.toolEvents,
-              usage,
-            }),
-          },
+          ...(mergedStructuredContent ? { structuredContent: mergedStructuredContent } : {}),
         };
 
         return { result: mergedResult, reportMessage: built.reportMessage };

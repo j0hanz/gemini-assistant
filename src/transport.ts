@@ -489,7 +489,9 @@ function startDetectedRuntime(
     };
   }
 
-  log.warn('no auto-serve runtime detected (Bun/Deno) — wire the exported handler manually.');
+  log.info(
+    'web-standard handler created without Bun/Deno auto-serve; wire the exported handler manually.',
+  );
   return undefined;
 }
 

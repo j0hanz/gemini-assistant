@@ -218,7 +218,7 @@ async function searchWork(
 
   return runToolStream(
     ctx,
-    'search',
+    'research',
     SEARCH_TOOL_LABEL,
     'Starting',
     'Search requested',
@@ -309,7 +309,7 @@ async function agenticSearchWork(
 
   return runToolStream(
     ctx,
-    'agentic_search',
+    'research',
     AGENTIC_SEARCH_TOOL_LABEL,
     'Starting deep research',
     'Agentic search requested',

@@ -1,12 +1,23 @@
+import { McpServer } from '@modelcontextprotocol/server';
+
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 
 import { closeStartedRuntime, main, type MainDependencies, startCli } from '../src/index.js';
+import { logger } from '../src/lib/logger.js';
+import { createServerInstance } from '../src/server.js';
 import type {
   HttpTransportResult,
   ServerInstance,
   WebStandardTransportResult,
 } from '../src/transport.js';
+
+const originalAttachServer = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(logger),
+  'attachServer',
+)?.value as typeof logger.attachServer;
+const originalServerClose = Object.getOwnPropertyDescriptor(McpServer.prototype, 'close')
+  ?.value as typeof McpServer.prototype.close;
 
 interface MockProcess {
   argv: string[];
@@ -71,6 +82,13 @@ async function emitProcessEvent(processLike: MockProcess, event: string, ...args
   await new Promise((resolve) => setImmediate(resolve));
 }
 
+afterEach(() => {
+  logger.attachServer = function restoreAttachServer(server) {
+    return originalAttachServer.call(this, server);
+  };
+  McpServer.prototype.close = originalServerClose;
+});
+
 describe('startCli', () => {
   it('routes startup failures through fatal logging and exit', async () => {
     const processLike = createMockProcess();
@@ -124,7 +142,7 @@ describe('closeStartedRuntime', () => {
             calls.push('web');
             throw new Error('web failed');
           },
-        } as WebStandardTransportResult,
+        } as unknown as WebStandardTransportResult,
       });
       assert.fail('Expected shutdown to fail');
     } catch (err) {
@@ -132,6 +150,42 @@ describe('closeStartedRuntime', () => {
     }
 
     assert.deepStrictEqual(calls, ['stdio', 'http', 'web']);
+  });
+
+  it('propagates a single createServerInstance close failure through runtime shutdown wrapping', async () => {
+    McpServer.prototype.close = async function mockClose() {
+      throw new Error('close boom');
+    };
+
+    const directInstance = createServerInstance();
+    const runtimeInstance = createServerInstance();
+
+    await assert.rejects(() => directInstance.close(), /close: server\.close failed: close boom/);
+    await assert.rejects(
+      () => closeStartedRuntime({ stdioInstance: runtimeInstance }),
+      /stdio transport shutdown failed: close: server\.close failed: close boom/,
+    );
+  });
+
+  it('rethrows AggregateError when both cleanup and server.close fail', async () => {
+    logger.attachServer = () => {
+      return () => {
+        throw new Error('detach boom');
+      };
+    };
+    McpServer.prototype.close = async function mockClose() {
+      throw new Error('close boom');
+    };
+
+    const instance = createServerInstance();
+
+    await assert.rejects(
+      () => instance.close(),
+      (err: unknown) =>
+        err instanceof AggregateError &&
+        err.message === 'Server instance shutdown failed' &&
+        err.errors.length === 2,
+    );
   });
 });
 
@@ -217,11 +271,11 @@ describe('main', () => {
 });
 
 function createEventStoreStub() {
-  throw new Error('not used');
+  return {} as ReturnType<MainDependencies['createEventStore']>;
 }
 
 function createServerInstanceStub() {
-  throw new Error('not used');
+  return {} as ServerInstance;
 }
 
 function createStdioTransportStub() {

@@ -45,6 +45,10 @@ interface LoggerOptions {
   verbosePayloads?: boolean;
 }
 
+function formatLogLine(entry: LogEntry): string {
+  return JSON.stringify(entry) + '\n';
+}
+
 export function summarizeLogValue(value: unknown, depth = 0): unknown {
   if (typeof value === 'string') {
     return { type: 'string', length: value.length };
@@ -83,20 +87,17 @@ export function maybeSummarizePayload(value: unknown, verbosePayloads: boolean):
 
 export class Logger {
   private readonly attachedServers = new Set<McpServer>();
-  private readonly logStream: Pick<Writable, 'write'>;
   private readonly verbosePayloads: boolean;
+  private logStream: Pick<Writable, 'write'> | undefined;
+  private logStreamInitialized = false;
+  private fileSinkErrorHandled = false;
 
   constructor(options: LoggerOptions = {}) {
     this.verbosePayloads = options.verbosePayloads ?? getVerbosePayloadLogging();
 
     if (options.logStream) {
       this.logStream = options.logStream;
-    } else {
-      const logDir = join(process.cwd(), 'logs');
-      if (!existsSync(logDir)) {
-        mkdirSync(logDir, { recursive: true });
-      }
-      this.logStream = createWriteStream(join(logDir, 'app.log'), { flags: 'a' });
+      this.logStreamInitialized = true;
     }
   }
 
@@ -118,8 +119,84 @@ export class Logger {
       ...(data !== undefined ? { data } : {}),
     };
 
-    this.logStream.write(JSON.stringify(entry) + '\n');
+    this.writeEntry(entry);
     this.broadcastToServers(level, context, entry);
+  }
+
+  private buildEntry(level: LogLevel, context: string, message: string, data?: unknown): LogEntry {
+    const traceId = logContext.getStore();
+    return {
+      timestamp: new Date().toISOString(),
+      level,
+      ...(traceId ? { traceId } : {}),
+      context,
+      message,
+      ...(data !== undefined ? { data } : {}),
+    };
+  }
+
+  private writeEntry(entry: LogEntry): void {
+    this.ensureLogStream().write(formatLogLine(entry));
+  }
+
+  private ensureLogStream(): Pick<Writable, 'write'> {
+    if (this.logStreamInitialized && this.logStream) {
+      return this.logStream;
+    }
+
+    this.logStreamInitialized = true;
+
+    try {
+      const logDir = join(process.cwd(), 'logs');
+      if (!existsSync(logDir)) {
+        mkdirSync(logDir, { recursive: true });
+      }
+
+      const stream = createWriteStream(join(logDir, 'app.log'), { flags: 'a' });
+      stream.once('error', (error) => {
+        if (this.fileSinkErrorHandled) {
+          return;
+        }
+
+        this.fileSinkErrorHandled = true;
+        this.logStream = process.stderr;
+        this.writeLocalOnly(
+          'warn',
+          'logger',
+          'log file sink failed; falling back to stderr',
+          {
+            error: error instanceof Error ? error.message : String(error),
+          },
+          process.stderr,
+        );
+      });
+      this.logStream = stream;
+      return stream;
+    } catch (error) {
+      this.logStream = process.stderr;
+      this.fileSinkErrorHandled = true;
+      this.writeLocalOnly(
+        'warn',
+        'logger',
+        'log file sink unavailable; falling back to stderr',
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+        process.stderr,
+      );
+      return process.stderr;
+    }
+  }
+
+  private writeLocalOnly(
+    level: LogLevel,
+    context: string,
+    message: string,
+    data?: unknown,
+    stream: Pick<Writable, 'write'> = this.ensureLogStream(),
+  ): void {
+    const entry = this.buildEntry(level, context, message, data);
+    stream.write(formatLogLine(entry));
   }
 
   private broadcastToServers(level: LogLevel, context: string, entry: LogEntry): void {
@@ -145,7 +222,12 @@ export class Logger {
           data: entry,
         }),
       ),
-    );
+    ).then((results) => {
+      const count = results.filter((result) => result.status === 'rejected').length;
+      if (count > 0) {
+        this.writeLocalOnly('warn', 'logger', `broadcast to ${count} server(s) failed`, { count });
+      }
+    });
   }
 
   getVerbosePayloads(): boolean {

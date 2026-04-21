@@ -245,7 +245,7 @@ describe('createToolTaskHandlers', () => {
       };
     };
 
-    const handlers = createToolTaskHandlers(work, queue);
+    const handlers = createToolTaskHandlers('test-tool', work, queue);
     const result = await handlers.createTask({ msg: 'hello' }, ctx);
 
     assert.ok(result.task);
@@ -260,14 +260,43 @@ describe('createToolTaskHandlers', () => {
     assert.strictEqual(entry.status, 'completed');
   });
 
+  it('createTask stores a failed result when work throws synchronously', async () => {
+    const store = makeMockStore();
+    const ctx = makeMockContext({ taskStore: store });
+    const queue = new InMemoryTaskMessageQueue();
+
+    const handlers = createToolTaskHandlers(
+      'test-tool',
+      () => {
+        throw new Error('sync explode');
+      },
+      queue,
+    );
+
+    const result = await handlers.createTask({}, ctx);
+    assert.ok(result.task);
+    assert.strictEqual(result.task.taskId, 'task-1');
+
+    assert.strictEqual(store.stored.length, 1);
+    const entry = store.stored[0];
+    assert.ok(entry);
+    assert.strictEqual(entry.status, 'failed');
+    assert.strictEqual(entry.result.isError, true);
+    assert.match(entry.result.content[0]?.text ?? '', /sync explode/);
+  });
+
   it('createTask stores a failed result when work rejects after task creation', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store });
     const queue = new InMemoryTaskMessageQueue();
 
-    const handlers = createToolTaskHandlers(async () => {
-      throw new Error('outputSchema mismatch');
-    }, queue);
+    const handlers = createToolTaskHandlers(
+      'test-tool',
+      async () => {
+        throw new Error('outputSchema mismatch');
+      },
+      queue,
+    );
 
     const result = await handlers.createTask({}, ctx);
     assert.ok(result.task);
@@ -295,6 +324,7 @@ describe('createToolTaskHandlers', () => {
     const queue = new InMemoryTaskMessageQueue();
 
     const handlers = createToolTaskHandlers(
+      'test-tool',
       async () => ({
         content: [{ type: 'text' as const, text: 'ok' }],
       }),
@@ -310,6 +340,7 @@ describe('createToolTaskHandlers', () => {
     const queue = new InMemoryTaskMessageQueue();
 
     const handlers = createToolTaskHandlers(
+      'test-tool',
       async () => ({
         content: [{ type: 'text' as const, text: 'ok' }],
       }),
@@ -327,6 +358,7 @@ describe('createToolTaskHandlers', () => {
     const queue = new InMemoryTaskMessageQueue();
 
     const handlers = createToolTaskHandlers(
+      'test-tool',
       async () => ({
         content: [{ type: 'text' as const, text: 'ok' }],
       }),
@@ -344,6 +376,7 @@ describe('createToolTaskHandlers', () => {
     const queue = new InMemoryTaskMessageQueue();
 
     const handlers = createToolTaskHandlers(
+      'test-tool',
       async () => ({
         content: [{ type: 'text' as const, text: 'ok' }],
       }),
@@ -361,6 +394,7 @@ describe('createToolTaskHandlers', () => {
     const queue = new InMemoryTaskMessageQueue();
 
     const handlers = createToolTaskHandlers(
+      'test-tool',
       async () => ({
         content: [{ type: 'text' as const, text: 'ok' }],
       }),
@@ -501,7 +535,7 @@ describe('registerTaskTool', () => {
           status: z.literal('completed'),
           summary: z.string(),
         }),
-        annotations: {} as never,
+        annotations: {},
       },
       queue,
       async ({ msg }: { msg: string }) => ({
@@ -539,7 +573,7 @@ describe('registerTaskTool', () => {
           status: z.literal('completed'),
           summary: z.string(),
         }),
-        annotations: {} as never,
+        annotations: {},
       },
       queue,
       async ({ msg }: { msg: string }) => ({

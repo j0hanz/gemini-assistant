@@ -4,12 +4,21 @@ import {
   LATEST_PROTOCOL_VERSION,
   McpServer,
 } from '@modelcontextprotocol/server';
+import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { createServer as createNodeServer } from 'node:http';
 import { afterEach, describe, it } from 'node:test';
 
+import { ScopedLogger } from '../src/lib/logger.js';
 import { startHttpTransport, startWebStandardTransport } from '../src/transport.js';
+
+const originalScopedLoggerError = Object.getOwnPropertyDescriptor(ScopedLogger.prototype, 'error')
+  ?.value as typeof ScopedLogger.prototype.error;
+const originalWebHandleRequest = Object.getOwnPropertyDescriptor(
+  WebStandardStreamableHTTPServerTransport.prototype,
+  'handleRequest',
+)?.value as typeof WebStandardStreamableHTTPServerTransport.prototype.handleRequest;
 
 interface ServerInstanceOptions {
   connectDelayMs?: number;
@@ -38,7 +47,7 @@ function createServerInstance(options: ServerInstanceOptions = {}) {
 
   if (options.failConnect || options.connectDelayMs) {
     const originalConnect = server.connect.bind(server);
-    server.connect = (async (transport) => {
+    server.connect = async (transport) => {
       if (options.connectDelayMs) {
         await new Promise((resolve) => setTimeout(resolve, options.connectDelayMs));
       }
@@ -46,7 +55,7 @@ function createServerInstance(options: ServerInstanceOptions = {}) {
         throw new Error('connect failed');
       }
       return await originalConnect(transport);
-    }) as typeof server.connect;
+    };
   }
 
   return {
@@ -102,6 +111,8 @@ afterEach(() => {
   delete process.env.MCP_MAX_TRANSPORT_SESSIONS;
   delete process.env.MCP_STATELESS;
   delete process.env.MCP_TRANSPORT_SESSION_TTL_MS;
+  ScopedLogger.prototype.error = originalScopedLoggerError;
+  WebStandardStreamableHTTPServerTransport.prototype.handleRequest = originalWebHandleRequest;
 });
 
 describe('startWebStandardTransport', () => {
@@ -305,6 +316,83 @@ describe('startWebStandardTransport', () => {
 
       assert.strictEqual(response.status, 500);
       assert.strictEqual(closeCalls, 1);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('logs structured request failure metadata when a request fails with a session id', async () => {
+    process.env.MCP_STATELESS = 'false';
+
+    const logged: { data?: unknown; message: string }[] = [];
+    ScopedLogger.prototype.error = function mockError(message: string, data?: unknown) {
+      logged.push({ message, data });
+    };
+
+    const transport = await startWebStandardTransport(() => createServerInstance());
+
+    try {
+      const sessionId = await initializeSession(transport);
+      WebStandardStreamableHTTPServerTransport.prototype.handleRequest = async function mockFail() {
+        throw new Error('request boom');
+      };
+
+      const response = await transport.handler(
+        createRequest({ jsonrpc: '2.0', id: 2, method: 'ping' }, sessionId),
+      );
+
+      assert.strictEqual(response.status, 500);
+      const failure = logged.find((entry) => entry.message === 'request failed');
+      assert.ok(failure);
+      assert.deepStrictEqual(failure.data, {
+        requestMethod: 'POST',
+        sessionId,
+        error: 'request boom',
+        stack: (failure.data as { stack: string }).stack,
+      });
+      assert.match((failure.data as { stack: string }).stack, /request boom/);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('omits sessionId from structured request failure metadata when no session exists', async () => {
+    process.env.MCP_STATELESS = 'false';
+
+    const logged: { data?: unknown; message: string }[] = [];
+    ScopedLogger.prototype.error = function mockError(message: string, data?: unknown) {
+      logged.push({ message, data });
+    };
+    WebStandardStreamableHTTPServerTransport.prototype.handleRequest = async function mockFail() {
+      throw new Error('request boom');
+    };
+
+    const transport = await startWebStandardTransport(() => createServerInstance());
+
+    try {
+      const response = await transport.handler(
+        createRequest({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            capabilities: { roots: {} },
+            clientInfo: { name: 'transport-test', version: '0.0.1' },
+            protocolVersion: LATEST_PROTOCOL_VERSION,
+          },
+        }),
+      );
+
+      assert.strictEqual(response.status, 500);
+      const failure = logged.find((entry) => entry.message === 'request failed');
+      assert.ok(failure);
+      assert.deepStrictEqual(failure.data, {
+        requestMethod: 'POST',
+        error: 'request boom',
+        stack: (failure.data as { stack: string }).stack,
+      });
+      assert.ok(!('sessionId' in ((failure.data as Record<string, unknown>) ?? {})));
+      assert.match((failure.data as { stack: string }).stack, /request boom/);
     } finally {
       await transport.close();
     }

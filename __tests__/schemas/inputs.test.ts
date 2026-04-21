@@ -34,7 +34,7 @@ function getObjectShape(schema: unknown): Record<string, z.ZodType> {
   }
 
   if (schema && typeof schema === 'object' && 'in' in schema) {
-    return getObjectShape((schema as { in: unknown }).in);
+    return getObjectShape(schema.in);
   }
 
   throw new Error('Expected object-like schema');

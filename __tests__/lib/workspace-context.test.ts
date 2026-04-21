@@ -256,12 +256,12 @@ describe('workspace-context', () => {
       let resolveCreate: ((value: { name: string }) => void) | undefined;
       let createCalls = 0;
 
-      ai.caches.create = (async () => {
+      ai.caches.create = async () => {
         createCalls++;
         return await new Promise<{ name: string }>((resolve) => {
           resolveCreate = resolve;
         });
-      }) as typeof ai.caches.create;
+      };
 
       try {
         const first = workspaceCacheManager.getOrCreateCache([root]);
@@ -290,9 +290,9 @@ describe('workspace-context', () => {
       const createdNames = ['cachedContents/first-cache', 'cachedContents/second-cache'];
       const deletedNames: string[] = [];
 
-      ai.caches.create = (async () => ({
+      ai.caches.create = async () => ({
         name: createdNames.shift() ?? 'cachedContents/fallback',
-      })) as typeof ai.caches.create;
+      });
       ai.caches.delete = (async ({ name }: { name: string }) => {
         deletedNames.push(name);
       }) as typeof ai.caches.delete;
@@ -327,13 +327,13 @@ describe('workspace-context', () => {
       const originalCreate = ai.caches.create.bind(ai.caches);
       let createCalls = 0;
 
-      ai.caches.create = (async () => {
+      ai.caches.create = async () => {
         createCalls++;
         if (createCalls === 1) {
           return { name: 'cachedContents/stable-cache' };
         }
         throw new Error('transient failure');
-      }) as typeof ai.caches.create;
+      };
 
       try {
         assert.strictEqual(
@@ -368,9 +368,9 @@ describe('workspace-context', () => {
       const originalDelete = ai.caches.delete.bind(ai.caches);
       const deletedNames: string[] = [];
 
-      ai.caches.create = (async () => ({
+      ai.caches.create = async () => ({
         name: 'cachedContents/to-delete',
-      })) as typeof ai.caches.create;
+      });
       ai.caches.delete = (async ({ name }: { name: string }) => {
         deletedNames.push(name);
       }) as typeof ai.caches.delete;

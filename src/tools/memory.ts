@@ -564,7 +564,7 @@ async function handleCachesCreate(
         };
   const result = await createCacheWork(createArgs, ctx);
   if (result.isError) return result;
-  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const structured = result.structuredContent ?? {};
   const resourceUris =
     typeof structured.name === 'string'
       ? ['memory://caches', `memory://caches/${encodeURIComponent(structured.name)}`]
@@ -595,7 +595,7 @@ async function handleCachesUpdate(
 ): Promise<CallToolResult> {
   const result = await updateCacheWork({ cacheName: args.cacheName, ttl: args.ttl }, ctx);
   if (result.isError) return result;
-  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const structured = result.structuredContent ?? {};
   return {
     ...result,
     structuredContent: {
@@ -618,7 +618,7 @@ async function handleCachesDelete(
 ): Promise<CallToolResult> {
   const result = await deleteCacheWork({ cacheName: args.cacheName, confirm: args.confirm }, ctx);
   if (result.isError) return result;
-  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const structured = result.structuredContent ?? {};
   return {
     ...result,
     structuredContent: {

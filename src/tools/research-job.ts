@@ -5,6 +5,8 @@ import type {
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
 
+import { AppError } from '../lib/errors.js';
+import { logger, maybeSummarizePayload } from '../lib/logger.js';
 import {
   buildAgenticResearchPrompt,
   buildFileAnalysisPrompt,
@@ -42,6 +44,7 @@ import { getAI, MODEL } from '../client.js';
 const SEARCH_TOOL_LABEL = 'Web Search';
 const ANALYZE_URL_TOOL_LABEL = 'Analyze URL';
 const AGENTIC_SEARCH_TOOL_LABEL = 'Agentic Search';
+const log = logger.child('research');
 
 type StreamGenerator = () => Promise<
   AsyncGenerator<import('@google/genai').GenerateContentResponse>
@@ -55,13 +58,15 @@ async function runToolStream<T extends Record<string, unknown>>(
   toolKey: string,
   label: string,
   initialMsg: string,
-  logMsg: string,
+  logMessage: string,
+  logData: unknown,
   startFn: StreamGenerator,
   resultFn?: StreamResponseBuilder<T>,
 ): Promise<CallToolResult> {
   const progress = new ProgressReporter(ctx, label);
   await progress.send(0, undefined, initialMsg);
-  await ctx.mcpReq.log('info', logMsg);
+  await ctx.mcpReq.log('info', logMessage);
+  log.info(logMessage, maybeSummarizePayload(logData, log.getVerbosePayloads()));
   return executor.runStream(ctx, toolKey, label, startFn, resultFn);
 }
 
@@ -81,15 +86,13 @@ function extractSampledText(content: unknown): string {
   if (Array.isArray(content)) {
     return content
       .map((entry: unknown) =>
-        typeof entry === 'object' && entry !== null && 'text' in entry
-          ? String((entry as { text: unknown }).text)
-          : '',
+        typeof entry === 'object' && entry !== null && 'text' in entry ? String(entry.text) : '',
       )
       .join('\n');
   }
 
   return typeof content === 'object' && content !== null && 'text' in content
-    ? String((content as { text: unknown }).text)
+    ? String(content.text)
     : '';
 }
 
@@ -114,10 +117,14 @@ async function enrichTopicWithSampling(topic: string, ctx: ServerContext): Promi
       return topic;
     }
 
-    await ctx.mcpReq.log('info', `Sampled context: ${sampledText}`);
+    await ctx.mcpReq.log('info', 'Sampling provided research angles');
+    log.debug('Sampling provided research angles', { sampledTextLength: sampledText.length });
     return `${topic}\n\nKeywords/angles:\n${sampledText}`;
   } catch (error) {
-    await ctx.mcpReq.log('info', `requestSampling encountered an issue: ${String(error)}`);
+    await ctx.mcpReq.log('info', 'Sampling unavailable; continuing without extra angles');
+    log.info('requestSampling encountered an issue', {
+      error: AppError.formatMessage(error),
+    });
     return topic;
   }
 }
@@ -214,7 +221,8 @@ async function searchWork(
     'search',
     SEARCH_TOOL_LABEL,
     'Starting',
-    `Search: ${query}`,
+    'Search requested',
+    { query, urlCount: urls?.length ?? 0 },
     () =>
       getAI().models.generateContentStream({
         model: MODEL,
@@ -254,7 +262,8 @@ export async function analyzeUrlWork(
     'analyze_url',
     ANALYZE_URL_TOOL_LABEL,
     'Fetching',
-    `Analyzing ${String(urls.length)} URL(s)`,
+    'Analyze URL requested',
+    { question, urlCount: urls.length },
     () =>
       getAI().models.generateContentStream({
         model: MODEL,
@@ -287,7 +296,8 @@ async function agenticSearchWork(
         topic = `${topic}\n\nAdditional User Constraint: ${constraint}`;
       }
     } catch (err) {
-      await ctx.mcpReq.log('warning', `Elicitation skipped or failed: ${String(err)}`);
+      await ctx.mcpReq.log('warning', 'Elicitation skipped; continuing without extra constraints');
+      log.warn('Elicitation skipped or failed', { error: AppError.formatMessage(err) });
     }
   }
 
@@ -302,7 +312,8 @@ async function agenticSearchWork(
     'agentic_search',
     AGENTIC_SEARCH_TOOL_LABEL,
     'Starting deep research',
-    `Agentic search: ${topic}`,
+    'Agentic search requested',
+    { topic, searchDepth },
     () =>
       getAI().models.generateContentStream({
         model: MODEL,
@@ -396,7 +407,7 @@ async function researchWork(args: ResearchInput, ctx: ServerContext): Promise<Ca
     return result;
   }
 
-  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const structured = result.structuredContent ?? {};
   const structuredContent = validateStructuredContent(
     'research',
     ResearchOutputSchema,

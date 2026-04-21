@@ -84,16 +84,16 @@ export class MockGeminiEnvironment {
     const cacheStore = this.cacheStore;
     const deletedUploads = this.deletedUploads;
 
-    this.client.models.generateContentStream = (async () => {
+    this.client.models.generateContentStream = async () => {
       const next = this.streamQueue.shift();
       if (!next) {
         throw new Error('No mocked Gemini stream queued for generateContentStream');
       }
 
       return next;
-    }) as unknown as typeof this.client.models.generateContentStream;
+    };
 
-    this.client.files.upload = (async (opts: { file: string }) => {
+    this.client.files.upload = async (opts: { file: string }) => {
       this.uploadCounter += 1;
       const fileName = opts.file.split(/[\\/]/).pop() ?? `upload-${String(this.uploadCounter)}`;
       return {
@@ -101,14 +101,14 @@ export class MockGeminiEnvironment {
         name: `uploaded-${String(this.uploadCounter)}`,
         uri: `gs://mock/${fileName}`,
       };
-    }) as typeof this.client.files.upload;
+    };
 
-    this.client.files.delete = (async (opts: { name: string }) => {
+    this.client.files.delete = async (opts: { name: string }) => {
       deletedUploads.push(opts.name);
       return {};
-    }) as unknown as typeof this.client.files.delete;
+    };
 
-    this.client.caches.create = (async (opts: {
+    this.client.caches.create = async (opts: {
       config?: { displayName?: string };
       model?: string;
     }) => {
@@ -121,15 +121,15 @@ export class MockGeminiEnvironment {
       };
       cacheStore.set(name, cache);
       return cache;
-    }) as typeof this.client.caches.create;
+    };
 
-    this.client.caches.get = (async (opts: { name: string }) => {
+    this.client.caches.get = async (opts: { name: string }) => {
       const cache = cacheStore.get(opts.name);
       if (!cache) {
         throw new Error(`Missing cache ${opts.name}`);
       }
       return cache;
-    }) as typeof this.client.caches.get;
+    };
 
     this.client.caches.list = (async () => ({
       async *[Symbol.asyncIterator]() {
@@ -139,7 +139,7 @@ export class MockGeminiEnvironment {
       },
     })) as unknown as typeof this.client.caches.list;
 
-    this.client.caches.update = (async (opts: { config?: { ttl?: string }; name: string }) => {
+    this.client.caches.update = async (opts: { config?: { ttl?: string }; name: string }) => {
       const existing = cacheStore.get(opts.name) ?? {
         expireTime: '2099-01-01T00:00:00.000Z',
         model: 'models/mock-gemini',
@@ -151,12 +151,12 @@ export class MockGeminiEnvironment {
       };
       cacheStore.set(opts.name, updated);
       return updated;
-    }) as typeof this.client.caches.update;
+    };
 
-    this.client.caches.delete = (async (opts: { name: string }) => {
+    this.client.caches.delete = async (opts: { name: string }) => {
       cacheStore.delete(opts.name);
       return {};
-    }) as unknown as typeof this.client.caches.delete;
+    };
   }
 
   restore(): void {

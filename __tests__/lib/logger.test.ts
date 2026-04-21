@@ -1,12 +1,16 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, it } from 'node:test';
 
 import { Logger, summarizeLogValue } from '../../src/lib/logger.js';
 
 interface MockServer {
+  failSend?: (enabled: boolean) => void;
   messages: unknown[];
   server: McpServer;
   setConnected: (connected: boolean) => void;
@@ -14,16 +18,22 @@ interface MockServer {
 
 function createMockServer(): MockServer {
   const messages: unknown[] = [];
-  const state = { connected: true, messages };
+  const state = { connected: true, failSend: false, messages };
 
   return {
     messages,
     server: {
       isConnected: () => state.connected,
       sendLoggingMessage: async (message: unknown) => {
+        if (state.failSend) {
+          throw new Error('broadcast failed');
+        }
         messages.push(message);
       },
     } as unknown as McpServer,
+    failSend: (enabled: boolean) => {
+      state.failSend = enabled;
+    },
     setConnected: (connected: boolean) => {
       state.connected = connected;
     },
@@ -50,6 +60,29 @@ function createBufferedLogger(verbosePayloads = false) {
 
 afterEach(() => {
   delete process.env.LOG_VERBOSE_PAYLOADS;
+});
+
+describe('Logger sink setup', () => {
+  it('creates the default log directory lazily on first write', async () => {
+    const originalCwd = process.cwd();
+    const tempDir = mkdtempSync(join(tmpdir(), 'gemini-assistant-logger-'));
+
+    try {
+      process.chdir(tempDir);
+      const logger = new Logger();
+
+      assert.strictEqual(existsSync(join(tempDir, 'logs')), false);
+
+      logger.info('system', 'hello');
+      await new Promise((resolve) => setImmediate(resolve));
+
+      assert.strictEqual(existsSync(join(tempDir, 'logs')), true);
+      assert.match(readFileSync(join(tempDir, 'logs', 'app.log'), 'utf8'), /"message":"hello"/);
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(tempDir, { force: true, recursive: true });
+    }
+  });
 });
 
 describe('summarizeLogValue', () => {
@@ -109,6 +142,31 @@ describe('Logger forwarding', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.strictEqual(server.messages.length, 0);
+  });
+
+  it('logs one local warning when broadcast delivery fails for attached servers', async () => {
+    const { logger, readEntries } = createBufferedLogger();
+    const healthyServer = createMockServer();
+    const failingServer = createMockServer();
+    failingServer.failSend?.(true);
+    logger.attachServer(healthyServer.server);
+    logger.attachServer(failingServer.server);
+
+    logger.info('system', 'hello');
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const entries = readEntries();
+    const failureWarnings = entries.filter(
+      (entry) =>
+        entry.level === 'warn' &&
+        entry.context === 'logger' &&
+        entry.message === 'broadcast to 1 server(s) failed',
+    );
+
+    assert.strictEqual(healthyServer.messages.length, 1);
+    assert.strictEqual(failureWarnings.length, 1);
+    assert.deepStrictEqual(failureWarnings[0]?.data, { count: 1 });
   });
 });
 

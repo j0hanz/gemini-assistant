@@ -65,7 +65,7 @@ describe('extractTextOrError', () => {
           },
         ],
         text: '',
-      } as Partial<GenerateContentResponse>),
+      }),
       'test',
     );
     assert.strictEqual(result.isError, true);
@@ -82,7 +82,7 @@ describe('extractTextOrError', () => {
           },
         ],
         text: '',
-      } as Partial<GenerateContentResponse>),
+      }),
       'test',
     );
     assert.strictEqual(result.isError, true);
@@ -99,7 +99,7 @@ describe('extractTextOrError', () => {
           },
         ],
         text: '',
-      } as Partial<GenerateContentResponse>),
+      }),
       'test',
     );
     assert.strictEqual(result.isError, true);
@@ -116,7 +116,7 @@ describe('extractTextOrError', () => {
           },
         ],
         text: 'partial',
-      } as Partial<GenerateContentResponse>),
+      }),
       'test',
     );
     assert.strictEqual(result.isError, undefined);
@@ -133,7 +133,7 @@ describe('extractTextOrError', () => {
           },
         ],
         text: '',
-      } as Partial<GenerateContentResponse>),
+      }),
       'test',
     );
     assert.strictEqual(result.isError, undefined);
@@ -154,7 +154,7 @@ describe('collectGroundedSources', () => {
         { web: { uri: 'https://example.org' } },
         { web: { title: 'Missing URI' } },
       ],
-    } as never);
+    });
 
     assert.deepStrictEqual(sources, ['https://example.com', 'https://example.org']);
   });
@@ -171,7 +171,7 @@ describe('collectGroundedSourceDetails', () => {
         { web: { title: 'Example', uri: 'https://example.com' } },
         { web: { uri: 'https://example.org' } },
       ],
-    } as never);
+    });
 
     assert.deepStrictEqual(sources, [
       { title: 'Example', url: 'https://example.com' },

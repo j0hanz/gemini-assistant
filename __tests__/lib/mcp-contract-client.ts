@@ -254,7 +254,7 @@ export async function createServerHarness(
   const client = new JsonRpcTestClient(clientTransport, clientOptions);
 
   await client.start();
-  await instance.server.connect(serverTransport as Parameters<McpServer['connect']>[0]);
+  await instance.server.connect(serverTransport);
 
   if (options.autoInitialize) {
     await client.initialize();

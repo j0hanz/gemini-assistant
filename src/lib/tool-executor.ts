@@ -123,7 +123,7 @@ export class ToolExecutor {
         ...finalResult,
         structuredContent: {
           ...(finalResult.structuredContent && typeof finalResult.structuredContent === 'object'
-            ? (finalResult.structuredContent as Record<string, unknown>)
+            ? finalResult.structuredContent
             : {}),
           ...(built.structuredContent ?? {}),
           ...buildSharedStructuredMetadata({

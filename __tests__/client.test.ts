@@ -80,9 +80,9 @@ describe('completeCacheNames', () => {
 
   it('returns an empty list when cache listing fails', async () => {
     const client = getAI();
-    client.caches.list = (async () => {
+    client.caches.list = async () => {
       throw new Error('boom');
-    }) as typeof client.caches.list;
+    };
 
     assert.deepStrictEqual(await completeCacheNames('cache'), []);
   });

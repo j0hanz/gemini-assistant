@@ -8,7 +8,7 @@ import {
 } from '../src/sessions.js';
 
 function mockChat(label = 'chat'): { _label: string } {
-  return { _label: label } as unknown as ReturnType<typeof mockChat>;
+  return { _label: label };
 }
 
 const stores: SessionStore[] = [];

@@ -244,9 +244,16 @@ async function createWebPair(
   return createManagedPair(createServer, WebHttpTransport, isStateless, createEventStore);
 }
 
-function logRequestFailure(label: string, err: unknown): void {
-  const detail = err instanceof Error ? err.message : String(err);
-  log.error(`${label}: ${detail}`);
+function logRequestFailure(
+  label: string,
+  err: unknown,
+  meta: { requestMethod: string; sessionId?: string },
+): void {
+  log.error(label, {
+    ...meta,
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+  });
 }
 
 function touchManagedPair<TTransport>(pair: ManagedPair<TTransport>): void {
@@ -427,7 +434,10 @@ async function handleManagedRequest<TTransport, TResult>({
     );
     return result;
   } catch (err: unknown) {
-    logRequestFailure('request failed', err);
+    logRequestFailure('request failed', err, {
+      requestMethod,
+      ...(sessionId ? { sessionId } : {}),
+    });
     return onError(err);
   } finally {
     releaseReservation?.();

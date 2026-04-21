@@ -342,7 +342,7 @@ async function analyzeWork(
     return result;
   }
 
-  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const structured = result.structuredContent ?? {};
   const structuredContent = validateStructuredContent(
     'analyze',
     AnalyzeOutputSchema,

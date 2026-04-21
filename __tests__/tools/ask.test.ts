@@ -57,7 +57,7 @@ describe('ask contract', () => {
     const askWork = createAskWork(
       createDeps({
         isEvicted: (sessionId?: string) => sessionId === 'sess-expired',
-      }) as never,
+      }),
     );
 
     const result = await askWork(
@@ -80,7 +80,7 @@ describe('ask contract', () => {
   });
 
   it('returns the exact validation error for cacheName plus systemInstruction', async () => {
-    const askWork = createAskWork(createDeps() as never);
+    const askWork = createAskWork(createDeps());
 
     const result = await askWork(
       {
@@ -108,7 +108,7 @@ describe('ask contract', () => {
       createDeps({
         getSessionEntry: (sessionId?: string) =>
           sessionId === 'sess-1' ? ({ id: 'sess-1' } as never) : undefined,
-      }) as never,
+      }),
     );
 
     const result = await askWork(
@@ -133,7 +133,7 @@ describe('ask contract', () => {
   });
 
   it('returns the exact validation error for cacheName plus generation controls', async () => {
-    const askWork = createAskWork(createDeps() as never);
+    const askWork = createAskWork(createDeps());
 
     const result = await askWork(
       {
@@ -160,7 +160,7 @@ describe('ask contract', () => {
       createDeps({
         getSessionEntry: (sessionId?: string) =>
           sessionId === 'sess-1' ? ({ id: 'sess-1' } as never) : undefined,
-      }) as never,
+      }),
     );
 
     const result = await askWork(
@@ -221,7 +221,7 @@ describe('ask contract', () => {
             toolProfile: 'none' as const,
           } as never;
         },
-      }) as never,
+      }),
     );
 
     try {
@@ -277,7 +277,7 @@ describe('ask contract', () => {
             toolProfile: 'none' as const,
           } as never;
         },
-      }) as never,
+      }),
     );
 
     try {

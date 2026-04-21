@@ -1109,7 +1109,7 @@ async function reviewWork(
     return result;
   }
 
-  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const structured = result.structuredContent ?? {};
   const structuredContent = validateStructuredContent(
     'review',
     ReviewOutputSchema,

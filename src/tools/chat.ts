@@ -819,7 +819,7 @@ function assembleChatOutput(
     return result;
   }
 
-  const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
+  const structured = result.structuredContent ?? {};
   const answer =
     typeof structured.answer === 'string' ? structured.answer : extractTextContent(result.content);
   const warnings = Array.isArray(structured.schemaWarnings)

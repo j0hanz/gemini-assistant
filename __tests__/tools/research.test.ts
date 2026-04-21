@@ -48,16 +48,30 @@ function makeMockStore(): RequestTaskStore & {
 }
 
 function makeMockContext(store: RequestTaskStore): ServerContext {
+  const logs: string[] = [];
   return {
     mcpReq: {
       _meta: {},
       signal: new AbortController().signal,
-      log: Object.assign(async () => undefined, {
-        debug: async () => undefined,
-        info: async () => undefined,
-        warning: async () => undefined,
-        error: async () => undefined,
-      }),
+      log: Object.assign(
+        async (_level: string, message: string) => {
+          logs.push(message);
+        },
+        {
+          debug: async (message: string) => {
+            logs.push(message);
+          },
+          info: async (message: string) => {
+            logs.push(message);
+          },
+          warning: async (message: string) => {
+            logs.push(message);
+          },
+          error: async (message: string) => {
+            logs.push(message);
+          },
+        },
+      ),
       notify: async () => undefined,
       requestSampling: async () => ({ content: [{ type: 'text', text: 'official docs' }] }),
     },
@@ -66,6 +80,7 @@ function makeMockContext(store: RequestTaskStore): ServerContext {
       requestedTtl: undefined,
       id: undefined,
     },
+    __logs: logs,
   } as unknown as ServerContext;
 }
 
@@ -104,6 +119,10 @@ async function* fakeStream(chunks: unknown[]): AsyncGenerator {
   for (const chunk of chunks) {
     yield chunk;
   }
+}
+
+function getCapturedLogs(ctx: ServerContext): string[] {
+  return ((ctx as unknown as { __logs?: string[] }).__logs ?? []).slice();
 }
 
 describe('research tool contracts', () => {
@@ -202,6 +221,71 @@ describe('research tool contracts', () => {
         { title: 'Docs', url: 'https://example.com/docs' },
       ]);
       assert.deepStrictEqual((structured as Record<string, unknown>).toolsUsed, ['googleSearch']);
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
+  it('keeps raw quick-search query text out of MCP log messages', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const ctx = makeMockContext(store);
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'Quick research answer' }] },
+              finishReason: 'STOP',
+            },
+          ],
+        },
+      ]);
+
+    try {
+      await research.createTask({ goal: 'SECRET-QUERY', mode: 'quick' }, ctx);
+      await flushTaskWork();
+
+      const messages = getCapturedLogs(ctx);
+      assert.ok(messages.includes('Search requested'));
+      assert.ok(messages.every((message) => !message.includes('SECRET-QUERY')));
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
+  it('keeps raw deep-research topic text out of MCP log messages', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const ctx = makeMockContext(store);
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'Deep research answer' }] },
+              finishReason: 'STOP',
+            },
+          ],
+        },
+      ]);
+
+    try {
+      await research.createTask({ goal: 'SECRET-TOPIC', mode: 'deep', searchDepth: 3 }, ctx);
+      await flushTaskWork();
+
+      const messages = getCapturedLogs(ctx);
+      assert.ok(messages.includes('Agentic search requested'));
+      assert.ok(messages.includes('Sampling provided research angles'));
+      assert.ok(messages.every((message) => !message.includes('SECRET-TOPIC')));
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
     }

@@ -6,7 +6,7 @@ import { describe, it } from 'node:test';
 import { InMemoryEventStore } from '../../src/lib/event-store.js';
 
 function msg(id: number): JSONRPCMessage {
-  return { jsonrpc: '2.0', method: 'test', params: { id } } as JSONRPCMessage;
+  return { jsonrpc: '2.0', method: 'test', params: { id } };
 }
 
 describe('InMemoryEventStore', () => {

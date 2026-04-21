@@ -7,8 +7,10 @@ import {
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { AppError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
+import { installTaskSafeToolCallHandler } from './lib/task-utils.js';
 import { buildServerRootsFetcher } from './lib/validation.js';
 import { subscribeWorkspaceCacheChange } from './lib/workspace-context.js';
 
@@ -155,6 +157,7 @@ export function createServerInstance(): ServerInstance {
   for (const register of SERVER_TOOL_REGISTRARS) {
     register(server, { sessionStore, taskMessageQueue });
   }
+  installTaskSafeToolCallHandler(server);
 
   const rootsFetcher = buildServerRootsFetcher(server);
   registerPrompts(server);
@@ -165,11 +168,14 @@ export function createServerInstance(): ServerInstance {
     close: async () => {
       if (closed) return;
       closed = true;
+      const closeErrors: Error[] = [];
       const safeRun = (label: string, fn: () => void): void => {
         try {
           fn();
         } catch (err) {
-          log.warn(`close: ${label} failed: ${String(err)}`);
+          const error = new Error(`close: ${label} failed: ${AppError.formatMessage(err)}`);
+          closeErrors.push(error);
+          log.warn(error.message, { stack: err instanceof Error ? err.stack : undefined });
         }
       };
       safeRun('unsubscribeSessionChange', unsubscribeSessionChange);
@@ -188,7 +194,20 @@ export function createServerInstance(): ServerInstance {
       try {
         await server.close();
       } catch (err) {
-        log.warn(`close: server.close failed: ${String(err)}`);
+        const error = new Error(`close: server.close failed: ${AppError.formatMessage(err)}`);
+        closeErrors.push(error);
+        log.warn(error.message, { stack: err instanceof Error ? err.stack : undefined });
+      }
+
+      if (closeErrors.length === 1) {
+        const firstError = closeErrors[0];
+        if (firstError) {
+          throw firstError;
+        }
+      }
+
+      if (closeErrors.length > 1) {
+        throw new AggregateError(closeErrors, 'Server instance shutdown failed');
       }
     },
   };

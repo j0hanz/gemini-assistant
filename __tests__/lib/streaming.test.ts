@@ -204,7 +204,7 @@ describe('consumeStreamWithProgress', () => {
       totalTokenCount: 15,
     };
     const chunk = makeChunk([{ text: 'result' }], FinishReason.STOP);
-    chunk.usageMetadata = usage as GenerateContentResponse['usageMetadata'];
+    chunk.usageMetadata = usage;
 
     const stream = fakeStream([chunk]);
 
@@ -499,7 +499,7 @@ describe('consumeStreamWithProgress', () => {
       promptTokenCount: 12,
       candidatesTokenCount: 7,
       totalTokenCount: 19,
-    } as GenerateContentResponse['usageMetadata'];
+    };
 
     const stream = fakeStream([
       researchChunk,
@@ -784,7 +784,7 @@ describe('extractUsage', () => {
       thoughtsTokenCount: 20,
       totalTokenCount: 170,
     };
-    const result = extractUsage(meta as Parameters<typeof extractUsage>[0]);
+    const result = extractUsage(meta);
     assert.deepStrictEqual(result, {
       promptTokenCount: 100,
       candidatesTokenCount: 50,
@@ -795,7 +795,7 @@ describe('extractUsage', () => {
 
   it('omits undefined fields', () => {
     const meta = { promptTokenCount: 42 };
-    const result = extractUsage(meta as Parameters<typeof extractUsage>[0]);
+    const result = extractUsage(meta);
     assert.strictEqual(result?.promptTokenCount, 42);
     assert.strictEqual('candidatesTokenCount' in (result ?? {}), false);
   });

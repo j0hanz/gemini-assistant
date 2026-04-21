@@ -490,9 +490,7 @@ async function handleThoughtOrSignaturePart(
 function getTaskQueueContext(
   ctx: ServerContext,
 ): (NonNullable<ServerContext['task']> & { queue?: TaskMessageQueue }) | undefined {
-  return ctx.task as
-    | (NonNullable<ServerContext['task']> & { queue?: TaskMessageQueue })
-    | undefined;
+  return ctx.task;
 }
 
 function enqueueStreamText(

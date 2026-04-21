@@ -52,6 +52,7 @@ export interface SessionSummary {
 }
 
 export interface SessionChangeEvent {
+  listChanged: boolean;
   detailUris: string[];
   eventUris: string[];
   transcriptUris: string[];
@@ -190,7 +191,7 @@ export class SessionStore {
     entry.transcript.push({ ...item });
     this.trimSessionHistory(entry.transcript, this.maxTranscriptEntries);
     this.touchSessionEntry(id, entry);
-    this.notifyChange([id]);
+    this.notifyChange([id], false);
     return true;
   }
 
@@ -200,7 +201,7 @@ export class SessionStore {
     entry.events.push(cloneSessionEventEntry(item));
     this.trimSessionHistory(entry.events, this.maxEventEntries);
     this.touchSessionEntry(id, entry);
-    this.notifyChange([id]);
+    this.notifyChange([id], false);
     return true;
   }
 
@@ -237,19 +238,20 @@ export class SessionStore {
     }
     this.createSession(id, chat);
     this.startEvictionTimer();
-    this.notifyChange(evictedId ? [evictedId, id] : [id]);
+    this.notifyChange(evictedId ? [evictedId, id] : [id], true);
   }
 
   replaceSession(id: string, chat: Chat): void {
     this.storeSession(id, chat);
     this.startEvictionTimer();
-    this.notifyChange([id]);
+    this.notifyChange([id], true);
   }
 
-  private notifyChange(sessionIds: string[] = []): void {
+  private notifyChange(sessionIds: string[] = [], listChanged = true): void {
     if (this.subscribers.size === 0) return;
 
     const event = {
+      listChanged,
       detailUris: sessionIds.map((id) => sessionDetailUri(id)),
       eventUris: sessionIds.map((id) => sessionEventsUri(id)),
       transcriptUris: sessionIds.map((id) => sessionTranscriptUri(id)),
@@ -351,7 +353,7 @@ export class SessionStore {
     if (this.evictionTimer) return;
     this.evictionTimer = setInterval(() => {
       const evictedIds = this.evictExpiredSessions();
-      if (evictedIds.length > 0) this.notifyChange(evictedIds);
+      if (evictedIds.length > 0) this.notifyChange(evictedIds, true);
     }, this.sweepIntervalMs);
     this.evictionTimer.unref();
   }

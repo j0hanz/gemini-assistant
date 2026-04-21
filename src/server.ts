@@ -82,16 +82,18 @@ function isAllowedResourceUri(uri: string): boolean {
 
 function sendResourceChangedForServer(
   server: McpServer,
-  listUri: string,
+  listUri: string | undefined,
   detailUris: readonly string[] = [],
 ): void {
   if (!server.isConnected()) return;
-  if (!isAllowedResourceUri(listUri)) {
-    log.warn(`Blocked resource notification with unexpected URI: ${listUri}`);
-    return;
+  if (listUri) {
+    if (!isAllowedResourceUri(listUri)) {
+      log.warn(`Blocked resource notification with unexpected URI: ${listUri}`);
+      return;
+    }
+    server.sendResourceListChanged();
+    void server.server.sendResourceUpdated({ uri: listUri });
   }
-  server.sendResourceListChanged();
-  void server.server.sendResourceUpdated({ uri: listUri });
   for (const uri of detailUris) {
     if (!isAllowedResourceUri(uri)) {
       log.warn(`Blocked resource notification with unexpected URI: ${uri}`);
@@ -101,7 +103,10 @@ function sendResourceChangedForServer(
   }
 }
 
-function sendResourceChanged(listUri: string, detailUris: readonly string[] = []): void {
+function sendResourceChanged(
+  listUri: string | undefined,
+  detailUris: readonly string[] = [],
+): void {
   for (const server of activeServers) {
     sendResourceChangedForServer(server, listUri, detailUris);
   }
@@ -109,12 +114,12 @@ function sendResourceChanged(listUri: string, detailUris: readonly string[] = []
 
 function handleCacheChange({ detailUris }: CacheChangeEvent): void {
   sendResourceChanged(MEMORY_CACHES_URI, detailUris);
-  sendResourceChanged(DISCOVER_CONTEXT_URI);
+  sendResourceChanged(undefined, [DISCOVER_CONTEXT_URI]);
 }
 
 function handleWorkspaceCacheChange(): void {
-  sendResourceChanged(MEMORY_WORKSPACE_CACHE_URI);
-  sendResourceChanged(DISCOVER_CONTEXT_URI);
+  sendResourceChanged(undefined, [MEMORY_WORKSPACE_CACHE_URI]);
+  sendResourceChanged(undefined, [DISCOVER_CONTEXT_URI]);
 }
 
 export function createServerInstance(): ServerInstance {
@@ -145,13 +150,16 @@ export function createServerInstance(): ServerInstance {
   let closed = false;
   const detachLogger = logger.attachServer(server);
   const unsubscribeSessionChange = sessionStore.subscribe(
-    ({ detailUris, eventUris, transcriptUris }: SessionChangeEvent) => {
-      sendResourceChangedForServer(server, 'memory://sessions', [
+    ({ listChanged, detailUris, eventUris, transcriptUris }: SessionChangeEvent) => {
+      sendResourceChangedForServer(server, listChanged ? 'memory://sessions' : undefined, [
         ...detailUris,
         ...transcriptUris,
         ...eventUris,
       ]);
-      sendResourceChangedForServer(server, DISCOVER_CONTEXT_URI);
+      // Context dashboard includes active session counts, update it if list changed
+      if (listChanged) {
+        sendResourceChangedForServer(server, undefined, [DISCOVER_CONTEXT_URI]);
+      }
     },
   );
   const unsubscribeCacheChange = subscribeCacheChange(handleCacheChange);

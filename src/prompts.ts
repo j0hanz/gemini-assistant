@@ -1,5 +1,4 @@
 import type { McpServer } from '@modelcontextprotocol/server';
-import { completable } from '@modelcontextprotocol/server';
 
 import { z } from 'zod/v4';
 
@@ -94,18 +93,9 @@ export function renderWorkflowSection(name: PublicWorkflowName): string {
   ].join('\n\n');
 }
 
-function filterByPrefix<T extends string>(values: readonly T[], prefix: string): T[] {
-  if (!prefix) return [...values];
-  const lowered = prefix.toLowerCase();
-  return values.filter((value) => value.toLowerCase().startsWith(lowered));
-}
-
 export const DiscoverPromptSchema = z
   .strictObject({
-    job: completable(
-      PublicJobNameSchema.optional().describe('Public job to focus discovery guidance on.'),
-      (value) => filterByPrefix(PUBLIC_JOB_OPTIONS, value ?? ''),
-    ),
+    job: PublicJobNameSchema.optional().describe('Public job to focus discovery guidance on.'),
     goal: textField('User outcome to optimize for.').optional(),
   })
   .describe('Guide a client to the best public job, prompt, and resource.');
@@ -113,30 +103,24 @@ export const DiscoverPromptSchema = z
 export const ResearchPromptSchema = z
   .strictObject({
     goal: goalText('Research goal or question'),
-    mode: completable(
-      enumField(RESEARCH_MODE_OPTIONS, 'Research mode (quick or deep).').optional(),
-      (value) => filterByPrefix(RESEARCH_MODE_OPTIONS, value ?? ''),
-    ),
+    mode: enumField(RESEARCH_MODE_OPTIONS, 'Research mode (quick or deep).').optional(),
     deliverable: textField('Requested output form.').optional(),
   })
   .describe('Explain the quick-versus-deep research decision flow.');
 
 export const ReviewPromptSchema = z
   .strictObject({
-    subject: completable(
-      enumField(REVIEW_SUBJECT_OPTIONS, 'Review variant (diff, comparison, failure).').optional(),
-      (value) => filterByPrefix(REVIEW_SUBJECT_OPTIONS, value ?? ''),
-    ),
+    subject: enumField(
+      REVIEW_SUBJECT_OPTIONS,
+      'Review variant (diff, comparison, failure).',
+    ).optional(),
     focus: textField('Review priority (e.g. regressions, tests, security).').optional(),
   })
   .describe('Guide diff review, file comparison, or failure triage.');
 
 export const MemoryPromptSchema = z
   .strictObject({
-    action: completable(
-      enumField(MEMORY_ACTION_OPTIONS, 'Memory action to focus on.').optional(),
-      (value) => filterByPrefix(MEMORY_ACTION_OPTIONS, value ?? ''),
-    ),
+    action: enumField(MEMORY_ACTION_OPTIONS, 'Memory action to focus on.').optional(),
     task: textField('Task context.').optional(),
   })
   .describe('Explain how sessions, caches, and workspace memory fit together.');

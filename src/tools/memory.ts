@@ -740,9 +740,7 @@ export async function memoryWork(
   } else if (isMemoryAction(args, 'workspace.cache')) {
     result = handleWorkspaceCache(base, args.action);
   } else {
-    throw new Error(
-      `memory: Unhandled action '${args.action}'. Enum validation failed upstream.`,
-    );
+    throw new Error(`memory: Unhandled action '${args.action}'. Enum validation failed upstream.`);
   }
 
   return result;

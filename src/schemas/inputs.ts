@@ -47,30 +47,25 @@ type SessionIdCompleter = (prefix?: string) => string[];
 
 const thinkingLevelField = thinkingLevel();
 
-function validateResponseSchemaJson(payload: ParsePayload<string>): void {
-  let parsed: unknown;
+export function parseResponseSchemaJsonValue(raw: string): GeminiResponseSchema {
+  const parsed = JSON.parse(raw) as unknown;
+  return GeminiResponseSchema.parse(parsed);
+}
 
+function validateResponseSchemaJson(payload: ParsePayload<string>): void {
   try {
-    parsed = JSON.parse(payload.value) as unknown;
-  } catch {
+    parseResponseSchemaJsonValue(payload.value);
+    return;
+  } catch (error) {
     payload.issues.push({
       code: 'custom',
       input: payload.value,
-      message: 'responseSchemaJson must be valid JSON.',
+      message:
+        error instanceof z.ZodError
+          ? `responseSchemaJson must match the supported schema.\n${z.prettifyError(error)}`
+          : 'responseSchemaJson must be valid JSON.',
     });
-    return;
   }
-
-  const result = GeminiResponseSchema.safeParse(parsed);
-  if (result.success) {
-    return;
-  }
-
-  payload.issues.push({
-    code: 'custom',
-    input: payload.value,
-    message: `responseSchemaJson must match the supported schema.\n${z.prettifyError(result.error)}`,
-  });
 }
 
 function responseSchemaJsonField() {

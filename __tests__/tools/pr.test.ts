@@ -2,7 +2,7 @@ import type { ServerContext } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -18,6 +18,7 @@ const {
   budgetDiffUnits,
   buildAnalysisPrompt,
   buildGitDiffArgs,
+  buildUntrackedPatch,
   buildUntrackedFilePatch,
   computeDiffStats,
   formatGitError,
@@ -347,6 +348,68 @@ describe('buildLocalDiffSnapshot', () => {
       assert.match(snapshot.diff, /src\/new-file\.ts/);
       assert.doesNotMatch(snapshot.diff, /bundle\.min\.js/);
       assert.ok(snapshot.stats.files >= 3);
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('honors abort signals while collecting untracked files', async () => {
+    const repoRoot = await createTempRepo();
+    let abortTimer: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      const fileBody = `export const value = '${'x'.repeat(131_072)}';\n`;
+      await writeFile(join(repoRoot, 'tracked.ts'), 'export const tracked = 1;\n');
+      runGit(repoRoot, ['add', '.']);
+      runGit(repoRoot, ['commit', '-m', 'initial']);
+
+      await mkdir(join(repoRoot, 'untracked'), { recursive: true });
+      for (let index = 0; index < 80; index++) {
+        await writeFile(join(repoRoot, 'untracked', `file-${String(index)}.ts`), fileBody);
+      }
+
+      const controller = new AbortController();
+      abortTimer = setTimeout(() => controller.abort(), 20);
+
+      await assert.rejects(
+        () => buildLocalDiffSnapshot(repoRoot, controller.signal),
+        (error: unknown) => {
+          assert.ok(
+            error instanceof DOMException ||
+              (error instanceof Error && error.name === 'AbortError'),
+          );
+          return true;
+        },
+      );
+    } finally {
+      if (abortTimer) {
+        clearTimeout(abortTimer);
+      }
+      await rm(repoRoot, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
+  it('skips symlinked untracked paths when building patches', async () => {
+    const repoRoot = await createTempRepo();
+
+    try {
+      const target = join(repoRoot, 'target.txt');
+      const link = join(repoRoot, 'linked.txt');
+      await writeFile(target, 'secret data\n');
+
+      try {
+        await symlink(target, link);
+      } catch {
+        return;
+      }
+
+      const result = await buildUntrackedPatch(repoRoot, 'linked.txt');
+      assert.deepStrictEqual(result, { path: 'linked.txt' });
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
     }

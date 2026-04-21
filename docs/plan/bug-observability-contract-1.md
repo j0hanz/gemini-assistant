@@ -26,27 +26,27 @@ This implementation plan outlines the steps required to apply the fixes identifi
 
 - GOAL-001: Clean up logs by separating test output and downgrading normal workflow warnings.
 
-| Task     | Description                                                                                                                                       | Completed | Date |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---- |
-| TASK-001 | Modify `src/lib/logger.ts` to check `process.execArgv.includes('--test')` and write logs to `test-app.log` during test runs instead of `app.log`. | ✅ | 2026-04-21 |
-| TASK-002 | Modify `src/transport.ts` `startWebStandardTransport` to use `log.info` instead of `log.warn` for the missing auto-serve runtime message.         | ✅ | 2026-04-21 |
+| Task     | Description                                                                                                                                       | Completed | Date       |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---------- |
+| TASK-001 | Modify `src/lib/logger.ts` to check `process.execArgv.includes('--test')` and write logs to `test-app.log` during test runs instead of `app.log`. | ✅        | 2026-04-21 |
+| TASK-002 | Modify `src/transport.ts` `startWebStandardTransport` to use `log.info` instead of `log.warn` for the missing auto-serve runtime message.         | ✅        | 2026-04-21 |
 
 ### Implementation Phase 2: Protocol Contract & Telemetry Fixes
 
 - GOAL-002: Ensure strict MCP protocol compliance and telemetry tracing.
 
-| Task     | Description                                                                                                                                                                         | Completed | Date |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---- |
-| TASK-003 | Update `src/tools/research.ts` to use `'research'` as the tool key for both standard and agentic search `runToolStream` invocations.                                                | ✅ | 2026-04-21 |
-| TASK-004 | Update `src/lib/tool-executor.ts` `runStream` method to stop synthesizing `{ answer: text }` as `structuredContent`. Merge metadata only if real structured content already exists. | ✅ | 2026-04-21 |
+| Task     | Description                                                                                                                                                                         | Completed | Date       |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---------- |
+| TASK-003 | Update `src/tools/research.ts` to use `'research'` as the tool key for both standard and agentic search `runToolStream` invocations.                                                | ✅        | 2026-04-21 |
+| TASK-004 | Update `src/lib/tool-executor.ts` `runStream` method to stop synthesizing `{ answer: text }` as `structuredContent`. Merge metadata only if real structured content already exists. | ✅        | 2026-04-21 |
 
 ### Implementation Phase 3: Testing & Validation
 
 - GOAL-003: Prevent future regression of the `structuredContent` contract.
 
-| Task     | Description                                                                                                                                            | Completed | Date |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- | ---- |
-| TASK-005 | Add a test in `__tests__/lib/tool-executor.test.ts` to verify `runStream` does not synthesize `structuredContent` when the caller does not provide it. | ✅ | 2026-04-21 |
+| Task     | Description                                                                                                                                            | Completed | Date       |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- | ---------- |
+| TASK-005 | Add a test in `__tests__/lib/tool-executor.test.ts` to verify `runStream` does not synthesize `structuredContent` when the caller does not provide it. | ✅        | 2026-04-21 |
 
 ## 3. Alternatives
 

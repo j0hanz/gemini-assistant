@@ -31,7 +31,12 @@ import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { getAllowedRoots, validateUrls } from '../lib/validation.js';
 import { workspaceCacheManager } from '../lib/workspace-context.js';
-import { type AskInput, type ChatInput, createChatInputSchema } from '../schemas/inputs.js';
+import {
+  type AskInput,
+  type ChatInput,
+  createChatInputSchema,
+  parseResponseSchemaJsonValue,
+} from '../schemas/inputs.js';
 import { type GeminiResponseSchema } from '../schemas/json-schema.js';
 import { ChatOutputSchema, type ContextUsed, type UsageMetadata } from '../schemas/outputs.js';
 
@@ -80,16 +85,6 @@ interface AskExecutionResult {
   streamResult: StreamResult;
   toolProfile: ToolProfile;
   urls?: string[];
-}
-
-function parseResponseSchemaJson(
-  responseSchemaJson: string | undefined,
-): GeminiResponseSchema | undefined {
-  if (!responseSchemaJson) {
-    return undefined;
-  }
-
-  return JSON.parse(responseSchemaJson) as GeminiResponseSchema;
 }
 
 const ASK_TOOL_LABEL = 'Chat';
@@ -851,7 +846,7 @@ function assembleChatOutput(
   };
 }
 
-async function chatWork(
+export async function chatWork(
   askWork: ReturnType<typeof createAskWork>,
   args: ChatInput,
   ctx: ServerContext,
@@ -861,7 +856,10 @@ async function chatWork(
       message: args.goal,
       sessionId: args.sessionId,
       cacheName: args.cacheName,
-      responseSchema: parseResponseSchemaJson(args.responseSchemaJson),
+      responseSchema:
+        args.responseSchemaJson !== undefined
+          ? parseResponseSchemaJsonValue(args.responseSchemaJson)
+          : undefined,
       seed: args.seed,
       systemInstruction: args.systemInstruction,
       temperature: args.temperature,

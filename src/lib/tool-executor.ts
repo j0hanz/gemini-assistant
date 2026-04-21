@@ -1,3 +1,4 @@
+import { ProtocolError } from '@modelcontextprotocol/server';
 import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 
 import { randomUUID } from 'node:crypto';
@@ -67,6 +68,10 @@ export class ToolExecutor {
 
         return result;
       } catch (err) {
+        if (err instanceof ProtocolError) {
+          throw err;
+        }
+
         const durationMs = performance.now() - startTime;
         const appError = AppError.from(err, toolName);
         this.scopedLogger.error('Execution failed', {
@@ -144,7 +149,7 @@ export class ToolExecutor {
         const usage = extractUsage(streamResult.usageMetadata);
         const existingStructuredContent =
           finalResult.structuredContent && typeof finalResult.structuredContent === 'object'
-            ? (finalResult.structuredContent as Record<string, unknown>)
+            ? finalResult.structuredContent
             : undefined;
 
         const mergedStructuredContent =

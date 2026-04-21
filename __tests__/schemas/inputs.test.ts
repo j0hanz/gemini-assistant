@@ -19,6 +19,7 @@ import {
   ExecuteCodeInputSchema,
   ExplainErrorInputSchema,
   GenerateDiagramInputSchema,
+  parseResponseSchemaJsonValue,
   ResearchInputSchema,
   ReviewInputSchema,
   SearchInputSchema,
@@ -213,6 +214,9 @@ describe('ChatInputSchema', () => {
       responseSchemaJson: '{not valid json}',
     });
     assert.strictEqual(result.success, false);
+    if (!result.success) {
+      assert.strictEqual(result.error.issues[0]?.message, 'responseSchemaJson must be valid JSON.');
+    }
   });
 
   it('rejects responseSchemaJson that fails supported schema validation', () => {
@@ -242,6 +246,13 @@ describe('ChatInputSchema', () => {
         /properties\.ok\.type|properties\["ok"\]\.type/i,
       );
     }
+  });
+
+  it('parseResponseSchemaJsonValue throws ZodError for parsed but invalid schemas', () => {
+    assert.throws(
+      () => parseResponseSchemaJsonValue(JSON.stringify({ type: 'unknown' })),
+      z.ZodError,
+    );
   });
 
   it('rejects temperature above the bounded range', () => {

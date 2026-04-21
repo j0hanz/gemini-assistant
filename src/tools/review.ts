@@ -6,7 +6,7 @@ import type {
 } from '@modelcontextprotocol/server';
 
 import { execFile } from 'node:child_process';
-import { readFile, stat } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -520,11 +520,13 @@ async function listUntrackedPaths(gitRoot: string, signal?: AbortSignal): Promis
 async function collectUntrackedResults(
   gitRoot: string,
   untrackedPaths: string[],
+  signal?: AbortSignal,
 ): Promise<UntrackedPatchResult[]> {
   const results: UntrackedPatchResult[] = [];
 
   for (const relativePath of untrackedPaths) {
-    results.push(await buildUntrackedPatch(gitRoot, relativePath));
+    signal?.throwIfAborted();
+    results.push(await buildUntrackedPatch(gitRoot, relativePath, signal));
   }
 
   return results;
@@ -569,12 +571,14 @@ export function buildUntrackedFilePatch(
   return patchLines.join('\n');
 }
 
-async function buildUntrackedPatch(
+export async function buildUntrackedPatch(
   gitRoot: string,
   relativePath: string,
+  signal?: AbortSignal,
 ): Promise<UntrackedPatchResult> {
+  signal?.throwIfAborted();
   const absolutePath = join(gitRoot, relativePath);
-  const fileStats = await stat(absolutePath).catch(() => null);
+  const fileStats = await lstat(absolutePath).catch(() => null);
 
   if (!fileStats?.isFile()) {
     return { path: relativePath };
@@ -584,7 +588,7 @@ async function buildUntrackedPatch(
     return { path: relativePath, skipReason: 'too_large' };
   }
 
-  const fileBuffer = await readFile(absolutePath);
+  const fileBuffer = await readFile(absolutePath, { signal });
   if (isBinaryContent(fileBuffer)) {
     return { path: relativePath, skipReason: 'binary' };
   }
@@ -896,7 +900,7 @@ export async function buildLocalDiffSnapshot(
     listUntrackedPaths(gitRoot, signal),
   ]);
 
-  const untrackedResults = await collectUntrackedResults(gitRoot, untrackedPaths);
+  const untrackedResults = await collectUntrackedResults(gitRoot, untrackedPaths, signal);
   const { includedUntracked, skippedBinaryPaths, skippedLargePaths, untrackedPatches } =
     summarizeUntrackedResults(untrackedResults);
   const reviewedPaths = uniqueSortedPaths([...trackedSnapshot.paths, ...includedUntracked]);

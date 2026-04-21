@@ -1,3 +1,4 @@
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import type { RequestTaskStore, ServerContext, Task } from '@modelcontextprotocol/server';
 import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
@@ -180,6 +181,25 @@ describe('ToolExecutor', () => {
       total: 100,
       message: 'Discover: failed — discover failed: boom',
     });
+  });
+
+  it('run rethrows ProtocolError instances unchanged', async () => {
+    const executor = createExecutor();
+    const { ctx, progressCalls } = makeMockContext();
+
+    await assert.rejects(
+      () =>
+        executor.run(ctx, 'discover', 'Discover', {}, async () => {
+          throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'bad');
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof ProtocolError);
+        assert.strictEqual(error.message, 'bad');
+        return true;
+      },
+    );
+
+    assert.deepStrictEqual(progressCalls, []);
   });
 
   it('runStream reports failure once when resultMod converts success into an error', async () => {

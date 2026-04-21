@@ -704,7 +704,7 @@ function hasTtl(args: MemoryInput): args is MemoryInput & {
   return typeof args.ttl === 'string';
 }
 
-async function memoryWork(
+export async function memoryWork(
   sessionStore: SessionStore,
   rootsFetcher: RootsFetcher,
   createCacheWork: ReturnType<typeof buildCreateCacheWork>,
@@ -734,8 +734,10 @@ async function memoryWork(
     result = await handleCachesDelete(base, args, ctx);
   } else if (isMemoryAction(args, 'workspace.context')) {
     result = await handleWorkspaceContext(rootsFetcher, base, args.action);
-  } else {
+  } else if (isMemoryAction(args, 'workspace.cache')) {
     result = handleWorkspaceCache(base, args.action);
+  } else {
+    result = new AppError('memory', `memory: Unsupported action '${args.action}'.`).toToolResult();
   }
 
   if (result.isError) {

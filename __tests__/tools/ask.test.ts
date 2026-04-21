@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { workspaceCacheManager } from '../../src/lib/workspace-context.js';
-import { createAskWork } from '../../src/tools/chat.js';
+import { chatWork, createAskWork } from '../../src/tools/chat.js';
 
 function createContext(): ServerContext {
   return {
@@ -293,6 +293,45 @@ describe('ask contract', () => {
     } finally {
       process.env.WORKSPACE_CACHE_ENABLED = originalEnabled;
       workspaceCacheManager.getOrCreateCache = originalGetOrCreateCache;
+    }
+  });
+
+  it('chatWork forwards a validated responseSchema parsed from responseSchemaJson', async () => {
+    const originalJsonParse = JSON.parse.bind(JSON);
+    let jsonParseCalls = 0;
+    let observedResponseSchema: unknown;
+    JSON.parse = ((...args: Parameters<typeof JSON.parse>) => {
+      jsonParseCalls++;
+      return originalJsonParse(...args) as unknown;
+    }) as typeof JSON.parse;
+
+    try {
+      const result = await chatWork(
+        async (args) => {
+          observedResponseSchema = args.responseSchema;
+          return {
+            content: [{ type: 'text', text: 'Assistant answer' }],
+            structuredContent: { answer: 'Assistant answer' },
+          };
+        },
+        {
+          goal: 'return JSON',
+          responseSchemaJson: JSON.stringify({
+            type: 'object',
+            properties: { answer: { type: 'string' } },
+          }),
+        },
+        createContext(),
+      );
+
+      assert.strictEqual(result.isError, undefined);
+      assert.strictEqual(jsonParseCalls, 1);
+      assert.deepStrictEqual(observedResponseSchema, {
+        type: 'object',
+        properties: { answer: { type: 'string' } },
+      });
+    } finally {
+      JSON.parse = originalJsonParse;
     }
   });
 });

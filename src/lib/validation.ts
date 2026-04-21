@@ -10,23 +10,12 @@ import { getAllowedFileRootsEnv, getAllowedHostsEnv } from '../config.js';
 // ── Host Validation ───────────────────────────────────────────────────
 
 const LOCALHOST_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+const LOCALHOST_BIND_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const BROAD_BIND_ADDRESSES = new Set(['0.0.0.0', '::', '']);
-
-function isBroadBind(host: string): boolean {
-  return BROAD_BIND_ADDRESSES.has(host);
-}
-
-function isLocalhostBind(host: string): boolean {
-  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
-}
 
 function normalizeAllowedHost(host: string): string {
   const cleanHost = host.replace(/^\[(.*)\]$/, '$1').toLowerCase();
-  const ipVersion = isIP(cleanHost);
-  if (ipVersion === 6) {
-    return `[${cleanHost}]`;
-  }
-  return cleanHost;
+  return isIP(cleanHost) === 6 ? `[${cleanHost}]` : cleanHost;
 }
 
 export function parseAllowedHosts(): string[] | undefined {
@@ -50,8 +39,8 @@ export function parseAllowedHosts(): string[] | undefined {
 export function resolveAllowedHosts(bindHost: string): string[] | undefined {
   const explicit = parseAllowedHosts();
   if (explicit) return explicit;
-  if (isBroadBind(bindHost)) return undefined;
-  if (isLocalhostBind(bindHost)) return LOCALHOST_HOSTS;
+  if (BROAD_BIND_ADDRESSES.has(bindHost)) return undefined;
+  if (LOCALHOST_BIND_HOSTS.has(bindHost)) return LOCALHOST_HOSTS;
   return [normalizeAllowedHost(bindHost)];
 }
 
@@ -399,18 +388,12 @@ function isPrivateIpv4(hostname: string): boolean {
   return a === 169 && b === 254;
 }
 
+const PRIVATE_IPV6_PREFIXES = ['fc', 'fd', 'fe8', 'fe9', 'fea', 'feb', '::ffff:'];
+
 function isPrivateIpv6(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
-  return (
-    normalized === '::1' ||
-    normalized.startsWith('fc') ||
-    normalized.startsWith('fd') ||
-    normalized.startsWith('fe8') ||
-    normalized.startsWith('fe9') ||
-    normalized.startsWith('fea') ||
-    normalized.startsWith('feb') ||
-    normalized.startsWith('::ffff:')
-  );
+  if (normalized === '::1') return true;
+  return PRIVATE_IPV6_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
 function isRejectedHost(hostname: string): boolean {

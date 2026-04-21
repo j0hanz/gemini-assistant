@@ -226,7 +226,7 @@ function appendToolEvent(state: StreamProcessingState, event: ToolEvent): void {
   state.toolEvents.push(event);
 }
 
-async function maybeReportSearchProgress(
+async function maybeReportBuiltInToolProgress(
   ctx: ServerContext,
   candidate: NonNullable<GenerateContentResponse['candidates']>[number],
   state: StreamProcessingState,
@@ -235,14 +235,6 @@ async function maybeReportSearchProgress(
   if (candidate.groundingMetadata && !state.toolsUsed.has('googleSearch')) {
     await recordToolActivity(ctx, state, msg, 'Searching the web', 'googleSearch');
   }
-}
-
-async function maybeReportUrlContextProgress(
-  ctx: ServerContext,
-  candidate: NonNullable<GenerateContentResponse['candidates']>[number],
-  state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
-): Promise<void> {
   if (candidate.urlContextMetadata && !state.toolsUsed.has('urlContext')) {
     await recordToolActivity(ctx, state, msg, 'Retrieving URL context', 'urlContext');
   }
@@ -612,8 +604,7 @@ export async function consumeStreamWithProgress(
     if (!candidate) continue;
 
     updateStreamMetadata(chunk, candidate, state);
-    await maybeReportSearchProgress(ctx, candidate, state, msg);
-    await maybeReportUrlContextProgress(ctx, candidate, state, msg);
+    await maybeReportBuiltInToolProgress(ctx, candidate, state, msg);
 
     for (const part of candidate.content?.parts ?? []) {
       await handleStreamPart(ctx, state, msg, part);

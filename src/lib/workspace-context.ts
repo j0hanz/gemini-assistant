@@ -86,21 +86,26 @@ async function tryReadFile(filePath: string): Promise<string | undefined> {
 
 // ── Context Assembly ──────────────────────────────────────────────────
 
-export async function scanRootForFiles(root: string): Promise<Map<string, string>> {
-  const files = new Map<string, string>();
+async function listScanFileNames(root: string): Promise<string[]> {
   try {
     const entries = await readdir(root, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isFile()) continue;
-      if (!SCAN_FILE_NAMES.has(entry.name.toLowerCase())) continue;
-      const filePath = join(root, entry.name);
-      const content = await tryReadFile(filePath);
-      if (content) {
-        files.set(filePath, content);
-      }
-    }
+    return entries
+      .filter((entry) => entry.isFile() && SCAN_FILE_NAMES.has(entry.name.toLowerCase()))
+      .map((entry) => entry.name);
   } catch {
     log.warn(`Failed to scan root: ${root}`);
+    return [];
+  }
+}
+
+export async function scanRootForFiles(root: string): Promise<Map<string, string>> {
+  const files = new Map<string, string>();
+  for (const name of await listScanFileNames(root)) {
+    const filePath = join(root, name);
+    const content = await tryReadFile(filePath);
+    if (content) {
+      files.set(filePath, content);
+    }
   }
   return files;
 }
@@ -108,20 +113,7 @@ export async function scanRootForFiles(root: string): Promise<Map<string, string
 export async function summarizeRootForDashboard(
   root: string,
 ): Promise<WorkspaceDashboardRootSummary> {
-  const fileNames: string[] = [];
-
-  try {
-    const entries = await readdir(root, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isFile()) continue;
-      if (!SCAN_FILE_NAMES.has(entry.name.toLowerCase())) continue;
-      fileNames.push(entry.name);
-    }
-  } catch {
-    log.warn(`Failed to scan root: ${root}`);
-  }
-
-  fileNames.sort((a, b) => a.localeCompare(b));
+  const fileNames = (await listScanFileNames(root)).sort((a, b) => a.localeCompare(b));
   return {
     fileCount: fileNames.length,
     fileNames,

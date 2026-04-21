@@ -8,6 +8,24 @@ import type { Writable } from 'node:stream';
 import { getVerbosePayloadLogging } from '../config.js';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'fatal';
+type McpLogLevel =
+  | 'debug'
+  | 'info'
+  | 'notice'
+  | 'warning'
+  | 'error'
+  | 'critical'
+  | 'alert'
+  | 'emergency';
+
+const MCP_LEVEL_MAP: Record<LogLevel, McpLogLevel> = {
+  debug: 'debug',
+  info: 'info',
+  warn: 'warning',
+  error: 'error',
+  fatal: 'critical',
+};
+
 const MAX_SUMMARY_DEPTH = 2;
 const MAX_SUMMARY_KEYS = 20;
 
@@ -100,61 +118,34 @@ export class Logger {
       ...(data !== undefined ? { data } : {}),
     };
 
-    const logString = JSON.stringify(entry);
+    this.logStream.write(JSON.stringify(entry) + '\n');
+    this.broadcastToServers(level, context, entry);
+  }
 
-    // Write to disk
-    this.logStream.write(logString + '\n');
+  private broadcastToServers(level: LogLevel, context: string, entry: LogEntry): void {
+    if (this.attachedServers.size === 0) return;
 
-    if (this.attachedServers.size > 0) {
-      const connectedServers = [...this.attachedServers].filter((server) => {
-        const connected = server.isConnected();
-        if (!connected) {
-          this.attachedServers.delete(server);
-        }
-        return connected;
-      });
-
-      if (connectedServers.length === 0) {
-        return;
+    const connectedServers: McpServer[] = [];
+    for (const server of this.attachedServers) {
+      if (server.isConnected()) {
+        connectedServers.push(server);
+      } else {
+        this.attachedServers.delete(server);
       }
-
-      let mcpLevel:
-        | 'debug'
-        | 'info'
-        | 'warning'
-        | 'error'
-        | 'critical'
-        | 'alert'
-        | 'emergency'
-        | 'notice' = 'info';
-      switch (level) {
-        case 'debug':
-          mcpLevel = 'debug';
-          break;
-        case 'info':
-          mcpLevel = 'info';
-          break;
-        case 'warn':
-          mcpLevel = 'warning';
-          break;
-        case 'error':
-          mcpLevel = 'error';
-          break;
-        case 'fatal':
-          mcpLevel = 'critical';
-          break;
-      }
-
-      void Promise.allSettled(
-        connectedServers.map((server) =>
-          server.sendLoggingMessage({
-            level: mcpLevel,
-            logger: context,
-            data: entry,
-          }),
-        ),
-      );
     }
+
+    if (connectedServers.length === 0) return;
+
+    const mcpLevel = MCP_LEVEL_MAP[level];
+    void Promise.allSettled(
+      connectedServers.map((server) =>
+        server.sendLoggingMessage({
+          level: mcpLevel,
+          logger: context,
+          data: entry,
+        }),
+      ),
+    );
   }
 
   getVerbosePayloads(): boolean {

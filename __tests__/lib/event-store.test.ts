@@ -68,6 +68,25 @@ describe('InMemoryEventStore', () => {
     assert.equal(replayed.length, 0);
   });
 
+  it('replays only the snapshot captured at replay start', async () => {
+    const store = new InMemoryEventStore();
+    const e1 = await store.storeEvent('s1', msg(1));
+    const e2 = await store.storeEvent('s1', msg(2));
+    const e3 = await store.storeEvent('s1', msg(3));
+
+    const replayed: string[] = [];
+    await store.replayEventsAfter(e1, {
+      send: async (eventId) => {
+        replayed.push(eventId);
+        if (eventId === e2) {
+          await store.storeEvent('s1', msg(4));
+        }
+      },
+    });
+
+    assert.deepStrictEqual(replayed, [e2, e3]);
+  });
+
   it('evicts oldest events when stream exceeds max', async () => {
     const store = new InMemoryEventStore();
 

@@ -53,6 +53,46 @@ describe('sessions', () => {
       assert.ok(after.lastAccess >= before.lastAccess);
     });
 
+    it('updates lastAccess on transcript writes', () => {
+      let now = 100;
+      const store = createStore({ now: () => now, ttlMs: 1_000, sweepIntervalMs: 60_000 });
+      store.setSession('sess-write-access', mockChat() as never);
+
+      const before = store.getSessionEntry('sess-write-access');
+      assert.ok(before);
+
+      now = 200;
+      store.appendSessionTranscript('sess-write-access', {
+        role: 'user',
+        text: 'Hello',
+        timestamp: 1,
+      });
+
+      const after = store.getSessionEntry('sess-write-access');
+      assert.ok(after);
+      assert.ok(after.lastAccess > before.lastAccess);
+    });
+
+    it('updates lastAccess on event writes', () => {
+      let now = 100;
+      const store = createStore({ now: () => now, ttlMs: 1_000, sweepIntervalMs: 60_000 });
+      store.setSession('sess-event-write-access', mockChat() as never);
+
+      const before = store.getSessionEntry('sess-event-write-access');
+      assert.ok(before);
+
+      now = 200;
+      store.appendSessionEvent('sess-event-write-access', {
+        request: { message: 'Hello' },
+        response: { text: 'Hi' },
+        timestamp: 1,
+      });
+
+      const after = store.getSessionEntry('sess-event-write-access');
+      assert.ok(after);
+      assert.ok(after.lastAccess > before.lastAccess);
+    });
+
     it('returns metadata for an active session', () => {
       const store = createStore();
       store.setSession('sess-entry-active', mockChat('entry-active') as never);
@@ -279,7 +319,7 @@ describe('sessions', () => {
   });
 
   describe('session overwrite', () => {
-    it('overwrites existing session with same ID', () => {
+    it('throws when setSession is called with an existing ID', () => {
       const store = createStore();
       const chat1 = mockChat('first');
       const chat2 = mockChat('second');
@@ -290,10 +330,32 @@ describe('sessions', () => {
         timestamp: 1,
       });
 
-      store.setSession('sess-overwrite', chat2 as never);
+      assert.throws(
+        () => store.setSession('sess-overwrite', chat2 as never),
+        /Session already exists: sess-overwrite/,
+      );
 
-      assert.strictEqual(store.getSession('sess-overwrite'), chat2);
-      assert.deepStrictEqual(store.listSessionTranscriptEntries('sess-overwrite'), []);
+      assert.strictEqual(store.getSession('sess-overwrite'), chat1);
+      assert.deepStrictEqual(store.listSessionTranscriptEntries('sess-overwrite'), [
+        { role: 'user', text: 'Old turn', timestamp: 1 },
+      ]);
+    });
+
+    it('replaceSession resets history for an existing ID', () => {
+      const store = createStore();
+      const chat1 = mockChat('first');
+      const chat2 = mockChat('second');
+      store.setSession('sess-replace', chat1 as never);
+      store.appendSessionTranscript('sess-replace', {
+        role: 'user',
+        text: 'Old turn',
+        timestamp: 1,
+      });
+
+      store.replaceSession('sess-replace', chat2 as never);
+
+      assert.strictEqual(store.getSession('sess-replace'), chat2);
+      assert.deepStrictEqual(store.listSessionTranscriptEntries('sess-replace'), []);
     });
 
     it('clears evicted state when a session ID is reused', () => {
@@ -327,6 +389,9 @@ describe('sessions', () => {
         timestamp: 1,
       });
 
+      for (let i = 13; i <= 60; i += 1) {
+        assert.ok(store.getSession(`${prefix}${String(i)}`));
+      }
       assert.ok(store.getSession(`${prefix}11`));
 
       store.setSession(`${prefix}61`, mockChat('lru-overflow') as never);
@@ -338,7 +403,7 @@ describe('sessions', () => {
   });
 
   describe('change notifications', () => {
-    it('notifies when reading a session updates lastAccess', () => {
+    it('does not notify when reading a session updates lastAccess', () => {
       const store = createStore();
       let calls = 0;
       store.subscribe(() => {
@@ -349,7 +414,7 @@ describe('sessions', () => {
       calls = 0;
 
       assert.ok(store.getSession('sess-read-notify'));
-      assert.strictEqual(calls, 1);
+      assert.strictEqual(calls, 0);
     });
 
     it('notifies once when adding a session over capacity', () => {
@@ -386,7 +451,7 @@ describe('sessions', () => {
       assert.ok(transcriptUris.includes('memory://sessions/sess-task-set/transcript'));
     });
 
-    it('includes detail and transcript URIs on getSession', () => {
+    it('does not emit detail or transcript URIs on getSession', () => {
       const store = createStore();
       let detailUris: string[] = [];
       let eventUris: string[] = [];
@@ -399,9 +464,28 @@ describe('sessions', () => {
       });
 
       store.getSession('sess-task-get');
-      assert.deepStrictEqual(detailUris, ['memory://sessions/sess-task-get']);
-      assert.deepStrictEqual(eventUris, ['memory://sessions/sess-task-get/events']);
-      assert.deepStrictEqual(transcriptUris, ['memory://sessions/sess-task-get/transcript']);
+      assert.deepStrictEqual(detailUris, []);
+      assert.deepStrictEqual(eventUris, []);
+      assert.deepStrictEqual(transcriptUris, []);
+    });
+
+    it('keeps actively written sessions alive until ttl expires from the latest write', () => {
+      let now = 1_000;
+      const store = createStore({ ttlMs: 100, now: () => now, sweepIntervalMs: 60_000 });
+      store.setSession('sess-write-ttl', mockChat('ttl-write') as never);
+
+      now = 1_050;
+      store.appendSessionTranscript('sess-write-ttl', {
+        role: 'user',
+        text: 'keep alive',
+        timestamp: 1,
+      });
+
+      now = 1_120;
+      assert.ok(store.getSessionEntry('sess-write-ttl'));
+
+      now = 1_200;
+      assert.strictEqual(store.getSession('sess-write-ttl'), undefined);
     });
   });
 

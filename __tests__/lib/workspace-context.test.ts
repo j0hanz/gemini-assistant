@@ -159,6 +159,29 @@ describe('workspace-context', () => {
       assert.strictEqual(doubled.sources.length, single.sources.length * 2);
     });
 
+    it('prioritizes matching files when focusText is provided', async () => {
+      const testDir = join(tmpdir(), `ws-focus-test-${Date.now()}`);
+      await mkdir(testDir, { recursive: true });
+      await writeFile(join(testDir, 'readme.md'), 'general project overview');
+      await writeFile(
+        join(testDir, 'package.json'),
+        '{"name":"focus-test","scripts":{"test":"vitest"}}',
+      );
+      process.env.WORKSPACE_AUTO_SCAN = 'true';
+      delete process.env.WORKSPACE_CONTEXT_FILE;
+
+      try {
+        const focused = await assembleWorkspaceContext([testDir], 'package scripts');
+
+        assert.deepStrictEqual(focused.sources, [
+          join(testDir, 'package.json'),
+          join(testDir, 'readme.md'),
+        ]);
+      } finally {
+        await rm(testDir, { recursive: true, force: true });
+      }
+    });
+
     it('skips symlinked files', async () => {
       const testDir = join(tmpdir(), `ws-ctx-test-${Date.now()}`);
       await mkdir(testDir, { recursive: true });
@@ -390,6 +413,50 @@ describe('workspace-context', () => {
         ai.caches.create = originalCreate;
         ai.caches.delete = originalDelete;
         await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('invalidates and deletes the previous cache when roots change within the hash throttle window', async () => {
+      process.env.WORKSPACE_CACHE_ENABLED = 'true';
+      process.env.WORKSPACE_AUTO_SCAN = 'true';
+      process.env.API_KEY = 'test-key';
+
+      const rootA = await createWorkspaceFile(
+        `ws-cache-roots-a-${Date.now()}`,
+        'a'.repeat(130_000),
+      );
+      const rootB = await createWorkspaceFile(
+        `ws-cache-roots-b-${Date.now()}`,
+        'b'.repeat(130_000),
+      );
+      const ai = getAI();
+      const originalCreate = ai.caches.create.bind(ai.caches);
+      const originalDelete = ai.caches.delete.bind(ai.caches);
+      const deletedNames: string[] = [];
+      const createdNames = ['cachedContents/root-a', 'cachedContents/root-b'];
+
+      ai.caches.create = async () => ({
+        name: createdNames.shift() ?? 'cachedContents/fallback',
+      });
+      ai.caches.delete = (async ({ name }: { name: string }) => {
+        deletedNames.push(name);
+      }) as typeof ai.caches.delete;
+
+      try {
+        assert.strictEqual(
+          await workspaceCacheManager.getOrCreateCache([rootA]),
+          'cachedContents/root-a',
+        );
+        assert.strictEqual(
+          await workspaceCacheManager.getOrCreateCache([rootB]),
+          'cachedContents/root-b',
+        );
+        assert.deepStrictEqual(deletedNames, ['cachedContents/root-a']);
+      } finally {
+        ai.caches.create = originalCreate;
+        ai.caches.delete = originalDelete;
+        await rm(rootA, { recursive: true, force: true });
+        await rm(rootB, { recursive: true, force: true });
       }
     });
   });

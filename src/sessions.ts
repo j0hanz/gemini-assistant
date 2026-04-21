@@ -189,6 +189,7 @@ export class SessionStore {
     if (!entry) return false;
     entry.transcript.push({ ...item });
     this.trimSessionHistory(entry.transcript, this.maxTranscriptEntries);
+    this.touchSessionEntry(id, entry);
     this.notifyChange([id]);
     return true;
   }
@@ -198,6 +199,7 @@ export class SessionStore {
     if (!entry) return false;
     entry.events.push(cloneSessionEventEntry(item));
     this.trimSessionHistory(entry.events, this.maxEventEntries);
+    this.touchSessionEntry(id, entry);
     this.notifyChange([id]);
     return true;
   }
@@ -222,19 +224,26 @@ export class SessionStore {
   getSession(id: string): Chat | undefined {
     const entry = this.getActiveSessionEntry(id);
     if (!entry) return undefined;
-    const chat = this.updateSessionAccess(id, entry);
-    this.notifyChange([id]);
-    return chat;
+    return this.updateSessionAccess(id, entry);
   }
 
   setSession(id: string, chat: Chat): void {
+    if (this.sessions.has(id)) {
+      throw new Error(`Session already exists: ${id}`);
+    }
     let evictedId: string | undefined;
-    if (this.sessions.size >= this.maxSessions && !this.sessions.has(id)) {
+    if (this.sessions.size >= this.maxSessions) {
       evictedId = this.evictOldest();
     }
-    this.storeSession(id, chat);
+    this.createSession(id, chat);
     this.startEvictionTimer();
     this.notifyChange(evictedId ? [evictedId, id] : [id]);
+  }
+
+  replaceSession(id: string, chat: Chat): void {
+    this.storeSession(id, chat);
+    this.startEvictionTimer();
+    this.notifyChange([id]);
   }
 
   private notifyChange(sessionIds: string[] = []): void {
@@ -273,10 +282,18 @@ export class SessionStore {
     this.sessions.set(id, entry);
   }
 
-  private updateSessionAccess(id: string, entry: SessionEntry): Chat {
+  private touchSessionEntry(id: string, entry: SessionEntry): void {
     entry.lastAccess = this.now();
     this.setSessionEntry(id, entry);
+  }
+
+  private updateSessionAccess(id: string, entry: SessionEntry): Chat {
+    this.touchSessionEntry(id, entry);
     return entry.chat;
+  }
+
+  private createSession(id: string, chat: Chat): void {
+    this.storeSession(id, chat);
   }
 
   private storeSession(id: string, chat: Chat): void {

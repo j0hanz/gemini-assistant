@@ -9,14 +9,15 @@ import {
   getWorkspaceCacheTtl,
   getWorkspaceContextFile,
 } from '../config.js';
+import { extractKeywords, scoreFile } from './context-assembler.js';
 import { withRetry } from './errors.js';
 import { logger } from './logger.js';
+import { estimateTokens } from './tokens.js';
 import { isPathWithinRoot } from './validation.js';
 
 // ── Constants ─────────────────────────────────────────────────────────
 
 export const MIN_CACHE_TOKENS = 32_000;
-const TOKENS_PER_CHAR = 4;
 const MAX_SCAN_FILE_SIZE = 512 * 1024;
 const MAX_TOTAL_CONTEXT_SIZE = 2 * 1024 * 1024;
 const WORKSPACE_CACHE_DISPLAY = 'gemini-assistant-workspace';
@@ -66,8 +67,14 @@ type CacheChangeCallback = (status: WorkspaceCacheStatus) => void;
 
 // ── Utilities ─────────────────────────────────────────────────────────
 
-export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / TOKENS_PER_CHAR);
+export { estimateTokens } from './tokens.js';
+
+function normalizeRootsKey(roots: readonly string[]): string {
+  return [
+    ...new Set(roots.filter((root) => root && isAbsolute(root)).map((root) => root.toLowerCase())),
+  ]
+    .sort((a, b) => a.localeCompare(b))
+    .join('\n');
 }
 
 function hashContent(content: string): string {
@@ -155,8 +162,12 @@ function formatContextMarkdown(
   return sections.join('\n');
 }
 
-export async function assembleWorkspaceContext(roots: string[]): Promise<WorkspaceContextResult> {
+export async function assembleWorkspaceContext(
+  roots: string[],
+  focusText?: string,
+): Promise<WorkspaceContextResult> {
   const validRoots = roots.filter((r) => r && isAbsolute(r));
+  const keywords = focusText ? extractKeywords(focusText) : [];
   const sources: string[] = [];
   let totalSize = 0;
   let contextFileContent: string | undefined;
@@ -179,7 +190,16 @@ export async function assembleWorkspaceContext(roots: string[]): Promise<Workspa
   if (getWorkspaceAutoScan()) {
     for (const root of validRoots) {
       const files = await scanRootForFiles(root);
-      for (const [filePath, content] of files) {
+      const candidates =
+        keywords.length > 0
+          ? [...files.entries()].sort(
+              ([leftPath, leftContent], [rightPath, rightContent]) =>
+                scoreFile(basename(rightPath), rightContent, keywords) -
+                scoreFile(basename(leftPath), leftContent, keywords),
+            )
+          : files.entries();
+
+      for (const [filePath, content] of candidates) {
         if (totalSize + content.length > MAX_TOTAL_CONTEXT_SIZE) {
           log.warn(
             `Total context size limit reached (${MAX_TOTAL_CONTEXT_SIZE} bytes), skipping remaining files`,
@@ -226,6 +246,7 @@ function emitWorkspaceCacheChange(status: WorkspaceCacheStatus): void {
 }
 
 class WorkspaceCacheManagerImpl {
+  private activeRootsKey: string | undefined;
   private cacheName: string | undefined;
   private contentHash: string | undefined;
   private estimatedTokens: number | undefined;
@@ -238,6 +259,16 @@ class WorkspaceCacheManagerImpl {
   async getOrCreateCache(roots: string[], signal?: AbortSignal): Promise<string | undefined> {
     if (!getWorkspaceCacheEnabled()) return undefined;
 
+    const rootsKey = normalizeRootsKey(roots);
+
+    if (this.cacheName && this.activeRootsKey !== rootsKey) {
+      const previousCacheName = this.cacheName;
+      this.invalidate();
+      if (previousCacheName) {
+        await this.deleteCacheBestEffort(previousCacheName, signal);
+      }
+    }
+
     if (this.cacheName) {
       if (this.lastHashCheck && Date.now() - this.lastHashCheck < HASH_CHECK_INTERVAL_MS) {
         return this.cacheName;
@@ -249,14 +280,14 @@ class WorkspaceCacheManagerImpl {
         return this.cacheName;
       }
       log.info('Workspace content changed, recreating cache');
-      return await this.refreshCache(ctx, signal);
+      return await this.refreshCache(ctx, rootsKey, signal);
     }
 
     if (this.inflightCreation) {
       return await this.inflightCreation;
     }
 
-    const creation = this.createCache(roots, signal);
+    const creation = this.createCache(roots, rootsKey, signal);
     this.inflightCreation = creation;
     try {
       return await creation;
@@ -281,6 +312,7 @@ class WorkspaceCacheManagerImpl {
 
   invalidate(): void {
     this.generation++;
+    this.activeRootsKey = undefined;
     this.cacheName = undefined;
     this.contentHash = undefined;
     this.estimatedTokens = undefined;
@@ -290,13 +322,18 @@ class WorkspaceCacheManagerImpl {
     this.emitChange();
   }
 
-  private async createCache(roots: string[], signal?: AbortSignal): Promise<string | undefined> {
+  private async createCache(
+    roots: string[],
+    rootsKey: string,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
     const ctx = await assembleWorkspaceContext(roots);
-    return await this.createCacheFromContext(ctx, signal);
+    return await this.createCacheFromContext(ctx, rootsKey, signal);
   }
 
   private async refreshCache(
     ctx: WorkspaceContextResult,
+    rootsKey: string,
     signal?: AbortSignal,
   ): Promise<string | undefined> {
     if (this.inflightCreation) {
@@ -317,7 +354,7 @@ class WorkspaceCacheManagerImpl {
         return undefined;
       }
 
-      const replacementCacheName = await this.createCacheFromContext(ctx, signal);
+      const replacementCacheName = await this.createCacheFromContext(ctx, rootsKey, signal);
       if (!replacementCacheName) {
         return previousCacheName;
       }
@@ -339,6 +376,7 @@ class WorkspaceCacheManagerImpl {
 
   private async createCacheFromContext(
     ctx: WorkspaceContextResult,
+    rootsKey: string,
     signal?: AbortSignal,
   ): Promise<string | undefined> {
     const gen = this.generation;
@@ -374,6 +412,7 @@ class WorkspaceCacheManagerImpl {
       }
 
       this.cacheName = cache.name;
+      this.activeRootsKey = rootsKey;
       this.contentHash = hashContent(ctx.content);
       this.estimatedTokens = ctx.estimatedTokens;
       this.sources = ctx.sources;

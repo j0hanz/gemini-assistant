@@ -1,7 +1,7 @@
 import type { ContextSourceReport, ContextUsed } from '../schemas/outputs.js';
 
 import type { TranscriptEntry } from '../sessions.js';
-import { estimateTokens } from './workspace-context.js';
+import { estimateTokens } from './tokens.js';
 
 const SESSION_SUMMARY_BUDGET = 500;
 const SUMMARY_ENTRY_MAX_CHARS = 200;

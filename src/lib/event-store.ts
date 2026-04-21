@@ -77,9 +77,12 @@ export class InMemoryEventStore implements EventStore {
     const arrayIndex = location.absoluteIndex - state.baseOffset;
     if (arrayIndex < 0 || arrayIndex >= state.events.length) return location.streamId;
 
-    for (let i = arrayIndex + 1; i < state.events.length; i++) {
-      const event = state.events[i];
-      if (event) await send(event.eventId, event.message);
+    state.lastActivity = Date.now();
+    state.lastActivityOrder = ++this._activityCounter;
+
+    const replayBatch = state.events.slice(arrayIndex + 1);
+    for (const event of replayBatch) {
+      await send(event.eventId, event.message);
     }
 
     return location.streamId;

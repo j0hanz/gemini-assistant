@@ -18,6 +18,10 @@ type StreamResponseBuilder<T extends Record<string, unknown>> = (
   reportMessage?: string;
 };
 
+interface ExecutionOptions {
+  reportTerminalProgress?: boolean;
+}
+
 export class ToolExecutor {
   constructor(private readonly scopedLogger: ScopedLogger) {}
 
@@ -28,6 +32,7 @@ export class ToolExecutor {
     mode: 'sync' | 'stream',
     args: unknown,
     work: () => Promise<{ result: CallToolResult; reportMessage?: string | undefined }>,
+    options: ExecutionOptions = {},
   ): Promise<CallToolResult> {
     const traceId = randomUUID();
     return await logContext.run(traceId, async () => {
@@ -52,10 +57,12 @@ export class ToolExecutor {
           result: maybeSummarizePayload(result, this.scopedLogger.getVerbosePayloads()),
         });
 
-        if (result.isError) {
-          await reportFailure(ctx, toolLabel, extractTextContent(result.content));
-        } else {
-          await reportCompletion(ctx, toolLabel, reportMessage ?? 'completed');
+        if (options.reportTerminalProgress !== false) {
+          if (result.isError) {
+            await reportFailure(ctx, toolLabel, extractTextContent(result.content));
+          } else {
+            await reportCompletion(ctx, toolLabel, reportMessage ?? 'completed');
+          }
         }
 
         return result;
@@ -72,7 +79,9 @@ export class ToolExecutor {
             ? undefined
             : maybeSummarizePayload(args, this.scopedLogger.getVerbosePayloads()),
         });
-        await reportFailure(ctx, toolLabel, appError.message);
+        if (options.reportTerminalProgress !== false) {
+          await reportFailure(ctx, toolLabel, appError.message);
+        }
         return appError.toToolResult();
       }
     });
@@ -84,11 +93,20 @@ export class ToolExecutor {
     toolLabel: string,
     args: TArgs,
     work: (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
+    options?: ExecutionOptions,
   ): Promise<CallToolResult> {
-    return this.executeWithTracing(ctx, toolName, toolLabel, 'sync', args, async () => {
-      const result = await work(args, ctx);
-      return { result };
-    });
+    return this.executeWithTracing(
+      ctx,
+      toolName,
+      toolLabel,
+      'sync',
+      args,
+      async () => {
+        const result = await work(args, ctx);
+        return { result };
+      },
+      options,
+    );
   }
 
   async runStream<T extends Record<string, unknown>>(
@@ -99,45 +117,54 @@ export class ToolExecutor {
     responseBuilder: StreamResponseBuilder<T> = (_streamResult, text) => ({
       structuredContent: { answer: text } as unknown as T,
     }),
+    options?: ExecutionOptions,
   ): Promise<CallToolResult> {
-    return this.executeWithTracing(ctx, toolName, toolLabel, 'stream', undefined, async () => {
-      const { streamResult, result } = await executeToolStream(
-        ctx,
-        toolName,
-        toolLabel,
-        streamGenerator,
-      );
-      if (result.isError) {
-        return { result };
-      }
+    return this.executeWithTracing(
+      ctx,
+      toolName,
+      toolLabel,
+      'stream',
+      undefined,
+      async () => {
+        const { streamResult, result } = await executeToolStream(
+          ctx,
+          toolName,
+          toolLabel,
+          streamGenerator,
+        );
+        if (result.isError) {
+          return { result };
+        }
 
-      const text = extractTextContent(result.content);
-      const built = responseBuilder(streamResult, text);
-      const finalResult: CallToolResult = {
-        ...result,
-        ...(built.resultMod ? built.resultMod(result) : {}),
-      };
+        const text = extractTextContent(result.content);
+        const built = responseBuilder(streamResult, text);
+        const finalResult: CallToolResult = {
+          ...result,
+          ...(built.resultMod ? built.resultMod(result) : {}),
+        };
 
-      const usage = extractUsage(streamResult.usageMetadata);
-      const mergedResult: CallToolResult = {
-        ...finalResult,
-        structuredContent: {
-          ...(finalResult.structuredContent && typeof finalResult.structuredContent === 'object'
-            ? finalResult.structuredContent
-            : {}),
-          ...(built.structuredContent ?? {}),
-          ...buildSharedStructuredMetadata({
-            functionCalls: streamResult.functionCalls,
-            includeThoughts: EXPOSE_THOUGHTS,
-            thoughtText: streamResult.thoughtText,
-            toolEvents: streamResult.toolEvents,
-            usage,
-          }),
-        },
-      };
+        const usage = extractUsage(streamResult.usageMetadata);
+        const mergedResult: CallToolResult = {
+          ...finalResult,
+          structuredContent: {
+            ...(finalResult.structuredContent && typeof finalResult.structuredContent === 'object'
+              ? finalResult.structuredContent
+              : {}),
+            ...(built.structuredContent ?? {}),
+            ...buildSharedStructuredMetadata({
+              functionCalls: streamResult.functionCalls,
+              includeThoughts: EXPOSE_THOUGHTS,
+              thoughtText: streamResult.thoughtText,
+              toolEvents: streamResult.toolEvents,
+              usage,
+            }),
+          },
+        };
 
-      return { result: mergedResult, reportMessage: built.reportMessage };
-    });
+        return { result: mergedResult, reportMessage: built.reportMessage };
+      },
+      options,
+    );
   }
 }
 

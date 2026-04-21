@@ -443,6 +443,7 @@ export function registerTaskTool<TArgs>(
           toolLabel,
           args,
           work as unknown as (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
+          { reportTerminalProgress: false },
         ),
       ),
     ),

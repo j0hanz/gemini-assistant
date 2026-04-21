@@ -110,28 +110,31 @@ async function uploadDiagramSourceFiles(
   ctx: ServerContext,
   rootsFetcher: RootsFetcher,
   uploadedNames: string[],
-): Promise<Part[]> {
+): Promise<{ parts: Part[]; uploadedCount: number }> {
   const contentParts: Part[] = [];
   const totalSteps = filesToUpload.length + 1;
   const progress = new ProgressReporter(ctx, ANALYZE_DIAGRAM_TOOL_LABEL);
+  let uploadedCount = 0;
 
   for (let index = 0; index < filesToUpload.length; index++) {
     if (ctx.mcpReq.signal.aborted) throw new DOMException('Aborted', 'AbortError');
     const filePath = filesToUpload[index];
     if (!filePath) continue;
 
-    await progress.step(
-      index,
-      totalSteps,
-      `Uploading ${filePath.split(/[\\/]/).pop() ?? filePath} (${String(index + 1)}/${String(filesToUpload.length)})`,
-    );
     const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
+    uploadedCount += 1;
     uploadedNames.push(uploaded.name);
     contentParts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
     contentParts.push({ text: `Source file: ${uploaded.displayPath}` });
+
+    await progress.step(
+      index + 1,
+      totalSteps,
+      `Uploaded ${filePath.split(/[\\/]/).pop() ?? filePath} (${String(index + 1)}/${String(filesToUpload.length)})`,
+    );
   }
 
-  return contentParts;
+  return { parts: contentParts, uploadedCount };
 }
 
 function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
@@ -252,18 +255,21 @@ async function analyzeDiagramWork(
 
   try {
     let attachedParts: Part[] = [];
+    let uploadedCount = 0;
 
     if (args.targetKind === 'file' || args.targetKind === 'multi') {
       const filesToUpload = collectDiagramSourceFiles(
         args.targetKind === 'file' ? args.filePath : undefined,
         args.targetKind === 'multi' ? args.filePaths : undefined,
       );
-      attachedParts = await uploadDiagramSourceFiles(
+      const uploaded = await uploadDiagramSourceFiles(
         filesToUpload,
         ctx,
         rootsFetcher,
         uploadedNames,
       );
+      attachedParts = uploaded.parts;
+      uploadedCount = uploaded.uploadedCount;
     } else {
       attachedParts = [
         {
@@ -272,8 +278,8 @@ async function analyzeDiagramWork(
       ];
     }
 
-    const totalSteps = attachedParts.length > 0 ? attachedParts.length + 1 : 1;
-    await progress.send(attachedParts.length, totalSteps, `Generating ${args.diagramType} diagram`);
+    const totalSteps = uploadedCount > 0 ? uploadedCount + 1 : 1;
+    await progress.send(uploadedCount, totalSteps, `Generating ${args.diagramType} diagram`);
     await ctx.mcpReq.log('info', `Generating ${args.diagramType} diagram`);
 
     const prompt = buildDiagramGenerationPrompt({

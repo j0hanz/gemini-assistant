@@ -170,6 +170,46 @@ describe('sendProgress', () => {
     await sendProgress(ctx, 1, 3, 'step 1');
   });
 
+  it('bridges task status without progressToken', async () => {
+    let capturedStatus: string | undefined;
+    let capturedMessage: string | undefined;
+    const ctx = makeMockContext({});
+    (ctx as unknown as Record<string, unknown>).task = {
+      id: 'task-no-token',
+      store: {
+        updateTaskStatus: async (_id: string, status: string, msg?: string) => {
+          capturedStatus = status;
+          capturedMessage = msg;
+        },
+      },
+    };
+
+    await sendProgress(ctx, 50, 100, 'bridged message');
+
+    assert.strictEqual(capturedStatus, 'working');
+    assert.strictEqual(capturedMessage, 'bridged message');
+  });
+
+  it('forces terminal task bridging without progressToken inside the throttle window', async () => {
+    const messages: string[] = [];
+    const ctx = makeMockContext({});
+    (ctx as unknown as Record<string, unknown>).task = {
+      id: 'task-no-token-terminal',
+      store: {
+        updateTaskStatus: async (_id: string, _status: string, msg?: string) => {
+          if (msg) {
+            messages.push(msg);
+          }
+        },
+      },
+    };
+
+    await sendProgress(ctx, 5, 100, 'step 1');
+    await sendProgress(ctx, 100, 100, 'final');
+
+    assert.deepStrictEqual(messages, ['step 1', 'final']);
+  });
+
   it('calls notify with progressToken', async () => {
     let notifyCalled = false;
     const ctx = makeMockContext({ progressToken: 'tok-1' });

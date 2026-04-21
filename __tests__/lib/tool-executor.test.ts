@@ -1,4 +1,5 @@
-import type { ServerContext } from '@modelcontextprotocol/server';
+import type { RequestTaskStore, ServerContext, Task } from '@modelcontextprotocol/server';
+import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
@@ -11,6 +12,7 @@ import { z } from 'zod/v4';
 import { resetProgressThrottle } from '../../src/lib/errors.js';
 import { Logger } from '../../src/lib/logger.js';
 import { validateStructuredToolResult } from '../../src/lib/response.js';
+import { registerTaskTool } from '../../src/lib/task-utils.js';
 import { ToolExecutor } from '../../src/lib/tool-executor.js';
 
 function makeChunk(parts: Part[], finishReason?: FinishReason): GenerateContentResponse {
@@ -74,6 +76,72 @@ function makeMockContext(): {
   } as unknown as ServerContext;
 
   return { ctx, progressCalls };
+}
+
+function makeMockTaskStore(): RequestTaskStore & {
+  stored: { taskId: string; status: string; result: { isError?: boolean } }[];
+} {
+  const stored: { taskId: string; status: string; result: { isError?: boolean } }[] = [];
+
+  return {
+    stored,
+    createTask: async () => ({ taskId: 'task-1' }) as Task,
+    getTask: async (taskId: string) => ({ taskId, status: 'completed' }) as Task,
+    getTaskResult: async () => ({ content: [{ type: 'text' as const, text: 'ok' }] }),
+    storeTaskResult: async (taskId: string, status: string, result) => {
+      stored.push({ taskId, status, result });
+    },
+    updateTaskStatus: async () => undefined,
+    listTasks: async () => ({ tasks: [] }),
+  };
+}
+
+function makeMockTaskContext(store: RequestTaskStore): {
+  ctx: ServerContext;
+  progressCalls: { progress: number; total?: number; message?: string }[];
+} {
+  const { ctx, progressCalls } = makeMockContext();
+  return {
+    ctx: {
+      ...ctx,
+      task: {
+        store,
+        requestedTtl: undefined,
+        id: undefined,
+      },
+    } as unknown as ServerContext,
+    progressCalls,
+  };
+}
+
+function makeMockTaskToolServer() {
+  let capturedHandler:
+    | {
+        createTask: (args: { input: string }, ctx: ServerContext) => Promise<{ task: Task }>;
+      }
+    | undefined;
+
+  const server = {
+    experimental: {
+      tasks: {
+        registerToolTask: (_name: string, _config: unknown, handler: typeof capturedHandler) => {
+          capturedHandler = handler;
+        },
+      },
+    },
+  } as unknown as { experimental: { tasks: { registerToolTask: typeof Function } } };
+
+  return {
+    server: server as never,
+    getHandler: () => {
+      assert.ok(capturedHandler);
+      return capturedHandler;
+    },
+  };
+}
+
+async function flushTaskWork(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
 describe('ToolExecutor', () => {
@@ -250,5 +318,92 @@ describe('ToolExecutor', () => {
         totalTokenCount: 3,
       },
     });
+  });
+
+  it('registerTaskTool emits a single terminal completion from the inner stream executor', async () => {
+    const queue = new InMemoryTaskMessageQueue();
+    const store = makeMockTaskStore();
+    const { ctx, progressCalls } = makeMockTaskContext(store);
+    const { server, getHandler } = makeMockTaskToolServer();
+    const executor = createExecutor();
+
+    registerTaskTool(
+      server,
+      'test_stream',
+      {
+        title: 'Test Stream',
+        description: 'test',
+        inputSchema: z.strictObject({ input: z.string() }),
+        outputSchema: z.strictObject({ answer: z.string() }),
+        annotations: {},
+      },
+      queue,
+      async (_args, taskCtx) =>
+        executor.runStream(
+          taskCtx,
+          'inner_stream',
+          'Inner Stream',
+          async () => fakeStream([makeChunk([{ text: 'stream answer' }], FinishReason.STOP)]),
+          (_streamResult, text) => ({
+            structuredContent: { answer: text },
+            reportMessage: '3 sources found',
+          }),
+        ),
+    );
+
+    await getHandler().createTask({ input: 'ok' }, ctx);
+    await flushTaskWork();
+
+    assert.strictEqual(store.stored[0]?.status, 'completed');
+    const terminalCalls = progressCalls.filter(
+      (call) => call.progress === 100 && call.total === 100,
+    );
+    assert.deepStrictEqual(terminalCalls, [
+      {
+        progress: 100,
+        total: 100,
+        message: 'Inner Stream: 3 sources found',
+      },
+    ]);
+  });
+
+  it('registerTaskTool emits a single terminal failure from the inner stream executor', async () => {
+    const queue = new InMemoryTaskMessageQueue();
+    const store = makeMockTaskStore();
+    const { ctx, progressCalls } = makeMockTaskContext(store);
+    const { server, getHandler } = makeMockTaskToolServer();
+    const executor = createExecutor();
+
+    registerTaskTool(
+      server,
+      'test_stream',
+      {
+        title: 'Test Stream',
+        description: 'test',
+        inputSchema: z.strictObject({ input: z.string() }),
+        outputSchema: z.strictObject({ answer: z.string() }),
+        annotations: {},
+      },
+      queue,
+      async (_args, taskCtx) =>
+        executor.runStream(taskCtx, 'inner_stream', 'Inner Stream', async () => {
+          throw new Error('boom');
+        }),
+    );
+
+    await getHandler().createTask({ input: 'ok' }, ctx);
+    await flushTaskWork();
+
+    assert.strictEqual(store.stored[0]?.status, 'failed');
+    const terminalCalls = progressCalls.filter(
+      (call) => call.progress === 100 && call.total === 100,
+    );
+    assert.deepStrictEqual(terminalCalls, [
+      {
+        progress: 100,
+        total: 100,
+        message: 'Inner Stream: failed — inner_stream failed: boom',
+      },
+    ]);
   });
 });

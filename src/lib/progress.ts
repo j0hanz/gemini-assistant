@@ -174,20 +174,21 @@ export async function sendProgress(
   total?: number,
   message?: string,
 ): Promise<void> {
-  const progressToken = ctx.mcpReq._meta?.progressToken;
-  if (progressToken === undefined || ctx.mcpReq.signal.aborted) return;
+  if (ctx.mcpReq.signal.aborted) return;
 
   const isTerminal = isTerminalProgress(progress, total);
-  const now = Date.now();
-  if (shouldThrottleProgress(progressToken, message, now, isTerminal)) {
-    return;
-  }
+  const progressToken = ctx.mcpReq._meta?.progressToken;
 
-  try {
-    await ctx.mcpReq.notify(buildProgressNotification(progressToken, progress, total, message));
-    updateProgressStateAfterNotify(progressToken, ctx.task?.id, message, now, isTerminal);
-  } catch (err: unknown) {
-    await logProgressFailure(ctx, err);
+  if (progressToken !== undefined) {
+    const now = Date.now();
+    if (!shouldThrottleProgress(progressToken, message, now, isTerminal)) {
+      try {
+        await ctx.mcpReq.notify(buildProgressNotification(progressToken, progress, total, message));
+        updateProgressStateAfterNotify(progressToken, ctx.task?.id, message, now, isTerminal);
+      } catch (err: unknown) {
+        await logProgressFailure(ctx, err);
+      }
+    }
   }
 
   await bridgeProgressMessage(ctx, message, isTerminal);

@@ -8,7 +8,6 @@ import type {
 import { Validator } from '@cfworker/json-schema';
 import type { Chat } from '@google/genai';
 
-import { buildContextUsed, buildSessionSummary, emptyContextUsed } from '../lib/chat-context.js';
 import { AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
@@ -30,6 +29,11 @@ import {
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { getAllowedRoots, validateUrls } from '../lib/validation.js';
+import {
+  buildContextUsed,
+  buildSessionSummary,
+  emptyContextUsed,
+} from '../lib/workspace-context.js';
 import { workspaceCacheManager } from '../lib/workspace-context.js';
 import {
   type AskInput,

@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
 
+import type { ContextSourceReport, ContextUsed } from '../schemas/outputs.js';
+
 import { DEFAULT_SYSTEM_INSTRUCTION, getAI, MODEL } from '../client.js';
 import {
   getWorkspaceAutoScan,
@@ -9,11 +11,189 @@ import {
   getWorkspaceCacheTtl,
   getWorkspaceContextFile,
 } from '../config.js';
-import { extractKeywords, scoreFile } from './context-assembler.js';
+import type { TranscriptEntry } from '../sessions.js';
 import { withRetry } from './errors.js';
 import { logger } from './logger.js';
-import { estimateTokens } from './tokens.js';
 import { isPathWithinRoot } from './validation.js';
+
+const TOKENS_PER_CHAR = 4;
+
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / TOKENS_PER_CHAR);
+}
+
+const STOPWORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'as',
+  'at',
+  'be',
+  'by',
+  'do',
+  'for',
+  'from',
+  'has',
+  'have',
+  'how',
+  'i',
+  'if',
+  'in',
+  'is',
+  'it',
+  'its',
+  'my',
+  'no',
+  'not',
+  'of',
+  'on',
+  'or',
+  'our',
+  'so',
+  'that',
+  'the',
+  'their',
+  'them',
+  'then',
+  'there',
+  'these',
+  'they',
+  'this',
+  'to',
+  'was',
+  'we',
+  'what',
+  'when',
+  'which',
+  'who',
+  'will',
+  'with',
+  'would',
+  'you',
+  'your',
+]);
+
+const STATIC_PRIORITY_FILES = new Map<string, number>([
+  ['readme.md', 0.2],
+  ['package.json', 0.2],
+  ['agents.md', 0.15],
+  ['tsconfig.json', 0.1],
+  ['copilot-instructions.md', 0.15],
+]);
+
+export function extractKeywords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[\s_./\\:;,!?'"()[\]{}-]+/)
+    .filter((word) => word.length > 1 && !STOPWORDS.has(word));
+}
+
+function filenameScore(fileName: string, keywords: readonly string[]): number {
+  const nameLower = fileName.toLowerCase();
+  const nameWithoutExt = nameLower.replace(/\.[^.]+$/, '');
+  const nameParts = nameWithoutExt.split(/[-_.]/);
+
+  let matches = 0;
+  for (const keyword of keywords) {
+    if (nameLower.includes(keyword) || nameParts.some((part) => part === keyword)) {
+      matches += 1;
+    }
+  }
+
+  return Math.min(0.4, matches * 0.2);
+}
+
+function contentKeywordScore(content: string, keywords: readonly string[]): number {
+  const contentLower = content.toLowerCase();
+  let matches = 0;
+
+  for (const keyword of keywords) {
+    if (contentLower.includes(keyword)) {
+      matches += 1;
+    }
+  }
+
+  return Math.min(0.4, (matches / Math.max(keywords.length, 1)) * 0.4);
+}
+
+function staticPriority(fileName: string): number {
+  return STATIC_PRIORITY_FILES.get(fileName.toLowerCase()) ?? 0.05;
+}
+
+export function scoreFile(fileName: string, content: string, keywords: readonly string[]): number {
+  return (
+    filenameScore(fileName, keywords) +
+    contentKeywordScore(content, keywords) +
+    staticPriority(fileName)
+  );
+}
+
+const SESSION_SUMMARY_BUDGET = 500;
+const SUMMARY_ENTRY_MAX_CHARS = 200;
+
+function truncate(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength - 3)}...`;
+}
+
+interface ContextSource extends ContextSourceReport {
+  relevanceScore: number;
+}
+
+export function buildSessionSummary(
+  transcript: readonly TranscriptEntry[],
+  maxTokens = SESSION_SUMMARY_BUDGET,
+): string | undefined {
+  if (transcript.length < 2) {
+    return undefined;
+  }
+
+  const lines: string[] = [];
+  let tokenEstimate = 0;
+
+  for (let index = transcript.length - 1; index >= 0; index -= 1) {
+    const entry = transcript[index];
+    if (!entry) {
+      continue;
+    }
+    const line = `[${entry.role}]: ${truncate(entry.text, SUMMARY_ENTRY_MAX_CHARS)}`;
+    const lineTokens = estimateTokens(line);
+    if (tokenEstimate + lineTokens > maxTokens) {
+      break;
+    }
+    lines.unshift(line);
+    tokenEstimate += lineTokens;
+  }
+
+  if (lines.length === 0) {
+    return undefined;
+  }
+
+  return `<prior_conversation>\n${lines.join('\n')}\n</prior_conversation>`;
+}
+
+export function buildContextUsed(
+  sources: readonly ContextSource[],
+  totalTokens: number,
+  workspaceCacheApplied: boolean,
+): ContextUsed {
+  return {
+    sources: sources.map(({ kind, name, tokens }) => ({ kind, name, tokens })),
+    totalTokens,
+    workspaceCacheApplied,
+  };
+}
+
+export function emptyContextUsed(): ContextUsed {
+  return {
+    sources: [],
+    totalTokens: 0,
+    workspaceCacheApplied: false,
+  };
+}
 
 // ── Constants ─────────────────────────────────────────────────────────
 
@@ -66,8 +246,6 @@ interface WorkspaceCacheStatus {
 type CacheChangeCallback = (status: WorkspaceCacheStatus) => void;
 
 // ── Utilities ─────────────────────────────────────────────────────────
-
-export { estimateTokens } from './tokens.js';
 
 function normalizeRootsKey(roots: readonly string[]): string {
   return [

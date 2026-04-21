@@ -19,6 +19,7 @@ import {
   createResourceLink,
   extractTextContent,
   validateStructuredContent,
+  withRelatedTaskMeta,
 } from '../lib/response.js';
 import {
   extractUsage,
@@ -396,11 +397,19 @@ async function runAskStream(
   };
 }
 
-function appendSessionResource(result: CallToolResult, sessionId: string): void {
+function appendSessionResource(result: CallToolResult, sessionId: string, taskId?: string): void {
   if (result.isError) return;
-  result.content.push(createResourceLink(sessionDetailUri(sessionId), `Chat Session ${sessionId}`));
   result.content.push(
-    createResourceLink(sessionEventsUri(sessionId), `Chat Session ${sessionId} Events`),
+    withRelatedTaskMeta(
+      createResourceLink(sessionDetailUri(sessionId), `Chat Session ${sessionId}`),
+      taskId,
+    ),
+  );
+  result.content.push(
+    withRelatedTaskMeta(
+      createResourceLink(sessionEventsUri(sessionId), `Chat Session ${sessionId} Events`),
+      taskId,
+    ),
   );
 }
 
@@ -707,7 +716,7 @@ async function askNewSession(
   if (!askResult.result.isError) {
     deps.setSession(args.sessionId, chat);
     appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id);
-    appendSessionResource(askResult.result, args.sessionId);
+    appendSessionResource(askResult.result, args.sessionId, ctx.task?.id);
   } else {
     await ctx.mcpReq.log('debug', `Session ${args.sessionId} not stored due to stream error`);
   }

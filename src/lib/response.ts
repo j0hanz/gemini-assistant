@@ -1,4 +1,7 @@
-import type { CallToolResult } from '@modelcontextprotocol/server';
+import {
+  type CallToolResult,
+  RELATED_TASK_META_KEY as SDK_RELATED_TASK_META_KEY,
+} from '@modelcontextprotocol/server';
 
 import type { GenerateContentResponse, GroundingMetadata, UrlMetadata } from '@google/genai';
 import { z } from 'zod/v4';
@@ -213,6 +216,30 @@ export function createResourceLink(
     uri,
     name,
     mimeType,
+  };
+}
+
+export const RELATED_TASK_META_KEY = SDK_RELATED_TASK_META_KEY;
+
+export function withRelatedTaskMeta<T extends Record<string, unknown>>(
+  value: T,
+  taskId?: string,
+): T & { _meta?: Record<string, unknown> } {
+  const existingMeta =
+    typeof value._meta === 'object' && value._meta !== null
+      ? (value._meta as Record<string, unknown>)
+      : undefined;
+
+  return {
+    ...value,
+    ...(taskId
+      ? {
+          _meta: {
+            ...(existingMeta ?? {}),
+            [RELATED_TASK_META_KEY]: { taskId },
+          },
+        }
+      : {}),
   };
 }
 

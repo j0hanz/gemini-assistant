@@ -12,7 +12,11 @@ import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { logger } from '../lib/logger.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from '../lib/resource-uris.js';
-import { buildBaseStructuredOutput, createResourceLink } from '../lib/response.js';
+import {
+  buildBaseStructuredOutput,
+  createResourceLink,
+  withRelatedTaskMeta,
+} from '../lib/response.js';
 import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from '../lib/validation.js';
 import { assembleWorkspaceContext, workspaceCacheManager } from '../lib/workspace-context.js';
@@ -67,15 +71,20 @@ function truncateName(name: string, maxLen = 10): string {
   return name.length > maxLen ? `${name.slice(0, maxLen)}…` : name;
 }
 
-function cacheResourceLink(cacheName: string, displayName?: string) {
-  return createResourceLink(
+function taskResourceLink(uri: string, name: string, taskId?: string, mimeType?: string) {
+  return withRelatedTaskMeta(createResourceLink(uri, name, mimeType), taskId);
+}
+
+function cacheResourceLink(cacheName: string, displayName?: string, taskId?: string) {
+  return taskResourceLink(
     `memory://caches/${encodeURIComponent(cacheName)}`,
     displayName ?? `Cache ${truncateName(cacheName)}`,
+    taskId,
   );
 }
 
-function cacheListResourceLink() {
-  return createResourceLink('memory://caches', 'Active Caches');
+function cacheListResourceLink(taskId?: string) {
+  return taskResourceLink('memory://caches', 'Active Caches', taskId);
 }
 
 function normalizeCreateCacheError(err: unknown): unknown {
@@ -242,12 +251,15 @@ function notifyCacheMutation(cacheName?: string): void {
   notifyCacheChange(cacheName ? [cacheName] : []);
 }
 
-function buildCreateCacheResult(cache: {
-  name?: string;
-  displayName?: string;
-  model?: string;
-  expireTime?: string;
-}): CallToolResult {
+function buildCreateCacheResult(
+  cache: {
+    name?: string;
+    displayName?: string;
+    model?: string;
+    expireTime?: string;
+  },
+  taskId?: string,
+): CallToolResult {
   if (!cache.name) {
     throw new AppError('memory', 'memory: Gemini returned a cache with no resource name.');
   }
@@ -265,8 +277,8 @@ function buildCreateCacheResult(cache: {
           `- **Model:** ${cache.model ?? 'N/A'}\n` +
           `- **Expires:** ${cache.expireTime ?? 'N/A'}`,
       },
-      cacheResourceLink(cacheName, cache.displayName ?? cacheName),
-      cacheListResourceLink(),
+      cacheResourceLink(cacheName, cache.displayName ?? cacheName, taskId),
+      cacheListResourceLink(taskId),
     ],
     structuredContent: {
       name: cacheName,
@@ -307,7 +319,7 @@ export function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
       await cleanupDuplicateCaches(displayName, cache.name, ctx.mcpReq.signal);
       notifyCacheMutation(cache.name);
 
-      return buildCreateCacheResult(cache);
+      return buildCreateCacheResult(cache, ctx.task?.id);
     } catch (err) {
       throw normalizeCreateCacheError(err);
     } finally {
@@ -353,7 +365,10 @@ async function deleteCacheWork(
   notifyCacheMutation(cacheName);
   await ctx.mcpReq.log('info', `Deleted cache: ${cacheName}`);
   return {
-    content: [{ type: 'text', text: `Cache '${cacheName}' deleted.` }, cacheListResourceLink()],
+    content: [
+      { type: 'text', text: `Cache '${cacheName}' deleted.` },
+      cacheListResourceLink(ctx.task?.id),
+    ],
     structuredContent: { cacheName, deleted: true },
   };
 }
@@ -377,7 +392,7 @@ async function updateCacheWork(
           `- **Name:** ${updated.name ?? cacheName}\n` +
           `- **Expires:** ${updated.expireTime ?? 'N/A'}`,
       },
-      cacheResourceLink(cacheName),
+      cacheResourceLink(cacheName, undefined, ctx.task?.id),
     ],
     structuredContent: {
       cacheName,
@@ -398,12 +413,13 @@ function handleSessionsList(
   sessionStore: SessionStore,
   base: Record<string, unknown>,
   action: string,
+  taskId?: string,
 ): CallToolResult {
   const sessions = sessionStore.listSessionEntries();
   return {
     content: [
       { type: 'text', text: `Found ${String(sessions.length)} active session(s).` },
-      createResourceLink('memory://sessions', 'Chat Sessions'),
+      taskResourceLink('memory://sessions', 'Chat Sessions', taskId),
     ],
     structuredContent: {
       ...base,
@@ -420,6 +436,7 @@ function handleSessionsGet(
   base: Record<string, unknown>,
   action: string,
   sessionId: string,
+  taskId?: string,
 ): CallToolResult {
   const session = sessionStore.getSessionEntry(sessionId);
   if (!session) {
@@ -429,7 +446,7 @@ function handleSessionsGet(
     content: [
       { type: 'text', text: `Session ${sessionId} is active.` },
       ...sessionUris(sessionId).map((uri, index) =>
-        createResourceLink(uri, ['Session', 'Transcript', 'Events'][index] ?? uri),
+        taskResourceLink(uri, ['Session', 'Transcript', 'Events'][index] ?? uri, taskId),
       ),
     ],
     structuredContent: {
@@ -447,6 +464,7 @@ function handleSessionsTranscript(
   base: Record<string, unknown>,
   action: string,
   sessionId: string,
+  taskId?: string,
 ): CallToolResult {
   const transcript = sessionStore.listSessionTranscriptEntries(sessionId);
   if (!transcript) {
@@ -455,7 +473,7 @@ function handleSessionsTranscript(
   return {
     content: [
       { type: 'text', text: `Transcript entries: ${String(transcript.length)}.` },
-      createResourceLink(sessionTranscriptUri(sessionId), `Transcript ${sessionId}`),
+      taskResourceLink(sessionTranscriptUri(sessionId), `Transcript ${sessionId}`, taskId),
     ],
     structuredContent: {
       ...base,
@@ -472,6 +490,7 @@ function handleSessionsEvents(
   base: Record<string, unknown>,
   action: string,
   sessionId: string,
+  taskId?: string,
 ): CallToolResult {
   const events = sessionStore.listSessionEventEntries(sessionId);
   if (!events) {
@@ -480,7 +499,7 @@ function handleSessionsEvents(
   return {
     content: [
       { type: 'text', text: `Event entries: ${String(events.length)}.` },
-      createResourceLink(sessionEventsUri(sessionId), `Events ${sessionId}`),
+      taskResourceLink(sessionEventsUri(sessionId), `Events ${sessionId}`, taskId),
     ],
     structuredContent: {
       ...base,
@@ -495,13 +514,14 @@ function handleSessionsEvents(
 async function handleCachesList(
   base: Record<string, unknown>,
   action: string,
+  taskId?: string,
   signal?: AbortSignal,
 ): Promise<CallToolResult> {
   const caches = await listCacheSummaries(signal);
   return {
     content: [
       { type: 'text', text: `Found ${String(caches.length)} active cache(s).` },
-      createResourceLink('memory://caches', 'Caches'),
+      taskResourceLink('memory://caches', 'Caches', taskId),
     ],
     structuredContent: {
       ...base,
@@ -517,6 +537,7 @@ async function handleCachesGet(
   base: Record<string, unknown>,
   action: string,
   cacheName: string,
+  taskId?: string,
   signal?: AbortSignal,
 ): Promise<CallToolResult> {
   let cache: CacheSummary;
@@ -532,7 +553,7 @@ async function handleCachesGet(
   return {
     content: [
       { type: 'text', text: `Cache ${cacheName} loaded.` },
-      createResourceLink(`memory://caches/${encodeURIComponent(cacheName)}`, cacheName),
+      taskResourceLink(`memory://caches/${encodeURIComponent(cacheName)}`, cacheName, taskId),
     ],
     structuredContent: {
       ...base,
@@ -644,6 +665,7 @@ async function handleWorkspaceContext(
   rootsFetcher: RootsFetcher,
   base: Record<string, unknown>,
   action: string,
+  taskId?: string,
 ): Promise<CallToolResult> {
   const roots = await getAllowedRoots(rootsFetcher);
   const workspaceContext = await assembleWorkspaceContext(roots);
@@ -653,7 +675,7 @@ async function handleWorkspaceContext(
         type: 'text',
         text: `Workspace context assembled from ${String(workspaceContext.sources.length)} source(s).`,
       },
-      createResourceLink('memory://workspace/context', 'Workspace Context', 'text/markdown'),
+      taskResourceLink('memory://workspace/context', 'Workspace Context', taskId, 'text/markdown'),
     ],
     structuredContent: {
       ...base,
@@ -665,12 +687,16 @@ async function handleWorkspaceContext(
   };
 }
 
-function handleWorkspaceCache(base: Record<string, unknown>, action: string): CallToolResult {
+function handleWorkspaceCache(
+  base: Record<string, unknown>,
+  action: string,
+  taskId?: string,
+): CallToolResult {
   const workspaceCache = workspaceCacheManager.getCacheStatus();
   return {
     content: [
       { type: 'text', text: 'Workspace cache status loaded.' },
-      createResourceLink('memory://workspace/cache', 'Workspace Cache'),
+      taskResourceLink('memory://workspace/cache', 'Workspace Cache', taskId),
     ],
     structuredContent: {
       ...base,
@@ -715,20 +741,21 @@ export async function memoryWork(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const base = buildBaseStructuredOutput(ctx.task?.id);
+  const taskId = ctx.task?.id;
   let result: CallToolResult;
 
   if (isMemoryAction(args, 'sessions.list')) {
-    result = handleSessionsList(sessionStore, base, args.action);
+    result = handleSessionsList(sessionStore, base, args.action, taskId);
   } else if (isMemoryAction(args, 'sessions.get') && hasSessionId(args)) {
-    result = handleSessionsGet(sessionStore, base, args.action, args.sessionId);
+    result = handleSessionsGet(sessionStore, base, args.action, args.sessionId, taskId);
   } else if (isMemoryAction(args, 'sessions.transcript') && hasSessionId(args)) {
-    result = handleSessionsTranscript(sessionStore, base, args.action, args.sessionId);
+    result = handleSessionsTranscript(sessionStore, base, args.action, args.sessionId, taskId);
   } else if (isMemoryAction(args, 'sessions.events') && hasSessionId(args)) {
-    result = handleSessionsEvents(sessionStore, base, args.action, args.sessionId);
+    result = handleSessionsEvents(sessionStore, base, args.action, args.sessionId, taskId);
   } else if (isMemoryAction(args, 'caches.list')) {
-    result = await handleCachesList(base, args.action, ctx.mcpReq.signal);
+    result = await handleCachesList(base, args.action, taskId, ctx.mcpReq.signal);
   } else if (isMemoryAction(args, 'caches.get') && hasCacheName(args)) {
-    result = await handleCachesGet(base, args.action, args.cacheName, ctx.mcpReq.signal);
+    result = await handleCachesGet(base, args.action, args.cacheName, taskId, ctx.mcpReq.signal);
   } else if (isMemoryAction(args, 'caches.create')) {
     result = await handleCachesCreate(createCacheWork, base, args, ctx);
   } else if (isMemoryAction(args, 'caches.update') && hasCacheName(args) && hasTtl(args)) {
@@ -736,9 +763,9 @@ export async function memoryWork(
   } else if (isMemoryAction(args, 'caches.delete') && hasCacheName(args)) {
     result = await handleCachesDelete(base, args, ctx);
   } else if (isMemoryAction(args, 'workspace.context')) {
-    result = await handleWorkspaceContext(rootsFetcher, base, args.action);
+    result = await handleWorkspaceContext(rootsFetcher, base, args.action, taskId);
   } else if (isMemoryAction(args, 'workspace.cache')) {
-    result = handleWorkspaceCache(base, args.action);
+    result = handleWorkspaceCache(base, args.action, taskId);
   } else {
     throw new Error(`memory: Unhandled action '${args.action}'. Enum validation failed upstream.`);
   }

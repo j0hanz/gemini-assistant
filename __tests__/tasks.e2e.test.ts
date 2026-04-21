@@ -9,6 +9,7 @@ import {
 } from './lib/mcp-contract-assertions.js';
 import {
   createServerHarness,
+  flushEventLoop,
   isJsonRpcFailure,
   type JsonRpcTestClient,
   type ToolCallResult,
@@ -52,12 +53,12 @@ async function createTask(
   client: JsonRpcTestClient,
   name: string,
   args: Record<string, unknown>,
-  ttl = 60_000,
+  ttl?: number,
 ): Promise<string> {
   const response = await client.request('tools/call', {
     arguments: args,
     name,
-    task: { ttl },
+    task: ttl === undefined ? {} : { ttl },
   });
   const taskId = (response.result as { task?: { taskId?: string } }).task?.taskId;
   assert.ok(taskId, 'Expected tools/call with task augmentation to return a task ID');
@@ -67,6 +68,31 @@ async function createTask(
 async function getTaskResult(client: JsonRpcTestClient, taskId: string): Promise<ToolCallResult> {
   const response = await client.request('tasks/result', { taskId });
   return response.result as unknown as ToolCallResult;
+}
+
+function getRelatedTaskId(result: ToolCallResult): string | undefined {
+  for (const item of result.content as Array<Record<string, unknown>>) {
+    if (item.type !== 'resource_link') {
+      continue;
+    }
+
+    const meta = item._meta;
+    if (!meta || typeof meta !== 'object') {
+      continue;
+    }
+
+    const related = (meta as Record<string, unknown>)['io.modelcontextprotocol/related-task'];
+    if (!related || typeof related !== 'object') {
+      continue;
+    }
+
+    const taskId = (related as { taskId?: unknown }).taskId;
+    if (typeof taskId === 'string') {
+      return taskId;
+    }
+  }
+
+  return undefined;
 }
 
 describe('public MCP task lifecycle', () => {
@@ -158,6 +184,129 @@ describe('public MCP task lifecycle', () => {
 
       const failedTask = await harness.client.request('tasks/get', { taskId: failedTaskId });
       assert.equal(failedTask.result.status, 'failed');
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('cancels an in-flight task and leaves no terminal task result stored', async () => {
+    const harness = await createHarness();
+
+    try {
+      const deferred = createDeferredStream(
+        makeChunk([{ text: 'Deferred research answer' }], FinishReason.STOP),
+      );
+      env.queueGenerator(deferred.stream);
+
+      const taskId = await createTask(
+        harness.client,
+        'research',
+        {
+          goal: 'Cancellation probe',
+          mode: 'quick',
+        },
+        60_000,
+      );
+
+      const cancelledTask = await harness.client.request('tasks/cancel', { taskId });
+      assert.equal(cancelledTask.result.status, 'cancelled');
+      assert.equal(cancelledTask.result.ttl, 60_000);
+
+      const latestTask = await harness.client.request('tasks/get', { taskId });
+      assert.equal(latestTask.result.status, 'cancelled');
+      assert.equal(latestTask.result.statusMessage, 'Client cancelled task execution.');
+
+      deferred.release();
+      await flushEventLoop(2);
+
+      const resultResponse = await harness.client.requestRaw('tasks/result', { taskId });
+      assert.equal(isJsonRpcFailure(resultResponse), true);
+      if (!isJsonRpcFailure(resultResponse)) {
+        assert.fail('Expected tasks/result to fail for a cancelled task with no stored result');
+      }
+      assert.match(resultResponse.error.message, /has no result stored/i);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('defaults task ttl to 300000 when omitted', async () => {
+    const harness = await createHarness();
+
+    try {
+      const taskId = await createTask(
+        harness.client,
+        'memory',
+        {
+          action: 'sessions.list',
+        },
+        undefined,
+      );
+
+      const task = await harness.client.request('tasks/get', { taskId });
+      assert.equal(task.result.ttl, 300_000);
+      assert.equal(task.result.pollInterval, 1000);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('forwards explicit ttl unchanged', async () => {
+    const harness = await createHarness();
+
+    try {
+      const taskId = await createTask(
+        harness.client,
+        'memory',
+        {
+          action: 'sessions.list',
+        },
+        60_000,
+      );
+
+      const task = await harness.client.request('tasks/get', { taskId });
+      assert.equal(task.result.ttl, 60_000);
+      assert.equal(task.result.pollInterval, 1000);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('preserves related-task metadata on task-associated session resource links', async () => {
+    const harness = await createHarness();
+
+    try {
+      const deferred = createDeferredStream(
+        makeChunk([{ text: 'Task chat answer' }], FinishReason.STOP),
+      );
+      env.queueGenerator(deferred.stream);
+
+      const taskId = await createTask(harness.client, 'chat', {
+        goal: 'Start a task-backed chat session',
+        sessionId: 'task-session',
+      });
+
+      deferred.release();
+
+      const result = await getTaskResult(harness.client, taskId);
+      assert.equal(getRelatedTaskId(result), taskId);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('preserves related-task metadata on memory resource links', async () => {
+    const harness = await createHarness();
+
+    try {
+      const taskId = await createTask(harness.client, 'memory', {
+        action: 'sessions.list',
+      });
+
+      await flushEventLoop(2);
+
+      const result = await getTaskResult(harness.client, taskId);
+      assert.equal(getRelatedTaskId(result), taskId);
     } finally {
       await harness.close();
     }

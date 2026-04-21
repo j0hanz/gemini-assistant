@@ -110,7 +110,7 @@ This plan makes task-augmented calls never throw at the transport boundary. Inst
 - **RISK-004**: Logging task-failure details may include user-supplied content. Mitigation: reuse `maybeSummarizePayload` from [src/lib/logger.ts](C:/gemini-assistant/src/lib/logger.ts) (GUD-002) which honors `verbosePayloads` configuration.
 - **ASSUMPTION-001**: The SDK’s inner `tools/call` handler catches `ProtocolError(InvalidParams)` from `validateToolInput` and converts it into `createToolError(...)`, producing the shape that fails `CreateTaskResultSchema`. Verified by reading `node_modules/@modelcontextprotocol/server/dist/index.mjs` lines 985–1005 during investigation on 2026-04-21.
 - **ASSUMPTION-002**: `InMemoryTaskStore.storeTaskResult` never throws for a freshly-created task ID with a terminal status transition. Backed by SDK behavior; no explicit contract guarantee.
-- **ASSUMPTION-003**: All five public tools register via `registerTaskTool` (verified in `src/tools/{chat,research-job,analyze,review,memory}.ts`), so centralizing the fix in `task-utils.ts` covers 100% of user-facing task paths.
+- **ASSUMPTION-003**: All five public tools register via `registerTaskTool` (verified in `src/tools/{chat,research,analyze,review,memory}.ts`), so centralizing the fix in `task-utils.ts` covers 100% of user-facing task paths.
 
 ## 8. Related Specifications / Further Reading
 

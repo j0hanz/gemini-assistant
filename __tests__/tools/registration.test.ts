@@ -12,7 +12,7 @@ process.env.API_KEY ??= 'test-key-for-registration';
 const { registerAnalyzeTool } = await import('../../src/tools/analyze.js');
 const { registerChatTool } = await import('../../src/tools/chat.js');
 const { registerMemoryTool } = await import('../../src/tools/memory.js');
-const { registerResearchTool } = await import('../../src/tools/research-job.js');
+const { registerResearchTool } = await import('../../src/tools/research.js');
 const { registerReviewTool } = await import('../../src/tools/review.js');
 const { createPromptDefinitions, PUBLIC_PROMPT_NAMES, registerPrompts } =
   await import('../../src/prompts.js');

@@ -21,7 +21,7 @@ import { registerAnalyzeTool } from './tools/analyze.js';
 import { registerChatTool } from './tools/chat.js';
 import { registerMemoryTool } from './tools/memory.js';
 import { type CacheChangeEvent, subscribeCacheChange } from './tools/memory.js';
-import { registerResearchTool } from './tools/research-job.js';
+import { registerResearchTool } from './tools/research.js';
 import { registerReviewTool } from './tools/review.js';
 import type { ServerInstance } from './transport.js';
 

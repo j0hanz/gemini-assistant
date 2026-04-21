@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 
 import { getAI } from '../../src/client.js';
 import { ResearchOutputSchema } from '../../src/schemas/outputs.js';
-import { registerResearchTool } from '../../src/tools/research-job.js';
+import { registerResearchTool } from '../../src/tools/research.js';
 
 process.env.API_KEY ??= 'test-key-for-research-tools';
 

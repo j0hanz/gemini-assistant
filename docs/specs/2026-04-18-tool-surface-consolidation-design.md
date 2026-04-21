@@ -140,7 +140,7 @@ This keeps self-description available without spending one of the public tool sl
 After consolidation, each public tool should have exactly one owning tool module:
 
 - `src/tools/chat.ts`
-- `src/tools/research-job.ts`
+- `src/tools/research.ts`
 - `src/tools/analyze.ts`
 - `src/tools/review.ts`
 - `src/tools/memory.ts`

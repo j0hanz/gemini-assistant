@@ -1,12 +1,12 @@
 # Refactor error logging for shutdown, research tools, and transport
 
-This plan addresses three defects identified in the code review of error handling and logging in `gemini-assistant`: (1) `createServerInstance().close()` silently swallows shutdown failures, preventing `closeStartedRuntime()` in [src/index.ts](src/index.ts) from reporting them; (2) [src/tools/research-job.ts](src/tools/research-job.ts) writes raw user queries, topics, and sampled model output to the MCP client log channel, bypassing the summarization guard in [src/lib/logger.ts](src/lib/logger.ts); and (3) [src/transport.ts](src/transport.ts) `logRequestFailure` emits only `err.message`, losing method, session, and stack metadata at a security boundary. Two optional observability improvements (lazy logger sink, broadcast-failure accounting) are included as follow-ups.
+This plan addresses three defects identified in the code review of error handling and logging in `gemini-assistant`: (1) `createServerInstance().close()` silently swallows shutdown failures, preventing `closeStartedRuntime()` in [src/index.ts](src/index.ts) from reporting them; (2) [src/tools/research.ts](src/tools/research.ts) writes raw user queries, topics, and sampled model output to the MCP client log channel, bypassing the summarization guard in [src/lib/logger.ts](src/lib/logger.ts); and (3) [src/transport.ts](src/transport.ts) `logRequestFailure` emits only `err.message`, losing method, session, and stack metadata at a security boundary. Two optional observability improvements (lazy logger sink, broadcast-failure accounting) are included as follow-ups.
 
 ## 1. Requirements & Constraints
 
 - **REQ-001**: `createServerInstance().close()` MUST reject when any cleanup step or `server.close()` throws, aggregating multiple failures via `AggregateError`.
 - **REQ-002**: `logRequestFailure` in [src/transport.ts](src/transport.ts) MUST include `requestMethod`, `sessionId` (when available), `error` message, and `stack` as structured data.
-- **REQ-003**: [src/tools/research-job.ts](src/tools/research-job.ts) MUST NOT emit raw user query, topic, or sampled model text to `ctx.mcpReq.log(...)` by default.
+- **REQ-003**: [src/tools/research.ts](src/tools/research.ts) MUST NOT emit raw user query, topic, or sampled model text to `ctx.mcpReq.log(...)` by default.
 - **REQ-004**: Detailed diagnostics (including raw payloads) MUST continue to flow through the server `logger` and respect `LOG_VERBOSE_PAYLOADS` via `maybeSummarizePayload`.
 - **SEC-001**: Transport-layer failure logs MUST NOT leak into JSON-RPC response bodies; only operator log sinks receive stack traces.
 - **SEC-002**: Client-visible MCP log messages in research paths MUST be neutral phrasing (e.g., "Search requested") with no raw prompt or model output content.
@@ -35,11 +35,11 @@ This plan addresses three defects identified in the code review of error handlin
 
 ### Implementation Phase 2 — Research tool log redaction
 
-- GOAL-002: Remove raw user query/topic/sampled text from MCP client logs in [src/tools/research-job.ts](src/tools/research-job.ts) and route diagnostic payloads through the summarization-aware server logger.
+- GOAL-002: Remove raw user query/topic/sampled text from MCP client logs in [src/tools/research.ts](src/tools/research.ts) and route diagnostic payloads through the summarization-aware server logger.
 
 | Task     | Description                                                                                                                                                                                                                                                  | Completed | Date |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- | ---- |
-| TASK-007 | In [src/tools/research-job.ts](src/tools/research-job.ts), add imports: `AppError` from `../lib/errors.js` and `{ logger, maybeSummarizePayload }` from `../lib/logger.js`. Declare `const log = logger.child('research');`.                                 |           |      |
+| TASK-007 | In [src/tools/research.ts](src/tools/research.ts), add imports: `AppError` from `../lib/errors.js` and `{ logger, maybeSummarizePayload }` from `../lib/logger.js`. Declare `const log = logger.child('research');`.                                         |           |      |
 | TASK-008 | Change `runToolStream` signature to accept a neutral `logMessage: string` and a structured `logData: unknown`. Send `logMessage` to `ctx.mcpReq.log('info', ...)` and call `log.info(logMessage, maybeSummarizePayload(logData, log.getVerbosePayloads()))`. |           |      |
 | TASK-009 | Update `searchWork` call site: replace `` `Search: ${query}` `` with message `'Search requested'` and data `{ query, urlCount: urls?.length ?? 0 }`.                                                                                                         |           |      |
 | TASK-010 | Update `analyzeUrlWork` call site: replace `` `Analyzing ${String(urls.length)} URL(s)` `` with message `'Analyze URL requested'` and data `{ question, urlCount: urls.length }`.                                                                            |           |      |
@@ -94,7 +94,7 @@ This plan addresses three defects identified in the code review of error handlin
 ## 5. Files
 
 - **FILE-001**: [src/server.ts](src/server.ts) — error-aggregating `close` closure in `createServerInstance`.
-- **FILE-002**: [src/tools/research-job.ts](src/tools/research-job.ts) — `runToolStream` signature, three call sites, `enrichTopicWithSampling`, elicitation catch.
+- **FILE-002**: [src/tools/research.ts](src/tools/research.ts) — `runToolStream` signature, three call sites, `enrichTopicWithSampling`, elicitation catch.
 - **FILE-003**: [src/transport.ts](src/transport.ts) — `logRequestFailure` signature + call sites within the managed-request helper.
 - **FILE-004**: [src/lib/logger.ts](src/lib/logger.ts) — optional lazy file sink + broadcast failure accounting.
 - **FILE-005**: [\_\_tests\_\_/index.test.ts](__tests__/index.test.ts) — shutdown rejection and aggregate tests.
@@ -117,7 +117,7 @@ This plan addresses three defects identified in the code review of error handlin
 - **RISK-001**: Existing callers may rely on `createServerInstance().close()` being infallible. Mitigation: `closeStartedRuntime()` already aggregates errors; no other caller outside tests invokes it directly.
 - **RISK-002**: Tests capturing MCP logs may be brittle if future SDK updates change the log shape. Mitigation: assert on message content substrings only, not full structural equality.
 - **RISK-003**: Lazy logger initialization (TASK-023) could change startup error semantics if the log directory is unwritable. Mitigation: surface the first write failure to `process.stderr` and continue without a file sink.
-- **ASSUMPTION-001**: `ctx.mcpReq.log` is the only MCP log channel used by research tooling (verified via grep of `src/tools/research-job.ts`).
+- **ASSUMPTION-001**: `ctx.mcpReq.log` is the only MCP log channel used by research tooling (verified via grep of `src/tools/research.ts`).
 - **ASSUMPTION-002**: No downstream consumer parses the current textual form of `logRequestFailure` output (internal operator log only).
 - **ASSUMPTION-003**: `AppError.formatMessage` is the canonical error stringification utility across the codebase.
 

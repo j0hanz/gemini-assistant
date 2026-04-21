@@ -22,7 +22,7 @@ import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '..
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, DEFAULT_THINKING_LEVEL, getAI, MODEL } from '../client.js';
-import { analyzeUrlWork } from './research-job.js';
+import { analyzeUrlWork } from './research.js';
 
 const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
 const ANALYZE_TOOL_LABEL = 'Analyze';

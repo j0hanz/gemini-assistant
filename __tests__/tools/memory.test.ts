@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 
 import { getAI } from '../../src/client.js';
 import type { MemoryInput } from '../../src/schemas/inputs.js';
+import { MemoryOutputSchema } from '../../src/schemas/outputs.js';
 import { buildCreateCacheWork, memoryWork } from '../../src/tools/memory.js';
 
 function createContext(elicitInput?: (request: unknown) => Promise<unknown>): ServerContext {
@@ -104,6 +105,97 @@ describe('memoryWork', () => {
       };
       assert.strictEqual(structured.deleted, false);
       assert.strictEqual(structured.confirmationRequired, false);
+    } finally {
+      client.caches.delete = originalDelete;
+    }
+  });
+
+  it('caches.update returns cache.name and validates against MemoryOutputSchema', async () => {
+    const client = getAI();
+    const originalUpdate = client.caches.update.bind(client.caches);
+    // @ts-expect-error test override — simulate SDK response with upstream resource name
+    client.caches.update = async () => ({
+      name: 'cachedContents/abc',
+      expireTime: '2030-01-01T00:00:00Z',
+    });
+
+    try {
+      const result = await memoryWork(
+        {} as never,
+        emptyRootsFetcher,
+        passthroughCreateCacheWork,
+        {
+          action: 'caches.update',
+          cacheName: 'cachedContents/abc',
+          ttl: '3600s',
+        },
+        createContext(),
+      );
+
+      assert.notStrictEqual(result.isError, true);
+      const structured = result.structuredContent as {
+        cache?: { name?: string; expireTime?: string };
+      };
+      assert.strictEqual(structured.cache?.name, 'cachedContents/abc');
+      assert.strictEqual(structured.cache?.expireTime, '2030-01-01T00:00:00Z');
+      const parsed = MemoryOutputSchema.safeParse(result.structuredContent);
+      assert.strictEqual(parsed.success, true);
+    } finally {
+      client.caches.update = originalUpdate;
+    }
+  });
+
+  it('caches.delete unsupported-elicitation path produces schema-valid output', async () => {
+    const result = await memoryWork(
+      {} as never,
+      emptyRootsFetcher,
+      passthroughCreateCacheWork,
+      {
+        action: 'caches.delete',
+        cacheName: 'cachedContents/mock-unsupported',
+      },
+      createContext(async () => {
+        throw new Error('elicitation unsupported');
+      }),
+    );
+
+    assert.notStrictEqual(result.isError, true);
+    const structured = result.structuredContent as {
+      deleted?: boolean;
+      confirmationRequired?: boolean;
+    };
+    assert.strictEqual(structured.deleted, false);
+    assert.strictEqual(structured.confirmationRequired, true);
+    const parsed = MemoryOutputSchema.safeParse(result.structuredContent);
+    assert.strictEqual(parsed.success, true);
+  });
+
+  it('caches.delete declined path validates against MemoryOutputSchema', async () => {
+    const client = getAI();
+    const originalDelete = client.caches.delete.bind(client.caches);
+    // @ts-expect-error test override — should never be reached on a declined flow
+    client.caches.delete = async () => {
+      throw new Error('caches.delete must not be called on a declined flow');
+    };
+
+    try {
+      const result = await memoryWork(
+        {} as never,
+        emptyRootsFetcher,
+        passthroughCreateCacheWork,
+        {
+          action: 'caches.delete',
+          cacheName: 'cachedContents/mock-declined-parse',
+        },
+        createContext(async () => ({
+          action: 'accept',
+          content: { confirm: false },
+        })),
+      );
+
+      assert.notStrictEqual(result.isError, true);
+      const parsed = MemoryOutputSchema.safeParse(result.structuredContent);
+      assert.strictEqual(parsed.success, true);
     } finally {
       client.caches.delete = originalDelete;
     }

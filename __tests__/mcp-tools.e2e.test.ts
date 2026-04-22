@@ -167,11 +167,6 @@ const MUTABLE_ANNOTATIONS = {
   readOnlyHint: false,
 } as const;
 
-const DESTRUCTIVE_MUTABLE_ANNOTATIONS = {
-  ...MUTABLE_ANNOTATIONS,
-  destructiveHint: true,
-} as const;
-
 const READONLY_NON_IDEMPOTENT_ANNOTATIONS = {
   ...READONLY_ANNOTATIONS,
   idempotentHint: false,
@@ -193,7 +188,7 @@ const EXPECTED_TOOL_CONTRACTS = {
     title: 'Chat',
   },
   memory: {
-    annotations: DESTRUCTIVE_MUTABLE_ANNOTATIONS,
+    annotations: MUTABLE_ANNOTATIONS,
     requiredInput: ['action'],
     requiredOutput: ['status', 'action', 'summary'],
     taskSupport: 'optional',
@@ -344,6 +339,7 @@ describe('MCP tool smoke coverage', () => {
       assert.ok(memoryAction);
       assert.equal(memoryAction.description, 'Memory action selector.');
       assert.equal((memorySchema as { oneOf?: unknown }).oneOf, undefined);
+      assert.match(toolMap.get('memory')?.description ?? '', /caches\.delete/i);
       assert.equal(reviewSubjectKind.default, 'diff');
 
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);

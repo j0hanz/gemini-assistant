@@ -145,6 +145,7 @@ export function createServerInstance(): ServerInstance {
         logging: {},
         prompts: {},
         resources: { listChanged: true },
+        tools: { listChanged: false },
         tasks: {
           requests: { tools: { call: {} } },
           taskStore,

@@ -14,6 +14,7 @@ import type {
 } from '../schemas/outputs.js';
 
 import { finishReasonToError, SafetyError } from './errors.js';
+import { isPublicHttpUrl } from './validation.js';
 
 type PickDefined<T> = {
   [K in keyof T as undefined extends T[K] ? K : never]?: Exclude<T[K], undefined>;
@@ -42,7 +43,9 @@ export function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlM
 }
 
 export function collectGroundedSources(groundingMetadata: GroundingMetadata | undefined): string[] {
-  return collectGroundedSourceDetails(groundingMetadata).map((source) => source.url);
+  return collectGroundedSourceDetails(groundingMetadata)
+    .map((source) => source.url)
+    .filter((url) => isPublicHttpUrl(url));
 }
 
 export function collectGroundedSourceDetails(

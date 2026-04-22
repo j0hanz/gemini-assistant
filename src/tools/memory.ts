@@ -620,13 +620,17 @@ async function handleCachesUpdate(
   const result = await updateCacheWork({ cacheName: args.cacheName, ttl: args.ttl }, ctx);
   if (result.isError) return result;
   const structured = result.structuredContent ?? {};
+  const cacheEntry = {
+    name: args.cacheName,
+    ...(typeof structured.expireTime === 'string' ? { expireTime: structured.expireTime } : {}),
+  };
   return {
     ...result,
     structuredContent: {
       ...base,
       action: args.action,
       summary: `Updated cache ${args.cacheName}.`,
-      cache: structured,
+      cache: cacheEntry,
       resourceUris: [`memory://caches/${encodeURIComponent(args.cacheName)}`],
     },
   };
@@ -654,8 +658,10 @@ async function handleCachesDelete(
           : structured.confirmationRequired === true
             ? `Deletion for ${args.cacheName} requires confirmation.`
             : `Did not delete cache ${args.cacheName}.`,
-      deleted: structured.deleted,
-      confirmationRequired: structured.confirmationRequired,
+      ...(typeof structured.deleted === 'boolean' ? { deleted: structured.deleted } : {}),
+      ...(typeof structured.confirmationRequired === 'boolean'
+        ? { confirmationRequired: structured.confirmationRequired }
+        : {}),
       resourceUris: ['memory://caches'],
     },
   };
@@ -786,10 +792,11 @@ export function registerMemoryTool(
     'memory',
     {
       title: 'Memory',
-      description: 'Inspect and manage sessions, caches, and workspace memory state.',
+      description:
+        'Inspect and manage sessions, caches, and workspace memory state. Only action=caches.delete is destructive.',
       inputSchema: createMemoryInputSchema(sessionStore.completeSessionIds.bind(sessionStore)),
       outputSchema: MemoryOutputSchema,
-      annotations: { ...MUTABLE_ANNOTATIONS, destructiveHint: true },
+      annotations: MUTABLE_ANNOTATIONS,
     },
     taskMessageQueue,
     (args: MemoryInput, ctx: ServerContext) =>

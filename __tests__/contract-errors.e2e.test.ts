@@ -162,4 +162,34 @@ describe('public MCP error taxonomy', () => {
       await harness.close();
     }
   });
+
+  it('rejects unknown top-level keys on chat arguments at the protocol boundary', async () => {
+    const harness = await createHarness();
+
+    try {
+      const response = await harness.client.requestRaw('tools/call', {
+        arguments: { goal: 'say hi', foo: 'bar' },
+        name: 'chat',
+      });
+
+      assertProtocolError(response, -32602, /foo|unrecognized|unknown/i);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('rejects unknown top-level keys on memory arguments at the protocol boundary', async () => {
+    const harness = await createHarness();
+
+    try {
+      const response = await harness.client.requestRaw('tools/call', {
+        arguments: { action: 'sessions.list', foo: 'bar' },
+        name: 'memory',
+      });
+
+      assertProtocolError(response, -32602, /foo|unrecognized|unknown/i);
+    } finally {
+      await harness.close();
+    }
+  });
 });

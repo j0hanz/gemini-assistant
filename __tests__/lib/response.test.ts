@@ -162,6 +162,17 @@ describe('collectGroundedSources', () => {
   it('returns an empty list when grounding metadata is missing', () => {
     assert.deepStrictEqual(collectGroundedSources(undefined), []);
   });
+
+  it('filters out non-public URLs (e.g., file://)', () => {
+    const sources = collectGroundedSources({
+      groundingChunks: [
+        { web: { title: 'Public', uri: 'https://example.com' } },
+        { web: { title: 'Local', uri: 'file:///etc/passwd' } },
+      ],
+    });
+
+    assert.deepStrictEqual(sources, ['https://example.com']);
+  });
 });
 
 describe('collectGroundedSourceDetails', () => {
@@ -348,5 +359,34 @@ describe('validateStructuredToolResult', () => {
       structuredContent: { status: 'completed', summary: 'ok' },
     };
     assert.deepStrictEqual(validateStructuredToolResult('test-tool', {}, nonSchema), nonSchema);
+  });
+
+  it('retains original content, appends a validation-failure entry, and omits structuredContent key', () => {
+    const result = validateStructuredToolResult(
+      'test-tool',
+      z.strictObject({
+        status: z.literal('completed'),
+        summary: z.string(),
+      }),
+      {
+        content: [
+          { type: 'text', text: 'first' },
+          { type: 'text', text: 'second' },
+        ],
+        structuredContent: { status: 'completed', explanation: 'bad' },
+      },
+    );
+
+    assert.strictEqual(result.isError, true);
+    assert.ok(
+      !('structuredContent' in (result as Record<string, unknown>)),
+      'downgraded result must not contain a structuredContent key',
+    );
+    assert.strictEqual(result.content[0]?.text, 'first');
+    assert.strictEqual(result.content[1]?.text, 'second');
+    assert.match(
+      result.content[2]?.text ?? '',
+      /Internal test-tool output validation failed: structuredContent did not match outputSchema\./,
+    );
   });
 });

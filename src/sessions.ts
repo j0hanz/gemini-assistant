@@ -41,6 +41,7 @@ interface SessionEntry {
   chat: Chat;
   events: SessionEventEntry[];
   lastAccess: number;
+  rebuiltAt?: number;
   transcript: TranscriptEntry[];
 }
 
@@ -49,6 +50,7 @@ export interface SessionSummary {
   lastAccess: number;
   transcriptCount: number;
   eventCount: number;
+  rebuiltAt?: number;
 }
 
 export interface SessionChangeEvent {
@@ -103,6 +105,7 @@ function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {
     lastAccess: entry.lastAccess,
     transcriptCount: entry.transcript.length,
     eventCount: entry.events.length,
+    ...(entry.rebuiltAt !== undefined ? { rebuiltAt: entry.rebuiltAt } : {}),
   };
 }
 
@@ -241,14 +244,14 @@ export class SessionStore {
     return this.updateSessionAccess(id, entry);
   }
 
-  setSession(id: string, chat: Chat): void {
+  setSession(id: string, chat: Chat, rebuiltAt?: number): void {
     if (this.sessions.has(id)) {
       throw new AppError('sessions', `Session already exists: ${id}`);
     }
     if (this.sessions.size >= this.maxSessions) {
       this.evictOldest();
     }
-    this.createSession(id, chat);
+    this.createSession(id, chat, rebuiltAt);
     this.startEvictionTimer();
     this.notifyChange(true);
   }
@@ -310,13 +313,19 @@ export class SessionStore {
     return entry.chat;
   }
 
-  private createSession(id: string, chat: Chat): void {
-    this.storeSession(id, chat);
+  private createSession(id: string, chat: Chat, rebuiltAt?: number): void {
+    this.storeSession(id, chat, rebuiltAt);
   }
 
-  private storeSession(id: string, chat: Chat): void {
+  private storeSession(id: string, chat: Chat, rebuiltAt?: number): void {
     this.evictedSessions.delete(id);
-    this.setSessionEntry(id, { chat, events: [], lastAccess: this.now(), transcript: [] });
+    this.setSessionEntry(id, {
+      chat,
+      events: [],
+      lastAccess: this.now(),
+      ...(rebuiltAt !== undefined ? { rebuiltAt } : {}),
+      transcript: [],
+    });
   }
 
   private trimEvictedSessions(): void {

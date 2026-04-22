@@ -72,6 +72,7 @@ describe('streaming Gemini metadata preservation', () => {
         promptTokenCount: 3,
         candidatesTokenCount: 5,
         thoughtsTokenCount: 7,
+        cachedContentTokenCount: 11,
         totalTokenCount: 15,
       },
     };
@@ -110,5 +111,6 @@ describe('streaming Gemini metadata preservation', () => {
     ]);
     assert.strictEqual(result.usageMetadata?.thoughtsTokenCount, 7);
     assert.strictEqual(result.usageMetadata?.candidatesTokenCount, 5);
+    assert.strictEqual(result.usageMetadata?.cachedContentTokenCount, 11);
   });
 });

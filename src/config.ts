@@ -1,3 +1,5 @@
+import type { SafetySetting } from '@google/genai';
+
 interface TransportConfig {
   corsOrigin: string;
   host: string;
@@ -19,6 +21,24 @@ const DEFAULT_TRANSPORT_SESSION_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_TRANSPORT_SESSIONS = 100;
 const DEFAULT_MAX_TRANSCRIPT_ENTRIES = 200;
 const DEFAULT_MAX_EVENT_ENTRIES = 200;
+const DEFAULT_MAX_OUTPUT_TOKENS = 32_768;
+
+const DEFAULT_SESSION_REDACTION_PATTERNS = [
+  /api[_-]?key/i,
+  /authorization/i,
+  /bearer/i,
+  /^token$/i,
+  /password/i,
+  /secret/i,
+  /credential/i,
+  /cookie/i,
+  /session[_-]?id/i,
+];
+
+let cachedSafetySettings: SafetySetting[] | undefined;
+let cachedSafetySettingsSource: string | undefined;
+let cachedSessionRedactionPatterns: RegExp[] | undefined;
+let cachedSessionRedactionPatternsSource: string | undefined;
 
 function parseBooleanEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
@@ -165,4 +185,70 @@ export function getWorkspaceCacheTtl(): string {
 
 export function getWorkspaceAutoScan(): boolean {
   return parseBooleanEnv('AUTO_SCAN', true);
+}
+
+export function getMaxOutputTokens(): number {
+  return parseIntEnv('GEMINI_MAX_OUTPUT_TOKENS', DEFAULT_MAX_OUTPUT_TOKENS, {
+    min: 1,
+    max: 1_048_576,
+  });
+}
+
+function parseRegexPattern(raw: string): RegExp {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    throw new Error('GEMINI_SESSION_REDACT_KEYS entries must be non-empty regex patterns.');
+  }
+
+  const literalMatch = /^\/(.+)\/([a-z]*)$/i.exec(trimmed);
+  if (literalMatch?.[1] !== undefined) {
+    return new RegExp(literalMatch[1], literalMatch[2] ?? undefined);
+  }
+
+  return new RegExp(trimmed);
+}
+
+export function getSafetySettings(): SafetySetting[] | undefined {
+  const raw = process.env.GEMINI_SAFETY_SETTINGS;
+  if (cachedSafetySettingsSource === raw) {
+    return cachedSafetySettings;
+  }
+
+  if (raw === undefined || raw.trim() === '') {
+    cachedSafetySettingsSource = raw;
+    cachedSafetySettings = undefined;
+    return cachedSafetySettings;
+  }
+
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error('GEMINI_SAFETY_SETTINGS must be a JSON array when set.');
+  }
+
+  cachedSafetySettings = parsed as SafetySetting[];
+  cachedSafetySettingsSource = raw;
+  return cachedSafetySettings;
+}
+
+export function getSessionRedactionPatterns(): RegExp[] {
+  const raw = process.env.GEMINI_SESSION_REDACT_KEYS;
+  if (cachedSessionRedactionPatternsSource === raw) {
+    return cachedSessionRedactionPatterns ?? DEFAULT_SESSION_REDACTION_PATTERNS;
+  }
+
+  const patterns =
+    raw === undefined || raw.trim() === ''
+      ? DEFAULT_SESSION_REDACTION_PATTERNS
+      : [
+          ...DEFAULT_SESSION_REDACTION_PATTERNS,
+          ...raw
+            .split(',')
+            .map((part) => part.trim())
+            .filter(Boolean)
+            .map(parseRegexPattern),
+        ];
+
+  cachedSessionRedactionPatterns = patterns;
+  cachedSessionRedactionPatternsSource = raw;
+  return cachedSessionRedactionPatterns;
 }

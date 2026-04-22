@@ -119,6 +119,7 @@ describe('UsageMetadataSchema', () => {
       promptTokenCount: 100,
       candidatesTokenCount: 50,
       thoughtsTokenCount: 20,
+      cachedContentTokenCount: 10,
       totalTokenCount: 170,
     });
     assert.ok(result.success);

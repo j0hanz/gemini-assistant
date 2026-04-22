@@ -35,7 +35,9 @@ interface AnalyzeDiagramInput {
   diagramType: 'mermaid' | 'plantuml';
   filePath?: string | undefined;
   filePaths?: string[] | undefined;
+  maxOutputTokens?: AnalyzeInput['maxOutputTokens'];
   mediaResolution?: AnalyzeInput['mediaResolution'];
+  safetySettings?: AnalyzeInput['safetySettings'];
   targetKind: AnalyzeInput['targetKind'];
   thinkingLevel?: AnalyzeInput['thinkingLevel'];
   urls?: string[] | undefined;
@@ -141,7 +143,17 @@ async function uploadDiagramSourceFiles(
 
 function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
   return async function analyzeFileWork(
-    { filePath, question, thinkingLevel, mediaResolution }: AnalyzeFileInput,
+    {
+      filePath,
+      question,
+      thinkingLevel,
+      mediaResolution,
+      maxOutputTokens,
+      safetySettings,
+    }: AnalyzeFileInput & {
+      maxOutputTokens?: AnalyzeInput['maxOutputTokens'];
+      safetySettings?: AnalyzeInput['safetySettings'];
+    },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
     let uploadedFileName: string | undefined;
@@ -174,6 +186,8 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
                 systemInstruction,
                 thinkingLevel,
                 mediaResolution,
+                maxOutputTokens,
+                safetySettings,
               },
               ctx.mcpReq.signal,
             ),
@@ -200,6 +214,8 @@ async function analyzeMultiFileWork(
   goal: string,
   thinkingLevel: AnalyzeInput['thinkingLevel'],
   ctx: ServerContext,
+  maxOutputTokens?: AnalyzeInput['maxOutputTokens'],
+  safetySettings?: AnalyzeInput['safetySettings'],
 ): Promise<CallToolResult> {
   const uploadedNames: string[] = [];
   const progress = new ProgressReporter(ctx, ANALYZE_TOOL_LABEL);
@@ -239,6 +255,8 @@ async function analyzeMultiFileWork(
             {
               systemInstruction: prompt.systemInstruction,
               thinkingLevel,
+              maxOutputTokens,
+              safetySettings,
             },
             ctx.mcpReq.signal,
           ),
@@ -313,6 +331,8 @@ async function analyzeDiagramWork(
             {
               systemInstruction: prompt.systemInstruction,
               thinkingLevel: args.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+              maxOutputTokens: args.maxOutputTokens,
+              safetySettings: args.safetySettings,
               ...buildOrchestrationConfig({
                 toolProfile:
                   args.targetKind === 'url' ? 'url' : args.validateSyntax ? 'code' : 'none',
@@ -380,6 +400,8 @@ async function runAnalyzeTarget(
         question: args.goal,
         thinkingLevel: args.thinkingLevel,
         mediaResolution: args.mediaResolution,
+        maxOutputTokens: args.maxOutputTokens,
+        safetySettings: args.safetySettings,
       },
       ctx,
     );
@@ -391,6 +413,8 @@ async function runAnalyzeTarget(
         urls: requireAnalyzeUrls(args),
         question: args.goal,
         thinkingLevel: args.thinkingLevel,
+        maxOutputTokens: args.maxOutputTokens,
+        safetySettings: args.safetySettings,
       },
       ctx,
     );
@@ -402,6 +426,8 @@ async function runAnalyzeTarget(
     args.goal,
     args.thinkingLevel,
     ctx,
+    args.maxOutputTokens,
+    args.safetySettings,
   );
 }
 

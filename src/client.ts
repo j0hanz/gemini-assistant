@@ -1,14 +1,22 @@
 import type {
   GenerateContentConfig,
   MediaResolution,
+  SafetySetting,
   ToolConfig,
   ToolListUnion,
 } from '@google/genai';
 import { FunctionCallingConfigMode, GoogleGenAI, ThinkingLevel } from '@google/genai';
 
+import type { SafetySettingInput } from './schemas/fragments.js';
 import type { GeminiResponseSchema } from './schemas/json-schema.js';
 
-import { getApiKey, getExposeThoughts, getGeminiModel } from './config.js';
+import {
+  getApiKey,
+  getExposeThoughts,
+  getGeminiModel,
+  getMaxOutputTokens,
+  getSafetySettings,
+} from './config.js';
 
 // ── Config Utilities ──────────────────────────────────────────────────
 
@@ -35,6 +43,7 @@ interface ConfigBuilderOptions {
   responseSchema?: GeminiResponseSchema | undefined;
   jsonMode?: boolean | undefined;
   maxOutputTokens?: number | undefined;
+  safetySettings?: SafetySettingInput[] | undefined;
   temperature?: number | undefined;
   seed?: number | undefined;
   mediaResolution?: string | undefined;
@@ -71,6 +80,20 @@ function buildMergedToolConfig(
   };
 }
 
+function normalizeSafetySettings(
+  safetySettings: readonly SafetySettingInput[] | readonly SafetySetting[] | undefined,
+): SafetySetting[] | undefined {
+  if (!safetySettings) {
+    return undefined;
+  }
+
+  return safetySettings.map((setting) => ({
+    ...(setting.category !== undefined ? { category: setting.category } : {}),
+    ...(setting.method !== undefined ? { method: setting.method } : {}),
+    threshold: setting.threshold ?? 'HARM_BLOCK_THRESHOLD_UNSPECIFIED',
+  })) as SafetySetting[];
+}
+
 function buildResponseConfig(
   cacheName: string | undefined,
   systemInstruction: string | undefined,
@@ -102,7 +125,8 @@ export function buildGenerateContentConfig(
     cacheName,
     responseSchema,
     jsonMode,
-    maxOutputTokens = 8192,
+    maxOutputTokens,
+    safetySettings,
     temperature,
     seed,
     mediaResolution,
@@ -112,10 +136,12 @@ export function buildGenerateContentConfig(
   } = options;
   const isJson = jsonMode ?? responseSchema !== undefined;
   const mergedToolConfig = buildMergedToolConfig(toolConfig, functionCallingMode);
+  const resolvedSafetySettings = normalizeSafetySettings(safetySettings ?? getSafetySettings());
 
   return {
     ...buildResponseConfig(cacheName, systemInstruction, isJson, responseSchema, thinkingLevel),
-    maxOutputTokens,
+    maxOutputTokens: maxOutputTokens ?? getMaxOutputTokens(),
+    ...(resolvedSafetySettings ? { safetySettings: resolvedSafetySettings } : {}),
     ...(temperature !== undefined ? { temperature } : {}),
     ...(seed !== undefined ? { seed } : {}),
     ...(mediaResolution ? { mediaResolution: mediaResolution as MediaResolution } : {}),

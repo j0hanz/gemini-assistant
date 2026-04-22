@@ -69,6 +69,7 @@ function createDeps(overrides: Partial<Parameters<typeof createAskWork>[0]> = {}
     getSessionEntry: () => undefined,
     isEvicted: () => false,
     listSessionTranscriptEntries: () => undefined,
+    rebuildChat: () => undefined,
     now: () => 1,
     runWithoutSession: async (args: Record<string, unknown>) =>
       ({
@@ -144,6 +145,58 @@ describe('ask contract', () => {
         {
           type: 'text',
           text: 'chat: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
+        },
+      ],
+      isError: true,
+    });
+  });
+
+  it('returns the exact validation error for responseSchema plus googleSearch', async () => {
+    const askWork = createAskWork(createDeps());
+
+    const result = await askWork(
+      {
+        message: 'hello',
+        googleSearch: true,
+        responseSchema: {
+          type: 'object',
+          properties: { answer: { type: 'string' } },
+        },
+      },
+      createContext(),
+    );
+
+    assert.deepStrictEqual(result, {
+      content: [
+        {
+          type: 'text',
+          text: 'chat: responseSchema cannot be combined with built-in tools (googleSearch, urlContext, codeExecution)',
+        },
+      ],
+      isError: true,
+    });
+  });
+
+  it('returns the exact validation error for responseSchema plus url context', async () => {
+    const askWork = createAskWork(createDeps());
+
+    const result = await askWork(
+      {
+        message: 'hello',
+        responseSchema: {
+          type: 'object',
+          properties: { answer: { type: 'string' } },
+        },
+        urls: ['https://example.com'],
+      },
+      createContext(),
+    );
+
+    assert.deepStrictEqual(result, {
+      content: [
+        {
+          type: 'text',
+          text: 'chat: responseSchema cannot be combined with built-in tools (googleSearch, urlContext, codeExecution)',
         },
       ],
       isError: true,
@@ -299,6 +352,30 @@ describe('ask contract', () => {
     }
   });
 
+  it('chatWork returns a tool error for unsupported responseSchemaJson $ref usage', async () => {
+    const result = await chatWork(
+      async () =>
+        ({
+          content: [{ type: 'text', text: 'Assistant answer' }],
+          structuredContent: { answer: 'Assistant answer' },
+        }) as never,
+      {
+        goal: 'return JSON',
+        responseSchemaJson: JSON.stringify({
+          type: 'object',
+          properties: { answer: { $ref: '#/$defs/Answer' } },
+          $defs: {
+            Answer: { type: 'string' },
+          },
+        }),
+      },
+      createContext(),
+    );
+
+    assert.strictEqual(result.isError, true);
+    assert.match(result.content[0]?.text ?? '', /\$ref is not supported/);
+  });
+
   it('retries once with repair suffix when first JSON response fails schema validation', async () => {
     const originalCache = process.env.CACHE;
     process.env.CACHE = 'false';
@@ -432,6 +509,32 @@ describe('ask contract', () => {
       const structured = result.structuredContent as Record<string, unknown>;
       assert.strictEqual(stub.calls.length, 1);
       assert.ok(Array.isArray(structured.schemaWarnings));
+    } finally {
+      process.env.CACHE = originalCache;
+      stub.restore();
+    }
+  });
+
+  it('passes maxOutputTokens through to the Gemini config', async () => {
+    const stub = withGeminiStreamStub(['Assistant answer']);
+    const originalCache = process.env.CACHE;
+    process.env.CACHE = 'false';
+
+    try {
+      const askWork = createAskWork();
+      await askWork(
+        {
+          message: 'Return a short answer',
+          maxOutputTokens: 12_345,
+        },
+        createContext(),
+      );
+
+      assert.strictEqual(
+        stub.calls[0]?.config &&
+          (stub.calls[0].config as { maxOutputTokens?: number }).maxOutputTokens,
+        12_345,
+      );
     } finally {
       process.env.CACHE = originalCache;
       stub.restore();

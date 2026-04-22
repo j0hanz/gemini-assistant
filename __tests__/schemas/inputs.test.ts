@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 
 import { z } from 'zod/v4';
 
+import { AppError } from '../../src/lib/errors.js';
 import {
   AgenticSearchInputSchema,
   AnalyzeFileInputSchema,
@@ -249,6 +250,24 @@ describe('ChatInputSchema', () => {
     assert.throws(
       () => parseResponseSchemaJsonValue(JSON.stringify({ type: 'unknown' })),
       z.ZodError,
+    );
+  });
+
+  it('rejects responseSchemaJson with unsupported $ref usage', () => {
+    assert.throws(
+      () =>
+        parseResponseSchemaJsonValue(
+          JSON.stringify({
+            type: 'object',
+            properties: {
+              answer: { $ref: '#/$defs/Answer' },
+            },
+            $defs: {
+              Answer: { type: 'string' },
+            },
+          }),
+        ),
+      (error) => error instanceof AppError && error.message.includes('$ref is not supported'),
     );
   });
 

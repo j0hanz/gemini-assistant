@@ -205,7 +205,18 @@ interface GitDiffArgsOptions {
 
 function createCompareFileWork(rootsFetcher: RootsFetcher) {
   return async function compareFileWork(
-    { filePathA, filePathB, question, thinkingLevel, googleSearch }: CompareFilesInput,
+    {
+      filePathA,
+      filePathB,
+      question,
+      thinkingLevel,
+      googleSearch,
+      maxOutputTokens,
+      safetySettings,
+    }: CompareFilesInput & {
+      maxOutputTokens?: ReviewInput['maxOutputTokens'];
+      safetySettings?: ReviewInput['safetySettings'];
+    },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
     const uploadedNames: string[] = [];
@@ -247,6 +258,8 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
               {
                 systemInstruction: prompt.systemInstruction,
                 thinkingLevel,
+                maxOutputTokens,
+                safetySettings,
                 ...buildOrchestrationConfig({
                   toolProfile: googleSearch ? 'search' : 'none',
                 }),
@@ -272,6 +285,8 @@ interface FailureReviewSubject {
   googleSearch?: boolean | undefined;
   kind: 'failure';
   language?: string | undefined;
+  maxOutputTokens?: ReviewInput['maxOutputTokens'];
+  safetySettings?: ReviewInput['safetySettings'];
   urls?: readonly string[] | undefined;
 }
 
@@ -281,7 +296,8 @@ async function diagnoseFailureWork(
   thinkingLevel: ReviewInput['thinkingLevel'],
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const { urls, error, codeContext, language, googleSearch } = subject;
+  const { urls, error, codeContext, language, googleSearch, maxOutputTokens, safetySettings } =
+    subject;
 
   const invalidUrlResult = validateUrls(urls);
   if (invalidUrlResult) return invalidUrlResult;
@@ -321,6 +337,8 @@ async function diagnoseFailureWork(
           {
             systemInstruction: prompt.systemInstruction,
             thinkingLevel,
+            maxOutputTokens,
+            safetySettings,
             ...orchestration,
           },
           ctx.mcpReq.signal,
@@ -949,7 +967,17 @@ export async function resolveReviewWorkingDirectory(
 }
 
 export async function analyzePrWork(
-  { thinkingLevel, language, dryRun, focus }: AnalyzePrInput,
+  {
+    thinkingLevel,
+    language,
+    dryRun,
+    focus,
+    maxOutputTokens,
+    safetySettings,
+  }: AnalyzePrInput & {
+    maxOutputTokens?: ReviewInput['maxOutputTokens'];
+    safetySettings?: ReviewInput['safetySettings'];
+  },
   ctx: ServerContext,
   rootsFetcher: RootsFetcher = () => Promise.resolve([]),
 ): Promise<CallToolResult> {
@@ -1029,6 +1057,8 @@ export async function analyzePrWork(
           {
             systemInstruction: modelPrompt.systemInstruction,
             thinkingLevel,
+            maxOutputTokens,
+            safetySettings,
           },
           ctx.mcpReq.signal,
         ),
@@ -1085,6 +1115,8 @@ async function reviewWork(
         language: args.language,
         thinkingLevel: args.thinkingLevel,
         focus: args.focus,
+        maxOutputTokens: args.maxOutputTokens,
+        safetySettings: args.safetySettings,
       },
       ctx,
       rootsFetcher,
@@ -1097,6 +1129,8 @@ async function reviewWork(
         question: args.question ?? args.focus,
         thinkingLevel: args.thinkingLevel,
         googleSearch: args.googleSearch,
+        maxOutputTokens: args.maxOutputTokens,
+        safetySettings: args.safetySettings,
       },
       ctx,
     );
@@ -1108,6 +1142,8 @@ async function reviewWork(
         kind: 'failure',
         language: args.language,
         googleSearch: args.googleSearch,
+        maxOutputTokens: args.maxOutputTokens,
+        safetySettings: args.safetySettings,
         urls: args.urls,
       },
       args.focus,

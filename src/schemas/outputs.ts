@@ -60,6 +60,8 @@ const AnalyzeDiagramOutputSchema = z.strictObject({
   diagramType: enumField(DIAGRAM_TYPES, 'Diagram syntax used for the output'),
   diagram: z.string().describe('Generated diagram source'),
   explanation: z.string().optional().describe('Short explanation or caveats for the diagram'),
+  syntaxErrors: z.array(z.string()).optional().describe('Diagram syntax validation errors'),
+  syntaxValid: z.boolean().optional().describe('Whether diagram syntax validated successfully'),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
   analyzedPaths: z.array(z.string()).optional().describe('Local files included in the analysis'),
   contextUsed: ContextUsedSchema.optional(),
@@ -78,10 +80,13 @@ export const ChatOutputSchema = z.strictObject({
   session: z
     .strictObject({
       id: z.string().describe('Server-managed in-memory session identifier'),
+      rebuiltAt: z.number().int().nonnegative().optional().describe('Session rebuild timestamp'),
       resources: SessionResourceLinksSchema,
     })
     .optional()
-    .describe('Session metadata for new or resumed chat sessions.'),
+    .describe(
+      'Session metadata for new or resumed chat sessions. Resumed sessions after server restart lose `thoughtSignature` and native tool parts; the first post-restart turn is text-only.',
+    ),
   contextUsed: ContextUsedSchema.optional(),
 });
 

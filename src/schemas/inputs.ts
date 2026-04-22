@@ -3,6 +3,8 @@ import { completable } from '@modelcontextprotocol/server';
 import { z } from 'zod/v4';
 import type { ParsePayload } from 'zod/v4/core';
 
+import { AppError } from '../lib/errors.js';
+
 import {
   analyzeOutputKind,
   analyzeTargetKind,
@@ -23,20 +25,35 @@ import {
   workspacePath,
   workspacePathArray,
 } from './fields.js';
-import { createFilePairFields, createUrlContextFields } from './fragments.js';
+import {
+  createFilePairFields,
+  createGenerationConfigFields,
+  createUrlContextFields,
+} from './fragments.js';
 import { GeminiResponseSchema } from './json-schema.js';
 import {
   validateExclusiveSourceFileFields,
   validateFlatAnalyzeInput,
   validateFlatResearchInput,
 } from './validators.js';
+import { validateGeminiJsonSchema } from './validators.js';
 
 type SessionIdCompleter = (prefix?: string) => string[];
 
 const thinkingLevelField = thinkingLevel();
+const generationConfigFields = createGenerationConfigFields();
 
 export function parseResponseSchemaJsonValue(raw: string): GeminiResponseSchema {
   const parsed = JSON.parse(raw) as unknown;
+  const compatibilityErrors = validateGeminiJsonSchema(parsed);
+  if (compatibilityErrors.length > 0) {
+    throw new AppError(
+      'chat',
+      `responseSchemaJson is not supported by Gemini's JSON-schema subset.\n${compatibilityErrors
+        .map((error) => `- ${error}`)
+        .join('\n')}`,
+    );
+  }
   return GeminiResponseSchema.parse(parsed);
 }
 
@@ -49,9 +66,13 @@ function validateResponseSchemaJson(payload: ParsePayload<string>): void {
       code: 'custom',
       input: payload.value,
       message:
-        error instanceof z.ZodError
-          ? `responseSchemaJson must match the supported schema.\n${z.prettifyError(error)}`
-          : 'responseSchemaJson must be valid JSON.',
+        error instanceof SyntaxError
+          ? 'responseSchemaJson must be valid JSON.'
+          : error instanceof AppError
+            ? error.message
+            : error instanceof z.ZodError
+              ? `responseSchemaJson must match the supported schema.\n${z.prettifyError(error)}`
+              : 'responseSchemaJson must be valid JSON.',
     });
   }
 }
@@ -78,6 +99,7 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
       textField('System instructions for response style, constraints, or behavior.'),
     ),
     thinkingLevel: thinkingLevelField,
+    ...generationConfigFields,
     responseSchemaJson: responseSchemaJsonField(),
     temperature: temperatureField(),
     seed: withFieldMetadata(z.int().optional(), 'Fixed random seed for reproducible outputs.'),
@@ -105,6 +127,7 @@ export const ResearchInputBaseSchema = z.strictObject({
     'How many search-and-synthesis passes to perform. Use higher values for broader or more thorough deep research.',
   ),
   thinkingLevel: thinkingLevelField,
+  ...generationConfigFields,
 });
 export const ResearchInputSchema = ResearchInputBaseSchema.superRefine(validateFlatResearchInput);
 export type ResearchInput = z.infer<typeof ResearchInputSchema>;
@@ -139,6 +162,7 @@ export const AnalyzeInputBaseSchema = z.strictObject({
     .optional()
     .describe('Validate generated diagram syntax when outputKind=diagram.'),
   thinkingLevel: thinkingLevelField,
+  ...generationConfigFields,
   mediaResolution: mediaResolution(
     'Resolution for image/video processing. Higher = more detail, more tokens.',
   ),
@@ -154,6 +178,7 @@ const reviewSubjectKindLiteral = <T extends 'diff' | 'comparison' | 'failure'>(v
 const reviewCommonShape = {
   focus: optionalField(textField('Review priorities (e.g. regressions, security, performance).')),
   thinkingLevel: thinkingLevelField,
+  ...generationConfigFields,
 };
 
 const ReviewDiffInputSchema = z.strictObject({
@@ -225,6 +250,7 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
       textField('System instructions for response style, constraints, or behavior.'),
     ),
     thinkingLevel: thinkingLevelField,
+    ...generationConfigFields,
     responseSchema: withFieldMetadata(
       GeminiResponseSchema.optional(),
       'JSON Schema for structured output.',

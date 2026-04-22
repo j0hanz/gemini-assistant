@@ -7,9 +7,21 @@ import {
   type SessionStore,
   type SessionStoreOptions,
 } from '../src/sessions.js';
+import { chatWork, createAskWork } from '../src/tools/chat.js';
 
 function mockChat(label = 'chat'): { _label: string } {
   return { _label: label };
+}
+
+function createContext(): import('@modelcontextprotocol/server').ServerContext {
+  return {
+    mcpReq: {
+      _meta: {},
+      log: async () => undefined,
+      notify: async () => undefined,
+      signal: new AbortController().signal,
+    },
+  } as import('@modelcontextprotocol/server').ServerContext;
 }
 
 const stores: SessionStore[] = [];
@@ -516,6 +528,168 @@ describe('sessions', () => {
 
       assert.strictEqual(store.getSessionEntry('sess-expire-on-entry'), undefined);
       assert.strictEqual(store.isEvicted('sess-expire-on-entry'), true);
+    });
+  });
+
+  describe('restart rebuilds and redacts', () => {
+    it('rebuilds a resumed session after restart and sets rebuiltAt', async () => {
+      const transcript = [
+        { role: 'user' as const, text: 'hello', timestamp: 1 },
+        { role: 'assistant' as const, text: 'hi', timestamp: 2 },
+      ];
+      let rebuiltAt: number | undefined;
+      let observedMessage: string | undefined;
+
+      const askWork = createAskWork({
+        appendSessionEvent: () => true,
+        appendSessionTranscript: () => true,
+        createChat: () => mockChat('live-chat') as never,
+        getSession: () => undefined,
+        getSessionEntry: (sessionId: string) =>
+          sessionId === 'sess-restart'
+            ? ({
+                id: sessionId,
+                lastAccess: 1,
+                transcriptCount: transcript.length,
+                eventCount: 0,
+                rebuiltAt,
+              } as never)
+            : undefined,
+        isEvicted: () => false,
+        listSessionTranscriptEntries: (sessionId: string) =>
+          sessionId === 'sess-restart' ? transcript : undefined,
+        now: () => 123_456,
+        rebuildChat: (sessionId: string) => {
+          if (sessionId !== 'sess-restart') return undefined;
+          rebuiltAt = 123_456;
+          return mockChat('rebuilt-chat') as never;
+        },
+        runWithoutSession: async (args: Record<string, unknown>) => {
+          observedMessage = args.message as string | undefined;
+          return {
+            result: {
+              content: [{ type: 'text' as const, text: 'Assistant answer' }],
+              structuredContent: { answer: 'Assistant answer' },
+            },
+            streamResult: {
+              functionCalls: [],
+              parts: [],
+              text: 'Assistant answer',
+              thoughtText: '',
+              toolEvents: [],
+              toolsUsed: [],
+            },
+            toolProfile: 'none' as const,
+          } as never;
+        },
+        setSession: () => undefined,
+      });
+
+      const result = await chatWork(
+        askWork,
+        {
+          goal: 'follow up',
+          sessionId: 'sess-restart',
+        },
+        createContext(),
+      );
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      assert.strictEqual(result.isError, undefined);
+      assert.match(observedMessage ?? '', /\n\nfollow up$/);
+      assert.strictEqual((structured.session as Record<string, unknown>).rebuiltAt, 123_456);
+    });
+
+    it('redacts sensitive keys in persisted session events', async () => {
+      const events: unknown[] = [];
+      const askWork = createAskWork({
+        appendSessionEvent: (_sessionId, item) => {
+          events.push(item);
+          return true;
+        },
+        appendSessionTranscript: () => true,
+        createChat: () => mockChat('live-chat') as never,
+        getSession: () => undefined,
+        getSessionEntry: () => undefined,
+        isEvicted: () => false,
+        listSessionTranscriptEntries: () => undefined,
+        now: () => 1,
+        rebuildChat: () => undefined,
+        runWithoutSession: async () =>
+          ({
+            result: {
+              content: [{ type: 'text' as const, text: 'Assistant answer' }],
+              structuredContent: {
+                answer: 'Assistant answer',
+                data: {
+                  apiKey: 'secret-value',
+                  nested: { token: 'hidden-value' },
+                  list: [{ password: 'another-secret' }],
+                },
+                functionCalls: [
+                  {
+                    name: 'lookup',
+                    args: {
+                      authorization: 'bearer secret',
+                    },
+                  },
+                ],
+                toolEvents: [
+                  {
+                    kind: 'tool_call',
+                    args: {
+                      sessionId: 'sess-secret',
+                    },
+                    response: {
+                      cookie: 'hidden-cookie',
+                    },
+                  },
+                ],
+              },
+            },
+            streamResult: {
+              functionCalls: [],
+              parts: [],
+              text: 'Assistant answer',
+              thoughtText: '',
+              toolEvents: [],
+              toolsUsed: [],
+            },
+            toolProfile: 'none' as const,
+          }) as never,
+        setSession: () => undefined,
+      });
+
+      await chatWork(
+        askWork,
+        {
+          goal: 'redact secrets',
+          sessionId: 'sess-redact',
+        },
+        createContext(),
+      );
+
+      const event = events[0] as {
+        response?: {
+          data?: {
+            apiKey?: string;
+            list?: { password?: string }[];
+            nested?: { token?: string };
+          };
+          functionCalls?: { args?: Record<string, unknown> }[];
+          toolEvents?: {
+            args?: Record<string, unknown>;
+            response?: Record<string, unknown>;
+          }[];
+        };
+      };
+
+      assert.strictEqual(event.response?.data?.apiKey, '[REDACTED]');
+      assert.strictEqual(event.response?.data?.nested?.token, '[REDACTED]');
+      assert.strictEqual(event.response?.data?.list?.[0]?.password, '[REDACTED]');
+      assert.strictEqual(event.response?.functionCalls?.[0]?.args?.authorization, '[REDACTED]');
+      assert.strictEqual(event.response?.toolEvents?.[0]?.args?.sessionId, '[REDACTED]');
+      assert.strictEqual(event.response?.toolEvents?.[0]?.response?.cookie, '[REDACTED]');
     });
   });
 });

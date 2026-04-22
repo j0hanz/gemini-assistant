@@ -56,6 +56,7 @@ type StreamGenerator = () => Promise<
 type StreamResponseBuilder<T extends Record<string, unknown>> = Parameters<
   typeof executor.runStream<T>
 >[4];
+type GenerationConfigFields = Pick<ResearchInput, 'maxOutputTokens' | 'safetySettings'>;
 
 async function runToolStream<T extends Record<string, unknown>>(
   ctx: ServerContext,
@@ -207,7 +208,14 @@ function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) 
 }
 
 async function searchWork(
-  { query, systemInstruction, urls, thinkingLevel }: SearchInput,
+  {
+    query,
+    systemInstruction,
+    urls,
+    thinkingLevel,
+    maxOutputTokens,
+    safetySettings,
+  }: SearchInput & GenerationConfigFields,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const invalidUrlResult = validateUrls(urls);
@@ -235,6 +243,8 @@ async function searchWork(
           {
             systemInstruction: systemInstruction ?? prompt.systemInstruction,
             thinkingLevel,
+            maxOutputTokens,
+            safetySettings,
             functionCallingMode,
             toolConfig,
             tools,
@@ -247,7 +257,14 @@ async function searchWork(
 }
 
 export async function analyzeUrlWork(
-  { urls, question, systemInstruction, thinkingLevel }: AnalyzeUrlInput,
+  {
+    urls,
+    question,
+    systemInstruction,
+    thinkingLevel,
+    maxOutputTokens,
+    safetySettings,
+  }: AnalyzeUrlInput & GenerationConfigFields,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const invalidUrlResult = validateUrls(urls);
@@ -276,6 +293,8 @@ export async function analyzeUrlWork(
           {
             systemInstruction: systemInstruction ?? prompt.systemInstruction,
             thinkingLevel,
+            maxOutputTokens,
+            safetySettings,
             ...buildOrchestrationConfig({ toolProfile: 'url' }),
           },
           ctx.mcpReq.signal,
@@ -286,7 +305,13 @@ export async function analyzeUrlWork(
 }
 
 async function agenticSearchWork(
-  { topic, searchDepth, thinkingLevel }: AgenticSearchInput,
+  {
+    topic,
+    searchDepth,
+    thinkingLevel,
+    maxOutputTokens,
+    safetySettings,
+  }: AgenticSearchInput & GenerationConfigFields,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   if (searchDepth && searchDepth > 3) {
@@ -326,6 +351,8 @@ async function agenticSearchWork(
           {
             systemInstruction: prompt.systemInstruction,
             thinkingLevel,
+            maxOutputTokens,
+            safetySettings,
             ...buildOrchestrationConfig({
               includeServerSideToolInvocations: true,
               toolProfile: 'search_code',
@@ -350,6 +377,8 @@ async function runQuickResearch(
       systemInstruction: args.systemInstruction,
       thinkingLevel: args.thinkingLevel,
       urls: args.urls,
+      maxOutputTokens: args.maxOutputTokens,
+      safetySettings: args.safetySettings,
     },
     ctx,
   );
@@ -363,6 +392,8 @@ async function runDeepResearch(args: ResearchInput, ctx: ServerContext): Promise
         : args.goal,
       searchDepth: args.searchDepth ?? 3,
       thinkingLevel: args.thinkingLevel,
+      maxOutputTokens: args.maxOutputTokens,
+      safetySettings: args.safetySettings,
     },
     ctx,
   );

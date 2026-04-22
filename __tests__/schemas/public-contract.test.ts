@@ -96,6 +96,8 @@ describe('public contract schemas', () => {
         kind: 'diagram',
         diagram: 'flowchart TD\nA-->B',
         diagramType: 'mermaid',
+        syntaxErrors: ['line 1: missing node'],
+        syntaxValid: false,
         targetKind: 'multi',
       }).success,
       'diagram analyze output should parse',

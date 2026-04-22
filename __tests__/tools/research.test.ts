@@ -290,4 +290,42 @@ describe('research tool contracts', () => {
       client.models.generateContentStream = originalGenerateContentStream;
     }
   });
+
+  it('passes maxOutputTokens through to the Gemini config for quick research', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+    const calls: Record<string, unknown>[] = [];
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async (request: Record<string, unknown>) => {
+      calls.push(request);
+      return fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'Quick research answer' }] },
+              finishReason: 'STOP',
+            },
+          ],
+        },
+      ]);
+    };
+
+    try {
+      await research.createTask(
+        { goal: 'latest release', mode: 'quick', maxOutputTokens: 9_999 },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+
+      assert.strictEqual(
+        (calls[0]?.config as { maxOutputTokens?: number } | undefined)?.maxOutputTokens,
+        9_999,
+      );
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
 });

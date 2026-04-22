@@ -1,3 +1,4 @@
+import { HarmBlockMethod, HarmBlockThreshold, HarmCategory } from '@google/genai';
 import { z } from 'zod/v4';
 
 import {
@@ -12,10 +13,23 @@ const usageMetadataFields = {
   promptTokenCount: nonNegativeInt('Tokens in the prompt').optional(),
   candidatesTokenCount: nonNegativeInt('Tokens in the response').optional(),
   thoughtsTokenCount: nonNegativeInt('Tokens used for thinking').optional(),
+  cachedContentTokenCount: nonNegativeInt('Tokens reused from cached content').optional(),
   totalTokenCount: nonNegativeInt('Total tokens for the request').optional(),
 };
 
 export const UsageMetadataSchema = z.strictObject(usageMetadataFields);
+
+const HARM_CATEGORY_VALUES = Object.values(HarmCategory) as [string, ...string[]];
+const HARM_BLOCK_METHOD_VALUES = Object.values(HarmBlockMethod) as [string, ...string[]];
+const HARM_BLOCK_THRESHOLD_VALUES = Object.values(HarmBlockThreshold) as [string, ...string[]];
+
+export const SafetySettingInputSchema = z.strictObject({
+  category: z.enum(HARM_CATEGORY_VALUES).optional().describe('Safety harm category to block'),
+  method: z.enum(HARM_BLOCK_METHOD_VALUES).optional().describe('Optional blocking method'),
+  threshold: z.enum(HARM_BLOCK_THRESHOLD_VALUES).describe('Safety blocking threshold'),
+});
+
+export type SafetySettingInput = z.infer<typeof SafetySettingInputSchema>;
 
 const functionCallEntryFields = {
   name: z.string().describe('Function/tool name'),
@@ -141,5 +155,21 @@ export function createUrlContextFields(options: UrlContextFieldOptions) {
 
   return {
     urls: publicHttpUrlArray({ ...options, optional: false }),
+  };
+}
+
+export function createGenerationConfigFields() {
+  return {
+    maxOutputTokens: z
+      .number()
+      .int()
+      .min(1)
+      .max(1_048_576)
+      .optional()
+      .describe('Maximum number of output tokens to request from Gemini.'),
+    safetySettings: z
+      .array(SafetySettingInputSchema)
+      .optional()
+      .describe('Gemini safety settings override for this call.'),
   };
 }

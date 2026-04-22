@@ -66,11 +66,13 @@ interface OrchestrationRequest {
   functionDeclarations?: FunctionDeclaration[] | undefined;
   googleSearch?: boolean | undefined;
   includeServerSideToolInvocations?: boolean | undefined;
+  jsonMode?: boolean | undefined;
   toolProfile?: ToolProfile | undefined;
   urls?: readonly string[] | undefined;
 }
 
 interface OrchestrationConfig {
+  downgradedFromProfile?: ToolProfile;
   functionCallingMode?: FunctionCallingConfigMode;
   toolConfig?: ToolConfig;
   toolProfile: ToolProfile;
@@ -103,9 +105,16 @@ export function normalizeToolProfile({
 }
 
 export function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationConfig {
-  const toolProfile = normalizeToolProfile(request);
-  const capabilities = TOOL_PROFILE_CAPABILITIES[toolProfile];
-  const builtInTools = capabilities.builtInTools.map((tool) => ({ ...tool }));
+  const resolvedToolProfile = normalizeToolProfile(request);
+  const capabilities = TOOL_PROFILE_CAPABILITIES[resolvedToolProfile];
+  const toolProfile =
+    request.jsonMode === true && capabilities.builtInTools.length > 0
+      ? 'none'
+      : resolvedToolProfile;
+  const downgradedFromProfile =
+    toolProfile !== resolvedToolProfile ? resolvedToolProfile : undefined;
+  const activeCapabilities = TOOL_PROFILE_CAPABILITIES[toolProfile];
+  const builtInTools = activeCapabilities.builtInTools.map((tool) => ({ ...tool }));
   const functionDeclarations = request.functionDeclarations?.slice();
   const hasBuiltIn = builtInTools.length > 0;
   const hasDeclarations = functionDeclarations !== undefined && functionDeclarations.length > 0;
@@ -116,10 +125,11 @@ export function buildOrchestrationConfig(request: OrchestrationRequest): Orchest
   }
 
   const config: OrchestrationConfig = {
+    ...(downgradedFromProfile ? { downgradedFromProfile } : {}),
     toolProfile,
-    usesCodeExecution: capabilities.usesCodeExecution,
-    usesGoogleSearch: capabilities.usesGoogleSearch,
-    usesUrlContext: capabilities.usesUrlContext,
+    usesCodeExecution: activeCapabilities.usesCodeExecution,
+    usesGoogleSearch: activeCapabilities.usesGoogleSearch,
+    usesUrlContext: activeCapabilities.usesUrlContext,
   };
 
   if (hasBuiltIn && hasDeclarations) {

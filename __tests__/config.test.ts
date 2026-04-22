@@ -4,6 +4,8 @@ import { afterEach, describe, it } from 'node:test';
 import {
   getExposeThoughts,
   getGeminiModel,
+  getMaxOutputTokens,
+  getSafetySettings,
   getSessionLimits,
   getTransportConfig,
   getTransportMode,
@@ -32,6 +34,9 @@ const NEW_VARS = [
   'AUTO_SCAN',
   'CACHE',
   'CACHE_TTL',
+  'GEMINI_MAX_OUTPUT_TOKENS',
+  'GEMINI_SAFETY_SETTINGS',
+  'GEMINI_SESSION_REDACT_KEYS',
 ] as const;
 
 const OLD_VARS = [
@@ -216,6 +221,31 @@ describe('config parsing', () => {
 
   it('defaults CACHE_TTL to 3600s', () => {
     assert.strictEqual(getWorkspaceCacheTtl(), '3600s');
+  });
+
+  it('defaults GEMINI_MAX_OUTPUT_TOKENS to 32768', () => {
+    assert.strictEqual(getMaxOutputTokens(), 32_768);
+  });
+
+  it('returns configured GEMINI_MAX_OUTPUT_TOKENS when set', () => {
+    process.env.GEMINI_MAX_OUTPUT_TOKENS = '4096';
+    assert.strictEqual(getMaxOutputTokens(), 4096);
+  });
+
+  it('returns configured GEMINI_SAFETY_SETTINGS when set', () => {
+    process.env.GEMINI_SAFETY_SETTINGS = JSON.stringify([
+      {
+        category: 'HARM_CATEGORY_HARASSMENT',
+        threshold: 'BLOCK_ONLY_HIGH',
+      },
+    ]);
+
+    assert.deepStrictEqual(getSafetySettings(), [
+      {
+        category: 'HARM_CATEGORY_HARASSMENT',
+        threshold: 'BLOCK_ONLY_HIGH',
+      },
+    ]);
   });
 
   it('returns the configured CACHE_TTL when set', () => {

@@ -62,6 +62,17 @@ describe('orchestration', () => {
     assert.deepStrictEqual(result.tools, [{ googleSearch: {} }, { codeExecution: {} }]);
   });
 
+  it('downgrades built-in tools when jsonMode is requested', () => {
+    const result = buildOrchestrationConfig({
+      jsonMode: true,
+      toolProfile: 'search',
+    });
+
+    assert.strictEqual(result.toolProfile, 'none');
+    assert.strictEqual(result.downgradedFromProfile, 'search');
+    assert.strictEqual(result.tools, undefined);
+  });
+
   it('enables validated function calling when built-ins are combined with functions', () => {
     const result = buildOrchestrationConfig({
       functionDeclarations: [

@@ -13,6 +13,7 @@ import { AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { pickDefined } from '../lib/object.js';
 import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
+import { validateGeminiRequest } from '../lib/preflight.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from '../lib/resource-uris.js';
 import {
@@ -54,7 +55,7 @@ import {
   getAI,
   MODEL,
 } from '../client.js';
-import { getWorkspaceCacheEnabled } from '../config.js';
+import { getSessionRedactionPatterns, getWorkspaceCacheEnabled } from '../config.js';
 import {
   createSessionStore,
   type SessionEventEntry,
@@ -74,6 +75,10 @@ interface AskStructuredContent extends Record<string, unknown> {
   data?: unknown;
   functionCalls?: FunctionCallEntry[];
   schemaWarnings?: string[];
+  session?: {
+    id: string;
+    rebuiltAt?: number;
+  };
   thoughts?: string;
   toolEvents?: ToolEvent[];
   usage?: UsageMetadata;
@@ -88,12 +93,13 @@ interface AskDependencies {
   isEvicted: (sessionId: string) => boolean;
   now: () => number;
   listSessionTranscriptEntries: (sessionId: string) => TranscriptEntry[] | undefined;
+  rebuildChat: (sessionId: string, args: AskArgs) => Chat | undefined;
   runWithoutSession: (
     args: AskArgs,
     ctx: ServerContext,
     chat?: Chat,
   ) => Promise<AskExecutionResult>;
-  setSession: (sessionId: string, chat: Chat) => void;
+  setSession: (sessionId: string, chat: Chat, rebuiltAt?: number) => void;
 }
 
 interface AskExecutionResult {
@@ -271,14 +277,6 @@ function hasExpiredSession(
   return !!sessionId && deps.isEvicted(sessionId);
 }
 
-function hasExistingSessionResponseSchemaConflict(
-  responseSchema: GeminiResponseSchema | undefined,
-  sessionId: string | undefined,
-  hasExistingSession: boolean,
-): boolean {
-  return !!responseSchema && !!sessionId && hasExistingSession;
-}
-
 function getAskToolProfile(args: AskArgs): ToolProfile | undefined {
   return 'toolProfile' in args ? args.toolProfile : undefined;
 }
@@ -299,12 +297,27 @@ function validateAskRequest(
   }
 
   const hasExistingSession = sessionId ? deps.getSessionEntry(sessionId) !== undefined : false;
+  const orchestration = buildOrchestrationConfig({
+    googleSearch: args.googleSearch,
+    toolProfile: getAskToolProfile(args),
+    urls,
+  });
+  const preflightResult = validateGeminiRequest({
+    hasExistingSession,
+    jsonMode: responseSchema !== undefined,
+    responseSchema,
+    sessionId,
+    toolProfile: orchestration.toolProfile,
+    usesCodeExecution: orchestration.usesCodeExecution,
+    usesGoogleSearch: orchestration.usesGoogleSearch,
+    usesUrlContext: orchestration.usesUrlContext,
+  });
+  if (preflightResult) {
+    return preflightResult;
+  }
+
   const conflicts: [boolean, string][] = [
     [hasExpiredSession(sessionId, deps), `chat: Session '${sessionId}' has expired.`],
-    [
-      hasExistingSessionResponseSchemaConflict(responseSchema, sessionId, hasExistingSession),
-      'chat: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
-    ],
   ];
 
   for (const [condition, message] of conflicts) {
@@ -330,6 +343,7 @@ function resolveAskTooling(args: AskArgs) {
   const urls = getAskUrls(args);
   const orchestration = buildOrchestrationConfig({
     googleSearch: args.googleSearch,
+    jsonMode: args.responseSchema !== undefined,
     toolProfile: askToolProfile,
     urls,
   });
@@ -341,6 +355,32 @@ function resolveAskTooling(args: AskArgs) {
     urls: orchestration.usesUrlContext ? [...(urls ?? [])] : undefined,
     ...toolConfig,
   };
+}
+
+function buildRebuiltChatHistory(
+  transcript: TranscriptEntry[],
+  maxChars: number,
+): { role: 'user' | 'model'; parts: [{ text: string }] }[] {
+  const selected: TranscriptEntry[] = [];
+  let totalChars = 0;
+
+  for (let index = transcript.length - 1; index >= 0; index--) {
+    const entry = transcript[index];
+    if (!entry) continue;
+
+    const nextChars = totalChars + entry.text.length;
+    if (selected.length > 0 && nextChars > maxChars) {
+      break;
+    }
+
+    selected.push(entry);
+    totalChars = nextChars;
+  }
+
+  return selected.reverse().map((entry) => ({
+    role: entry.role === 'user' ? 'user' : 'model',
+    parts: [{ text: entry.text }],
+  }));
 }
 
 async function runAskStream(
@@ -472,8 +512,18 @@ const SESSION_VALUE_MAX_STRING_LENGTH = 2000;
 const SESSION_VALUE_MAX_ARRAY_ITEMS = 20;
 const SESSION_VALUE_MAX_OBJECT_KEYS = 50;
 const SESSION_VALUE_TRUNCATION_SUFFIX = '... [truncated]';
+const SESSION_REDACTION_PATTERNS = getSessionRedactionPatterns();
 
-function sanitizeSessionValue(value: unknown): unknown {
+function shouldRedactSessionValue(keyContext?: string): boolean {
+  if (!keyContext) return false;
+  return SESSION_REDACTION_PATTERNS.some((pattern) => pattern.test(keyContext));
+}
+
+function sanitizeSessionValue(value: unknown, keyContext?: string): unknown {
+  if (shouldRedactSessionValue(keyContext)) {
+    return '[REDACTED]';
+  }
+
   if (typeof value === 'string') {
     if (value.length <= SESSION_VALUE_MAX_STRING_LENGTH) {
       return value;
@@ -487,14 +537,16 @@ function sanitizeSessionValue(value: unknown): unknown {
   }
 
   if (Array.isArray(value)) {
-    return value.slice(0, SESSION_VALUE_MAX_ARRAY_ITEMS).map((item) => sanitizeSessionValue(item));
+    return value
+      .slice(0, SESSION_VALUE_MAX_ARRAY_ITEMS)
+      .map((item) => sanitizeSessionValue(item, keyContext));
   }
 
   if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value)
         .slice(0, SESSION_VALUE_MAX_OBJECT_KEYS)
-        .map(([key, nestedValue]) => [key, sanitizeSessionValue(nestedValue)]),
+        .map(([key, nestedValue]) => [key, sanitizeSessionValue(nestedValue, key)]),
     );
   }
 
@@ -505,7 +557,7 @@ function sanitizeFunctionCalls(functionCalls: FunctionCallEntry[]): FunctionCall
   return functionCalls.map((functionCall) => ({
     ...functionCall,
     ...(functionCall.args
-      ? { args: sanitizeSessionValue(functionCall.args) as Record<string, unknown> }
+      ? { args: sanitizeSessionValue(functionCall.args, 'args') as Record<string, unknown> }
       : {}),
   }));
 }
@@ -514,14 +566,18 @@ function sanitizeToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
   return toolEvents.map((toolEvent) => ({
     ...toolEvent,
     ...(toolEvent.args
-      ? { args: sanitizeSessionValue(toolEvent.args) as Record<string, unknown> }
+      ? { args: sanitizeSessionValue(toolEvent.args, 'args') as Record<string, unknown> }
       : {}),
-    ...(toolEvent.code ? { code: sanitizeSessionValue(toolEvent.code) as string } : {}),
-    ...(toolEvent.output ? { output: sanitizeSessionValue(toolEvent.output) as string } : {}),
+    ...(toolEvent.code ? { code: sanitizeSessionValue(toolEvent.code, 'code') as string } : {}),
+    ...(toolEvent.output
+      ? { output: sanitizeSessionValue(toolEvent.output, 'output') as string }
+      : {}),
     ...(toolEvent.response
-      ? { response: sanitizeSessionValue(toolEvent.response) as Record<string, unknown> }
+      ? {
+          response: sanitizeSessionValue(toolEvent.response, 'response') as Record<string, unknown>,
+        }
       : {}),
-    ...(toolEvent.text ? { text: sanitizeSessionValue(toolEvent.text) as string } : {}),
+    ...(toolEvent.text ? { text: sanitizeSessionValue(toolEvent.text, 'text') as string } : {}),
   }));
 }
 
@@ -673,6 +729,21 @@ function createDefaultAskDependencies(sessionStore: SessionStore): AskDependenci
     getSessionEntry: sessionStore.getSessionEntry.bind(sessionStore),
     isEvicted: sessionStore.isEvicted.bind(sessionStore),
     listSessionTranscriptEntries: sessionStore.listSessionTranscriptEntries.bind(sessionStore),
+    rebuildChat: (sessionId, args) => {
+      const transcript = sessionStore.listSessionTranscriptEntries(sessionId) ?? [];
+      if (transcript.length === 0) {
+        return undefined;
+      }
+
+      const { functionCallingMode, toolConfig, tools } = resolveAskTooling(args);
+      const chat = getAI().chats.create({
+        model: MODEL,
+        config: buildGenerateContentConfig({ ...args, functionCallingMode, toolConfig, tools }),
+        history: buildRebuiltChatHistory(transcript, 200_000),
+      });
+      sessionStore.setSession(sessionId, chat, Date.now());
+      return chat;
+    },
     now: () => Date.now(),
     runWithoutSession: askWithoutSession,
     setSession: sessionStore.setSession.bind(sessionStore),
@@ -694,14 +765,10 @@ async function askExistingSession(
   args: AskArgs & { sessionId: string },
   ctx: ServerContext,
   deps: AskDependencies,
+  chat: Chat,
   contextUsed?: ContextUsed,
+  sessionSummary?: string,
 ): Promise<CallToolResult | undefined> {
-  const chat = deps.getSession(args.sessionId);
-  if (!chat) return undefined;
-
-  const sessionSummary = buildSessionSummary(
-    deps.listSessionTranscriptEntries(args.sessionId) ?? [],
-  );
   const resumedArgs = sessionSummary
     ? { ...args, message: `${sessionSummary}\n\n${args.message}` }
     : args;
@@ -719,6 +786,11 @@ async function askExistingSession(
   await progress.send(0, undefined, 'Resuming session');
   const askResult = await deps.runWithoutSession(resumedArgs, ctx, chat);
   askResult.result = attachContextUsed(askResult.result, effectiveContextUsed);
+  askResult.result = attachSessionMetadata(
+    askResult.result,
+    args.sessionId,
+    deps.getSessionEntry(args.sessionId)?.rebuiltAt,
+  );
   appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id);
   return askResult.result;
 }
@@ -737,6 +809,7 @@ async function askNewSession(
 
   if (!askResult.result.isError) {
     deps.setSession(args.sessionId, chat);
+    askResult.result = attachSessionMetadata(askResult.result, args.sessionId);
     appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id);
     appendSessionResource(askResult.result, args.sessionId, ctx.task?.id);
   } else {
@@ -803,13 +876,33 @@ export function createAskWork(
       return attachContextUsed(askResult.result, contextUsed);
     }
 
-    const resumed = await askExistingSession(
-      effectiveArgs as AskArgs & { sessionId: string },
-      ctx,
-      deps,
-      contextUsed,
-    );
-    if (resumed) return resumed;
+    const sessionId = effectiveArgs.sessionId;
+    const liveChat = deps.getSession(sessionId);
+    if (liveChat) {
+      const resumed = await askExistingSession(
+        effectiveArgs as AskArgs & { sessionId: string },
+        ctx,
+        deps,
+        liveChat,
+        contextUsed,
+      );
+      if (resumed) return resumed;
+    } else if (deps.getSessionEntry(sessionId)) {
+      const rebuiltChat = deps.rebuildChat(sessionId, effectiveArgs);
+      if (rebuiltChat) {
+        const transcript = deps.listSessionTranscriptEntries(sessionId) ?? [];
+        const sessionSummary = transcript.length > 0 ? buildSessionSummary(transcript) : undefined;
+        const resumed = await askExistingSession(
+          effectiveArgs as AskArgs & { sessionId: string },
+          ctx,
+          deps,
+          rebuiltChat,
+          contextUsed,
+          sessionSummary,
+        );
+        if (resumed) return resumed;
+      }
+    }
 
     return await askNewSession(
       effectiveArgs as AskArgs & { sessionId: string },
@@ -847,6 +940,36 @@ function sessionResources(sessionId: string) {
   };
 }
 
+function attachSessionMetadata(
+  result: CallToolResult,
+  sessionId: string,
+  rebuiltAt?: number,
+): CallToolResult {
+  if (result.isError) {
+    return result;
+  }
+
+  const structured = result.structuredContent;
+  return {
+    ...result,
+    structuredContent:
+      structured && typeof structured === 'object'
+        ? {
+            ...structured,
+            session: {
+              id: sessionId,
+              ...(rebuiltAt !== undefined ? { rebuiltAt } : {}),
+            },
+          }
+        : {
+            session: {
+              id: sessionId,
+              ...(rebuiltAt !== undefined ? { rebuiltAt } : {}),
+            },
+          },
+  };
+}
+
 function assembleChatOutput(
   result: CallToolResult,
   sessionIdHint: string | undefined,
@@ -863,6 +986,23 @@ function assembleChatOutput(
     ? structured.schemaWarnings.filter((value): value is string => typeof value === 'string')
     : undefined;
   const sessionId = extractSessionId(result, sessionIdHint);
+  const session =
+    sessionId && typeof structured.session === 'object' && structured.session !== null
+      ? {
+          id: sessionId,
+          resources: sessionResources(sessionId),
+          ...(typeof (structured.session as Record<string, unknown>).rebuiltAt === 'number'
+            ? {
+                rebuiltAt: (structured.session as Record<string, unknown>).rebuiltAt as number,
+              }
+            : {}),
+        }
+      : sessionId
+        ? {
+            id: sessionId,
+            resources: sessionResources(sessionId),
+          }
+        : undefined;
   return safeValidateStructuredContent(
     'chat',
     ChatOutputSchema,
@@ -870,12 +1010,7 @@ function assembleChatOutput(
       ...buildBaseStructuredOutput(taskId, warnings),
       answer,
       data: structured.data,
-      session: sessionId
-        ? {
-            id: sessionId,
-            resources: sessionResources(sessionId),
-          }
-        : undefined,
+      session,
       functionCalls: structured.functionCalls,
       thoughts: structured.thoughts,
       toolEvents: structured.toolEvents,
@@ -891,15 +1026,25 @@ export async function chatWork(
   args: ChatInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
+  let responseSchema: GeminiResponseSchema | undefined;
+  if (args.responseSchemaJson !== undefined) {
+    try {
+      responseSchema = parseResponseSchemaJsonValue(args.responseSchemaJson);
+    } catch (error) {
+      return error instanceof AppError
+        ? error.toToolResult()
+        : new AppError('chat', 'responseSchemaJson must be valid JSON.').toToolResult();
+    }
+  }
+
   const result = await askWork(
     {
       message: args.goal,
       sessionId: args.sessionId,
-      responseSchema:
-        args.responseSchemaJson !== undefined
-          ? parseResponseSchemaJsonValue(args.responseSchemaJson)
-          : undefined,
+      responseSchema,
+      maxOutputTokens: args.maxOutputTokens,
       seed: args.seed,
+      safetySettings: args.safetySettings,
       systemInstruction: args.systemInstruction,
       temperature: args.temperature,
       thinkingLevel: args.thinkingLevel,

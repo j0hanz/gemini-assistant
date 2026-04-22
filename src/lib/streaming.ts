@@ -636,6 +636,7 @@ export function validateStreamResult(result: StreamResult, toolName: string): Ca
 export function extractUsage(meta?: GenerateContentResponseUsageMetadata) {
   if (!meta) return undefined;
   return pickDefined({
+    cachedContentTokenCount: meta.cachedContentTokenCount,
     promptTokenCount: meta.promptTokenCount,
     candidatesTokenCount: meta.candidatesTokenCount,
     thoughtsTokenCount: meta.thoughtsTokenCount,

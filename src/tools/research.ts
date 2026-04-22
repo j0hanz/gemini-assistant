@@ -19,16 +19,16 @@ import {
   appendSources,
   appendUrlStatus,
   buildBaseStructuredOutput,
-  collectGroundedSourceDetails,
-  collectGroundedSources,
+  collectGroundedSourceDetailsWithCounts,
+  collectGroundedSourcesWithCounts,
   collectGroundingCitations,
   collectSearchEntryPoint,
-  collectUrlMetadata,
+  collectUrlMetadataWithCounts,
   formatCountLabel,
   mergeSourceDetails,
   safeValidateStructuredContent,
 } from '../lib/response.js';
-import { type StreamResult } from '../lib/streaming.js';
+import { deriveComputationsFromToolEvents, type StreamResult } from '../lib/streaming.js';
 import {
   elicitTaskInput,
   READONLY_NON_IDEMPOTENT_ANNOTATIONS,
@@ -119,10 +119,26 @@ function appendSearchEntryPointContent(
   });
 }
 
-function buildDroppedSupportWarnings(droppedSupportCount: number): string[] {
-  return droppedSupportCount > 0
-    ? [`dropped ${String(droppedSupportCount)} non-public grounding supports`]
-    : [];
+function buildDroppedSupportWarnings({
+  droppedChunkCount,
+  droppedSupportCount,
+  droppedUrlCount,
+}: {
+  droppedChunkCount: number;
+  droppedSupportCount: number;
+  droppedUrlCount: number;
+}): string[] {
+  return [
+    ...(droppedSupportCount > 0
+      ? [`dropped ${String(droppedSupportCount)} non-public grounding supports`]
+      : []),
+    ...(droppedChunkCount > 0
+      ? [`dropped ${String(droppedChunkCount)} non-public grounding chunks`]
+      : []),
+    ...(droppedUrlCount > 0
+      ? [`dropped ${String(droppedUrlCount)} non-public URL metadata entries`]
+      : []),
+  ];
 }
 
 function extractSampledText(content: unknown): string {
@@ -183,7 +199,7 @@ function emitDeepResearchToolBudgetLogs(
   ctx: ServerContext,
   streamResult: StreamResult,
   searchDepth: number,
-): void {
+): string[] {
   const toolsUsedOccurrences = countOccurrences(streamResult.toolsUsedOccurrences);
   const payload = {
     searchDepth,
@@ -197,11 +213,15 @@ function emitDeepResearchToolBudgetLogs(
     .catch(() => undefined);
 
   if (searchDepth >= 3 && !('codeExecution' in toolsUsedOccurrences)) {
+    const warning = `deep research did not invoke Code Execution at depth ${String(searchDepth)}`;
     log.warn('deep research did not invoke Code Execution', payload);
     void ctx.mcpReq
       .log('warning', 'deep research did not invoke Code Execution')
       .catch(() => undefined);
+    return [warning];
   }
+
+  return [];
 }
 
 function buildAgenticSearchResult(
@@ -210,20 +230,36 @@ function buildAgenticSearchResult(
   ctx: ServerContext,
   searchDepth: number,
 ) {
-  emitDeepResearchToolBudgetLogs(ctx, streamResult, searchDepth);
+  const deepResearchWarnings = emitDeepResearchToolBudgetLogs(ctx, streamResult, searchDepth);
 
-  const groundedSources = collectGroundedSources(streamResult.groundingMetadata);
-  const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
+  const groundedSourcesResult = collectGroundedSourcesWithCounts(streamResult.groundingMetadata);
+  const groundedSources = groundedSourcesResult.items;
+  const urlMetadataResult = collectUrlMetadataWithCounts(
+    streamResult.urlContextMetadata?.urlMetadata,
+  );
+  const urlMetadata = urlMetadataResult.items;
   const urlContextSources = collectUrlContextSources(urlMetadata);
+  const groundedSourceDetailsResult = collectGroundedSourceDetailsWithCounts(
+    streamResult.groundingMetadata,
+    new Set(urlContextSources),
+  );
   const sourceDetails = mergeSourceDetails(
-    collectGroundedSourceDetails(streamResult.groundingMetadata, new Set(urlContextSources)),
+    groundedSourceDetailsResult.items,
     buildUrlContextSourceDetails(urlContextSources),
   );
   const { citations, droppedSupportCount } = collectGroundingCitations(
     streamResult.groundingMetadata,
   );
   const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
-  const warnings = buildDroppedSupportWarnings(droppedSupportCount);
+  const warnings = [
+    ...buildDroppedSupportWarnings({
+      droppedSupportCount,
+      droppedChunkCount: groundedSourceDetailsResult.droppedNonPublic,
+      droppedUrlCount: urlMetadataResult.droppedNonPublic,
+    }),
+    ...deepResearchWarnings,
+  ];
+  const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
   const contentAdditions: CallToolResult['content'] = [];
 
   appendSources(contentAdditions, formatSourceLabels(sourceDetails));
@@ -241,10 +277,11 @@ function buildAgenticSearchResult(
       urlContextSources: urlContextSources.length > 0 ? urlContextSources : undefined,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
       toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
-      grounded: groundedSources.length > 0,
+      grounded: sourceDetails.length > 0 || citations.length > 0,
       urlContextUsed: urlContextSources.length > 0,
       citations: citations.length > 0 ? citations : undefined,
       searchEntryPoint,
+      computations: computations.length > 0 ? computations : undefined,
       warnings: warnings.length > 0 ? warnings : undefined,
     }),
     reportMessage: buildSourceReportMessage(groundedSources.length),
@@ -252,18 +289,31 @@ function buildAgenticSearchResult(
 }
 
 function buildSearchResult(streamResult: StreamResult, textContent: string) {
-  const groundedSources = collectGroundedSources(streamResult.groundingMetadata);
-  const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
+  const groundedSourcesResult = collectGroundedSourcesWithCounts(streamResult.groundingMetadata);
+  const groundedSources = groundedSourcesResult.items;
+  const urlMetadataResult = collectUrlMetadataWithCounts(
+    streamResult.urlContextMetadata?.urlMetadata,
+  );
+  const urlMetadata = urlMetadataResult.items;
   const urlContextSources = collectUrlContextSources(urlMetadata);
+  const groundedSourceDetailsResult = collectGroundedSourceDetailsWithCounts(
+    streamResult.groundingMetadata,
+    new Set(urlContextSources),
+  );
   const sourceDetails = mergeSourceDetails(
-    collectGroundedSourceDetails(streamResult.groundingMetadata, new Set(urlContextSources)),
+    groundedSourceDetailsResult.items,
     buildUrlContextSourceDetails(urlContextSources),
   );
   const { citations, droppedSupportCount } = collectGroundingCitations(
     streamResult.groundingMetadata,
   );
   const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
-  const warnings = buildDroppedSupportWarnings(droppedSupportCount);
+  const warnings = buildDroppedSupportWarnings({
+    droppedSupportCount,
+    droppedChunkCount: groundedSourceDetailsResult.droppedNonPublic,
+    droppedUrlCount: urlMetadataResult.droppedNonPublic,
+  });
+  const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
   const contentAdditions: CallToolResult['content'] = [];
 
   appendSources(contentAdditions, formatSourceLabels(sourceDetails));
@@ -286,10 +336,11 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
       sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
       urlContextSources: urlContextSources.length > 0 ? urlContextSources : undefined,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
-      grounded: groundedSources.length > 0,
+      grounded: sourceDetails.length > 0 || citations.length > 0,
       urlContextUsed: urlContextSources.length > 0,
       citations: citations.length > 0 ? citations : undefined,
       searchEntryPoint,
+      computations: computations.length > 0 ? computations : undefined,
       warnings: warnings.length > 0 ? warnings : undefined,
     }),
     reportMessage: buildSourceReportMessage(groundedSources.length),
@@ -297,18 +348,31 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
 }
 
 function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) {
-  const groundedSources = collectGroundedSources(streamResult.groundingMetadata);
-  const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
+  const groundedSourcesResult = collectGroundedSourcesWithCounts(streamResult.groundingMetadata);
+  const groundedSources = groundedSourcesResult.items;
+  const urlMetadataResult = collectUrlMetadataWithCounts(
+    streamResult.urlContextMetadata?.urlMetadata,
+  );
+  const urlMetadata = urlMetadataResult.items;
   const urlContextSources = collectUrlContextSources(urlMetadata);
+  const groundedSourceDetailsResult = collectGroundedSourceDetailsWithCounts(
+    streamResult.groundingMetadata,
+    new Set(urlContextSources),
+  );
   const sourceDetails = mergeSourceDetails(
-    collectGroundedSourceDetails(streamResult.groundingMetadata, new Set(urlContextSources)),
+    groundedSourceDetailsResult.items,
     buildUrlContextSourceDetails(urlContextSources),
   );
   const { citations, droppedSupportCount } = collectGroundingCitations(
     streamResult.groundingMetadata,
   );
   const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
-  const warnings = buildDroppedSupportWarnings(droppedSupportCount);
+  const warnings = buildDroppedSupportWarnings({
+    droppedSupportCount,
+    droppedChunkCount: groundedSourceDetailsResult.droppedNonPublic,
+    droppedUrlCount: urlMetadataResult.droppedNonPublic,
+  });
+  const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
   const contentAdditions: CallToolResult['content'] = [];
 
   appendSources(contentAdditions, formatSourceLabels(sourceDetails));
@@ -325,10 +389,11 @@ function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) 
       sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
       urlContextSources: urlContextSources.length > 0 ? urlContextSources : undefined,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
-      grounded: groundedSources.length > 0,
+      grounded: false,
       urlContextUsed: urlContextSources.length > 0,
       citations: citations.length > 0 ? citations : undefined,
       searchEntryPoint,
+      computations: computations.length > 0 ? computations : undefined,
       warnings: warnings.length > 0 ? warnings : undefined,
     }),
     reportMessage: `${formatCountLabel(urlMetadata.length, 'URL')} retrieved`,
@@ -626,6 +691,7 @@ function buildResearchStructuredContent(
       : {}),
     ...(structured.citations ? { citations: structured.citations } : {}),
     ...(structured.searchEntryPoint ? { searchEntryPoint: structured.searchEntryPoint } : {}),
+    ...(structured.computations ? { computations: structured.computations } : {}),
     ...(structured.contextUsed ? { contextUsed: structured.contextUsed } : {}),
     ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
     ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),

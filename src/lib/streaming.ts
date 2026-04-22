@@ -49,6 +49,14 @@ export interface ToolEvent {
   toolType?: string;
 }
 
+export interface CodeComputation {
+  code: string;
+  language?: string;
+  outcome?: string;
+  output?: string;
+  id?: string;
+}
+
 export interface StreamResult {
   text: string;
   textByWave: string[];
@@ -97,6 +105,7 @@ interface StreamProcessingState extends StreamMetadata {
   currentProgress: number;
   _fnSeen: Set<string>;
   functionCalls: FunctionCallEntry[];
+  groundingProgressReported: boolean;
   hadToolActivity: boolean;
   namelessFunctionCallCount: number;
   parts: Part[];
@@ -213,6 +222,7 @@ function createStreamProcessingState(): StreamProcessingState {
     currentProgress: 0,
     _fnSeen: new Set<string>(),
     functionCalls: [],
+    groundingProgressReported: false,
     hadToolActivity: false,
     hadCandidate: false,
     namelessFunctionCallCount: 0,
@@ -274,6 +284,10 @@ function normalizeToolName(toolType: string | undefined): string | undefined {
       return 'fileSearch';
     case 'GOOGLE_MAPS':
       return 'googleMaps';
+    case 'CODE_EXECUTION':
+      return 'codeExecution';
+    case 'COMPUTER_USE':
+      return 'computerUse';
     default:
       return toolType?.trim() ? toolType : undefined;
   }
@@ -306,8 +320,14 @@ async function maybeReportBuiltInToolProgress(
   state: StreamProcessingState,
   msg: ProgressMessageFormatter,
 ): Promise<void> {
-  if (candidate.groundingMetadata && !state.toolsUsed.has('googleSearch')) {
-    await recordToolActivity(ctx, state, msg, 'Searching the web', 'googleSearch');
+  const hasGoogleSearchToolCall = (candidate.content?.parts ?? []).some(
+    (part) =>
+      normalizeToolName(part.toolCall?.toolType) === 'googleSearch' ||
+      normalizeToolName(part.toolResponse?.toolType) === 'googleSearch',
+  );
+  if (candidate.groundingMetadata && !hasGoogleSearchToolCall && !state.groundingProgressReported) {
+    state.groundingProgressReported = true;
+    await recordToolActivity(ctx, state, msg, 'Retrieving grounded sources');
   }
   if (candidate.urlContextMetadata && !state.toolsUsed.has('urlContext')) {
     await recordToolActivity(ctx, state, msg, 'Retrieving URL context', 'urlContext');
@@ -748,6 +768,80 @@ function finalizeStreamResult(state: StreamProcessingState): StreamResult {
   };
 }
 
+function hasCodeExecutionEvents(toolEvents: readonly ToolEvent[]): boolean {
+  return toolEvents.some(
+    (event) => event.kind === 'executable_code' || event.kind === 'code_execution_result',
+  );
+}
+
+export function renderCodeExecutionParts(
+  toolEvents: readonly ToolEvent[] = [],
+): { type: 'text'; text: string }[] {
+  return toolEvents.flatMap((event) => {
+    if (event.kind === 'executable_code') {
+      const language = event.language ?? '';
+      return [{ type: 'text' as const, text: `\`\`\`${language}\n${event.code ?? ''}\n\`\`\`` }];
+    }
+
+    if (event.kind === 'code_execution_result') {
+      const outcome = event.outcome ? ` (${event.outcome})` : '';
+      const text =
+        event.output === undefined || event.output.length === 0
+          ? `Output${outcome}: (empty)`
+          : `Output${outcome}:\n\`\`\`\n${event.output}\n\`\`\``;
+      return [{ type: 'text' as const, text }];
+    }
+
+    return [];
+  });
+}
+
+export function deriveComputationsFromToolEvents(
+  toolEvents: readonly ToolEvent[],
+): CodeComputation[] {
+  const usedResultIndexes = new Set<number>();
+  const computations: CodeComputation[] = [];
+
+  for (const [execIndex, event] of toolEvents.entries()) {
+    if (event.kind !== 'executable_code' || event.code === undefined) {
+      continue;
+    }
+
+    const resultIndex =
+      event.id !== undefined
+        ? toolEvents.findIndex(
+            (candidate, candidateIndex) =>
+              candidateIndex > execIndex &&
+              !usedResultIndexes.has(candidateIndex) &&
+              candidate.kind === 'code_execution_result' &&
+              candidate.id === event.id,
+          )
+        : toolEvents.findIndex(
+            (candidate, candidateIndex) =>
+              candidateIndex > execIndex &&
+              !usedResultIndexes.has(candidateIndex) &&
+              candidate.kind === 'code_execution_result' &&
+              candidate.id === undefined,
+          );
+    const result = resultIndex >= 0 ? toolEvents[resultIndex] : undefined;
+    if (resultIndex >= 0) {
+      usedResultIndexes.add(resultIndex);
+    }
+
+    computations.push(
+      pickDefined({
+        code: event.code,
+        language: event.language,
+        id: event.id,
+        outcome: result?.outcome,
+        output: result?.output,
+      }),
+    );
+  }
+
+  return computations;
+}
+
 export async function consumeStreamWithProgress(
   stream: AsyncGenerator<GenerateContentResponse>,
   ctx: ServerContext,
@@ -815,8 +909,12 @@ export function validateStreamResult(result: StreamResult, toolName: string): Ca
   const errResult = finishReasonToError(result.finishReason, result.text, toolName);
   if (errResult) return errResult.toToolResult();
 
+  const toolEvents = (result as Partial<StreamResult>).toolEvents ?? [];
   return {
-    content: [{ type: 'text', text: result.text }],
+    content: [
+      { type: 'text', text: result.text },
+      ...(hasCodeExecutionEvents(toolEvents) ? renderCodeExecutionParts(toolEvents) : []),
+    ],
   };
 }
 

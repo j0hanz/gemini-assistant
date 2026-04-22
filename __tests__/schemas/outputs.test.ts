@@ -119,6 +119,15 @@ describe('ResearchOutputSchema', () => {
         { origin: 'both', title: 'Example', url: 'https://example.com' },
         { origin: 'urlContext', url: 'https://example.com/context' },
       ],
+      computations: [
+        {
+          id: 'exec-1',
+          code: 'print(2)',
+          language: 'PYTHON',
+          outcome: 'OUTCOME_OK',
+          output: '2',
+        },
+      ],
     });
     assert.ok(result.success);
 
@@ -173,6 +182,7 @@ describe('ChatOutputSchema', () => {
           thoughtSignature: 'sig-thought',
         },
       ],
+      computations: [{ code: 'print(1)', output: '1' }],
     });
 
     assert.ok(result.success);

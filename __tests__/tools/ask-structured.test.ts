@@ -91,4 +91,31 @@ describe('ask structured output shaping', () => {
     assert.ok(structured.schemaWarnings);
     assert.match(structured.schemaWarnings?.[0] ?? '', /does not match schema/i);
   });
+
+  it('surfaces code execution computations from tool events', () => {
+    const structured = buildAskStructuredContent('Answer', {
+      functionCalls: [],
+      thoughtText: '',
+      toolEvents: [
+        { kind: 'executable_code', id: 'exec-1', code: 'print(2)', language: 'PYTHON' },
+        {
+          kind: 'code_execution_result',
+          id: 'exec-1',
+          outcome: 'OUTCOME_OK',
+          output: '2',
+        },
+      ],
+      usageMetadata: undefined,
+    });
+
+    assert.deepStrictEqual(structured.computations, [
+      {
+        id: 'exec-1',
+        code: 'print(2)',
+        language: 'PYTHON',
+        outcome: 'OUTCOME_OK',
+        output: '2',
+      },
+    ]);
+  });
 });

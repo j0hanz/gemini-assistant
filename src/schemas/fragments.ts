@@ -80,6 +80,7 @@ const toolEventFields = {
     .optional()
     .describe('Tool or function response payload'),
   code: z.string().describe('Executable code payload').optional(),
+  language: z.string().describe('Executable code language when available').optional(),
   output: z.string().describe('Code execution output').optional(),
   outcome: z.string().describe('Code execution outcome').optional(),
   text: z

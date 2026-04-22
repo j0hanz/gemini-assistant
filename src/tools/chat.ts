@@ -34,6 +34,7 @@ import {
   withRelatedTaskMeta,
 } from '../lib/response.js';
 import {
+  deriveComputationsFromToolEvents,
   extractUsage,
   type FunctionCallEntry,
   type StreamResult,
@@ -84,6 +85,7 @@ interface AskStructuredContent extends Record<string, unknown> {
   answer: string;
   contextUsed?: ContextUsed;
   data?: unknown;
+  computations?: ReturnType<typeof deriveComputationsFromToolEvents>;
   functionCalls?: FunctionCallEntry[];
   citationMetadata?: unknown;
   finishMessage?: string | undefined;
@@ -217,6 +219,7 @@ export function buildAskStructuredContent(
   const answer = parsedData === undefined ? text : JSON.stringify(parsedData, null, 2);
   const usage = extractUsage(streamResult.usageMetadata);
   const warnings = buildAskWarnings(parsedData, jsonMode, responseSchema);
+  const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
   const sharedMetadata = buildSharedStructuredMetadata({
     ...(contextUsed ? { contextUsed } : {}),
     functionCalls: streamResult.functionCalls,
@@ -232,6 +235,7 @@ export function buildAskStructuredContent(
   return {
     answer,
     ...(parsedData !== undefined ? { data: parsedData } : {}),
+    ...(computations.length > 0 ? { computations } : {}),
     ...(warnings.length > 0 ? { schemaWarnings: warnings } : {}),
     ...sharedMetadata,
   };

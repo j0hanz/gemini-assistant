@@ -195,7 +195,12 @@ describe('research tool contracts', () => {
         {
           candidates: [
             {
-              content: { parts: [{ text: 'Deep research report' }] },
+              content: {
+                parts: [
+                  { toolCall: { id: 'search-1', toolType: 'GOOGLE_SEARCH_WEB' } },
+                  { text: 'Deep research report' },
+                ],
+              },
               finishReason: 'STOP',
               groundingMetadata: {
                 groundingChunks: [{ web: { title: 'Docs', uri: 'https://example.com/docs' } }],
@@ -360,7 +365,7 @@ describe('research tool contracts', () => {
       assert.deepStrictEqual(structured.sourceDetails, [
         { origin: 'urlContext', url: 'https://example.com/context' },
       ]);
-      assert.strictEqual(structured.grounded, false);
+      assert.strictEqual(structured.grounded, true);
       assert.strictEqual(structured.urlContextUsed, true);
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
@@ -381,7 +386,20 @@ describe('research tool contracts', () => {
         {
           candidates: [
             {
-              content: { parts: [{ text: 'Deep research report' }] },
+              content: {
+                parts: [
+                  { executableCode: { id: 'exec-1', code: 'print(2)', language: 'PYTHON' } },
+                  {
+                    codeExecutionResult: {
+                      id: 'exec-1',
+                      outcome: 'OUTCOME_OK',
+                      output: '2',
+                    },
+                  },
+                  { executableCode: { code: 'print(3)' } },
+                  { text: 'Deep research report' },
+                ],
+              },
               finishReason: 'STOP',
               groundingMetadata: {
                 groundingChunks: [
@@ -462,7 +480,25 @@ describe('research tool contracts', () => {
       assert.deepStrictEqual(structured.searchEntryPoint, {
         renderedContent: '<div>search</div>',
       });
-      assert.deepStrictEqual(structured.warnings, ['dropped 1 non-public grounding supports']);
+      assert.deepStrictEqual(structured.computations, [
+        {
+          id: 'exec-1',
+          code: 'print(2)',
+          language: 'PYTHON',
+          outcome: 'OUTCOME_OK',
+          output: '2',
+        },
+        { code: 'print(3)' },
+      ]);
+      assert.deepStrictEqual(structured.warnings, [
+        'dropped 1 non-public grounding supports',
+        'dropped 1 non-public grounding chunks',
+      ]);
+      assert.ok(
+        store.stored[0]?.result.content.some((entry) =>
+          entry.text?.includes('```PYTHON\nprint(2)\n```'),
+        ),
+      );
       assert.ok(
         store.stored[0]?.result.content.some((entry) =>
           entry.text?.includes('Google Search Suggestions:\n<div>search</div>'),

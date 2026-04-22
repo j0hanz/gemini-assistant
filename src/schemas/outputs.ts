@@ -47,6 +47,14 @@ export type SourceDetail = z.infer<typeof SourceDetailSchema>;
 export type GroundingCitation = z.infer<typeof GroundingCitationSchema>;
 export type SearchEntryPoint = z.infer<typeof SearchEntryPointSchema>;
 
+const ComputationSchema = z.strictObject({
+  code: z.string().describe('Executable code emitted by Gemini Code Execution'),
+  language: z.string().optional().describe('Code language when provided'),
+  outcome: z.string().optional().describe('Code execution outcome when provided'),
+  output: z.string().optional().describe('Code execution output when provided'),
+  id: z.string().optional().describe('Code execution identifier when provided'),
+});
+
 const AnalyzeSummaryOutputSchema = z.strictObject({
   ...publicBaseOutputFields,
   kind: z.literal('summary').describe('Analyze output selector (`summary`)'),
@@ -96,6 +104,10 @@ export const ChatOutputSchema = z.strictObject({
       'Session metadata for new or resumed chat sessions. Resumed sessions without persisted Part[] (e.g. pre-upgrade transcripts) cannot be resumed and must be started fresh.',
     ),
   contextUsed: ContextUsedSchema.optional(),
+  computations: z
+    .array(ComputationSchema)
+    .optional()
+    .describe('Gemini Code Execution computations surfaced from tool events'),
   workspaceCacheApplied: z
     .boolean()
     .default(false)
@@ -130,6 +142,10 @@ export const ResearchOutputSchema = z.strictObject({
   searchEntryPoint: SearchEntryPointSchema.optional().describe(
     'Google Search entry point content for display compliance',
   ),
+  computations: z
+    .array(ComputationSchema)
+    .optional()
+    .describe('Gemini Code Execution computations surfaced from tool events'),
   contextUsed: ContextUsedSchema.optional(),
 });
 

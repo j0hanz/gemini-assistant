@@ -419,7 +419,7 @@ describe('consumeStreamWithProgress', () => {
     });
   });
 
-  it('detects grounding metadata and reports search tool', async () => {
+  it('reports grounding metadata without attributing googleSearch', async () => {
     const { ctx, progressCalls } = makeMockContext();
     const chunk = makeChunk([{ text: 'search result' }], FinishReason.STOP);
     const candidates = chunk.candidates ?? [];
@@ -433,13 +433,37 @@ describe('consumeStreamWithProgress', () => {
 
     const result = await consumeStreamWithProgress(stream, ctx);
 
-    assert.ok(result.toolsUsed.includes('googleSearch'));
+    assert.deepStrictEqual(result.toolsUsed, []);
     const messages = progressCalls.map((c) => c.message);
-    assert.ok(messages.includes('Searching the web'));
+    assert.ok(messages.includes('Retrieving grounded sources'));
     assert.ok(
       messages.includes('Compiling results'),
-      'text after search should emit Compiling results',
+      'text after grounded retrieval should emit Compiling results',
     );
+  });
+
+  it('normalizes CODE_EXECUTION tool calls', async () => {
+    const { ctx } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ toolCall: { id: 'tool-1', toolType: 'CODE_EXECUTION' } } as Part]),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.deepStrictEqual(result.toolsUsed, ['codeExecution']);
+    assert.deepStrictEqual(result.toolsUsedOccurrences, ['codeExecution']);
+  });
+
+  it('passes unknown tool types through verbatim', async () => {
+    const { ctx } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ toolCall: { id: 'tool-1', toolType: 'UNKNOWN_TOOL' } } as Part]),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.deepStrictEqual(result.toolsUsed, ['UNKNOWN_TOOL']);
+    assert.deepStrictEqual(result.toolsUsedOccurrences, ['UNKNOWN_TOOL']);
   });
 
   it('detects function calls and reports tool name', async () => {
@@ -700,9 +724,12 @@ describe('consumeStreamWithProgress', () => {
     await consumeStreamWithProgress(fakeStream([chunk]), ctx);
 
     const messages = progressCalls.map((call) => call.message);
-    assert.strictEqual(messages.filter((message) => message === 'Searching the web').length, 1);
     assert.strictEqual(
       messages.filter((message) => message === 'Built-in tool: googleSearch').length,
+      1,
+    );
+    assert.strictEqual(
+      messages.filter((message) => message === 'Retrieving grounded sources').length,
       0,
     );
   });
@@ -920,7 +947,10 @@ describe('consumeStreamWithProgress', () => {
 
   it('tracks multiple tool types in toolsUsed', async () => {
     const { ctx, progressCalls } = makeMockContext();
-    const searchChunk = makeChunk([{ text: 'found data' }]);
+    const searchChunk = makeChunk([
+      { toolCall: { id: 'search-1', toolType: 'GOOGLE_SEARCH_WEB' } },
+      { text: 'found data' },
+    ] as Part[]);
     const candidates = searchChunk.candidates ?? [];
     const firstCandidate = candidates[0];
     if (firstCandidate) {
@@ -950,7 +980,10 @@ describe('consumeStreamWithProgress', () => {
 
   it('handles mixed Gemini-style chunk sequences while preserving metadata', async () => {
     const { ctx, progressCalls } = makeMockContext();
-    const researchChunk = makeChunk([{ text: '**Planning**\n\nInvestigating.', thought: true }]);
+    const researchChunk = makeChunk([
+      { toolCall: { id: 'search-1', toolType: 'GOOGLE_SEARCH_WEB' } },
+      { text: '**Planning**\n\nInvestigating.', thought: true },
+    ] as Part[]);
     const candidates = researchChunk.candidates ?? [];
     const firstCandidate = candidates[0];
     if (firstCandidate) {
@@ -991,7 +1024,7 @@ describe('consumeStreamWithProgress', () => {
     assert.ok(result.toolEvents.some((event) => event.kind === 'code_execution_result'));
 
     const messages = progressCalls.map((c) => c.message);
-    assert.ok(messages.includes('Searching the web'));
+    assert.ok(messages.includes('Built-in tool: googleSearch'));
     assert.ok(messages.includes('Planning'));
     assert.ok(messages.includes('Tool: fetchRepo'));
     assert.ok(messages.includes('Executing code'));
@@ -1231,6 +1264,31 @@ describe('validateStreamResult', () => {
     );
     assert.strictEqual(result.isError, undefined);
     assert.strictEqual(result.content[0]?.text, 'Hello');
+  });
+
+  it('renders code execution events into content blocks', () => {
+    const result = validateStreamResult(
+      {
+        text: 'The answer is 2',
+        parts: [{ text: 'The answer is 2' }],
+        finishReason: FinishReason.STOP,
+        hadCandidate: true,
+        toolEvents: [
+          { kind: 'executable_code', code: 'print(1 + 1)', language: 'PYTHON' },
+          {
+            kind: 'code_execution_result',
+            outcome: Outcome.OUTCOME_OK,
+            output: '2',
+          },
+        ],
+      } as StreamResult,
+      'test',
+    );
+
+    assert.deepStrictEqual(
+      result.content.map((entry) => (entry.type === 'text' ? entry.text : '')),
+      ['The answer is 2', '```PYTHON\nprint(1 + 1)\n```', 'Output (OUTCOME_OK):\n```\n2\n```'],
+    );
   });
 
   it('returns error for SAFETY finish reason', () => {

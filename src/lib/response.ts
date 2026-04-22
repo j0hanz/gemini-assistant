@@ -20,13 +20,26 @@ import { logger } from './logger.js';
 import { pickDefined } from './object.js';
 import { isPublicHttpUrl } from './validation.js';
 
-export function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlMetadataEntry[] {
-  if (!urlMetadata) return [];
+export interface CollectedItems<T> {
+  items: T[];
+  droppedNonPublic: number;
+}
+
+export function collectUrlMetadataWithCounts(
+  urlMetadata: UrlMetadata[] | undefined,
+): CollectedItems<UrlMetadataEntry> {
+  if (!urlMetadata) return { items: [], droppedNonPublic: 0 };
   const entries: UrlMetadataEntry[] = [];
   const seen = new Set<string>();
+  let droppedNonPublic = 0;
   for (const meta of urlMetadata) {
     const url = meta.retrievedUrl;
-    if (!url || seen.has(url) || !isPublicHttpUrl(url)) {
+    if (!url || seen.has(url)) {
+      continue;
+    }
+
+    if (!isPublicHttpUrl(url)) {
+      droppedNonPublic += 1;
       continue;
     }
 
@@ -36,24 +49,44 @@ export function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlM
       status: meta.urlRetrievalStatus ?? 'UNKNOWN',
     });
   }
-  return entries;
+  return { items: entries, droppedNonPublic };
+}
+
+export function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlMetadataEntry[] {
+  return collectUrlMetadataWithCounts(urlMetadata).items;
+}
+
+export function collectGroundedSourcesWithCounts(
+  groundingMetadata: GroundingMetadata | undefined,
+): CollectedItems<string> {
+  const collected = collectGroundedSourceDetailsWithCounts(groundingMetadata);
+  return {
+    items: collected.items.map((source) => source.url),
+    droppedNonPublic: collected.droppedNonPublic,
+  };
 }
 
 export function collectGroundedSources(groundingMetadata: GroundingMetadata | undefined): string[] {
-  return collectGroundedSourceDetails(groundingMetadata).map((source) => source.url);
+  return collectGroundedSourcesWithCounts(groundingMetadata).items;
 }
 
-export function collectGroundedSourceDetails(
+export function collectGroundedSourceDetailsWithCounts(
   groundingMetadata: GroundingMetadata | undefined,
   urlContextUrls = new Set<string>(),
-): SourceDetail[] {
-  if (!groundingMetadata?.groundingChunks) return [];
+): CollectedItems<SourceDetail> {
+  if (!groundingMetadata?.groundingChunks) return { items: [], droppedNonPublic: 0 };
 
   const sources: SourceDetail[] = [];
   const seen = new Set<string>();
+  let droppedNonPublic = 0;
   for (const chunk of groundingMetadata.groundingChunks) {
     const uri = chunk.web?.uri;
-    if (!uri || seen.has(uri) || !isPublicHttpUrl(uri)) continue;
+    if (!uri || seen.has(uri)) continue;
+
+    if (!isPublicHttpUrl(uri)) {
+      droppedNonPublic += 1;
+      continue;
+    }
 
     seen.add(uri);
     const title = chunk.web?.title;
@@ -61,7 +94,14 @@ export function collectGroundedSourceDetails(
     sources.push(title ? { origin, title, url: uri } : { origin, url: uri });
   }
 
-  return sources;
+  return { items: sources, droppedNonPublic };
+}
+
+export function collectGroundedSourceDetails(
+  groundingMetadata: GroundingMetadata | undefined,
+  urlContextUrls = new Set<string>(),
+): SourceDetail[] {
+  return collectGroundedSourceDetailsWithCounts(groundingMetadata, urlContextUrls).items;
 }
 
 export function mergeSourceDetails(

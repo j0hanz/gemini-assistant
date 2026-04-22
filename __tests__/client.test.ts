@@ -33,13 +33,22 @@ describe('client config', () => {
     assert.strictEqual(config.safetySettings?.[0]?.threshold, HarmBlockThreshold.BLOCK_ONLY_HIGH);
   });
 
-  it('includes thinkingBudget with thinkingLevel when provided', () => {
+  it('strips thinkingBudget when thinkingLevel is provided', () => {
     const config = buildGenerateContentConfig({
       thinkingLevel: 'LOW',
       thinkingBudget: 64,
     });
 
     assert.strictEqual(config.thinkingConfig?.thinkingLevel, ThinkingLevel.LOW);
+    assert.strictEqual(config.thinkingConfig?.thinkingBudget, undefined);
+  });
+
+  it('uses thinkingBudget as a fallback when thinkingLevel is absent', () => {
+    const config = buildGenerateContentConfig({
+      thinkingBudget: 64,
+    });
+
+    assert.strictEqual(config.thinkingConfig?.thinkingLevel, undefined);
     assert.strictEqual(config.thinkingConfig?.thinkingBudget, 64);
   });
 });

@@ -72,8 +72,9 @@ export function buildMergedToolConfig(
 function buildThinkingConfig(thinkingLevel?: AskThinkingLevel, thinkingBudget?: number) {
   return {
     ...(EXPOSE_THOUGHTS ? { includeThoughts: true } : {}),
+    // Gemini 3 precedence: thinkingLevel wins over thinkingBudget; see .github/google-genai-api.md §7.
     ...(thinkingLevel ? { thinkingLevel: THINKING_LEVEL_MAP[thinkingLevel] } : {}),
-    ...(thinkingBudget !== undefined ? { thinkingBudget } : {}),
+    ...(thinkingLevel === undefined && thinkingBudget !== undefined ? { thinkingBudget } : {}),
   };
 }
 

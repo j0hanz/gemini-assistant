@@ -68,7 +68,7 @@ export function buildGroundedAnswerPrompt(
     {
       promptText,
       systemInstruction:
-        'Answer using retrieved sources from this turn. Cite source URLs inline after the sentence they support. If no sources were retrieved, say so and label the answer as unverified.',
+        'Answer using retrieved sources from this turn. Prefer referencing sources by their URL when directly supported by retrieved content. If no sources were retrieved, say so and label the answer as unverified.',
     },
     cacheName,
   );

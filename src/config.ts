@@ -90,10 +90,20 @@ export function getTransportMode(): TransportMode {
 }
 
 export function getTransportConfig(): TransportConfig {
+  const corsOrigin = process.env.MCP_CORS_ORIGIN ?? '';
+  const host = parseNonEmptyStringEnv('MCP_HTTP_HOST', DEFAULT_HTTP_HOST);
+  const isStateless = parseBooleanEnv('MCP_STATELESS', false);
+
+  if (corsOrigin === '*' && !isStateless) {
+    throw new Error(
+      'MCP_CORS_ORIGIN="*" requires MCP_STATELESS="true". Wildcard CORS is not allowed for stateful transports.',
+    );
+  }
+
   return {
-    corsOrigin: process.env.MCP_CORS_ORIGIN ?? '',
-    host: parseNonEmptyStringEnv('MCP_HTTP_HOST', DEFAULT_HTTP_HOST),
-    isStateless: parseBooleanEnv('MCP_STATELESS', false),
+    corsOrigin,
+    host,
+    isStateless,
     maxSessions: parseIntEnv('MCP_MAX_TRANSPORT_SESSIONS', DEFAULT_MAX_TRANSPORT_SESSIONS, {
       min: 1,
       max: MAX_SESSION_COUNT,

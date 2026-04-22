@@ -7,7 +7,7 @@ import {
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
-import { createServer as createNodeServer } from 'node:http';
+import { createServer as createNodeServer, request as sendNodeRequest } from 'node:http';
 import { afterEach, describe, it } from 'node:test';
 
 import { ScopedLogger } from '../src/lib/logger.js';
@@ -84,6 +84,78 @@ function createRequest(
   });
 }
 
+function firstHeaderValue(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+
+  return value ?? null;
+}
+
+async function withAvailablePort<T>(run: (port: number) => Promise<T>): Promise<T> {
+  const probe = createNodeServer();
+  await new Promise<void>((resolve, reject) => {
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => resolve());
+  });
+
+  const address = probe.address();
+  assert.ok(address && typeof address === 'object');
+  const { port } = address;
+
+  await new Promise<void>((resolve, reject) => {
+    probe.close((err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+
+  return await run(port);
+}
+
+async function sendHttpRequest(options: {
+  body?: string;
+  headers?: Record<string, string>;
+  method: 'OPTIONS' | 'POST';
+  port: number;
+}): Promise<{
+  body: string;
+  headers: Record<string, string | string[] | undefined>;
+  status: number;
+}> {
+  return await new Promise((resolve, reject) => {
+    const request = sendNodeRequest(
+      {
+        host: '127.0.0.1',
+        port: options.port,
+        path: '/mcp',
+        method: options.method,
+        headers: options.headers,
+      },
+      (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => {
+          body += chunk;
+        });
+        response.on('end', () => {
+          resolve({
+            body,
+            headers: response.headers,
+            status: response.statusCode ?? 0,
+          });
+        });
+      },
+    );
+
+    request.on('error', reject);
+    if (options.body) {
+      request.write(options.body);
+    }
+    request.end();
+  });
+}
+
 async function initializeSession(
   transport: Awaited<ReturnType<typeof startWebStandardTransport>>,
 ): Promise<string> {
@@ -140,6 +212,7 @@ describe('startWebStandardTransport', () => {
         response.headers.get('Access-Control-Allow-Origin'),
         'https://app.example.com',
       );
+      assert.match(response.headers.get('Vary') ?? '', /Origin/);
       assert.match(response.headers.get('Access-Control-Expose-Headers') ?? '', /mcp-session-id/);
     } finally {
       await transport.close();
@@ -171,6 +244,7 @@ describe('startWebStandardTransport', () => {
         response.headers.get('Access-Control-Allow-Origin'),
         'https://app.example.com',
       );
+      assert.match(response.headers.get('Vary') ?? '', /Origin/);
       assert.match(response.headers.get('Access-Control-Expose-Headers') ?? '', /mcp-session-id/);
       assert.ok(response.headers.get('mcp-session-id'));
     } finally {
@@ -199,6 +273,7 @@ describe('startWebStandardTransport', () => {
 
       assert.strictEqual(response.status, 200);
       assert.strictEqual(response.headers.get('Access-Control-Allow-Origin'), null);
+      assert.strictEqual(response.headers.get('Vary'), null);
     } finally {
       await transport.close();
     }
@@ -264,6 +339,40 @@ describe('startWebStandardTransport', () => {
           {
             hostHeader: 'example.internal:3000',
             requestUrl: 'http://example.internal:3000/mcp',
+          },
+        ),
+      );
+
+      assert.strictEqual(response.status, 200);
+      assert.ok(response.headers.get('mcp-session-id'));
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('accepts explicit allowed hosts that differ from the bind host', async () => {
+    process.env.MCP_STATELESS = 'false';
+    process.env.MCP_HTTP_HOST = '192.0.2.1';
+    process.env.MCP_ALLOWED_HOSTS = 'mcp.internal';
+    const transport = await startWebStandardTransport(() => createServerInstance());
+
+    try {
+      const response = await transport.handler(
+        createRequest(
+          {
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'initialize',
+            params: {
+              capabilities: { roots: {} },
+              clientInfo: { name: 'transport-test', version: '0.0.1' },
+              protocolVersion: LATEST_PROTOCOL_VERSION,
+            },
+          },
+          undefined,
+          {
+            hostHeader: 'mcp.internal:3000',
+            requestUrl: 'http://mcp.internal:3000/mcp',
           },
         ),
       );
@@ -527,6 +636,105 @@ describe('startWebStandardTransport', () => {
 });
 
 describe('startHttpTransport', () => {
+  it('returns CORS preflight headers with Vary: Origin when enabled', async () => {
+    await withAvailablePort(async (port) => {
+      process.env.MCP_HTTP_HOST = '127.0.0.1';
+      process.env.MCP_HTTP_PORT = String(port);
+      process.env.MCP_CORS_ORIGIN = 'https://app.example.com';
+      process.env.MCP_STATELESS = 'true';
+
+      const transport = await startHttpTransport(() => createServerInstance());
+
+      try {
+        const response = await sendHttpRequest({
+          method: 'OPTIONS',
+          port,
+          headers: {
+            host: `127.0.0.1:${String(port)}`,
+            origin: 'https://app.example.com',
+          },
+        });
+
+        assert.strictEqual(response.status, 204);
+        assert.strictEqual(
+          firstHeaderValue(response.headers['access-control-allow-origin']),
+          'https://app.example.com',
+        );
+        assert.match(firstHeaderValue(response.headers.vary) ?? '', /Origin/);
+      } finally {
+        await transport.close();
+      }
+    });
+  });
+
+  it('rejects mismatched Host headers before CORS headers are applied', async () => {
+    await withAvailablePort(async (port) => {
+      process.env.MCP_HTTP_HOST = '127.0.0.1';
+      process.env.MCP_HTTP_PORT = String(port);
+      process.env.MCP_CORS_ORIGIN = 'https://app.example.com';
+      process.env.MCP_STATELESS = 'false';
+
+      const transport = await startHttpTransport(() => createServerInstance());
+
+      try {
+        const response = await sendHttpRequest({
+          method: 'POST',
+          port,
+          headers: {
+            host: 'evil.example.com',
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+        });
+
+        assert.strictEqual(response.status, 403);
+        assert.strictEqual(firstHeaderValue(response.headers['access-control-allow-origin']), null);
+        assert.match(response.body, /(Forbidden|Invalid Host)/);
+      } finally {
+        await transport.close();
+      }
+    });
+  });
+
+  it('accepts explicit allowed hosts that differ from the bind host', async () => {
+    await withAvailablePort(async (port) => {
+      process.env.MCP_HTTP_HOST = '127.0.0.1';
+      process.env.MCP_HTTP_PORT = String(port);
+      process.env.MCP_ALLOWED_HOSTS = 'app.example.com';
+      process.env.MCP_STATELESS = 'false';
+
+      const transport = await startHttpTransport(() => createServerInstance());
+
+      try {
+        const response = await sendHttpRequest({
+          method: 'POST',
+          port,
+          headers: {
+            host: 'app.example.com',
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'initialize',
+            params: {
+              capabilities: { roots: {} },
+              clientInfo: { name: 'transport-test', version: '0.0.1' },
+              protocolVersion: LATEST_PROTOCOL_VERSION,
+            },
+          }),
+        });
+
+        assert.strictEqual(response.status, 200);
+        assert.match(response.body, /"result"/);
+      } finally {
+        await transport.close();
+      }
+    });
+  });
+
   it('rejects bind conflicts during startup', async () => {
     const occupiedServer = createNodeServer();
     await new Promise<void>((resolve, reject) => {

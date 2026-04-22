@@ -12,7 +12,11 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 
 import { logger } from './lib/logger.js';
-import { parseAllowedHosts, resolveAllowedHosts, validateHostHeader } from './lib/validation.js';
+import {
+  isAutoDerivedAllowedHosts,
+  resolveAllowedHosts,
+  validateHostHeader,
+} from './lib/validation.js';
 
 import { getTransportConfig } from './config.js';
 
@@ -126,7 +130,39 @@ function warnIfUnprotected(host: string, hasProtection: boolean): void {
       `SECURITY: bound to ${host} without DNS rebinding protection. ` +
         'Set MCP_ALLOWED_HOSTS=hostname1,hostname2 to restrict accepted Host headers.',
     );
+    return;
   }
+
+  if (isAutoDerivedAllowedHosts(host)) {
+    log.warn(
+      `SECURITY: bound to ${host} with auto-derived Host header protection only. ` +
+        'Requests sent through DNS aliases, load balancers, or reverse proxies may be rejected. ' +
+        'Set MCP_ALLOWED_HOSTS=hostname1,hostname2 to allow those external hostnames explicitly.',
+    );
+  }
+}
+
+function appendUniqueHeaderValue(existing: string | null, value: string): string {
+  const values = (existing ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (!values.some((entry) => entry.toLowerCase() === value.toLowerCase())) {
+    values.push(value);
+  }
+
+  return values.join(', ');
+}
+
+function appendResponseVaryHeader(res: ServerResponse, value: string): void {
+  const existing = res.getHeader('Vary');
+  const serialized = Array.isArray(existing) ? existing.join(', ') : String(existing ?? '');
+  res.setHeader('Vary', appendUniqueHeaderValue(serialized, value));
+}
+
+function appendHeadersVaryHeader(headers: Headers, value: string): void {
+  headers.set('Vary', appendUniqueHeaderValue(headers.get('Vary'), value));
 }
 
 function logListening(host: string, port: number, runtime?: string): void {
@@ -454,6 +490,9 @@ function applyCors(app: ReturnType<typeof createMcpExpressApp>, corsOrigin: stri
 
   app.use((_req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+    if (corsOrigin !== '*') {
+      appendResponseVaryHeader(res, 'Origin');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader(
       'Access-Control-Allow-Headers',
@@ -473,11 +512,16 @@ function applyCorsHeaders(headers: Headers, corsOrigin: string): void {
   }
 
   headers.set('Access-Control-Allow-Origin', corsOrigin);
+  if (corsOrigin !== '*') {
+    appendHeadersVaryHeader(headers, 'Origin');
+  }
   headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   headers.set(
     'Access-Control-Allow-Headers',
     'Content-Type, mcp-session-id, Last-Event-Id, mcp-protocol-version',
   );
+  // Credentials mode is intentionally unsupported. Do not emit
+  // Access-Control-Allow-Credentials without a dedicated stateful-session review.
   headers.set('Access-Control-Expose-Headers', 'mcp-session-id, mcp-protocol-version');
 }
 
@@ -535,13 +579,29 @@ export async function startHttpTransport(
   createEventStore?: EventStoreFactory,
 ): Promise<HttpTransportResult> {
   const { port, host, corsOrigin, isStateless, maxSessions, sessionTtlMs } = getTransportConfig();
-  const allowedHosts = parseAllowedHosts();
+  const allowedHosts = resolveAllowedHosts(host);
   warnIfUnprotected(host, !!allowedHosts);
 
   const app = createMcpExpressApp({
     host,
     ...(allowedHosts ? { allowedHosts } : {}),
   });
+
+  if (allowedHosts) {
+    app.use('/mcp', (req, res, next) => {
+      const headers = req.headers as Record<string, string | string[] | undefined>;
+      const rawHost = headers.host;
+      const hostHeader = Array.isArray(rawHost) ? (rawHost[0] ?? null) : (rawHost ?? null);
+
+      if (!validateHostHeader(hostHeader, allowedHosts)) {
+        nodeErrorResponse(res, 403, 'Forbidden');
+        return;
+      }
+
+      next();
+    });
+  }
+
   applyCors(app, corsOrigin);
 
   const statefulPairs = new Map<string, ManagedPair<NodeStreamableHTTPServerTransport>>();

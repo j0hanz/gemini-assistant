@@ -109,7 +109,7 @@ Useful optional variables:
 - `MCP_HTTP_HOST`: HTTP bind host, default `127.0.0.1`
 - `MCP_STATELESS`: enable stateless streamable HTTP mode when set to `true`
 - `MCP_CORS_ORIGIN`: optional `Access-Control-Allow-Origin` for HTTP mode
-- `MCP_ALLOWED_HOSTS`: optional comma-separated host allowlist for HTTP/web-standard mode
+- `MCP_ALLOWED_HOSTS`: optional comma-separated explicit host allowlist for HTTP/web-standard mode
 - `ALLOWED_FILE_ROOTS`: optional comma-separated absolute roots allowed for file tools, `memory://workspace/context`, and automatic workspace caching
 - `SESSION_TTL_MS`: session idle TTL in milliseconds, default `1800000`
 - `MAX_SESSIONS`: max in-memory chat sessions before LRU eviction, default `50`
@@ -118,6 +118,14 @@ Useful optional variables:
 - `WORKSPACE_CACHE_TTL`: Gemini cache TTL for workspace context, default `3600s`
 - `WORKSPACE_AUTO_SCAN`: auto-scan workspace roots for known project files when set to `true` (default), set `false` to disable
 - `CONTEXT_BUDGET_TOKENS`: max token budget for request-aware context assembly, default `8192`
+
+Host validation defaults:
+
+- localhost binds accept `localhost`, `127.0.0.1`, and `[::1]`
+- broad binds such as `0.0.0.0` and `::` remain unrestricted unless `MCP_ALLOWED_HOSTS` is set
+- any other `MCP_HTTP_HOST` is treated as the default allowed Host header when `MCP_ALLOWED_HOSTS` is unset
+
+If clients reach the server through a DNS alias, reverse proxy, or load balancer hostname that differs from `MCP_HTTP_HOST`, set `MCP_ALLOWED_HOSTS` to the externally visible hostnames or those requests will be rejected.
 
 ## Run
 

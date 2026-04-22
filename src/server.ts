@@ -20,6 +20,7 @@ import { buildServerRootsFetcher } from './lib/validation.js';
 import { subscribeWorkspaceCacheChange } from './lib/workspace-context.js';
 
 import { registerPrompts } from './prompts.js';
+import { PUBLIC_RESOURCE_URIS } from './public-contract.js';
 import { registerResources } from './resources.js';
 import { createSessionStore, type SessionChangeEvent, type SessionStore } from './sessions.js';
 import { registerAnalyzeTool } from './tools/analyze.js';
@@ -74,29 +75,41 @@ const SERVER_INSTRUCTIONS =
   'memory (sessions, caches, and workspace memory inspection/mutation). ' +
   'Use discover://catalog and discover://workflows for the canonical public surface.';
 
-const ALLOWED_URI_SCHEMES = ['memory://', 'discover://'];
+const STATIC_RESOURCE_URIS = new Set<string>(
+  PUBLIC_RESOURCE_URIS.filter((uri) => !uri.includes('{')),
+);
+const SESSION_DETAIL_URI_PATTERN = /^memory:\/\/sessions\/[^/]+$/;
+const SESSION_TRANSCRIPT_URI_PATTERN = /^memory:\/\/sessions\/[^/]+\/transcript$/;
+const SESSION_EVENTS_URI_PATTERN = /^memory:\/\/sessions\/[^/]+\/events$/;
+const CACHE_DETAIL_URI_PATTERN = /^memory:\/\/caches\/[^/]+$/;
 
-function isAllowedResourceUri(uri: string): boolean {
-  return ALLOWED_URI_SCHEMES.some((scheme) => uri.startsWith(scheme));
+export function isKnownResourceUri(uri: string): boolean {
+  return (
+    STATIC_RESOURCE_URIS.has(uri) ||
+    SESSION_DETAIL_URI_PATTERN.test(uri) ||
+    SESSION_TRANSCRIPT_URI_PATTERN.test(uri) ||
+    SESSION_EVENTS_URI_PATTERN.test(uri) ||
+    CACHE_DETAIL_URI_PATTERN.test(uri)
+  );
 }
 
-function sendResourceChangedForServer(
+export function sendResourceChangedForServer(
   server: McpServer,
   listUri: string | undefined,
   detailUris: readonly string[] = [],
 ): void {
   if (!server.isConnected()) return;
   if (listUri) {
-    if (!isAllowedResourceUri(listUri)) {
-      log.warn(`Blocked resource notification with unexpected URI: ${listUri}`);
+    if (!isKnownResourceUri(listUri)) {
+      log.warn(`Blocked resource notification with unregistered URI: ${listUri}`);
       return;
     }
     server.sendResourceListChanged();
     void server.server.sendResourceUpdated({ uri: listUri });
   }
   for (const uri of detailUris) {
-    if (!isAllowedResourceUri(uri)) {
-      log.warn(`Blocked resource notification with unexpected URI: ${uri}`);
+    if (!isKnownResourceUri(uri)) {
+      log.warn(`Blocked resource notification with unregistered URI: ${uri}`);
       continue;
     }
     void server.server.sendResourceUpdated({ uri });

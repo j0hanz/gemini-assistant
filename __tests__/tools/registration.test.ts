@@ -67,7 +67,7 @@ describe('tool registration', () => {
 
   it('registers resources without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerResources(server));
+    assert.doesNotThrow(() => registerResources(server, sessionStore));
   });
 
   it('registers prompts without error', () => {
@@ -84,7 +84,7 @@ describe('tool registration', () => {
       registerReviewTool(server, queue);
       registerMemoryTool(server, sessionStore, queue);
       registerPrompts(server);
-      registerResources(server);
+      registerResources(server, sessionStore);
     });
   });
 

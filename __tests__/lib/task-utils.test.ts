@@ -4,20 +4,81 @@ import type {
   ServerContext,
   Task,
 } from '@modelcontextprotocol/server';
-import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
+import {
+  InMemoryTaskMessageQueue,
+  InMemoryTaskStore,
+  McpServer,
+} from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 
 import { z } from 'zod/v4';
 
 import {
   createToolTaskHandlers,
   elicitTaskInput,
+  installTaskSafeToolCallHandler,
   registerTaskTool,
   runToolAsTask,
   taskTtl,
 } from '../../src/lib/task-utils.js';
+
+process.env.API_KEY ??= 'test-key-for-task-utils';
+
+interface InternalServerWithSpy {
+  __taskSafeToolCallHandlerInstalled?: boolean;
+  server: {
+    setRequestHandler: (method: 'tools/call', handler: unknown) => void;
+  };
+}
+
+function createServer(): McpServer {
+  return new McpServer(
+    { name: 'task-utils-test', version: '0.0.1' },
+    {
+      capabilities: {
+        logging: {},
+        tools: {},
+        tasks: {
+          requests: { tools: { call: {} } },
+          taskStore: new InMemoryTaskStore(),
+          taskMessageQueue: new InMemoryTaskMessageQueue(),
+        },
+      },
+    },
+  );
+}
+
+afterEach(async () => {
+  // No-op placeholder to keep node:test happy if future cases add cleanup.
+});
+
+describe('installTaskSafeToolCallHandler', () => {
+  it('installs the tools/call handler only once per server', async () => {
+    const server = createServer();
+    const internalServer = server as unknown as InternalServerWithSpy;
+    let installCalls = 0;
+    const originalSetRequestHandler = internalServer.server.setRequestHandler.bind(
+      internalServer.server,
+    );
+
+    internalServer.server.setRequestHandler = (method, handler) => {
+      installCalls += 1;
+      originalSetRequestHandler(method, handler);
+    };
+
+    try {
+      installTaskSafeToolCallHandler(server);
+      installTaskSafeToolCallHandler(server);
+
+      assert.equal(internalServer.__taskSafeToolCallHandlerInstalled, true);
+      assert.equal(installCalls, 1);
+    } finally {
+      await server.close();
+    }
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Helpers

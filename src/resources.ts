@@ -37,7 +37,7 @@ import {
   getWorkspaceCacheEnabled,
   getWorkspaceCacheTtl,
 } from './config.js';
-import { createSessionStore, type SessionStore } from './sessions.js';
+import type { SessionStore } from './sessions.js';
 
 export { PUBLIC_RESOURCE_URIS } from './public-contract.js';
 
@@ -737,7 +737,7 @@ function registerWorkspaceResources(server: McpServer, rootsFetcher: RootsFetche
 
 export function registerResources(
   server: McpServer,
-  sessionStore: SessionStore = createSessionStore(),
+  sessionStore: SessionStore,
   rootsFetcher: RootsFetcher = buildServerRootsFetcher(server),
 ): void {
   registerSessionResources(server, sessionStore);

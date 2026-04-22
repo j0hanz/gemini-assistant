@@ -13,6 +13,7 @@ afterEach(() => {
   delete process.env.MAX_SESSIONS;
   delete process.env.MAX_SESSION_EVENT_ENTRIES;
   delete process.env.MAX_SESSION_TRANSCRIPT_ENTRIES;
+  delete process.env.MCP_CORS_ORIGIN;
   delete process.env.MCP_HTTP_HOST;
   delete process.env.MCP_HTTP_PORT;
   delete process.env.MCP_MAX_TRANSPORT_SESSIONS;
@@ -71,6 +72,20 @@ describe('config parsing', () => {
   it('rejects invalid session retention limits', () => {
     process.env.MAX_SESSION_TRANSCRIPT_ENTRIES = '0';
     assert.throws(() => getSessionLimits(), /MAX_SESSION_TRANSCRIPT_ENTRIES/);
+  });
+
+  it('rejects wildcard CORS for stateful transports', () => {
+    process.env.MCP_CORS_ORIGIN = '*';
+    process.env.MCP_STATELESS = 'false';
+
+    assert.throws(() => getTransportConfig(), /MCP_CORS_ORIGIN=.*MCP_STATELESS/);
+  });
+
+  it('allows wildcard CORS for stateless transports', () => {
+    process.env.MCP_CORS_ORIGIN = '*';
+    process.env.MCP_STATELESS = 'true';
+
+    assert.equal(getTransportConfig().corsOrigin, '*');
   });
 
   it('returns validated transport config values', () => {

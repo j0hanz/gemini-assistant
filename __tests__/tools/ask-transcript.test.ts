@@ -50,7 +50,7 @@ function createHarness() {
         session.transcript.push(entry);
         return true;
       },
-      createChat: () => ({ kind: 'chat' }) as never,
+      createChat: () => ({ chat: { kind: 'chat' } as never }),
       getSession: (sessionId: string) =>
         sessions.has(sessionId) ? ({ kind: 'chat' } as never) : undefined,
       getSessionEntry: (sessionId: string) =>

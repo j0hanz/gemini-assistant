@@ -1,12 +1,17 @@
 import type {
+  BlockedReason,
   Chat,
   FinishReason,
+  GenerateContentConfig,
   GroundingMetadata,
   Part,
+  ToolConfig,
+  ToolListUnion,
   UrlContextMetadata,
 } from '@google/genai';
 
 import { AppError } from './lib/errors.js';
+import { logger } from './lib/logger.js';
 import type { FunctionCallEntry, StreamAnomalies, ToolEvent } from './lib/streaming.js';
 import type { UsageMetadata } from './schemas/outputs.js';
 
@@ -30,6 +35,18 @@ export interface ContentEntry {
   taskId?: string;
   finishReason?: FinishReason;
   finishMessage?: string;
+  promptBlockReason?: BlockedReason;
+}
+
+export interface SessionGenerationContract {
+  model: string;
+  systemInstruction?: GenerateContentConfig['systemInstruction'];
+  tools?: ToolListUnion;
+  toolConfig?: ToolConfig;
+  functionCallingMode?: unknown;
+  thinkingConfig?: GenerateContentConfig['thinkingConfig'];
+  responseMimeType?: GenerateContentConfig['responseMimeType'];
+  responseJsonSchema?: unknown;
 }
 
 export interface SessionEventEntry {
@@ -64,6 +81,7 @@ export interface SessionEventEntry {
 interface SessionEntry {
   chat: Chat;
   cacheName?: string;
+  contract?: SessionGenerationContract;
   contents: ContentEntry[];
   events: SessionEventEntry[];
   lastAccess: number;
@@ -74,6 +92,7 @@ interface SessionEntry {
 export interface SessionSummary {
   id: string;
   cacheName?: string;
+  contract?: SessionGenerationContract;
   lastAccess: number;
   transcriptCount: number;
   eventCount: number;
@@ -153,13 +172,24 @@ function cloneContentEntry(item: ContentEntry): ContentEntry {
     parts: cloneValue(item.parts),
     ...(item.finishReason !== undefined ? { finishReason: item.finishReason } : {}),
     ...(item.finishMessage !== undefined ? { finishMessage: item.finishMessage } : {}),
+    ...(item.promptBlockReason !== undefined ? { promptBlockReason: item.promptBlockReason } : {}),
   };
 }
 
 export function sanitizeHistoryParts(parts: Part[]): Part[] {
+  const inlineDataMaxBytes = getSessionLimits().replayInlineDataMaxBytes;
   return parts.filter((part) => {
     if (part.thought === true) return false;
     if (part.functionCall && !part.functionCall.name) return false;
+    if (part.inlineData?.data && part.inlineData.data.length > inlineDataMaxBytes) {
+      // Replay history must not retain large raw media blobs; callers should
+      // use fileData for durable replayable media references instead.
+      logger.child('sessions').debug('Dropping oversized inlineData part from replay history', {
+        inlineDataBytes: part.inlineData.data.length,
+        inlineDataMaxBytes,
+      });
+      return false;
+    }
     return true;
   });
 }
@@ -168,6 +198,7 @@ function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {
   return {
     id,
     ...(entry.cacheName ? { cacheName: entry.cacheName } : {}),
+    ...(entry.contract ? { contract: cloneValue(entry.contract) } : {}),
     lastAccess: entry.lastAccess,
     transcriptCount: entry.transcript.length,
     eventCount: entry.events.length,
@@ -326,14 +357,20 @@ export class SessionStore {
     return this.updateSessionAccess(id, entry);
   }
 
-  setSession(id: string, chat: Chat, rebuiltAt?: number, cacheName?: string): void {
+  setSession(
+    id: string,
+    chat: Chat,
+    rebuiltAt?: number,
+    cacheName?: string,
+    contract?: SessionGenerationContract,
+  ): void {
     if (this.sessions.has(id)) {
       throw new AppError('sessions', `Session already exists: ${id}`);
     }
     if (this.sessions.size >= this.maxSessions) {
       this.evictOldest();
     }
-    this.createSession(id, chat, rebuiltAt, cacheName);
+    this.createSession(id, chat, rebuiltAt, cacheName, contract);
     this.startEvictionTimer();
     this.notifyChange(true);
   }
@@ -395,15 +432,28 @@ export class SessionStore {
     return entry.chat;
   }
 
-  private createSession(id: string, chat: Chat, rebuiltAt?: number, cacheName?: string): void {
-    this.storeSession(id, chat, rebuiltAt, cacheName);
+  private createSession(
+    id: string,
+    chat: Chat,
+    rebuiltAt?: number,
+    cacheName?: string,
+    contract?: SessionGenerationContract,
+  ): void {
+    this.storeSession(id, chat, rebuiltAt, cacheName, contract);
   }
 
-  private storeSession(id: string, chat: Chat, rebuiltAt?: number, cacheName?: string): void {
+  private storeSession(
+    id: string,
+    chat: Chat,
+    rebuiltAt?: number,
+    cacheName?: string,
+    contract?: SessionGenerationContract,
+  ): void {
     this.evictedSessions.delete(id);
     this.setSessionEntry(id, {
       chat,
       ...(cacheName ? { cacheName } : {}),
+      ...(contract ? { contract: cloneValue(contract) } : {}),
       contents: [],
       events: [],
       lastAccess: this.now(),

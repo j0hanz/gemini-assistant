@@ -37,6 +37,8 @@ const NEW_VARS = [
   'GEMINI_MAX_OUTPUT_TOKENS',
   'GEMINI_SAFETY_SETTINGS',
   'GEMINI_SESSION_REDACT_KEYS',
+  'SESSION_REPLAY_INLINE_DATA_MAX_BYTES',
+  'SESSION_REPLAY_MAX_BYTES',
 ] as const;
 
 const OLD_VARS = [
@@ -165,6 +167,8 @@ describe('config parsing', () => {
       maxEventEntries: 200,
       maxSessions: 50,
       maxTranscriptEntries: 200,
+      replayInlineDataMaxBytes: 64 * 1024,
+      replayMaxBytes: 200_000,
       ttlMs: 30 * 60 * 1000,
     });
   });

@@ -10,7 +10,12 @@ import {
   type SessionStore,
   type SessionStoreOptions,
 } from '../src/sessions.js';
-import { buildRebuiltChatContents, chatWork, createAskWork } from '../src/tools/chat.js';
+import {
+  appendToolResponseTurn,
+  buildRebuiltChatContents,
+  chatWork,
+  createAskWork,
+} from '../src/tools/chat.js';
 
 function mockChat(label = 'chat'): { _label: string } {
   return { _label: label };
@@ -117,6 +122,17 @@ describe('sessions', () => {
       ]);
     });
 
+    it('preserves thoughtSignature byte-for-byte on retained parts', () => {
+      const parts = [
+        { functionCall: { name: 'lookup' }, thoughtSignature: 'opaque-signature-value' },
+      ];
+
+      assert.strictEqual(
+        sanitizeHistoryParts(parts as never)[0]?.thoughtSignature,
+        'opaque-signature-value',
+      );
+    });
+
     it('buildRebuiltChatContents skips entries whose parts sanitize to empty', () => {
       const rebuilt = buildRebuiltChatContents(
         [
@@ -213,6 +229,30 @@ describe('sessions', () => {
       assert.ok(entry);
       assert.strictEqual(entry.id, 'sess-entry-active');
       assert.strictEqual(typeof entry.lastAccess, 'number');
+    });
+
+    it('stores cloned session generation contracts on summaries', () => {
+      const store = createStore();
+      store.setSession('sess-contract', mockChat('contract') as never, undefined, undefined, {
+        model: 'gemini-test',
+        systemInstruction: 'original',
+        tools: [{ googleSearch: {} }],
+      });
+
+      const entry = store.getSessionEntry('sess-contract');
+      assert.deepStrictEqual(entry?.contract, {
+        model: 'gemini-test',
+        systemInstruction: 'original',
+        tools: [{ googleSearch: {} }],
+      });
+
+      if (entry?.contract?.tools?.[0]) {
+        entry.contract.tools[0] = { codeExecution: {} };
+      }
+
+      assert.deepStrictEqual(store.getSessionEntry('sess-contract')?.contract?.tools, [
+        { googleSearch: {} },
+      ]);
     });
   });
 
@@ -352,6 +392,33 @@ describe('sessions', () => {
 
       assert.strictEqual(store.isEvicted('sess-content-old'), true);
       assert.strictEqual(store.listSessionContentEntries('sess-content-old'), undefined);
+    });
+
+    it('appends synthetic functionResponse turns through the replay helper', () => {
+      const store = createStore();
+      store.setSession('sess-function-response', mockChat('function-response') as never);
+
+      assert.strictEqual(
+        appendToolResponseTurn(
+          'sess-function-response',
+          [{ id: 'call-1', name: 'lookup', response: { ok: true } }],
+          {
+            appendSessionContent: store.appendSessionContent.bind(store),
+            now: () => 123,
+          },
+          'task-response',
+        ),
+        true,
+      );
+
+      assert.deepStrictEqual(store.listSessionContentEntries('sess-function-response'), [
+        {
+          role: 'user',
+          parts: [{ functionResponse: { id: 'call-1', name: 'lookup', response: { ok: true } } }],
+          timestamp: 123,
+          taskId: 'task-response',
+        },
+      ]);
     });
   });
 
@@ -769,7 +836,7 @@ describe('sessions', () => {
         appendSessionEvent: () => true,
         appendSessionContent: () => true,
         appendSessionTranscript: () => true,
-        createChat: () => mockChat('live-chat') as never,
+        createChat: () => ({ chat: mockChat('live-chat') as never }),
         getSession: () => undefined,
         getSessionEntry: (sessionId: string) =>
           sessionId === 'sess-restart'
@@ -837,7 +904,7 @@ describe('sessions', () => {
         },
         appendSessionContent: () => true,
         appendSessionTranscript: () => true,
-        createChat: () => mockChat('live-chat') as never,
+        createChat: () => ({ chat: mockChat('live-chat') as never }),
         getSession: () => undefined,
         getSessionEntry: () => undefined,
         isEvicted: () => false,

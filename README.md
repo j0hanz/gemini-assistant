@@ -66,9 +66,11 @@ Large event payloads may be truncated into previews.
 `gemini://sessions/{sessionId}/turns/{turnIndex}/parts` exposes the raw persisted Gemini `Part[]`
 for replay-safe orchestration of a specific model turn.
 
-Internally, sessions also keep a replay-safe Gemini `Content[]` log alongside the display
-transcript. Rebuilt sessions use that log so thinking signatures, function calls, and function
-responses survive live chat eviction without changing the public session resources.
+Internally, sessions keep two separate records: a replay substrate made from raw Gemini `Content[]`
+parts plus the original generation contract, and a normalized audit log for session resources.
+Rebuilt sessions use only the replay substrate so thinking signatures, function/tool call pairs,
+function responses, system instructions, tool declarations, and response format settings survive
+live chat eviction without changing the public session resources.
 Non-thought signature-bearing text parts are preserved for Gemini replay; `thought: true` parts are
 not replayed.
 
@@ -186,6 +188,8 @@ Optional local transport:
 - `ALLOWED_HOSTS`: optional comma-separated Host header allow-list for HTTP transports
 - `MAX_TRANSPORT_SESSIONS`: maximum stateful HTTP transport sessions, default `100`
 - `TRANSPORT_SESSION_TTL_MS`: idle TTL for stateful HTTP transport sessions, default `1800000`
+- `SESSION_REPLAY_MAX_BYTES`: byte budget for rebuilt chat history, default `200000`
+- `SESSION_REPLAY_INLINE_DATA_MAX_BYTES`: max inline media bytes retained in replay history, default `65536`
 
 Booleans accept only the literal strings `true` or `false` when set. Old variable names (`GEMINI_MODEL`, `ALLOWED_FILE_ROOTS`, `WORKSPACE_*`, `MCP_TRANSPORT`, `MCP_HTTP_HOST`, `MCP_HTTP_PORT`, `LOG_VERBOSE_PAYLOADS`, etc.) are not supported and have no effect.
 

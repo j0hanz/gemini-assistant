@@ -10,11 +10,13 @@ import { FinishReason } from '@google/genai';
 
 import { getAI } from '../../src/client.js';
 import { workspaceCacheManager } from '../../src/lib/workspace-context.js';
+import { createSessionStore } from '../../src/sessions.js';
 import {
   askWithoutSession,
   buildRebuiltChatContents,
   chatWork,
   createAskWork,
+  createDefaultAskDependencies,
 } from '../../src/tools/chat.js';
 
 function createContext(): ServerContext {
@@ -72,7 +74,7 @@ function createDeps(overrides: Partial<Parameters<typeof createAskWork>[0]> = {}
     appendSessionEvent: () => true,
     appendSessionContent: () => true,
     appendSessionTranscript: () => true,
-    createChat: () => ({ kind: 'chat' }) as never,
+    createChat: () => ({ chat: { kind: 'chat' } as never }),
     getSession: () => undefined,
     getSessionEntry: () => undefined,
     isEvicted: () => false,
@@ -686,10 +688,7 @@ describe('ask contract', () => {
       200_000,
     );
 
-    assert.deepStrictEqual(history, [
-      { role: 'user', parts: [{ text: 'Call lookup' }] },
-      { role: 'model', parts: [{ functionCall: { name: 'lookup', args: { q: 'x' } } }] },
-    ]);
+    assert.deepStrictEqual(history, [{ role: 'user', parts: [{ text: 'Call lookup' }] }]);
   });
 
   it('drops nameless functionCall parts from rebuilt history so Gemini replay remains valid', () => {
@@ -720,6 +719,65 @@ describe('ask contract', () => {
       { role: 'user', parts: [{ text: 'Call lookup' }] },
       { role: 'model', parts: [{ text: 'fallback' }] },
     ]);
+  });
+
+  it('rebuilds sessions with the original generation contract', () => {
+    process.env.API_KEY ??= 'test-key-for-ask';
+    const originalCache = process.env.CACHE;
+    process.env.CACHE = 'false';
+    const store = createSessionStore();
+    const deps = createDefaultAskDependencies(store);
+    const client = getAI();
+    const originalCreate = client.chats.create.bind(client.chats);
+    const calls: Record<string, unknown>[] = [];
+
+    // @ts-expect-error test override
+    client.chats.create = (request: Record<string, unknown>) => {
+      calls.push(request);
+      return { sendMessageStream: async function* emptyStream() {} };
+    };
+
+    try {
+      const created = deps.createChat({
+        googleSearch: true,
+        message: 'start',
+        sessionId: 'sess-contract',
+        systemInstruction: 'original system',
+      });
+      deps.setSession('sess-contract', created.chat, undefined, undefined, created.contract);
+      deps.appendSessionContent('sess-contract', {
+        role: 'user',
+        parts: [{ text: 'start' }],
+        timestamp: 1,
+      });
+      deps.appendSessionContent('sess-contract', {
+        role: 'model',
+        parts: [{ text: 'answer' }],
+        timestamp: 2,
+      });
+
+      deps.rebuildChat('sess-contract', {
+        googleSearch: false,
+        message: 'resume',
+        sessionId: 'sess-contract',
+        systemInstruction: 'mutated system',
+      });
+    } finally {
+      client.chats.create = originalCreate;
+      store.close();
+      if (originalCache === undefined) {
+        delete process.env.CACHE;
+      } else {
+        process.env.CACHE = originalCache;
+      }
+    }
+
+    const rebuildConfig = calls[1]?.['config'] as {
+      systemInstruction?: string;
+      tools?: Record<string, unknown>[];
+    };
+    assert.strictEqual(rebuildConfig.systemInstruction, 'original system');
+    assert.deepStrictEqual(rebuildConfig.tools, [{ googleSearch: {} }]);
   });
 
   it('persists sentMessage for rebuilt sessions with summaries and stores finishReason', async () => {

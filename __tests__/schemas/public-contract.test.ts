@@ -13,8 +13,66 @@ import {
   ResearchOutputSchema,
   ReviewOutputSchema,
 } from '../../src/schemas/outputs.js';
+import type { SessionEventEntry } from '../../src/sessions.js';
 
 describe('public contract schemas', () => {
+  it('keeps SessionEventEntry audit shape stable', () => {
+    const event = {
+      request: { message: 'Hello', sentMessage: 'Hello', toolProfile: 'none', urls: [] },
+      response: {
+        anomalies: { namelessFunctionCalls: 1 },
+        citationMetadata: {},
+        data: {},
+        finishMessage: 'done',
+        finishReason: 'STOP',
+        functionCalls: [],
+        groundingMetadata: {},
+        promptBlockReason: 'SAFETY',
+        promptFeedback: {},
+        safetyRatings: [],
+        schemaWarnings: [],
+        text: 'Hi',
+        thoughts: 'summary',
+        toolEvents: [],
+        urlContextMetadata: {},
+        usage: {},
+      },
+      taskId: 'task-1',
+      timestamp: 1,
+    } satisfies SessionEventEntry;
+
+    assert.deepStrictEqual(Object.keys(event).sort(), [
+      'request',
+      'response',
+      'taskId',
+      'timestamp',
+    ]);
+    assert.deepStrictEqual(Object.keys(event.request).sort(), [
+      'message',
+      'sentMessage',
+      'toolProfile',
+      'urls',
+    ]);
+    assert.deepStrictEqual(Object.keys(event.response).sort(), [
+      'anomalies',
+      'citationMetadata',
+      'data',
+      'finishMessage',
+      'finishReason',
+      'functionCalls',
+      'groundingMetadata',
+      'promptBlockReason',
+      'promptFeedback',
+      'safetyRatings',
+      'schemaWarnings',
+      'text',
+      'thoughts',
+      'toolEvents',
+      'urlContextMetadata',
+      'usage',
+    ]);
+  });
+
   it('defaults research.mode and rejects legacy top-level fields', () => {
     const result = ResearchInputSchema.safeParse({ goal: 'Current events' });
     assert.strictEqual(result.success, true);

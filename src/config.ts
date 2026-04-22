@@ -22,6 +22,8 @@ const DEFAULT_MAX_TRANSPORT_SESSIONS = 100;
 const DEFAULT_MAX_TRANSCRIPT_ENTRIES = 200;
 const DEFAULT_MAX_EVENT_ENTRIES = 200;
 const DEFAULT_MAX_OUTPUT_TOKENS = 32_768;
+const DEFAULT_SESSION_REPLAY_MAX_BYTES = 200_000;
+const DEFAULT_SESSION_REPLAY_INLINE_DATA_MAX_BYTES = 64 * 1024;
 
 const DEFAULT_SESSION_REDACTION_PATTERNS = [
   /api[_-]?key/i,
@@ -157,12 +159,22 @@ export function getSessionLimits(): {
   maxEventEntries: number;
   maxSessions: number;
   maxTranscriptEntries: number;
+  replayInlineDataMaxBytes: number;
+  replayMaxBytes: number;
   ttlMs: number;
 } {
   return {
     maxEventEntries: DEFAULT_MAX_EVENT_ENTRIES,
     maxSessions: DEFAULT_MAX_SESSIONS,
     maxTranscriptEntries: DEFAULT_MAX_TRANSCRIPT_ENTRIES,
+    replayInlineDataMaxBytes: parseIntEnv(
+      'SESSION_REPLAY_INLINE_DATA_MAX_BYTES',
+      DEFAULT_SESSION_REPLAY_INLINE_DATA_MAX_BYTES,
+      { min: 0 },
+    ),
+    replayMaxBytes: parseIntEnv('SESSION_REPLAY_MAX_BYTES', DEFAULT_SESSION_REPLAY_MAX_BYTES, {
+      min: 1,
+    }),
     ttlMs: DEFAULT_SESSION_TTL_MS,
   };
 }

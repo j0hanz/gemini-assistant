@@ -18,7 +18,7 @@
 
 - Tests are colocated under `__tests__/`.
 - `npm run test` uses Node's built-in test runner with `tsx/esm` and `.env`.
-- The repository scan found 30 test files, including end-to-end coverage.
+- The repository scan found 31 test files, including end-to-end coverage.
 
 ## Commands
 

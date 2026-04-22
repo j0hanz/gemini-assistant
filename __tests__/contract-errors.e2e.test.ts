@@ -1,7 +1,9 @@
+import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import {
-  assertRequestValidationFailure,
+  assertNoStructuredContentOnError,
+  assertProtocolError,
   assertToolExecutionError,
 } from './lib/mcp-contract-assertions.js';
 import { createServerHarness, type ToolCallResult } from './lib/mcp-contract-client.js';
@@ -40,7 +42,7 @@ describe('public MCP error taxonomy', () => {
         name: 'analyze',
       });
 
-      assertRequestValidationFailure(response, -32602, /filePath/i);
+      assertProtocolError(response, -32602, /filePath/i);
     } finally {
       await harness.close();
     }
@@ -80,6 +82,82 @@ describe('public MCP error taxonomy', () => {
         response.result as ToolCallResult,
         /No mocked Gemini stream queued|research:/i,
       );
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('never returns structuredContent on a failed tool call', async () => {
+    const harness = await createHarness();
+
+    try {
+      const response = await harness.client.request('tools/call', {
+        arguments: {
+          action: 'caches.get',
+          cacheName: 'cachedContents/missing-cache',
+        },
+        name: 'memory',
+      });
+
+      assertNoStructuredContentOnError(response.result as ToolCallResult);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('returns isError:true with non-empty content for every tool when the upstream rejects', async () => {
+    const harness = await createHarness();
+
+    try {
+      // Each tool below triggers a runtime failure without queueing a stream;
+      // the mock environment rejects generateContentStream, so the tool body
+      // must surface isError:true with a descriptive content entry.
+      const toolFailureCases: { name: string; arguments: Record<string, unknown> }[] = [
+        { name: 'chat', arguments: { goal: 'force runtime failure' } },
+        { name: 'research', arguments: { goal: 'force runtime failure', mode: 'quick' } },
+        {
+          name: 'analyze',
+          arguments: {
+            goal: 'force runtime failure',
+            targetKind: 'file',
+            filePath: 'src/client.ts',
+            outputKind: 'summary',
+          },
+        },
+        {
+          name: 'review',
+          arguments: {
+            subjectKind: 'failure',
+            error: 'force runtime failure',
+            language: 'typescript',
+          },
+        },
+        {
+          name: 'memory',
+          arguments: {
+            action: 'caches.get',
+            cacheName: 'cachedContents/missing-cache',
+          },
+        },
+      ];
+
+      for (const testCase of toolFailureCases) {
+        const response = await harness.client.request('tools/call', {
+          arguments: testCase.arguments,
+          name: testCase.name,
+        });
+        const result = response.result as ToolCallResult;
+        assert.equal(result.isError, true, `${testCase.name} failure must carry isError:true`);
+        assert.ok(
+          Array.isArray(result.content) && result.content.length >= 1,
+          `${testCase.name} failure must carry non-empty content[]`,
+        );
+        assert.equal(
+          (result as { structuredContent?: unknown }).structuredContent,
+          undefined,
+          `${testCase.name} failure must not carry structuredContent`,
+        );
+      }
     } finally {
       await harness.close();
     }

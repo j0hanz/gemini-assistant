@@ -30,18 +30,19 @@ export function schemaRequiresField(schema: JsonSchemaLike | undefined, field: s
   return false;
 }
 
-export function assertRequestValidationFailure(
+export function assertProtocolError(
   response: JsonRpcResponse,
   expectedCode: number,
   expectedMessagePattern: RegExp,
 ): void {
-  if (isJsonRpcFailure(response)) {
-    assert.equal(response.error.code, expectedCode);
-    assert.match(response.error.message, expectedMessagePattern);
-    return;
-  }
-
-  assertToolExecutionError(response.result as unknown as ToolCallResult, expectedMessagePattern);
+  assert.ok(isJsonRpcFailure(response), 'Expected JSON-RPC failure response, got a success result');
+  assert.equal(
+    (response as unknown as { result?: unknown }).result,
+    undefined,
+    'JSON-RPC failure must not carry a result field',
+  );
+  assert.equal(response.error.code, expectedCode);
+  assert.match(response.error.message, expectedMessagePattern);
 }
 
 export function assertToolExecutionError(
@@ -49,8 +50,25 @@ export function assertToolExecutionError(
   expectedMessagePattern: RegExp,
 ): void {
   assert.equal(result.isError, true, 'Expected tool execution to fail');
+  assert.ok(
+    Array.isArray(result.content) && result.content.length >= 1,
+    'Tool error result must include non-empty content[]',
+  );
   const text = result.content.find((entry) => typeof entry.text === 'string')?.text ?? '';
   assert.match(text, expectedMessagePattern);
+}
+
+export function assertNoStructuredContentOnError(result: ToolCallResult): void {
+  assert.equal(result.isError, true, 'Expected isError:true result');
+  assert.ok(
+    Array.isArray(result.content) && result.content.length >= 1,
+    'Tool error result must include non-empty content[]',
+  );
+  assert.equal(
+    (result as { structuredContent?: unknown }).structuredContent,
+    undefined,
+    'Tool error result must not carry structuredContent',
+  );
 }
 
 export function assertAdvertisedOutputSchema(tool: ToolInfo, result: ToolCallResult): void {

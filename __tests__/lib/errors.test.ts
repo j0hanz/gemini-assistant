@@ -164,15 +164,26 @@ describe('sendProgress', () => {
     resetProgressThrottle();
   });
 
-  it('is a no-op without progressToken', async () => {
+  it('never emits notifications/progress without progressToken', async () => {
+    const notifyCalls: unknown[] = [];
     const ctx = makeMockContext({});
-    // Should not throw
+    (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async (
+      notification: unknown,
+    ) => {
+      notifyCalls.push(notification);
+    };
+
     await sendProgress(ctx, 1, 3, 'step 1');
+    await sendProgress(ctx, 2, 3, 'step 2');
+    await sendProgress(ctx, 3, 3, 'final');
+
+    assert.deepStrictEqual(notifyCalls, []);
   });
 
-  it('bridges task status without progressToken', async () => {
+  it('bridges task status without progressToken and still never calls notify', async () => {
     let capturedStatus: string | undefined;
     let capturedMessage: string | undefined;
+    const notifyCalls: unknown[] = [];
     const ctx = makeMockContext({});
     (ctx as unknown as Record<string, unknown>).task = {
       id: 'task-no-token',
@@ -183,11 +194,17 @@ describe('sendProgress', () => {
         },
       },
     };
+    (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async (
+      notification: unknown,
+    ) => {
+      notifyCalls.push(notification);
+    };
 
     await sendProgress(ctx, 50, 100, 'bridged message');
 
     assert.strictEqual(capturedStatus, 'working');
     assert.strictEqual(capturedMessage, 'bridged message');
+    assert.deepStrictEqual(notifyCalls, []);
   });
 
   it('forces terminal task bridging without progressToken inside the throttle window', async () => {

@@ -146,4 +146,32 @@ describe('public MCP resource notifications', () => {
       await rm(tempDir, { force: true, recursive: true });
     }
   });
+
+  it('never emits notifications/progress when the request omits _meta.progressToken', async () => {
+    const harness = await createHarness();
+
+    try {
+      env.queueStream(makeChunk([{ text: 'hello' }], FinishReason.STOP));
+
+      const offset = harness.client.getNotifications().length;
+      await harness.client.request('tools/call', {
+        arguments: { goal: 'exercise a successful chat without progress token' },
+        name: 'chat',
+      });
+
+      await flushEventLoop(2);
+      const notifications = notificationSlice(harness.client.getNotifications(), offset);
+      const progressNotifications = notifications.filter(
+        (notification) => notification.method === 'notifications/progress',
+      );
+
+      assert.deepStrictEqual(
+        progressNotifications,
+        [],
+        'notifications/progress must not be emitted without _meta.progressToken',
+      );
+    } finally {
+      await harness.close();
+    }
+  });
 });

@@ -5,7 +5,7 @@ import { FinishReason } from '@google/genai';
 
 import {
   assertAdvertisedOutputSchema,
-  assertRequestValidationFailure,
+  assertProtocolError,
   schemaRequiresField,
 } from './lib/mcp-contract-assertions.js';
 import {
@@ -530,7 +530,7 @@ describe('MCP tool smoke coverage', () => {
         arguments: { goal: 'Summarize this file' },
         name: 'analyze',
       });
-      assertRequestValidationFailure(invalidAnalyzeShape, -32602, /filePath/i);
+      assertProtocolError(invalidAnalyzeShape, -32602, /filePath/i);
 
       const invalidAnalyzeTargets = await harness.client.requestRaw('tools/call', {
         arguments: {
@@ -541,11 +541,7 @@ describe('MCP tool smoke coverage', () => {
         },
         name: 'analyze',
       });
-      assertRequestValidationFailure(
-        invalidAnalyzeTargets,
-        -32602,
-        /public http:\/\/ or https:\/\//i,
-      );
+      assertProtocolError(invalidAnalyzeTargets, -32602, /public http:\/\/ or https:\/\//i);
 
       const invalidMemoryAction = await harness.client.requestRaw('tools/call', {
         arguments: {
@@ -553,7 +549,7 @@ describe('MCP tool smoke coverage', () => {
         },
         name: 'memory',
       });
-      assertRequestValidationFailure(invalidMemoryAction, -32602, /filePaths|systemInstruction/i);
+      assertProtocolError(invalidMemoryAction, -32602, /filePaths|systemInstruction/i);
 
       const invalidChatSchema = await harness.client.requestRaw('tools/call', {
         arguments: {
@@ -567,7 +563,7 @@ describe('MCP tool smoke coverage', () => {
         },
         name: 'chat',
       });
-      assertRequestValidationFailure(invalidChatSchema, -32602, /responseSchemaJson|type|number/i);
+      assertProtocolError(invalidChatSchema, -32602, /responseSchemaJson|type|number/i);
 
       const removedChatSession = await harness.client.requestRaw('tools/call', {
         arguments: {
@@ -576,7 +572,7 @@ describe('MCP tool smoke coverage', () => {
         },
         name: 'chat',
       });
-      assertRequestValidationFailure(removedChatSession, -32602, /session/i);
+      assertProtocolError(removedChatSession, -32602, /session/i);
 
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);
     } finally {

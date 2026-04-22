@@ -6,10 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
-import {
-  assertRequestValidationFailure,
-  assertStablePublicSurface,
-} from './lib/mcp-contract-assertions.js';
+import { assertProtocolError, assertStablePublicSurface } from './lib/mcp-contract-assertions.js';
 import { createServerHarness } from './lib/mcp-contract-client.js';
 
 import {
@@ -122,7 +119,7 @@ describe('in-memory MCP server e2e', () => {
       arguments: { goal: 'Summarize this file' },
       name: 'analyze',
     });
-    assertRequestValidationFailure(invalidAnalyzeRequest, -32602, /filePath/i);
+    assertProtocolError(invalidAnalyzeRequest, -32602, /filePath/i);
 
     const invalidChatSchema = await harness.client.requestRaw('tools/call', {
       arguments: {
@@ -136,7 +133,7 @@ describe('in-memory MCP server e2e', () => {
       },
       name: 'chat',
     });
-    assertRequestValidationFailure(invalidChatSchema, -32602, /responseSchemaJson|type|number/i);
+    assertProtocolError(invalidChatSchema, -32602, /responseSchemaJson|type|number/i);
   });
 
   it('reads memory://workspace/context as markdown through MCP', async () => {
@@ -193,5 +190,34 @@ describe('in-memory MCP server e2e', () => {
       process.env.WORKSPACE_CONTEXT_FILE = originalContextFile;
       await rm(restrictedRoot, { recursive: true, force: true });
     }
+  });
+
+  it('surfaces an unknown resources/read URI through the protocol boundary', async () => {
+    const harness = await createServerHarness(createServerInstance, {
+      capabilities: { roots: {} },
+    });
+    cleanupCallbacks.push(harness.close);
+
+    await harness.client.initialize();
+    const response = await harness.client.requestRaw('resources/read', {
+      uri: 'memory://does-not-exist/nope',
+    });
+
+    assertProtocolError(response, -32002, /resource|uri|not found|invalid/i);
+  });
+
+  it('surfaces prompts/get with invalid argument shape through the protocol boundary', async () => {
+    const harness = await createServerHarness(createServerInstance, {
+      capabilities: { roots: {} },
+    });
+    cleanupCallbacks.push(harness.close);
+
+    await harness.client.initialize();
+    const response = await harness.client.requestRaw('prompts/get', {
+      arguments: { mode: 'not-a-valid-mode' },
+      name: 'research',
+    });
+
+    assertProtocolError(response, -32602, /mode|invalid|enum/i);
   });
 });

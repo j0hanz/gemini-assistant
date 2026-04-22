@@ -71,13 +71,18 @@ function isTerminalProgress(progress: number, total?: number): boolean {
   return total !== undefined && progress >= total;
 }
 
-function buildThrottleKey(progressToken: string | number, message?: string): string {
-  return `${String(progressToken)}:${message ?? ''}`;
+function buildThrottleKey(
+  progressToken: string | number,
+  message: string | undefined,
+  progress: number,
+): string {
+  return `${String(progressToken)}:${progress}:${message ?? ''}`;
 }
 
 function shouldThrottleProgress(
   progressToken: string | number,
   message: string | undefined,
+  progress: number,
   now: number,
   isTerminal: boolean,
 ): boolean {
@@ -85,7 +90,7 @@ function shouldThrottleProgress(
     return false;
   }
 
-  const lastEmit = lastEmitTime.get(buildThrottleKey(progressToken, message));
+  const lastEmit = lastEmitTime.get(buildThrottleKey(progressToken, message, progress));
   return lastEmit !== undefined && now - lastEmit < MIN_PROGRESS_INTERVAL_MS;
 }
 
@@ -137,9 +142,10 @@ function clearProgressState(progressToken: string | number, taskId?: string): vo
 function markProgressEmission(
   progressToken: string | number,
   message: string | undefined,
+  progress: number,
   now: number,
 ): void {
-  lastEmitTime.set(buildThrottleKey(progressToken, message), now);
+  lastEmitTime.set(buildThrottleKey(progressToken, message, progress), now);
 }
 
 function markTerminalProgress(ctx: ServerContext, isTerminal: boolean): void {
@@ -165,6 +171,7 @@ function updateProgressStateAfterNotify(
   progressToken: string | number,
   taskId: string | undefined,
   message: string | undefined,
+  progress: number,
   now: number,
   isTerminal: boolean,
 ): void {
@@ -173,7 +180,7 @@ function updateProgressStateAfterNotify(
     return;
   }
 
-  markProgressEmission(progressToken, message, now);
+  markProgressEmission(progressToken, message, progress, now);
 }
 
 async function bridgeProgressMessage(
@@ -224,12 +231,19 @@ export async function sendProgress(
 
   if (progressToken !== undefined) {
     const now = Date.now();
-    if (!shouldThrottleProgress(progressToken, message, now, isTerminal)) {
+    if (!shouldThrottleProgress(progressToken, message, progress, now, isTerminal)) {
       try {
         await ctx.mcpReq.notify(
           buildProgressNotification(progressToken, progress, total, message, ctx.task?.id),
         );
-        updateProgressStateAfterNotify(progressToken, ctx.task?.id, message, now, isTerminal);
+        updateProgressStateAfterNotify(
+          progressToken,
+          ctx.task?.id,
+          message,
+          progress,
+          now,
+          isTerminal,
+        );
       } catch (err: unknown) {
         await logProgressFailure(ctx, err);
       }

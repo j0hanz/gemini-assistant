@@ -189,6 +189,73 @@ describe('sessions', () => {
     });
   });
 
+  describe('content entries', () => {
+    it('appends and reads replay content entries as clones', () => {
+      const store = createStore();
+      store.setSession('sess-content-append', mockChat('content') as never);
+      const parts = [{ text: 'Hello' }, { functionCall: { name: 'lookup', args: { q: 'x' } } }];
+
+      store.appendSessionContent('sess-content-append', {
+        role: 'model',
+        parts,
+        timestamp: 1,
+        taskId: 'task-content',
+      });
+
+      const entries = store.listSessionContentEntries('sess-content-append');
+      assert.deepStrictEqual(entries, [
+        {
+          role: 'model',
+          parts,
+          timestamp: 1,
+          taskId: 'task-content',
+        },
+      ]);
+
+      if (entries?.[0]?.parts[0]) {
+        entries[0].parts[0].text = 'mutated';
+      }
+
+      assert.strictEqual(
+        store.listSessionContentEntries('sess-content-append')?.[0]?.parts[0]?.text,
+        'Hello',
+      );
+    });
+
+    it('retains only the most recent content entries when over the transcript limit', () => {
+      const store = createStore({ maxTranscriptEntries: 2 });
+      store.setSession('sess-content-cap', mockChat('content-cap') as never);
+
+      for (let i = 1; i <= 3; i += 1) {
+        store.appendSessionContent('sess-content-cap', {
+          role: i % 2 === 0 ? 'model' : 'user',
+          parts: [{ text: `content-${String(i)}` }],
+          timestamp: i,
+        });
+      }
+
+      assert.deepStrictEqual(store.listSessionContentEntries('sess-content-cap'), [
+        { role: 'model', parts: [{ text: 'content-2' }], timestamp: 2 },
+        { role: 'user', parts: [{ text: 'content-3' }], timestamp: 3 },
+      ]);
+    });
+
+    it('removes content entries when a session is evicted', () => {
+      const store = createStore({ maxSessions: 1 });
+      store.setSession('sess-content-old', mockChat('old') as never);
+      store.appendSessionContent('sess-content-old', {
+        role: 'user',
+        parts: [{ text: 'old' }],
+        timestamp: 1,
+      });
+
+      store.setSession('sess-content-new', mockChat('new') as never);
+
+      assert.strictEqual(store.isEvicted('sess-content-old'), true);
+      assert.strictEqual(store.listSessionContentEntries('sess-content-old'), undefined);
+    });
+  });
+
   describe('events', () => {
     it('appends and reads session event entries', () => {
       const store = createStore();
@@ -542,6 +609,7 @@ describe('sessions', () => {
 
       const askWork = createAskWork({
         appendSessionEvent: () => true,
+        appendSessionContent: () => true,
         appendSessionTranscript: () => true,
         createChat: () => mockChat('live-chat') as never,
         getSession: () => undefined,
@@ -556,6 +624,7 @@ describe('sessions', () => {
               } as never)
             : undefined,
         isEvicted: () => false,
+        listSessionContentEntries: () => undefined,
         listSessionTranscriptEntries: (sessionId: string) =>
           sessionId === 'sess-restart' ? transcript : undefined,
         now: () => 123_456,
@@ -578,6 +647,7 @@ describe('sessions', () => {
               thoughtText: '',
               toolEvents: [],
               toolsUsed: [],
+              toolsUsedOccurrences: [],
             },
             toolProfile: 'none' as const,
           } as never;
@@ -607,11 +677,13 @@ describe('sessions', () => {
           events.push(item);
           return true;
         },
+        appendSessionContent: () => true,
         appendSessionTranscript: () => true,
         createChat: () => mockChat('live-chat') as never,
         getSession: () => undefined,
         getSessionEntry: () => undefined,
         isEvicted: () => false,
+        listSessionContentEntries: () => undefined,
         listSessionTranscriptEntries: () => undefined,
         now: () => 1,
         rebuildChat: () => undefined,
@@ -654,6 +726,7 @@ describe('sessions', () => {
               thoughtText: '',
               toolEvents: [],
               toolsUsed: [],
+              toolsUsedOccurrences: [],
             },
             toolProfile: 'none' as const,
           }) as never,

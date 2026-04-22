@@ -1,4 +1,4 @@
-import type { Chat } from '@google/genai';
+import type { Chat, Part } from '@google/genai';
 
 import { AppError } from './lib/errors.js';
 import type { ToolProfile } from './lib/orchestration.js';
@@ -18,15 +18,25 @@ export interface TranscriptEntry {
   taskId?: string;
 }
 
+export interface ContentEntry {
+  role: 'user' | 'model';
+  parts: Part[];
+  timestamp: number;
+  taskId?: string;
+}
+
 export interface SessionEventEntry {
   request: {
     message: string;
+    sentMessage?: string;
     toolProfile?: ToolProfile;
     urls?: string[];
   };
   response: {
     data?: unknown;
+    finishReason?: string;
     functionCalls?: FunctionCallEntry[];
+    promptBlockReason?: string;
     schemaWarnings?: string[];
     thoughts?: string;
     text: string;
@@ -39,6 +49,7 @@ export interface SessionEventEntry {
 
 interface SessionEntry {
   chat: Chat;
+  contents: ContentEntry[];
   events: SessionEventEntry[];
   lastAccess: number;
   rebuiltAt?: number;
@@ -96,6 +107,13 @@ function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
         : {}),
       ...(item.response.usage ? { usage: { ...item.response.usage } } : {}),
     },
+  };
+}
+
+function cloneContentEntry(item: ContentEntry): ContentEntry {
+  return {
+    ...item,
+    parts: cloneValue(item.parts),
   };
 }
 
@@ -185,12 +203,28 @@ export class SessionStore {
     return entry.events.map((item) => cloneSessionEventEntry(item));
   }
 
+  listSessionContentEntries(id: string): ContentEntry[] | undefined {
+    const entry = this.getActiveSessionEntry(id);
+    if (!entry) return undefined;
+    return entry.contents.map((item) => cloneContentEntry(item));
+  }
+
   appendSessionTranscript(id: string, item: TranscriptEntry): boolean {
     return this.appendSessionHistoryEntry(
       id,
       item,
       (entry) => entry.transcript,
       (value) => ({ ...value }),
+      this.maxTranscriptEntries,
+    );
+  }
+
+  appendSessionContent(id: string, item: ContentEntry): boolean {
+    return this.appendSessionHistoryEntry(
+      id,
+      item,
+      (entry) => entry.contents,
+      cloneContentEntry,
       this.maxTranscriptEntries,
     );
   }
@@ -321,6 +355,7 @@ export class SessionStore {
     this.evictedSessions.delete(id);
     this.setSessionEntry(id, {
       chat,
+      contents: [],
       events: [],
       lastAccess: this.now(),
       ...(rebuiltAt !== undefined ? { rebuiltAt } : {}),

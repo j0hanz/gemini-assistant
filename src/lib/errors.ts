@@ -140,6 +140,44 @@ export class TruncationError extends AppError {
   }
 }
 
+const FINISH_REASON_ERRORS = new Map<FinishReason, { code: string; message: string }>([
+  [
+    FinishReason.MALFORMED_FUNCTION_CALL,
+    {
+      code: 'malformed_function_call',
+      message: 'model returned a malformed function call',
+    },
+  ],
+  [
+    FinishReason.BLOCKLIST,
+    {
+      code: 'blocklist',
+      message: 'response blocked by blocklist',
+    },
+  ],
+  [
+    FinishReason.PROHIBITED_CONTENT,
+    {
+      code: 'prohibited_content',
+      message: 'response blocked due to prohibited content',
+    },
+  ],
+  [
+    FinishReason.SPII,
+    {
+      code: 'spii',
+      message: 'response blocked because it may contain sensitive personal information',
+    },
+  ],
+  [
+    FinishReason.OTHER,
+    {
+      code: 'finish_other',
+      message: 'response stopped for an unspecified reason',
+    },
+  ],
+]);
+
 export function finishReasonToError(
   finishReason: FinishReason | undefined,
   text: string,
@@ -155,6 +193,11 @@ export function finishReasonToError(
 
   if (!text && finishReason === FinishReason.MAX_TOKENS) {
     return new TruncationError(toolName);
+  }
+
+  const mapped = finishReason ? FINISH_REASON_ERRORS.get(finishReason) : undefined;
+  if (mapped) {
+    return new AppError(toolName, `${toolName}: ${mapped.message} (${mapped.code})`, 'internal');
   }
 
   return undefined;

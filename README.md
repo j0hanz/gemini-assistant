@@ -62,6 +62,10 @@ Workflow entries:
 `session://{sessionId}/events` is a normalized inspection summary, not a replay-ready Gemini history.
 Large event payloads may be truncated into previews.
 
+Internally, sessions also keep a replay-safe Gemini `Content[]` log alongside the display
+transcript. Rebuilt sessions use that log so thinking signatures, function calls, and function
+responses survive live chat eviction without changing the public session resources.
+
 Workspace context state is exposed through `discover://context`, `workspace://context`, and `workspace://cache`.
 
 ## Capability Notes

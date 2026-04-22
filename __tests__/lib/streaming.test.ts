@@ -357,6 +357,34 @@ describe('consumeStreamWithProgress', () => {
     );
   });
 
+  it('preserves empty string fields in tool events', async () => {
+    const { ctx } = makeMockContext();
+    const result = await consumeStreamWithProgress(
+      fakeStream([
+        makeChunk([{ codeExecutionResult: { output: '', outcome: Outcome.OUTCOME_OK } }]),
+      ]),
+      ctx,
+    );
+
+    assert.deepStrictEqual(result.toolEvents, [
+      { kind: 'code_execution_result', outcome: Outcome.OUTCOME_OK, output: '' },
+    ]);
+  });
+
+  it('captures executable-code language', async () => {
+    const { ctx } = makeMockContext();
+    const result = await consumeStreamWithProgress(
+      fakeStream([makeChunk([{ executableCode: { code: 'print(1)', language: 'PYTHON' } }])]),
+      ctx,
+    );
+
+    assert.deepStrictEqual(result.toolEvents[0], {
+      kind: 'executable_code',
+      code: 'print(1)',
+      language: 'PYTHON',
+    });
+  });
+
   it('detects grounding metadata and reports search tool', async () => {
     const { ctx, progressCalls } = makeMockContext();
     const chunk = makeChunk([{ text: 'search result' }], FinishReason.STOP);
@@ -446,7 +474,7 @@ describe('consumeStreamWithProgress', () => {
 
     const messages = progressCalls.map((c) => c.message);
     assert.ok(messages.includes('Built-in tool: googleSearch'));
-    assert.ok(messages.includes('Built-in result: googleSearch'));
+    assert.ok(!messages.includes('Built-in result: googleSearch'));
   });
 
   it('captures function responses as tool events without adding toolsUsed entries', async () => {
@@ -477,8 +505,127 @@ describe('consumeStreamWithProgress', () => {
       response: { forecast: 'sunny' },
       thoughtSignature: 'sig-function-response',
     });
-    assert.deepStrictEqual(result.toolsUsed, []);
+    assert.deepStrictEqual(result.toolsUsed, ['lookupWeather']);
     assert.strictEqual(result.text, 'done');
+  });
+
+  it('captures thought signatures on thought parts while accumulating thought text', async () => {
+    const { ctx } = makeMockContext();
+    const result = await consumeStreamWithProgress(
+      fakeStream([
+        makeChunk([{ text: 'private reasoning', thought: true, thoughtSignature: 'sig-thought' }]),
+      ]),
+      ctx,
+    );
+
+    assert.strictEqual(result.thoughtText, 'private reasoning');
+    assert.deepStrictEqual(result.toolEvents[0], {
+      kind: 'part',
+      text: 'private reasoning',
+      thoughtSignature: 'sig-thought',
+    });
+  });
+
+  it('captures model text signatures without dropping visible text', async () => {
+    const { ctx } = makeMockContext();
+    const result = await consumeStreamWithProgress(
+      fakeStream([makeChunk([{ text: 'visible', thoughtSignature: 'sig-visible' }])]),
+      ctx,
+    );
+
+    assert.strictEqual(result.text, 'visible');
+    assert.deepStrictEqual(result.toolEvents, [
+      { kind: 'model_text', text: 'visible', thoughtSignature: 'sig-visible' },
+    ]);
+  });
+
+  it('preserves model text and function call event ordering', async () => {
+    const { ctx } = makeMockContext();
+    const result = await consumeStreamWithProgress(
+      fakeStream([
+        makeChunk([
+          { text: 'before', thoughtSignature: 'sig-before' },
+          { functionCall: { name: 'lookup', args: { q: 'x' } } },
+          { text: 'after', thoughtSignature: 'sig-after' },
+        ]),
+      ]),
+      ctx,
+    );
+
+    assert.deepStrictEqual(
+      result.toolEvents.map((event) => event.kind),
+      ['model_text', 'function_call', 'model_text'],
+    );
+  });
+
+  it('does not double-advance progress for grounding metadata plus matching toolCall', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    const chunk = makeChunk([
+      {
+        toolCall: {
+          toolType: 'GOOGLE_SEARCH_WEB',
+          args: { queries: ['query'] },
+          id: 'tool-1',
+        },
+      },
+      { text: 'answer' },
+    ]);
+    const candidate = chunk.candidates?.[0];
+    if (candidate) {
+      candidate.groundingMetadata = {
+        groundingChunks: [{ web: { title: 'Test', uri: 'https://example.com' } }],
+      };
+    }
+
+    await consumeStreamWithProgress(fakeStream([chunk]), ctx);
+
+    const messages = progressCalls.map((call) => call.message);
+    assert.strictEqual(messages.filter((message) => message === 'Searching the web').length, 1);
+    assert.strictEqual(
+      messages.filter((message) => message === 'Built-in tool: googleSearch').length,
+      0,
+    );
+  });
+
+  it('emits compiling progress for each tool wave after visible text', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+    await consumeStreamWithProgress(
+      fakeStream([
+        makeChunk([{ text: 'intro' }]),
+        makeChunk([{ functionCall: { name: 'firstTool', args: {} } }]),
+        makeChunk([{ text: 'middle' }]),
+        makeChunk([{ functionCall: { name: 'secondTool', args: {} } }]),
+        makeChunk([{ text: 'final' }]),
+      ]),
+      ctx,
+    );
+
+    const compileCount = progressCalls.filter(
+      (call) => call.message === 'Compiling results',
+    ).length;
+    assert.strictEqual(compileCount, 2);
+  });
+
+  it('captures toolsUsedOccurrences in event order with duplicates', async () => {
+    const { ctx } = makeMockContext();
+    const result = await consumeStreamWithProgress(
+      fakeStream([
+        makeChunk([
+          { functionCall: { name: 'lookup', args: {} } },
+          { functionResponse: { name: 'lookup', response: {} } },
+          { executableCode: { code: 'print(1)' } },
+          { codeExecutionResult: { output: '1', outcome: Outcome.OUTCOME_OK } },
+        ]),
+      ]),
+      ctx,
+    );
+
+    assert.deepStrictEqual(result.toolsUsedOccurrences, [
+      'lookup',
+      'lookup',
+      'codeExecution',
+      'codeExecution',
+    ]);
   });
 
   it('does not enqueue streaming text on the logging channel', async () => {
@@ -900,6 +1047,35 @@ describe('validateStreamResult', () => {
     assert.match(result.content[0]?.text ?? '', /max tokens/);
   });
 
+  it('returns errors for additional terminal finish reasons', () => {
+    const cases: [FinishReason, RegExp][] = [
+      [FinishReason.MALFORMED_FUNCTION_CALL, /malformed_function_call/],
+      [FinishReason.BLOCKLIST, /blocklist/],
+      [FinishReason.PROHIBITED_CONTENT, /prohibited_content/],
+      [FinishReason.SPII, /spii/],
+      [FinishReason.OTHER, /finish_other/],
+    ];
+
+    for (const [finishReason, pattern] of cases) {
+      const result = validateStreamResult(
+        { text: 'partial', parts: [], finishReason, hadCandidate: true } as StreamResult,
+        'test',
+      );
+      assert.strictEqual(result.isError, true);
+      assert.match(result.content[0]?.text ?? '', pattern);
+    }
+  });
+
+  it('returns aborted errors before candidate validation', () => {
+    const result = validateStreamResult(
+      { text: '', parts: [], hadCandidate: false, aborted: true } as StreamResult,
+      'test',
+    );
+
+    assert.strictEqual(result.isError, true);
+    assert.match(result.content[0]?.text ?? '', /aborted/);
+  });
+
   it('returns text when MAX_TOKENS but text exists', () => {
     const result = validateStreamResult(
       {
@@ -920,7 +1096,7 @@ describe('validateStreamResult', () => {
       'test',
     );
     assert.strictEqual(result.isError, true);
-    assert.match(result.content[0]?.text ?? '', /prompt blocked.*unknown/i);
+    assert.match(result.content[0]?.text ?? '', /empty_stream/);
   });
 
   it('returns error for prompt-blocked results', () => {

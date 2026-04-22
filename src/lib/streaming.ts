@@ -10,7 +10,7 @@ import type {
   UrlContextMetadata,
 } from '@google/genai';
 
-import { finishReasonToError, withRetry } from './errors.js';
+import { AppError, finishReasonToError, withRetry } from './errors.js';
 import { pickDefined } from './object.js';
 import { advanceProgress, PROGRESS_TOTAL, sendProgress } from './progress.js';
 import { promptBlockedError } from './response.js';
@@ -30,10 +30,12 @@ export interface ToolEvent {
     | 'tool_response'
     | 'function_call'
     | 'function_response'
+    | 'model_text'
     | 'executable_code'
     | 'code_execution_result';
   args?: Record<string, unknown>;
   code?: string;
+  language?: string;
   id?: string;
   name?: string;
   outcome?: string;
@@ -49,9 +51,11 @@ export interface StreamResult {
   thoughtText: string;
   parts: Part[];
   toolsUsed: string[];
+  toolsUsedOccurrences: string[];
   functionCalls: FunctionCallEntry[];
   toolEvents: ToolEvent[];
   hadCandidate: boolean;
+  aborted?: boolean;
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
   promptBlockReason?: BlockedReason;
@@ -75,8 +79,8 @@ interface ThoughtHeaderState {
 }
 
 interface StreamProcessingState extends StreamMetadata {
+  completedToolWaves: number;
   currentProgress: number;
-  emittedCompiling: boolean;
   functionCalls: FunctionCallEntry[];
   hadToolActivity: boolean;
   parts: Part[];
@@ -86,6 +90,7 @@ interface StreamProcessingState extends StreamMetadata {
   thoughtText: string;
   toolEvents: ToolEvent[];
   toolsUsed: Set<string>;
+  toolWaves: number;
 }
 
 type ProgressMessageFormatter = (message: string) => string;
@@ -132,6 +137,7 @@ async function emitThoughtHeaders(
 }
 
 interface StreamMetadata {
+  aborted: boolean;
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
   hadCandidate: boolean;
@@ -165,8 +171,9 @@ function updateStreamMetadata(
 
 function createStreamProcessingState(): StreamProcessingState {
   return {
+    aborted: false,
+    completedToolWaves: 0,
     currentProgress: 0,
-    emittedCompiling: false,
     functionCalls: [],
     hadToolActivity: false,
     hadCandidate: false,
@@ -181,6 +188,7 @@ function createStreamProcessingState(): StreamProcessingState {
     thoughtText: '',
     toolEvents: [],
     toolsUsed: new Set<string>(),
+    toolWaves: 0,
   };
 }
 
@@ -201,6 +209,12 @@ async function recordToolActivity(
   progressMessage: string,
   toolName?: string,
 ): Promise<void> {
+  if (state.text.length > 0 && state.phase >= Phase.Generating) {
+    state.toolWaves += 1;
+    state.phase = Phase.Thinking;
+  } else if (state.toolWaves === 0) {
+    state.toolWaves = 1;
+  }
   if (toolName) {
     state.toolsUsed.add(toolName);
   }
@@ -229,8 +243,8 @@ function appendToolEvent(state: StreamProcessingState, event: ToolEvent): void {
 }
 
 /**
- * Builds a ToolEvent by dropping falsy (undefined/empty-string/null) fields,
- * preserving the exact semantics of the previous `...(x ? {k:x} : {})` spreads.
+ * Builds a ToolEvent by dropping only undefined fields so falsy SDK values
+ * such as empty strings, 0, and false remain replay-visible.
  */
 function toolEvent(
   kind: ToolEvent['kind'],
@@ -240,7 +254,7 @@ function toolEvent(
 ): ToolEvent {
   const ev: Record<string, unknown> = { kind };
   for (const [k, v] of Object.entries(fields)) {
-    if (v) ev[k] = v;
+    if (v !== undefined) ev[k] = v;
   }
   return ev as unknown as ToolEvent;
 }
@@ -277,8 +291,8 @@ async function transitionToGenerating(
   state: StreamProcessingState,
   msg: ProgressMessageFormatter,
 ): Promise<void> {
-  if (state.hadToolActivity && !state.emittedCompiling) {
-    state.emittedCompiling = true;
+  if (state.hadToolActivity && state.completedToolWaves < state.toolWaves) {
+    state.completedToolWaves = state.toolWaves;
     state.phase = Phase.Generating;
     await advanceAndSendProgress(ctx, state, msg, 'Compiling results');
     return;
@@ -345,13 +359,18 @@ async function handleToolCallPart(
       toolType: toolCall.toolType,
     }),
   );
-  await recordToolActivity(
-    ctx,
-    state,
-    msg,
-    `Built-in tool: ${normalizedToolName ?? toolCall.toolType ?? 'unknown'}`,
-    normalizedToolName,
-  );
+  const alreadyReported = normalizedToolName ? state.toolsUsed.has(normalizedToolName) : false;
+  const toolName = normalizedToolName ?? toolCall.toolType;
+  if (toolName) state.toolsUsed.add(toolName);
+  if (!alreadyReported) {
+    await recordToolActivity(
+      ctx,
+      state,
+      msg,
+      `Built-in tool: ${normalizedToolName ?? toolCall.toolType ?? 'unknown'}`,
+      normalizedToolName,
+    );
+  }
 }
 
 async function handleToolResponsePart(
@@ -375,13 +394,18 @@ async function handleToolResponsePart(
       toolType: toolResponse.toolType,
     }),
   );
-  await recordToolActivity(
-    ctx,
-    state,
-    msg,
-    `Built-in result: ${normalizedToolName ?? toolResponse.toolType ?? 'unknown'}`,
-    normalizedToolName,
-  );
+  const alreadyReported = normalizedToolName ? state.toolsUsed.has(normalizedToolName) : false;
+  const toolName = normalizedToolName ?? toolResponse.toolType;
+  if (toolName) state.toolsUsed.add(toolName);
+  if (!alreadyReported) {
+    await recordToolActivity(
+      ctx,
+      state,
+      msg,
+      `Built-in result: ${normalizedToolName ?? toolResponse.toolType ?? 'unknown'}`,
+      normalizedToolName,
+    );
+  }
 }
 
 async function handleThoughtPart(
@@ -417,6 +441,7 @@ async function handleExecutableCodePart(
     toolEvent('executable_code', {
       code: part.executableCode.code,
       id: part.executableCode.id,
+      language: part.executableCode.language,
       thoughtSignature: part.thoughtSignature,
     }),
   );
@@ -490,6 +515,13 @@ async function handleFunctionProtocolPart(
       thoughtSignature: part.thoughtSignature,
     }),
   );
+  await recordToolActivity(
+    ctx,
+    state,
+    msg,
+    `Function result: ${part.functionResponse.name ?? 'tool'}`,
+    part.functionResponse.name,
+  );
   return true;
 }
 
@@ -501,6 +533,13 @@ async function handleThoughtOrSignaturePart(
 ): Promise<boolean> {
   const partText = part.text;
   if (part.thought) {
+    appendToolEvent(
+      state,
+      toolEvent('part', {
+        text: partText,
+        thoughtSignature: part.thoughtSignature,
+      }),
+    );
     await handleThoughtPart(ctx, state, msg, partText);
     return true;
   }
@@ -525,12 +564,22 @@ async function handleTextPart(
   ctx: ServerContext,
   state: StreamProcessingState,
   msg: ProgressMessageFormatter,
-  partText: string | undefined,
+  part: Part,
 ): Promise<void> {
+  const partText = part.text;
   if (partText === undefined) {
     return;
   }
 
+  if (part.thoughtSignature !== undefined) {
+    appendToolEvent(
+      state,
+      toolEvent('model_text', {
+        text: partText,
+        thoughtSignature: part.thoughtSignature,
+      }),
+    );
+  }
   await transitionToGenerating(ctx, state, msg);
   state.text += partText;
 }
@@ -563,7 +612,23 @@ async function handleStreamPart(
     return;
   }
 
-  await handleTextPart(ctx, state, msg, part.text);
+  await handleTextPart(ctx, state, msg, part);
+}
+
+function toolsUsedOccurrences(toolEvents: ToolEvent[]): string[] {
+  return toolEvents.flatMap((event) => {
+    if (event.kind === 'function_call' || event.kind === 'function_response') {
+      return event.name ? [event.name] : [];
+    }
+    if (event.kind === 'executable_code' || event.kind === 'code_execution_result') {
+      return ['codeExecution'];
+    }
+    if (event.kind === 'tool_call' || event.kind === 'tool_response') {
+      const normalized = normalizeToolName(event.toolType);
+      return normalized ? [normalized] : [];
+    }
+    return [];
+  });
 }
 
 function finalizeStreamResult(state: StreamProcessingState): StreamResult {
@@ -572,10 +637,12 @@ function finalizeStreamResult(state: StreamProcessingState): StreamResult {
     thoughtText: state.thoughtText,
     parts: state.parts,
     toolsUsed: [...state.toolsUsed],
+    toolsUsedOccurrences: toolsUsedOccurrences(state.toolEvents),
     functionCalls: state.functionCalls,
     toolEvents: state.toolEvents,
     hadCandidate: state.hadCandidate,
     ...pickDefined({
+      aborted: state.aborted,
       finishReason: state.finishReason,
       groundingMetadata: state.groundingMetadata,
       promptBlockReason: state.promptBlockReason,
@@ -596,7 +663,10 @@ export async function consumeStreamWithProgress(
   await advanceAndSendProgress(ctx, state, msg, 'Evaluating prompt');
 
   for await (const chunk of stream) {
-    if (ctx.mcpReq.signal.aborted) break;
+    if (ctx.mcpReq.signal.aborted) {
+      state.aborted = true;
+      break;
+    }
 
     if (chunk.promptFeedback?.blockReason) {
       state.promptBlockReason = chunk.promptFeedback.blockReason;
@@ -617,12 +687,26 @@ export async function consumeStreamWithProgress(
 }
 
 export function validateStreamResult(result: StreamResult, toolName: string): CallToolResult {
+  if (result.aborted) {
+    return new AppError(
+      toolName,
+      `${toolName}: aborted (aborted)`,
+      'cancelled',
+      false,
+    ).toToolResult();
+  }
+
   if (result.promptBlockReason) {
     return promptBlockedError(toolName, result.promptBlockReason);
   }
 
   if (!result.hadCandidate) {
-    return promptBlockedError(toolName);
+    return new AppError(
+      toolName,
+      `${toolName}: empty stream from Gemini (empty_stream)`,
+      'internal',
+      true,
+    ).toToolResult();
   }
 
   const errResult = finishReasonToError(result.finishReason, result.text, toolName);

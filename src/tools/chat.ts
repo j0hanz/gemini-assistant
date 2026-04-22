@@ -7,7 +7,7 @@ import type {
 
 import { Validator } from '@cfworker/json-schema';
 import { FinishReason } from '@google/genai';
-import type { Chat } from '@google/genai';
+import type { Chat, Content } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
@@ -61,6 +61,7 @@ import {
 } from '../client.js';
 import { getSessionRedactionPatterns, getWorkspaceCacheEnabled } from '../config.js';
 import {
+  type ContentEntry,
   createSessionStore,
   type SessionEventEntry,
   type SessionStore,
@@ -89,12 +90,14 @@ interface AskStructuredContent extends Record<string, unknown> {
 }
 
 interface AskDependencies {
+  appendSessionContent: (sessionId: string, item: ContentEntry) => boolean;
   appendSessionEvent: (sessionId: string, item: SessionEventEntry) => boolean;
   appendSessionTranscript: (sessionId: string, item: TranscriptEntry) => boolean;
   createChat: (args: AskArgs) => Chat;
   getSession: (sessionId: string) => Chat | undefined;
   getSessionEntry: (sessionId: string) => SessionSummary | undefined;
   isEvicted: (sessionId: string) => boolean;
+  listSessionContentEntries: (sessionId: string) => ContentEntry[] | undefined;
   now: () => number;
   listSessionTranscriptEntries: (sessionId: string) => TranscriptEntry[] | undefined;
   rebuildChat: (sessionId: string, args: AskArgs) => Chat | undefined;
@@ -108,6 +111,7 @@ interface AskDependencies {
 
 interface AskExecutionResult {
   result: CallToolResult;
+  sentMessage?: string;
   streamResult: StreamResult;
   toolProfile: ToolProfile;
   urls?: string[];
@@ -372,7 +376,7 @@ async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
   } as const;
 }
 
-function buildRebuiltChatHistory(
+export function buildRebuiltChatHistory(
   transcript: TranscriptEntry[],
   maxChars: number,
 ): { role: 'user' | 'model'; parts: [{ text: string }] }[] {
@@ -395,6 +399,29 @@ function buildRebuiltChatHistory(
   return selected.reverse().map((entry) => ({
     role: entry.role === 'user' ? 'user' : 'model',
     parts: [{ text: entry.text }],
+  }));
+}
+
+export function buildRebuiltChatContents(contents: ContentEntry[], maxBytes: number): Content[] {
+  const selected: ContentEntry[] = [];
+  let totalBytes = 0;
+
+  for (let index = contents.length - 1; index >= 0; index--) {
+    const entry = contents[index];
+    if (!entry) continue;
+
+    const nextBytes = totalBytes + JSON.stringify(entry.parts).length;
+    if (selected.length > 0 && nextBytes > maxBytes) {
+      break;
+    }
+
+    selected.push(entry);
+    totalBytes = nextBytes;
+  }
+
+  return selected.reverse().map((entry) => ({
+    role: entry.role,
+    parts: structuredClone(entry.parts),
   }));
 }
 
@@ -434,6 +461,7 @@ async function runAskStream(
       thoughtText: '',
       parts: [],
       toolsUsed: [],
+      toolsUsedOccurrences: [],
       functionCalls: [],
       toolEvents: [],
       hadCandidate: false,
@@ -477,6 +505,7 @@ export async function askWithoutSession(
         thoughtText: '',
         parts: [],
         toolsUsed: [],
+        toolsUsedOccurrences: [],
         functionCalls: [],
         toolEvents: [],
         hadCandidate: false,
@@ -521,7 +550,7 @@ export async function askWithoutSession(
       isRetryableSchemaFailure(warnings, parsedData, jsonMode);
 
     if (!shouldRetry) {
-      return askResult;
+      return { ...askResult, sentMessage: currentPrompt };
     }
 
     logger.child('chat').debug('Retrying JSON response with repair suffix', {
@@ -595,8 +624,10 @@ function sanitizeToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
     ...(toolEvent.args
       ? { args: sanitizeSessionValue(toolEvent.args, 'args') as Record<string, unknown> }
       : {}),
-    ...(toolEvent.code ? { code: sanitizeSessionValue(toolEvent.code, 'code') as string } : {}),
-    ...(toolEvent.output
+    ...(toolEvent.code !== undefined
+      ? { code: sanitizeSessionValue(toolEvent.code, 'code') as string }
+      : {}),
+    ...(toolEvent.output !== undefined
       ? { output: sanitizeSessionValue(toolEvent.output, 'output') as string }
       : {}),
     ...(toolEvent.response
@@ -604,7 +635,9 @@ function sanitizeToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
           response: sanitizeSessionValue(toolEvent.response, 'response') as Record<string, unknown>,
         }
       : {}),
-    ...(toolEvent.text ? { text: sanitizeSessionValue(toolEvent.text, 'text') as string } : {}),
+    ...(toolEvent.text !== undefined
+      ? { text: sanitizeSessionValue(toolEvent.text, 'text') as string }
+      : {}),
   }));
 }
 
@@ -636,38 +669,63 @@ function appendSessionTurn(
   sessionId: string,
   askResult: AskExecutionResult,
   args: AskArgs,
-  deps: Pick<AskDependencies, 'appendSessionEvent' | 'appendSessionTranscript' | 'now'>,
+  deps: Pick<
+    AskDependencies,
+    'appendSessionContent' | 'appendSessionEvent' | 'appendSessionTranscript' | 'now'
+  >,
   taskId?: string,
+  sentArgs: AskArgs = args,
 ): void {
   appendTranscriptPair(sessionId, args.message, askResult.result, deps, taskId);
   if (askResult.result.isError) return;
   const structured = getAskStructuredContent(askResult.result);
+  const timestamp = deps.now();
+  const sentMessage = askResult.sentMessage ?? sentArgs.message;
+
+  deps.appendSessionContent(sessionId, {
+    role: 'user',
+    parts: [{ text: sentMessage }],
+    timestamp,
+    ...(taskId ? { taskId } : {}),
+  });
+  deps.appendSessionContent(sessionId, {
+    role: 'model',
+    parts: askResult.streamResult.parts,
+    timestamp,
+    ...(taskId ? { taskId } : {}),
+  });
 
   deps.appendSessionEvent(sessionId, {
-    request: buildSessionEventRequest(args.message, askResult),
-    response: buildSessionEventResponse(askResult.result, structured),
-    timestamp: deps.now(),
+    request: buildSessionEventRequest(args.message, sentMessage, askResult),
+    response: buildSessionEventResponse(askResult, structured),
+    timestamp,
     ...(taskId ? { taskId } : {}),
   });
 }
 
 function buildSessionEventRequest(
   message: string,
+  sentMessage: string,
   askResult: AskExecutionResult,
 ): SessionEventEntry['request'] {
   return {
     message,
+    ...(sentMessage !== message ? { sentMessage } : {}),
     ...(askResult.toolProfile !== 'none' ? { toolProfile: askResult.toolProfile } : {}),
     ...(askResult.urls ? { urls: askResult.urls } : {}),
   };
 }
 
 function buildSessionEventResponse(
-  result: CallToolResult,
+  askResult: AskExecutionResult,
   structured: AskStructuredContent | undefined,
 ): SessionEventEntry['response'] {
   return {
-    text: extractTextContent(result.content),
+    text: extractTextContent(askResult.result.content),
+    ...pickDefined({
+      finishReason: askResult.streamResult.finishReason,
+      promptBlockReason: askResult.streamResult.promptBlockReason,
+    }),
     ...buildSessionEventData(structured),
     ...buildSessionEventFunctionCalls(structured),
     ...buildSessionEventSchemaWarnings(structured),
@@ -757,6 +815,7 @@ function buildAskToolingConfig(args: AskArgs) {
 
 function createDefaultAskDependencies(sessionStore: SessionStore): AskDependencies {
   return {
+    appendSessionContent: sessionStore.appendSessionContent.bind(sessionStore),
     appendSessionEvent: sessionStore.appendSessionEvent.bind(sessionStore),
     appendSessionTranscript: sessionStore.appendSessionTranscript.bind(sessionStore),
     createChat: (args) => {
@@ -769,10 +828,13 @@ function createDefaultAskDependencies(sessionStore: SessionStore): AskDependenci
     getSession: sessionStore.getSession.bind(sessionStore),
     getSessionEntry: sessionStore.getSessionEntry.bind(sessionStore),
     isEvicted: sessionStore.isEvicted.bind(sessionStore),
+    listSessionContentEntries: sessionStore.listSessionContentEntries.bind(sessionStore),
     listSessionTranscriptEntries: sessionStore.listSessionTranscriptEntries.bind(sessionStore),
     rebuildChat: (sessionId, args) => {
-      const transcript = sessionStore.listSessionTranscriptEntries(sessionId) ?? [];
-      if (transcript.length === 0) {
+      const contents = sessionStore.listSessionContentEntries(sessionId) ?? [];
+      const transcript =
+        contents.length === 0 ? (sessionStore.listSessionTranscriptEntries(sessionId) ?? []) : [];
+      if (contents.length === 0 && transcript.length === 0) {
         return undefined;
       }
 
@@ -780,7 +842,10 @@ function createDefaultAskDependencies(sessionStore: SessionStore): AskDependenci
       const chat = getAI().chats.create({
         model: MODEL,
         config: buildGenerateContentConfig({ ...args, toolConfig, tools }),
-        history: buildRebuiltChatHistory(transcript, 200_000),
+        history:
+          contents.length > 0
+            ? buildRebuiltChatContents(contents, 200_000)
+            : buildRebuiltChatHistory(transcript, 200_000),
       });
       sessionStore.setSession(sessionId, chat, Date.now());
       return chat;
@@ -832,7 +897,7 @@ async function askExistingSession(
     args.sessionId,
     deps.getSessionEntry(args.sessionId)?.rebuiltAt,
   );
-  appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id);
+  appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id, resumedArgs);
   return askResult.result;
 }
 

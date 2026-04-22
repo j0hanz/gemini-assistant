@@ -6,9 +6,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { FinishReason } from '@google/genai';
+
 import { getAI } from '../../src/client.js';
 import { workspaceCacheManager } from '../../src/lib/workspace-context.js';
-import { askWithoutSession, chatWork, createAskWork } from '../../src/tools/chat.js';
+import {
+  askWithoutSession,
+  buildRebuiltChatContents,
+  chatWork,
+  createAskWork,
+} from '../../src/tools/chat.js';
 
 function createContext(): ServerContext {
   return createContextWithSignal(new AbortController().signal);
@@ -63,11 +70,13 @@ function withGeminiStreamStub(responses: (string | (() => AsyncGenerator))[]): {
 function createDeps(overrides: Partial<Parameters<typeof createAskWork>[0]> = {}) {
   return {
     appendSessionEvent: () => true,
+    appendSessionContent: () => true,
     appendSessionTranscript: () => true,
     createChat: () => ({ kind: 'chat' }) as never,
     getSession: () => undefined,
     getSessionEntry: () => undefined,
     isEvicted: () => false,
+    listSessionContentEntries: () => undefined,
     listSessionTranscriptEntries: () => undefined,
     rebuildChat: () => undefined,
     now: () => 1,
@@ -84,6 +93,7 @@ function createDeps(overrides: Partial<Parameters<typeof createAskWork>[0]> = {}
           thoughtText: '',
           toolEvents: [],
           toolsUsed: [],
+          toolsUsedOccurrences: [],
         },
         toolProfile: 'none' as const,
         observedArgs: args,
@@ -234,6 +244,7 @@ describe('ask contract', () => {
               thoughtText: '',
               toolEvents: [],
               toolsUsed: [],
+              toolsUsedOccurrences: [],
             },
             toolProfile: 'none' as const,
           } as never;
@@ -290,6 +301,7 @@ describe('ask contract', () => {
               thoughtText: '',
               toolEvents: [],
               toolsUsed: [],
+              toolsUsedOccurrences: [],
             },
             toolProfile: 'none' as const,
           } as never;
@@ -513,6 +525,132 @@ describe('ask contract', () => {
       process.env.CACHE = originalCache;
       stub.restore();
     }
+  });
+
+  it('stores replay-safe content entries for successful session turns', async () => {
+    const originalCache = process.env.CACHE;
+    process.env.CACHE = 'false';
+    const contentEntries: Record<string, unknown>[] = [];
+    const askWork = createAskWork(
+      createDeps({
+        appendSessionContent: (_sessionId, item) => {
+          contentEntries.push(item as unknown as Record<string, unknown>);
+          return true;
+        },
+        runWithoutSession: async () =>
+          ({
+            result: {
+              content: [{ type: 'text' as const, text: 'Need tool result' }],
+              structuredContent: { answer: 'Need tool result' },
+            },
+            streamResult: {
+              functionCalls: [{ name: 'lookup', args: { q: 'x' } }],
+              parts: [{ functionCall: { name: 'lookup', args: { q: 'x' } } }],
+              text: 'Need tool result',
+              thoughtText: '',
+              toolEvents: [{ kind: 'function_call', name: 'lookup', args: { q: 'x' } }],
+              toolsUsed: ['lookup'],
+              toolsUsedOccurrences: ['lookup'],
+              hadCandidate: true,
+            },
+            toolProfile: 'none' as const,
+          }) as never,
+      }),
+    );
+
+    try {
+      await askWork({ message: 'Call lookup', sessionId: 'sess-content' }, createContext());
+    } finally {
+      if (originalCache === undefined) {
+        delete process.env.CACHE;
+      } else {
+        process.env.CACHE = originalCache;
+      }
+    }
+
+    assert.deepStrictEqual(
+      contentEntries.map((entry) => entry['role']),
+      ['user', 'model'],
+    );
+    assert.deepStrictEqual(contentEntries[1]?.['parts'], [
+      { functionCall: { name: 'lookup', args: { q: 'x' } } },
+    ]);
+  });
+
+  it('builds rebuilt chat history from full content parts', () => {
+    const history = buildRebuiltChatContents(
+      [
+        {
+          role: 'user',
+          parts: [{ text: 'Call lookup' }],
+          timestamp: 1,
+        },
+        {
+          role: 'model',
+          parts: [{ functionCall: { name: 'lookup', args: { q: 'x' } } }],
+          timestamp: 1,
+        },
+      ],
+      200_000,
+    );
+
+    assert.deepStrictEqual(history, [
+      { role: 'user', parts: [{ text: 'Call lookup' }] },
+      { role: 'model', parts: [{ functionCall: { name: 'lookup', args: { q: 'x' } } }] },
+    ]);
+  });
+
+  it('persists sentMessage for rebuilt sessions with summaries and stores finishReason', async () => {
+    const events: Record<string, unknown>[] = [];
+    const transcript = [
+      { role: 'user' as const, text: 'previous question', timestamp: 1 },
+      { role: 'assistant' as const, text: 'previous answer', timestamp: 2 },
+    ];
+    const askWork = createAskWork(
+      createDeps({
+        appendSessionEvent: (_sessionId, item) => {
+          events.push(item);
+          return true;
+        },
+        getSessionEntry: (sessionId?: string) =>
+          sessionId === 'sess-rebuilt'
+            ? { id: sessionId, lastAccess: 1, transcriptCount: 2, eventCount: 0 }
+            : undefined,
+        listSessionTranscriptEntries: () => transcript,
+        rebuildChat: () => ({ kind: 'rebuilt-chat' }) as never,
+        runWithoutSession: async (args: Record<string, unknown>) =>
+          ({
+            result: {
+              content: [{ type: 'text' as const, text: 'Assistant answer' }],
+              structuredContent: { answer: 'Assistant answer' },
+            },
+            streamResult: {
+              functionCalls: [],
+              parts: [{ text: 'Assistant answer' }],
+              text: 'Assistant answer',
+              thoughtText: '',
+              toolEvents: [],
+              toolsUsed: [],
+              toolsUsedOccurrences: [],
+              finishReason: FinishReason.STOP,
+              hadCandidate: true,
+            },
+            sentMessage: args.message,
+            toolProfile: 'none' as const,
+          }) as never,
+      }),
+    );
+
+    await askWork({ message: 'follow up', sessionId: 'sess-rebuilt' }, createContext());
+
+    const event = events[0] as {
+      request?: { message?: string; sentMessage?: string };
+      response?: { finishReason?: string };
+    };
+    assert.strictEqual(event.request?.message, 'follow up');
+    assert.match(event.request?.sentMessage ?? '', /previous question/);
+    assert.match(event.request?.sentMessage ?? '', /\n\nfollow up$/);
+    assert.strictEqual(event.response?.finishReason, FinishReason.STOP);
   });
 
   it('passes maxOutputTokens through to the Gemini config', async () => {

@@ -21,7 +21,11 @@ function createContext(taskId?: string): ServerContext {
 function createHarness() {
   const sessions = new Map<
     string,
-    { events: Record<string, unknown>[]; transcript: Record<string, unknown>[] }
+    {
+      contents: Record<string, unknown>[];
+      events: Record<string, unknown>[];
+      transcript: Record<string, unknown>[];
+    }
   >();
   let nowValue = 0;
 
@@ -32,6 +36,12 @@ function createHarness() {
         const session = sessions.get(sessionId);
         if (!session) return false;
         session.events.push(entry);
+        return true;
+      },
+      appendSessionContent: (sessionId: string, entry: Record<string, unknown>) => {
+        const session = sessions.get(sessionId);
+        if (!session) return false;
+        session.contents.push(entry);
         return true;
       },
       appendSessionTranscript: (sessionId: string, entry: Record<string, unknown>) => {
@@ -46,6 +56,7 @@ function createHarness() {
       getSessionEntry: (sessionId: string) =>
         sessions.has(sessionId) ? ({ id: sessionId, lastAccess: 0 } as never) : undefined,
       isEvicted: () => false,
+      listSessionContentEntries: (sessionId: string) => sessions.get(sessionId)?.contents as never,
       listSessionTranscriptEntries: (sessionId: string) =>
         sessions.get(sessionId)?.transcript as never,
       now: () => {
@@ -63,11 +74,12 @@ function createHarness() {
           thoughtText: '',
           toolEvents: [],
           toolsUsed: [],
+          toolsUsedOccurrences: [],
         },
         toolProfile: 'none' as const,
       }),
       setSession: (sessionId: string) => {
-        sessions.set(sessionId, { events: [], transcript: [] });
+        sessions.set(sessionId, { contents: [], events: [], transcript: [] });
       },
     },
   };
@@ -132,7 +144,7 @@ describe('ask transcript capture', () => {
 
   it('captures transcript entries when resuming an existing session', async () => {
     const harness = createHarness();
-    harness.sessions.set('sess-existing', { events: [], transcript: [] });
+    harness.sessions.set('sess-existing', { contents: [], events: [], transcript: [] });
     const askWork = createAskWork(harness.deps as never);
 
     await askWork({ message: 'Follow up', sessionId: 'sess-existing' }, createContext('task-2'));
@@ -153,7 +165,7 @@ describe('ask transcript capture', () => {
 
   it('does not store transcript entries when result generation fails', async () => {
     const harness = createHarness();
-    harness.sessions.set('sess-error', { events: [], transcript: [] });
+    harness.sessions.set('sess-error', { contents: [], events: [], transcript: [] });
     harness.deps.runWithoutSession = async () => ({
       result: {
         content: [{ type: 'text' as const, text: 'ask failed' }],
@@ -166,6 +178,7 @@ describe('ask transcript capture', () => {
         thoughtText: '',
         toolEvents: [],
         toolsUsed: [],
+        toolsUsedOccurrences: [],
       },
       toolProfile: 'none' as const,
     });
@@ -180,7 +193,7 @@ describe('ask transcript capture', () => {
 
   it('persists structured output metadata in session events', async () => {
     const harness = createHarness();
-    harness.sessions.set('sess-structured', { events: [], transcript: [] });
+    harness.sessions.set('sess-structured', { contents: [], events: [], transcript: [] });
     harness.deps.runWithoutSession = async () => ({
       result: {
         content: [{ type: 'text' as const, text: '{\n  "status": "ok"\n}' }],
@@ -200,6 +213,7 @@ describe('ask transcript capture', () => {
         thoughtText: '',
         toolEvents: [],
         toolsUsed: [],
+        toolsUsedOccurrences: [],
       },
       toolProfile: 'search' as const,
       urls: ['https://example.com'],
@@ -234,7 +248,7 @@ describe('ask transcript capture', () => {
 
   it('truncates large structured payloads before persisting session events', async () => {
     const harness = createHarness();
-    harness.sessions.set('sess-large', { events: [], transcript: [] });
+    harness.sessions.set('sess-large', { contents: [], events: [], transcript: [] });
     harness.deps.runWithoutSession = async () => ({
       result: {
         content: [{ type: 'text' as const, text: 'Assistant answer' }],
@@ -269,6 +283,7 @@ describe('ask transcript capture', () => {
         thoughtText: '',
         toolEvents: [],
         toolsUsed: [],
+        toolsUsedOccurrences: [],
         hadCandidate: true,
       },
       toolProfile: 'none' as const,

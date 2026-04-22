@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
+import { FinishReason } from '@google/genai';
+
 import { AppError } from '../src/lib/errors.js';
 import {
   createSessionStore,
@@ -100,6 +102,39 @@ describe('sessions', () => {
           parts: [{ text: 'visible', thoughtSignature: 'sig-visible' }],
         },
       ]);
+    });
+
+    it('drops functionCall parts without a name on replay', () => {
+      const parts = [
+        { functionCall: { name: 'lookup', args: { q: 'x' } } },
+        { functionCall: { args: { stray: true } } },
+        { functionCall: { name: '', args: { empty: true } } },
+        { text: 'after' },
+      ];
+      assert.deepStrictEqual(sanitizeHistoryParts(parts as never), [
+        { functionCall: { name: 'lookup', args: { q: 'x' } } },
+        { text: 'after' },
+      ]);
+    });
+
+    it('buildRebuiltChatContents skips entries whose parts sanitize to empty', () => {
+      const rebuilt = buildRebuiltChatContents(
+        [
+          {
+            role: 'model',
+            parts: [{ functionCall: { args: { stray: true } } }],
+            timestamp: 1,
+          },
+          {
+            role: 'user',
+            parts: [{ text: 'next' }],
+            timestamp: 2,
+          },
+        ],
+        200_000,
+      );
+
+      assert.deepStrictEqual(rebuilt, [{ role: 'user', parts: [{ text: 'next' }] }]);
     });
   });
 
@@ -392,6 +427,65 @@ describe('sessions', () => {
           timestamp: 3,
         },
       ]);
+    });
+
+    it('preserves replay provenance fields (finishReason, groundingMetadata, urlContextMetadata, promptFeedback, anomalies) through clone round-trip', () => {
+      const store = createStore();
+      store.setSession('sess-provenance', mockChat('provenance') as never);
+
+      const groundingMetadata = {
+        webSearchQueries: ['what is foo'],
+      } as unknown as Record<string, unknown>;
+      const urlContextMetadata = {
+        urlMetadata: [{ retrievedUrl: 'https://example.com' }],
+      } as unknown as Record<string, unknown>;
+      const promptFeedback = { blockReason: 'SAFETY' } as unknown as Record<string, unknown>;
+      const anomalies = { namelessFunctionCalls: 1 };
+
+      store.appendSessionEvent('sess-provenance', {
+        request: { message: 'prompt' },
+        response: {
+          text: 'ok',
+          finishReason: 'STOP',
+          finishMessage: 'done',
+          promptBlockReason: 'SAFETY',
+          namelessFunctionCallCount: 1,
+          groundingMetadata,
+          urlContextMetadata,
+          promptFeedback,
+          anomalies,
+        },
+        timestamp: 1,
+      });
+
+      store.appendSessionContent('sess-provenance', {
+        role: 'model',
+        parts: [{ text: 'ok' }],
+        timestamp: 2,
+        finishReason: FinishReason.STOP,
+        finishMessage: 'done',
+      });
+
+      const events = store.listSessionEventEntries('sess-provenance');
+      assert.deepStrictEqual(events?.[0]?.response.groundingMetadata, groundingMetadata);
+      assert.deepStrictEqual(events?.[0]?.response.urlContextMetadata, urlContextMetadata);
+      assert.deepStrictEqual(events?.[0]?.response.promptFeedback, promptFeedback);
+      assert.deepStrictEqual(events?.[0]?.response.anomalies, anomalies);
+      assert.strictEqual(events?.[0]?.response.finishReason, 'STOP');
+      assert.strictEqual(events?.[0]?.response.finishMessage, 'done');
+
+      // Mutating the returned clone must NOT mutate the stored entry.
+      if (events?.[0]?.response.groundingMetadata) {
+        events[0].response.groundingMetadata.webSearchQueries = ['mutated'];
+      }
+      const eventsAgain = store.listSessionEventEntries('sess-provenance');
+      assert.deepStrictEqual(eventsAgain?.[0]?.response.groundingMetadata?.webSearchQueries, [
+        'what is foo',
+      ]);
+
+      const contents = store.listSessionContentEntries('sess-provenance');
+      assert.strictEqual(contents?.[0]?.finishReason, FinishReason.STOP);
+      assert.strictEqual(contents?.[0]?.finishMessage, 'done');
     });
   });
 

@@ -1,7 +1,13 @@
-import type { Chat, Part } from '@google/genai';
+import type {
+  Chat,
+  FinishReason,
+  GroundingMetadata,
+  Part,
+  UrlContextMetadata,
+} from '@google/genai';
 
 import { AppError } from './lib/errors.js';
-import type { FunctionCallEntry, ToolEvent } from './lib/streaming.js';
+import type { FunctionCallEntry, StreamAnomalies, ToolEvent } from './lib/streaming.js';
 import type { UsageMetadata } from './schemas/outputs.js';
 
 import { getSessionLimits } from './config.js';
@@ -22,6 +28,8 @@ export interface ContentEntry {
   parts: Part[];
   timestamp: number;
   taskId?: string;
+  finishReason?: FinishReason;
+  finishMessage?: string;
 }
 
 export interface SessionEventEntry {
@@ -37,6 +45,7 @@ export interface SessionEventEntry {
     functionCalls?: FunctionCallEntry[];
     citationMetadata?: unknown;
     promptBlockReason?: string;
+    promptFeedback?: unknown;
     schemaWarnings?: string[];
     safetyRatings?: unknown;
     finishMessage?: string;
@@ -44,6 +53,9 @@ export interface SessionEventEntry {
     text: string;
     toolEvents?: ToolEvent[];
     usage?: UsageMetadata;
+    groundingMetadata?: GroundingMetadata;
+    urlContextMetadata?: UrlContextMetadata;
+    anomalies?: StreamAnomalies;
   };
   timestamp: number;
   taskId?: string;
@@ -119,6 +131,18 @@ function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
         ? { toolEvents: item.response.toolEvents.map((toolEvent) => ({ ...toolEvent })) }
         : {}),
       ...(item.response.usage ? { usage: { ...item.response.usage } } : {}),
+      ...(item.response.groundingMetadata !== undefined
+        ? { groundingMetadata: cloneValue(item.response.groundingMetadata) }
+        : {}),
+      ...(item.response.urlContextMetadata !== undefined
+        ? { urlContextMetadata: cloneValue(item.response.urlContextMetadata) }
+        : {}),
+      ...(item.response.promptFeedback !== undefined
+        ? { promptFeedback: cloneValue(item.response.promptFeedback) }
+        : {}),
+      ...(item.response.anomalies !== undefined
+        ? { anomalies: { ...item.response.anomalies } }
+        : {}),
     },
   };
 }
@@ -127,11 +151,17 @@ function cloneContentEntry(item: ContentEntry): ContentEntry {
   return {
     ...item,
     parts: cloneValue(item.parts),
+    ...(item.finishReason !== undefined ? { finishReason: item.finishReason } : {}),
+    ...(item.finishMessage !== undefined ? { finishMessage: item.finishMessage } : {}),
   };
 }
 
 export function sanitizeHistoryParts(parts: Part[]): Part[] {
-  return parts.filter((part) => part.thought !== true);
+  return parts.filter((part) => {
+    if (part.thought === true) return false;
+    if (part.functionCall && !part.functionCall.name) return false;
+    return true;
+  });
 }
 
 function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {

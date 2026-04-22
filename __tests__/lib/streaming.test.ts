@@ -98,7 +98,10 @@ describe('consumeStreamWithProgress', () => {
     const result = await consumeStreamWithProgress(stream, ctx);
 
     assert.strictEqual(result.text, 'Hello world');
-    assert.strictEqual(result.parts.length, 2);
+    // Consecutive plain-text parts are coalesced into a single Part by
+    // `appendStreamPart` to keep token accounting stable on replay.
+    assert.strictEqual(result.parts.length, 1);
+    assert.strictEqual(result.parts[0]?.text, 'Hello world');
     assert.strictEqual(result.finishReason, FinishReason.STOP);
 
     // Should have: Evaluating prompt, Generating response (no terminal 'Complete' — callers own that)
@@ -1148,6 +1151,70 @@ describe('consumeStreamWithProgress', () => {
     }
     // After many steps, should be at the cap
     assert.strictEqual(current, PROGRESS_CAP);
+  });
+
+  it('coalesces three consecutive plain-text parts into a single Part', async () => {
+    const { ctx } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ text: 'a' }]),
+      makeChunk([{ text: 'b' }]),
+      makeChunk([{ text: 'c' }], FinishReason.STOP),
+    ]);
+    const result = await consumeStreamWithProgress(stream, ctx);
+    assert.strictEqual(result.text, 'abc');
+    assert.strictEqual(result.parts.length, 1);
+    assert.strictEqual(result.parts[0]?.text, 'abc');
+  });
+
+  it('does NOT coalesce plain-text parts when either carries a thoughtSignature', async () => {
+    const { ctx } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ text: 'a', thoughtSignature: 'sig-1' }]),
+      makeChunk([{ text: 'b' }], FinishReason.STOP),
+    ]);
+    const result = await consumeStreamWithProgress(stream, ctx);
+    assert.strictEqual(result.parts.length, 2);
+    assert.strictEqual(result.parts[0]?.text, 'a');
+    assert.strictEqual(result.parts[0]?.thoughtSignature, 'sig-1');
+    assert.strictEqual(result.parts[1]?.text, 'b');
+  });
+
+  it('counts nameless functionCall parts and surfaces anomalies.namelessFunctionCalls', async () => {
+    const { ctx } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([{ functionCall: { args: { a: 1 } } }]),
+      makeChunk([{ functionCall: { args: { b: 2 } } }], FinishReason.STOP),
+    ]);
+    const result = await consumeStreamWithProgress(stream, ctx);
+    assert.strictEqual(result.namelessFunctionCallCount, 2);
+    assert.deepStrictEqual(result.anomalies, { namelessFunctionCalls: 2 });
+    // Raw parts are preserved verbatim so downstream sanitizers can filter.
+    assert.strictEqual(result.parts.length, 2);
+    // The deduped `functionCalls` list drops nameless entries entirely.
+    assert.strictEqual(result.functionCalls.length, 0);
+  });
+
+  it('omits anomalies when no anomaly conditions triggered', async () => {
+    const { ctx } = makeMockContext();
+    const stream = fakeStream([makeChunk([{ text: 'ok' }], FinishReason.STOP)]);
+    const result = await consumeStreamWithProgress(stream, ctx);
+    assert.strictEqual(result.anomalies, undefined);
+  });
+
+  it('captures full promptFeedback object alongside promptBlockReason', async () => {
+    const { ctx } = makeMockContext();
+    const fullFeedback = {
+      blockReason: 'SAFETY',
+      safetyRatings: [{ category: 'HARM_CATEGORY_HARASSMENT', probability: 'HIGH' }],
+    } as unknown as GenerateContentResponse['promptFeedback'];
+    const chunkWithFeedback: GenerateContentResponse = {
+      candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: FinishReason.STOP }],
+      promptFeedback: fullFeedback,
+    } as GenerateContentResponse;
+    const stream = fakeStream([chunkWithFeedback]);
+    const result = await consumeStreamWithProgress(stream, ctx);
+    assert.deepStrictEqual(result.promptFeedback, fullFeedback);
+    assert.strictEqual(result.promptBlockReason, 'SAFETY');
   });
 });
 

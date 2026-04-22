@@ -692,6 +692,36 @@ describe('ask contract', () => {
     ]);
   });
 
+  it('drops nameless functionCall parts from rebuilt history so Gemini replay remains valid', () => {
+    const history = buildRebuiltChatContents(
+      [
+        {
+          role: 'user',
+          parts: [{ text: 'Call lookup' }],
+          timestamp: 1,
+        },
+        {
+          role: 'model',
+          parts: [{ functionCall: { args: { stray: true } } }, { text: 'fallback' }],
+          timestamp: 2,
+        },
+        {
+          role: 'model',
+          parts: [{ functionCall: { args: { only: 'stray' } } }],
+          timestamp: 3,
+        },
+      ],
+      200_000,
+    );
+
+    // Entry 2's nameless functionCall is dropped; the `text` part survives.
+    // Entry 3 sanitizes to an empty parts array and is skipped entirely.
+    assert.deepStrictEqual(history, [
+      { role: 'user', parts: [{ text: 'Call lookup' }] },
+      { role: 'model', parts: [{ text: 'fallback' }] },
+    ]);
+  });
+
   it('persists sentMessage for rebuilt sessions with summaries and stores finishReason', async () => {
     const events: Record<string, unknown>[] = [];
     const transcript = [

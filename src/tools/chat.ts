@@ -415,10 +415,13 @@ export function buildRebuiltChatContents(contents: ContentEntry[], maxBytes: num
     totalBytes = nextBytes;
   }
 
-  return selected.reverse().map((entry) => ({
-    role: entry.role,
-    parts: sanitizeHistoryParts(structuredClone(entry.parts)),
-  }));
+  return selected
+    .reverse()
+    .map((entry) => ({
+      role: entry.role,
+      parts: sanitizeHistoryParts(structuredClone(entry.parts)),
+    }))
+    .filter((content) => content.parts.length > 0);
 }
 
 function buildPerTurnConfig(config: ReturnType<typeof buildGenerateContentConfig>) {
@@ -733,6 +736,12 @@ function appendSessionTurn(
     parts: sanitizeHistoryParts(askResult.streamResult.parts),
     timestamp,
     ...(taskId ? { taskId } : {}),
+    ...(askResult.streamResult.finishReason !== undefined
+      ? { finishReason: askResult.streamResult.finishReason }
+      : {}),
+    ...(askResult.streamResult.finishMessage !== undefined
+      ? { finishMessage: askResult.streamResult.finishMessage }
+      : {}),
   });
 
   deps.appendSessionEvent(sessionId, {
@@ -775,6 +784,10 @@ function buildSessionEventResponse(
     ...buildSessionEventThoughts(structured),
     ...buildSessionEventToolEvents(structured),
     ...buildSessionEventUsage(structured),
+    ...buildSessionEventGroundingMetadata(askResult),
+    ...buildSessionEventUrlContextMetadata(askResult),
+    ...buildSessionEventPromptFeedback(askResult),
+    ...buildSessionEventAnomalies(askResult),
   };
 }
 
@@ -830,6 +843,49 @@ function buildSessionEventUsage(
   structured: AskStructuredContent | undefined,
 ): Partial<SessionEventEntry['response']> {
   return structured?.usage ? { usage: structured.usage } : {};
+}
+
+function buildSessionEventGroundingMetadata(
+  askResult: AskExecutionResult,
+): Partial<SessionEventEntry['response']> {
+  const groundingMetadata = askResult.streamResult.groundingMetadata;
+  if (groundingMetadata === undefined) return {};
+  return {
+    groundingMetadata: sanitizeSessionValue(groundingMetadata, 'groundingMetadata') as NonNullable<
+      SessionEventEntry['response']['groundingMetadata']
+    >,
+  };
+}
+
+function buildSessionEventUrlContextMetadata(
+  askResult: AskExecutionResult,
+): Partial<SessionEventEntry['response']> {
+  const urlContextMetadata = askResult.streamResult.urlContextMetadata;
+  if (urlContextMetadata === undefined) return {};
+  return {
+    urlContextMetadata: sanitizeSessionValue(
+      urlContextMetadata,
+      'urlContextMetadata',
+    ) as NonNullable<SessionEventEntry['response']['urlContextMetadata']>,
+  };
+}
+
+function buildSessionEventPromptFeedback(
+  askResult: AskExecutionResult,
+): Partial<SessionEventEntry['response']> {
+  const promptFeedback = askResult.streamResult.promptFeedback;
+  if (promptFeedback === undefined) return {};
+  return {
+    promptFeedback: sanitizeSessionValue(promptFeedback, 'promptFeedback'),
+  };
+}
+
+function buildSessionEventAnomalies(
+  askResult: AskExecutionResult,
+): Partial<SessionEventEntry['response']> {
+  const anomalies = askResult.streamResult.anomalies;
+  if (anomalies === undefined) return {};
+  return { anomalies: { ...anomalies } };
 }
 
 async function resolveWorkspaceCacheName(

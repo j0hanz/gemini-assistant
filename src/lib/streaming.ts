@@ -4,6 +4,7 @@ import { FinishReason } from '@google/genai';
 import type {
   BlockedReason,
   GenerateContentResponse,
+  GenerateContentResponsePromptFeedback,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
   Part,
@@ -65,9 +66,15 @@ export interface StreamResult {
   finishMessage?: string;
   citationMetadata?: unknown;
   namelessFunctionCallCount?: number;
+  anomalies?: StreamAnomalies;
   promptBlockReason?: BlockedReason;
+  promptFeedback?: GenerateContentResponsePromptFeedback;
   urlContextMetadata?: UrlContextMetadata;
   usageMetadata?: GenerateContentResponseUsageMetadata;
+}
+
+export interface StreamAnomalies {
+  namelessFunctionCalls?: number;
 }
 
 const enum Phase {
@@ -155,6 +162,7 @@ interface StreamMetadata {
   finishMessage?: string;
   citationMetadata?: unknown;
   promptBlockReason?: BlockedReason;
+  promptFeedback?: GenerateContentResponsePromptFeedback;
   urlContextMetadata?: UrlContextMetadata;
   usageMetadata?: GenerateContentResponseUsageMetadata;
 }
@@ -187,6 +195,10 @@ function updateStreamMetadata(
 
   if (candidate.urlContextMetadata) {
     metadata.urlContextMetadata = candidate.urlContextMetadata;
+  }
+
+  if (chunk.promptFeedback) {
+    metadata.promptFeedback = chunk.promptFeedback;
   }
 
   if (chunk.usageMetadata) {
@@ -626,13 +638,41 @@ async function handleTextPart(
   state.textByWave[waveIndex] = `${state.textByWave[waveIndex] ?? ''}${partText}`;
 }
 
+function isCoalescablePlainTextPart(part: Part): boolean {
+  return (
+    typeof part.text === 'string' &&
+    !part.thought &&
+    part.thoughtSignature === undefined &&
+    !part.functionCall &&
+    !part.functionResponse &&
+    !part.toolCall &&
+    !part.toolResponse &&
+    !part.executableCode &&
+    !part.codeExecutionResult &&
+    !part.inlineData &&
+    !part.fileData
+  );
+}
+
+function appendStreamPart(state: StreamProcessingState, part: Part): void {
+  if (isCoalescablePlainTextPart(part)) {
+    const lastIndex = state.parts.length - 1;
+    const last = lastIndex >= 0 ? state.parts[lastIndex] : undefined;
+    if (last && isCoalescablePlainTextPart(last)) {
+      state.parts[lastIndex] = { ...last, text: `${last.text ?? ''}${part.text ?? ''}` };
+      return;
+    }
+  }
+  state.parts.push(part);
+}
+
 async function handleStreamPart(
   ctx: ServerContext,
   state: StreamProcessingState,
   msg: ProgressMessageFormatter,
   part: Part,
 ): Promise<void> {
-  state.parts.push(part);
+  appendStreamPart(state, part);
 
   if (await handleExecutableCodePart(ctx, state, msg, part)) {
     return;
@@ -674,6 +714,13 @@ function toolsUsedOccurrences(toolEvents: ToolEvent[]): string[] {
 }
 
 function finalizeStreamResult(state: StreamProcessingState): StreamResult {
+  const derivedPromptBlockReason = state.promptBlockReason ?? state.promptFeedback?.blockReason;
+
+  const anomalies: StreamAnomalies | undefined =
+    state.namelessFunctionCallCount > 0
+      ? { namelessFunctionCalls: state.namelessFunctionCallCount }
+      : undefined;
+
   return {
     text: state.text,
     textByWave: state.textByWave,
@@ -692,7 +739,9 @@ function finalizeStreamResult(state: StreamProcessingState): StreamResult {
       citationMetadata: state.citationMetadata,
       groundingMetadata: state.groundingMetadata,
       namelessFunctionCallCount: state.namelessFunctionCallCount,
-      promptBlockReason: state.promptBlockReason,
+      anomalies,
+      promptBlockReason: derivedPromptBlockReason,
+      promptFeedback: state.promptFeedback,
       urlContextMetadata: state.urlContextMetadata,
       usageMetadata: state.usageMetadata,
     }),

@@ -11,7 +11,7 @@ import type { GenerateContentResponse } from '@google/genai';
 
 import { getAI } from '../../src/client.js';
 import { resetProgressThrottle } from '../../src/lib/errors.js';
-import { registerAnalyzeTool } from '../../src/tools/analyze.js';
+import { buildDiagramFencePattern, registerAnalyzeTool } from '../../src/tools/analyze.js';
 
 process.env.API_KEY ??= 'test-key-for-analyze-progress';
 
@@ -55,20 +55,27 @@ function makeMockStore(): RequestTaskStore & {
 
 function makeMockContext(store: RequestTaskStore): {
   ctx: ServerContext;
+  logs: { level: string; message: string }[];
   progressCalls: { progress: number; total?: number; message?: string }[];
 } {
+  const logs: { level: string; message: string }[] = [];
   const progressCalls: { progress: number; total?: number; message?: string }[] = [];
 
   const ctx = {
     mcpReq: {
       _meta: { progressToken: 'analyze-token' },
       signal: new AbortController().signal,
-      log: Object.assign(async () => {}, {
-        debug: async () => {},
-        info: async () => {},
-        warning: async () => {},
-        error: async () => {},
-      }),
+      log: Object.assign(
+        async (level: string, message: string) => {
+          logs.push({ level, message });
+        },
+        {
+          debug: async (message: string) => logs.push({ level: 'debug', message }),
+          info: async (message: string) => logs.push({ level: 'info', message }),
+          warning: async (message: string) => logs.push({ level: 'warning', message }),
+          error: async (message: string) => logs.push({ level: 'error', message }),
+        },
+      ),
       notify: async (notification: unknown) => {
         const n = notification as {
           params: { progress: number; total?: number; message?: string };
@@ -87,7 +94,7 @@ function makeMockContext(store: RequestTaskStore): {
     },
   } as unknown as ServerContext;
 
-  return { ctx, progressCalls };
+  return { ctx, logs, progressCalls };
 }
 
 function getHandlers() {
@@ -142,6 +149,14 @@ async function* fakeStream(
 describe('analyze diagram progress', () => {
   beforeEach(() => {
     resetProgressThrottle();
+  });
+
+  it('builds diagram fence patterns that require the requested language tag', () => {
+    const pattern = buildDiagramFencePattern('mermaid');
+
+    assert.ok(pattern.test('```mermaid\nflowchart TD\nA-->B\n```'));
+    assert.strictEqual(pattern.test('```\nflowchart TD\nA-->B\n```'), false);
+    assert.strictEqual(pattern.test('```plantuml\nAlice -> Bob\n```'), false);
   });
 
   it('reports uploaded file counts and generating step from logical file count', async () => {
@@ -418,6 +433,57 @@ describe('analyze diagram progress', () => {
       assert.strictEqual(structured.diagramType, 'mermaid');
       assert.strictEqual(structured.diagram, 'flowchart TD\nA-->B');
       assert.strictEqual(structured.explanation, 'Explanation text.');
+    } finally {
+      client.models.generateContentStream = originalGenerate;
+    }
+  });
+
+  it('falls back to unlabeled diagram fences and logs a warning', async () => {
+    const { analyze } = getHandlers();
+    const store = makeMockStore();
+    const { ctx, logs } = makeMockContext(store);
+    const client = getAI();
+    const originalGenerate = client.models.generateContentStream.bind(client.models);
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream([
+        {
+          candidates: [
+            {
+              content: {
+                parts: [{ text: '```\nflowchart TD\nA-->B\n```\n\nExplanation text.' }],
+              },
+              finishReason: FinishReason.STOP,
+            },
+          ],
+        } as GenerateContentResponse,
+      ]);
+
+    try {
+      await analyze.createTask(
+        {
+          goal: 'Generate a diagram',
+          outputKind: 'diagram',
+          diagramType: 'mermaid',
+          targetKind: 'url',
+          urls: ['https://example.com'],
+        },
+        ctx,
+      );
+      await flushTaskWork(() => store.stored.length > 0);
+
+      const structured = store.stored[0]?.result.structuredContent as {
+        diagram: string;
+      };
+      assert.strictEqual(structured.diagram, 'flowchart TD\nA-->B');
+      assert.ok(
+        logs.some(
+          (entry) =>
+            entry.level === 'warning' &&
+            entry.message.includes('returned an unlabeled diagram fence'),
+        ),
+      );
     } finally {
       client.models.generateContentStream = originalGenerate;
     }

@@ -1,5 +1,6 @@
 import { isAbsolute, normalize } from 'node:path';
 
+import { MediaResolution } from '@google/genai';
 import { z } from 'zod/v4';
 
 import { isPublicHttpUrl } from '../lib/validation.js';
@@ -9,13 +10,8 @@ import { PUBLIC_TOOL_NAMES } from '../public-contract.js';
 
 const WINDOWS_DRIVE_RELATIVE_PATH_PATTERN = /^[A-Za-z]:(?![\\/])/;
 const PUBLIC_HTTP_URL_ERROR = 'URL must be a valid public http:// or https:// URL';
-const MEDIA_RESOLUTIONS = [
-  'MEDIA_RESOLUTION_LOW',
-  'MEDIA_RESOLUTION_MEDIUM',
-  'MEDIA_RESOLUTION_HIGH',
-] as const;
 export const DIAGRAM_TYPES = ['mermaid', 'plantuml'] as const;
-export const ASK_URL_TOOL_PROFILES = ['url', 'search_url'] as const;
+export const ASK_URL_TOOL_PROFILES = ['url', 'search_url', 'url_code', 'search_url_code'] as const;
 export const ASK_NON_URL_TOOL_PROFILES = ['none', 'search', 'code', 'search_code'] as const;
 export const RESEARCH_MODE_OPTIONS = ['quick', 'deep'] as const;
 const ANALYZE_TARGET_KIND_OPTIONS = ['file', 'url', 'multi'] as const;
@@ -192,7 +188,7 @@ export function analyzeOutputKind(
 
 export function mediaResolution(description: string) {
   return withFieldMetadata(
-    z.enum(MEDIA_RESOLUTIONS).default('MEDIA_RESOLUTION_MEDIUM'),
+    z.enum(MediaResolution).default(MediaResolution.MEDIA_RESOLUTION_MEDIUM),
     description,
   );
 }

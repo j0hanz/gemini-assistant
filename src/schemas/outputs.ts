@@ -96,6 +96,10 @@ export const ChatOutputSchema = z.strictObject({
       'Session metadata for new or resumed chat sessions. Resumed sessions without persisted Part[] (e.g. pre-upgrade transcripts) cannot be resumed and must be started fresh.',
     ),
   contextUsed: ContextUsedSchema.optional(),
+  workspaceCacheApplied: z
+    .boolean()
+    .default(false)
+    .describe('Whether automatic workspace cache was applied for this chat turn'),
 });
 
 export const ResearchOutputSchema = z.strictObject({

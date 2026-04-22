@@ -128,6 +128,27 @@ describe('ResearchOutputSchema', () => {
 });
 
 describe('ChatOutputSchema', () => {
+  it('defaults workspaceCacheApplied to false', () => {
+    const result = ChatOutputSchema.safeParse({
+      status: 'completed',
+      answer: 'Done',
+    });
+
+    assert.ok(result.success);
+    assert.strictEqual(result.data.workspaceCacheApplied, false);
+  });
+
+  it('accepts workspaceCacheApplied when true', () => {
+    const result = ChatOutputSchema.safeParse({
+      status: 'completed',
+      answer: 'Done',
+      workspaceCacheApplied: true,
+    });
+
+    assert.ok(result.success);
+    assert.strictEqual(result.data.workspaceCacheApplied, true);
+  });
+
   it('accepts function-call signatures and thought tool events', () => {
     const result = ChatOutputSchema.safeParse({
       status: 'completed',

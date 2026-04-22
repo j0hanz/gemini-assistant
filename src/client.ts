@@ -1,11 +1,10 @@
 import type {
   GenerateContentConfig,
-  MediaResolution,
   SafetySetting,
   ToolConfig,
   ToolListUnion,
 } from '@google/genai';
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { GoogleGenAI, HarmBlockThreshold, ThinkingLevel } from '@google/genai';
 
 import type { SafetySettingInput } from './schemas/fragments.js';
 import type { GeminiResponseSchema } from './schemas/json-schema.js';
@@ -46,7 +45,7 @@ interface ConfigBuilderOptions {
   safetySettings?: SafetySettingInput[] | undefined;
   temperature?: number | undefined;
   seed?: number | undefined;
-  mediaResolution?: string | undefined;
+  mediaResolution?: GenerateContentConfig['mediaResolution'] | undefined;
   tools?: ToolListUnion | undefined;
   toolConfig?: ToolConfig | undefined;
 }
@@ -68,7 +67,7 @@ function normalizeSafetySettings(
   return safetySettings.map((setting) => ({
     ...(setting.category !== undefined ? { category: setting.category } : {}),
     ...(setting.method !== undefined ? { method: setting.method } : {}),
-    threshold: setting.threshold ?? 'HARM_BLOCK_THRESHOLD_UNSPECIFIED',
+    threshold: setting.threshold ?? HarmBlockThreshold.BLOCK_ONLY_HIGH,
   })) as SafetySetting[];
 }
 
@@ -120,7 +119,7 @@ export function buildGenerateContentConfig(
     ...(resolvedSafetySettings ? { safetySettings: resolvedSafetySettings } : {}),
     ...(temperature !== undefined ? { temperature } : {}),
     ...(seed !== undefined ? { seed } : {}),
-    ...(mediaResolution ? { mediaResolution: mediaResolution as MediaResolution } : {}),
+    ...(mediaResolution ? { mediaResolution } : {}),
     ...(tools ? { tools } : {}),
     ...(toolConfig ? { toolConfig } : {}),
     ...(signal ? { abortSignal: signal } : {}),

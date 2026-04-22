@@ -76,15 +76,36 @@ function requireAnalyzeDiagramType(args: AnalyzeInput): 'mermaid' | 'plantuml' {
   throw new Error('AnalyzeInput validation requires diagramType when outputKind=diagram.');
 }
 
-const DIAGRAM_FENCED_PATTERN = /```(?:mermaid|plantuml)?\s*\n([\s\S]*?)```/;
+const UNLABELED_DIAGRAM_FENCED_PATTERN = /```\s*\n([\s\S]*?)```/;
 
-function extractDiagram(text: string): { diagram: string; explanation: string } {
-  const match = DIAGRAM_FENCED_PATTERN.exec(text);
+export function buildDiagramFencePattern(diagramType: 'mermaid' | 'plantuml'): RegExp {
+  return new RegExp(`\`\`\`${diagramType}\\s*\\n([\\s\\S]*?)\`\`\``);
+}
+
+function extractDiagram(
+  text: string,
+  diagramType: 'mermaid' | 'plantuml',
+  ctx: ServerContext,
+): { diagram: string; explanation: string } {
+  const labeledPattern = buildDiagramFencePattern(diagramType);
+  const match = labeledPattern.exec(text);
 
   if (match?.[1]) {
     const diagram = match[1].trimEnd();
-    const explanation = text.replace(DIAGRAM_FENCED_PATTERN, '').trim();
+    const explanation = text.replace(labeledPattern, '').trim();
     return { diagram, explanation };
+  }
+
+  const unlabeledMatch = UNLABELED_DIAGRAM_FENCED_PATTERN.exec(text);
+  if (unlabeledMatch?.[1]) {
+    void ctx.mcpReq.log(
+      'warning',
+      `analyze_diagram: Gemini returned an unlabeled diagram fence; expected ${diagramType}`,
+    );
+    return {
+      diagram: unlabeledMatch[1].trimEnd(),
+      explanation: text.replace(UNLABELED_DIAGRAM_FENCED_PATTERN, '').trim(),
+    };
   }
 
   return { diagram: text, explanation: '' };
@@ -412,7 +433,7 @@ async function analyzeDiagramWork(
           ),
         }),
       (_streamResult, textContent: string) => {
-        const { diagram, explanation } = extractDiagram(textContent);
+        const { diagram, explanation } = extractDiagram(textContent, args.diagramType, ctx);
         const diagramType = args.diagramType;
         const formatted = formatAnalyzeDiagramMarkdown(diagram, diagramType, explanation);
 

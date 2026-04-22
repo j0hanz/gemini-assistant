@@ -68,6 +68,7 @@ import { getSessionRedactionPatterns, getWorkspaceCacheEnabled } from '../config
 import {
   type ContentEntry,
   createSessionStore,
+  sanitizeHistoryParts,
   type SessionEventEntry,
   type SessionStore,
   type SessionSummary,
@@ -77,7 +78,7 @@ import {
 type WithOptionalTemperature<T> = T extends { temperature: infer Temperature }
   ? Omit<T, 'temperature'> & { temperature?: Temperature }
   : T;
-type AskArgs = WithOptionalTemperature<AskInput>;
+type AskArgs = WithOptionalTemperature<AskInput> & { cacheName?: string };
 
 interface AskStructuredContent extends Record<string, unknown> {
   answer: string;
@@ -111,7 +112,7 @@ interface AskDependencies {
     ctx: ServerContext,
     chat?: Chat,
   ) => Promise<AskExecutionResult>;
-  setSession: (sessionId: string, chat: Chat, rebuiltAt?: number) => void;
+  setSession: (sessionId: string, chat: Chat, rebuiltAt?: number, cacheName?: string) => void;
 }
 
 interface AskExecutionResult {
@@ -368,9 +369,9 @@ async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
   }
   const { toolProfile, tools, toolConfig, usesUrlContext } = resolved.config;
 
-  // Only inline URLs into the prompt when URL Context is OFF; otherwise
-  // Gemini retrieves them and the concatenation duplicates tokens.
-  const promptUrls = usesUrlContext ? undefined : urls;
+  // URL Context discovers target URLs from prompt text; keep URLs visible
+  // whenever a URL-capable profile is active.
+  const promptUrls = usesUrlContext || !tools || tools.length === 0 ? urls : undefined;
 
   return {
     prompt: buildAskPrompt(args.message, promptUrls),
@@ -400,8 +401,15 @@ export function buildRebuiltChatContents(contents: ContentEntry[], maxBytes: num
 
   return selected.reverse().map((entry) => ({
     role: entry.role,
-    parts: structuredClone(entry.parts),
+    parts: sanitizeHistoryParts(structuredClone(entry.parts)),
   }));
+}
+
+function buildPerTurnConfig(config: ReturnType<typeof buildGenerateContentConfig>) {
+  return pickDefined({
+    abortSignal: config.abortSignal,
+    thinkingConfig: config.thinkingConfig,
+  });
 }
 
 async function runAskStream(
@@ -523,7 +531,8 @@ export async function askWithoutSession(
   const { prompt, toolConfig, toolProfile, tools, urls } = resolved;
   const jsonMode = !!args.responseSchema;
   const config = buildGenerateContentConfig({ ...args, toolConfig, tools }, ctx.mcpReq.signal);
-  const maxRetries = !chat && jsonMode && !ctx.mcpReq.signal.aborted ? JSON_REPAIR_MAX_RETRIES : 0;
+  const perTurnConfig = buildPerTurnConfig(config);
+  const maxRetries = jsonMode && !ctx.mcpReq.signal.aborted ? JSON_REPAIR_MAX_RETRIES : 0;
   let currentPrompt = prompt;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -533,7 +542,7 @@ export async function askWithoutSession(
         chat
           ? chat.sendMessageStream({
               message: currentPrompt,
-              config,
+              config: perTurnConfig,
             })
           : getAI().models.generateContentStream({
               model: MODEL,
@@ -697,7 +706,7 @@ function appendSessionTurn(
   });
   deps.appendSessionContent(sessionId, {
     role: 'model',
-    parts: askResult.streamResult.parts,
+    parts: sanitizeHistoryParts(askResult.streamResult.parts),
     timestamp,
     ...(taskId ? { taskId } : {}),
   });
@@ -844,12 +853,22 @@ function createDefaultAskDependencies(sessionStore: SessionStore): AskDependenci
       }
 
       const { toolConfig, tools } = buildAskToolingConfig(args);
+      const cacheName = sessionStore.getSessionEntry(sessionId)?.cacheName;
+      const activeCacheName = workspaceCacheManager.getCacheStatus().cacheName;
+      const rebuildArgs =
+        cacheName && cacheName === activeCacheName ? { ...args, cacheName } : args;
+      if (cacheName && cacheName !== activeCacheName) {
+        logger.child('chat').info('Rebuilding session without stale workspace cache', {
+          sessionId,
+          cacheName,
+        });
+      }
       const chat = getAI().chats.create({
         model: MODEL,
-        config: buildGenerateContentConfig({ ...args, toolConfig, tools }),
+        config: buildGenerateContentConfig({ ...rebuildArgs, toolConfig, tools }),
         history: buildRebuiltChatContents(contents, 200_000),
       });
-      sessionStore.setSession(sessionId, chat, Date.now());
+      sessionStore.setSession(sessionId, chat, Date.now(), cacheName);
       return chat;
     },
     now: () => Date.now(),
@@ -918,7 +937,7 @@ async function askNewSession(
   askResult.result = attachContextUsed(askResult.result, contextUsed);
 
   if (!askResult.result.isError) {
-    deps.setSession(args.sessionId, chat);
+    deps.setSession(args.sessionId, chat, undefined, args.cacheName);
     askResult.result = attachSessionMetadata(askResult.result, args.sessionId);
     appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id);
     const turnIndex = (deps.listSessionContentEntries(args.sessionId)?.length ?? 0) - 1;
@@ -944,11 +963,14 @@ async function prepareAskRequest(
   const validationError = validateAskRequest(args, deps);
   if (validationError) return validationError;
 
+  const persistedCacheName = args.sessionId
+    ? deps.getSessionEntry(args.sessionId)?.cacheName
+    : undefined;
   const canUseWorkspaceCache =
-    !args.sessionId || deps.getSessionEntry(args.sessionId) === undefined;
+    !persistedCacheName && (!args.sessionId || deps.getSessionEntry(args.sessionId) === undefined);
   const workspaceCacheName = canUseWorkspaceCache
     ? await resolveWorkspaceCacheName(args, signal, workspaceCacheManagerInstance)
-    : undefined;
+    : persistedCacheName;
   const contextUsed = workspaceCacheName
     ? buildContextUsed(
         [{ kind: 'workspace-cache', name: workspaceCacheName, tokens: 0, relevanceScore: 1 }],
@@ -1139,6 +1161,8 @@ function assembleChatOutput(
       toolEvents: structured.toolEvents,
       usage: structured.usage,
       contextUsed: structured.contextUsed,
+      workspaceCacheApplied:
+        (structured.contextUsed as ContextUsed | undefined)?.workspaceCacheApplied ?? false,
     }),
     result,
   );

@@ -4,6 +4,7 @@ import { afterEach, describe, it } from 'node:test';
 import { AppError } from '../src/lib/errors.js';
 import {
   createSessionStore,
+  sanitizeHistoryParts,
   type SessionStore,
   type SessionStoreOptions,
 } from '../src/sessions.js';
@@ -39,6 +40,44 @@ afterEach(() => {
 });
 
 describe('sessions', () => {
+  describe('sanitizeHistoryParts', () => {
+    it('drops thought-only and signature-only parts while preserving tool signatures', () => {
+      const parts = [
+        { text: 'summary', thought: true },
+        { text: '', thoughtSignature: 'sig-empty' },
+        { text: 'visible', thoughtSignature: 'sig-text' },
+        { functionCall: { name: 'lookup', args: { q: 'x' } }, thoughtSignature: 'sig-fn' },
+        { toolCall: { toolType: 'URL_CONTEXT' }, thoughtSignature: 'sig-tool' },
+        { executableCode: { code: 'print(1)' }, thoughtSignature: 'sig-code' },
+        { codeExecutionResult: { output: '1' }, thoughtSignature: 'sig-result' },
+        { text: 'plain' },
+      ];
+
+      assert.deepStrictEqual(sanitizeHistoryParts(parts as never), [
+        { functionCall: { name: 'lookup', args: { q: 'x' } }, thoughtSignature: 'sig-fn' },
+        { toolCall: { toolType: 'URL_CONTEXT' }, thoughtSignature: 'sig-tool' },
+        { executableCode: { code: 'print(1)' }, thoughtSignature: 'sig-code' },
+        { codeExecutionResult: { output: '1' }, thoughtSignature: 'sig-result' },
+        { text: 'plain' },
+      ]);
+    });
+
+    it('is backward-compatible with v0 persisted session parts', () => {
+      const persisted = JSON.parse(
+        JSON.stringify([
+          { text: 'old answer' },
+          { text: 'old thought', thought: true },
+          { functionCall: { name: 'lookup' }, thoughtSignature: 'sig-old' },
+        ]),
+      ) as never;
+
+      assert.deepStrictEqual(sanitizeHistoryParts(persisted), [
+        { text: 'old answer' },
+        { functionCall: { name: 'lookup' }, thoughtSignature: 'sig-old' },
+      ]);
+    });
+  });
+
   describe('getSession / setSession', () => {
     it('stores and retrieves a session', () => {
       const store = createStore();

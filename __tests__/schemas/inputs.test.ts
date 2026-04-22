@@ -644,6 +644,15 @@ describe('shared selector defaults', () => {
     }
   });
 
+  it('rejects invalid mediaResolution values', () => {
+    const result = AnalyzeInputSchema.safeParse({
+      goal: 'Summarize the architecture',
+      filePath: 'src/index.ts',
+      mediaResolution: 'MEDIA_RESOLUTION_TINY',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
   it('defaults analyze diagramType to mermaid when outputKind=diagram', () => {
     const result = AnalyzeInputSchema.safeParse({
       goal: 'Diagram this file',

@@ -13,6 +13,8 @@
 ## Architecture
 
 - Tool-based
+- Session history is sanitized on write and on rebuild via `sanitizeHistoryParts`.
+- Thought-summary parts are never replayed; `thoughtSignature` is preserved on functionCall/toolCall/executableCode parts only.
 
 ## Testing Strategy
 

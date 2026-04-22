@@ -452,14 +452,14 @@ describe('ask contract', () => {
     }
   });
 
-  it('does not retry when sessionId is set', async () => {
+  it('retries once with repair suffix when chat is provided', async () => {
     const originalCache = process.env.CACHE;
     process.env.CACHE = 'false';
     let sendCalls = 0;
     const chat = {
       sendMessageStream: async () => {
         sendCalls++;
-        return fakeStream('{not json}');
+        return fakeStream(sendCalls === 1 ? '{not json}' : '{"count":2}');
       },
     };
 
@@ -479,10 +479,70 @@ describe('ask contract', () => {
       const result = askResult.result;
 
       const structured = result.structuredContent as Record<string, unknown>;
-      assert.strictEqual(sendCalls, 1);
-      assert.ok(Array.isArray(structured.schemaWarnings));
+      assert.strictEqual(sendCalls, 2);
+      assert.deepStrictEqual(structured.data, { count: 2 });
+      assert.strictEqual(structured.schemaWarnings, undefined);
     } finally {
       process.env.CACHE = originalCache;
+    }
+  });
+
+  it('passes only per-turn config fields to chat.sendMessageStream', async () => {
+    const originalCache = process.env.CACHE;
+    process.env.CACHE = 'false';
+    let observedConfig: Record<string, unknown> | undefined;
+    const chat = {
+      sendMessageStream: async (request: { config?: Record<string, unknown> }) => {
+        observedConfig = request.config;
+        return fakeStream('{"count":2}');
+      },
+    };
+
+    try {
+      await askWithoutSession(
+        {
+          message: 'Need JSON',
+          sessionId: 'sess-per-turn-config',
+          responseSchema: {
+            type: 'object',
+            properties: { count: { type: 'integer' } },
+          },
+          maxOutputTokens: 100,
+          systemInstruction: 'Return JSON',
+          thinkingLevel: 'LOW',
+          safetySettings: [{ threshold: 'BLOCK_ONLY_HIGH' }],
+        },
+        createContext(),
+        chat as never,
+      );
+
+      assert.ok(observedConfig);
+      assert.deepStrictEqual(Object.keys(observedConfig).sort(), ['abortSignal', 'thinkingConfig']);
+    } finally {
+      process.env.CACHE = originalCache;
+    }
+  });
+
+  it('keeps URL Context URLs in the prompt text', async () => {
+    const originalCache = process.env.CACHE;
+    process.env.CACHE = 'false';
+    const stub = withGeminiStreamStub(['Assistant answer']);
+
+    try {
+      await askWithoutSession(
+        {
+          message: 'Summarize this page',
+          toolProfile: 'url',
+          urls: ['https://example.com/docs'],
+        },
+        createContext(),
+      );
+
+      assert.strictEqual(typeof stub.calls[0]?.contents, 'string');
+      assert.match(stub.calls[0]?.contents as string, /https:\/\/example\.com\/docs/);
+    } finally {
+      process.env.CACHE = originalCache;
+      stub.restore();
     }
   });
 

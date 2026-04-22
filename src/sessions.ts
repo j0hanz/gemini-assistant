@@ -49,6 +49,7 @@ export interface SessionEventEntry {
 
 interface SessionEntry {
   chat: Chat;
+  cacheName?: string;
   contents: ContentEntry[];
   events: SessionEventEntry[];
   lastAccess: number;
@@ -58,6 +59,7 @@ interface SessionEntry {
 
 export interface SessionSummary {
   id: string;
+  cacheName?: string;
   lastAccess: number;
   transcriptCount: number;
   eventCount: number;
@@ -117,9 +119,33 @@ function cloneContentEntry(item: ContentEntry): ContentEntry {
   };
 }
 
+function isReplaySafeSignaturePart(part: Part): boolean {
+  return (
+    part.functionCall !== undefined ||
+    part.toolCall !== undefined ||
+    part.executableCode !== undefined ||
+    part.codeExecutionResult !== undefined
+  );
+}
+
+export function sanitizeHistoryParts(parts: Part[]): Part[] {
+  return parts.filter((part) => {
+    if (part.thought === true) {
+      return false;
+    }
+
+    if (part.thoughtSignature !== undefined && !isReplaySafeSignaturePart(part)) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
 function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {
   return {
     id,
+    ...(entry.cacheName ? { cacheName: entry.cacheName } : {}),
     lastAccess: entry.lastAccess,
     transcriptCount: entry.transcript.length,
     eventCount: entry.events.length,
@@ -278,14 +304,14 @@ export class SessionStore {
     return this.updateSessionAccess(id, entry);
   }
 
-  setSession(id: string, chat: Chat, rebuiltAt?: number): void {
+  setSession(id: string, chat: Chat, rebuiltAt?: number, cacheName?: string): void {
     if (this.sessions.has(id)) {
       throw new AppError('sessions', `Session already exists: ${id}`);
     }
     if (this.sessions.size >= this.maxSessions) {
       this.evictOldest();
     }
-    this.createSession(id, chat, rebuiltAt);
+    this.createSession(id, chat, rebuiltAt, cacheName);
     this.startEvictionTimer();
     this.notifyChange(true);
   }
@@ -347,14 +373,15 @@ export class SessionStore {
     return entry.chat;
   }
 
-  private createSession(id: string, chat: Chat, rebuiltAt?: number): void {
-    this.storeSession(id, chat, rebuiltAt);
+  private createSession(id: string, chat: Chat, rebuiltAt?: number, cacheName?: string): void {
+    this.storeSession(id, chat, rebuiltAt, cacheName);
   }
 
-  private storeSession(id: string, chat: Chat, rebuiltAt?: number): void {
+  private storeSession(id: string, chat: Chat, rebuiltAt?: number, cacheName?: string): void {
     this.evictedSessions.delete(id);
     this.setSessionEntry(id, {
       chat,
+      ...(cacheName ? { cacheName } : {}),
       contents: [],
       events: [],
       lastAccess: this.now(),

@@ -358,6 +358,26 @@ describe('sessions', () => {
       assert.deepStrictEqual(store.listSessionTranscriptEntries('sess-replace'), []);
     });
 
+    it('emits listChanged=false on replaceSession and listChanged=true on setSession', () => {
+      const store = createStore();
+      const events: { listChanged: boolean; detailUris: string[] }[] = [];
+      store.subscribe((event) => {
+        events.push({ listChanged: event.listChanged, detailUris: [...event.detailUris] });
+      });
+
+      store.setSession('sess-replace-notify', mockChat('initial') as never);
+      store.replaceSession('sess-replace-notify', mockChat('replacement') as never);
+
+      const setEvent = events.find((event) => event.listChanged);
+      const replaceEvent = events.find(
+        (event) =>
+          !event.listChanged && event.detailUris.includes('memory://sessions/sess-replace-notify'),
+      );
+
+      assert.ok(setEvent, 'setSession must emit listChanged=true');
+      assert.ok(replaceEvent, 'replaceSession must emit listChanged=false with detail URIs');
+    });
+
     it('clears evicted state when a session ID is reused', () => {
       const store = createStore({ maxSessions: 50 });
       const prefix = 'sess-evicted-reuse-';

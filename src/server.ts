@@ -108,12 +108,13 @@ export function sendResourceChangedForServer(
     server.sendResourceListChanged();
     void server.server.sendResourceUpdated({ uri: listUri });
   }
+  // Per-URI `resources/updated` fan-out requires `resources/subscribe`
+  // tracking, which the server does not currently implement. Validate the
+  // provided detail URIs for logging parity, but do not emit updates.
   for (const uri of detailUris) {
     if (!isKnownResourceUri(uri)) {
       log.warn(`Blocked resource notification with unregistered URI: ${uri}`);
-      continue;
     }
-    void server.server.sendResourceUpdated({ uri });
   }
 }
 
@@ -128,13 +129,14 @@ function sendResourceChanged(
 
 function handleCacheChange({ detailUris }: CacheChangeEvent): void {
   sendResourceChanged(MEMORY_CACHES_URI, detailUris);
-  sendResourceChanged(undefined, [DISCOVER_CONTEXT_URI]);
+  // `discover://context` is a per-session aggregation and must not be
+  // broadcast across servers. The session-change subscriber (bound to the
+  // originating `server`) owns scoped updates to that URI.
 }
 
 function handleWorkspaceCacheChange(): void {
-  sendResourceChanged(undefined, [MEMORY_WORKSPACE_CONTEXT_URI]);
-  sendResourceChanged(undefined, [MEMORY_WORKSPACE_CACHE_URI]);
-  sendResourceChanged(undefined, [DISCOVER_CONTEXT_URI]);
+  sendResourceChanged(undefined, [MEMORY_WORKSPACE_CONTEXT_URI, MEMORY_WORKSPACE_CACHE_URI]);
+  // Intentionally skip `discover://context`; see handleCacheChange comment.
 }
 
 export function createServerInstance(): ServerInstance {
@@ -152,7 +154,7 @@ export function createServerInstance(): ServerInstance {
       capabilities: {
         logging: {},
         prompts: {},
-        resources: { listChanged: true, subscribe: true },
+        resources: { listChanged: true },
         tasks: {
           requests: { tools: { call: {} } },
           taskStore,

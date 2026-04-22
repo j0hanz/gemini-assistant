@@ -76,17 +76,15 @@ describe('public MCP resource notifications', () => {
 
       await flushEventLoop(2);
       const sessionNotifications = notificationSlice(harness.client.getNotifications(), offset);
-      const encodedSessionId = encodeURIComponent(sessionId);
       assertListChanged(sessionNotifications);
       const sessionUpdatedUris = new Set(updatedUris(sessionNotifications));
-      for (const uri of [
-        'memory://sessions',
-        `memory://sessions/${encodedSessionId}`,
-        `memory://sessions/${encodedSessionId}/events`,
-        `memory://sessions/${encodedSessionId}/transcript`,
-      ]) {
-        assert.ok(sessionUpdatedUris.has(uri), `Expected session notification for ${uri}`);
-      }
+      assert.ok(
+        sessionUpdatedUris.has('memory://sessions'),
+        'Expected collection-level memory://sessions update',
+      );
+      // Per-detail session URIs are NOT emitted: `resources/subscribe` is not
+      // advertised, so per-URI updates would be unscoped broadcasts. Clients
+      // re-read the collection after `list_changed`.
 
       offset = harness.client.getNotifications().length;
       await harness.client.request('tools/call', {
@@ -101,11 +99,7 @@ describe('public MCP resource notifications', () => {
       const cacheNotifications = notificationSlice(harness.client.getNotifications(), offset);
       assertListChanged(cacheNotifications);
       assert.ok(updatedUris(cacheNotifications).includes('memory://caches'));
-      assert.ok(
-        updatedUris(cacheNotifications).some((uri) =>
-          uri.startsWith('memory://caches/cachedContents%2F'),
-        ),
-      );
+      // Per-cache detail URIs are not emitted without subscribe tracking.
     } finally {
       await harness.close();
     }
@@ -137,8 +131,18 @@ describe('public MCP resource notifications', () => {
 
       await flushEventLoop(2);
       const notifications = notificationSlice(harness.client.getNotifications(), offset);
-      assert.ok(updatedUris(notifications).includes('memory://workspace/cache'));
-      assert.ok(updatedUris(notifications).includes('memory://workspace/context'));
+      // Workspace resources are singletons addressed by detail URIs only;
+      // without subscribe/unsubscribe tracking we do not fan out per-URI
+      // updates. Assert the request completed without producing stray
+      // per-URI `resources/updated` for those singletons.
+      const workspaceUpdates = updatedUris(notifications).filter((uri) =>
+        uri.startsWith('memory://workspace/'),
+      );
+      assert.deepStrictEqual(
+        workspaceUpdates,
+        [],
+        'Workspace URIs must not fan out as resources/updated without subscribe tracking',
+      );
     } finally {
       process.env.ALLOWED_FILE_ROOTS = originalAllowedRoots;
       process.env.WORKSPACE_CACHE_ENABLED = originalWorkspaceCacheEnabled;
@@ -173,6 +177,41 @@ describe('public MCP resource notifications', () => {
       );
     } finally {
       await harness.close();
+    }
+  });
+
+  it('does not leak discover://context or session-scoped updates across concurrent harnesses', async () => {
+    const harnessA = await createHarness();
+    const harnessB = await createHarness();
+
+    try {
+      env.queueStream(makeChunk([{ text: 'Session A started' }], FinishReason.STOP));
+
+      const offsetB = harnessB.client.getNotifications().length;
+      await harnessA.client.request('tools/call', {
+        arguments: {
+          goal: 'Start a session scoped to harness A',
+          sessionId: 'harness-a-session',
+        },
+        name: 'chat',
+      });
+
+      await flushEventLoop(4);
+
+      const leakedOnB = notificationSlice(harnessB.client.getNotifications(), offsetB);
+      const leakedUpdatedUris = updatedUris(leakedOnB);
+
+      assert.ok(
+        !leakedUpdatedUris.includes('discover://context'),
+        'discover://context must not fan out to non-originating harnesses',
+      );
+      assert.ok(
+        !leakedUpdatedUris.some((uri) => uri.startsWith('memory://sessions/harness-a-session')),
+        'Harness A session URIs must not appear on Harness B',
+      );
+    } finally {
+      await harnessA.close();
+      await harnessB.close();
     }
   });
 });

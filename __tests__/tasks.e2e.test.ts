@@ -312,6 +312,56 @@ describe('public MCP task lifecycle', () => {
     }
   });
 
+  it('tags notifications/progress with related-task metadata inside a task context', async () => {
+    const harness = await createHarness();
+
+    try {
+      const deferred = createDeferredStream(
+        makeChunk([{ text: 'progress probe answer' }], FinishReason.STOP),
+      );
+      env.queueGenerator(deferred.stream);
+
+      const offset = harness.client.getNotifications().length;
+      const response = await harness.client.request('tools/call', {
+        _meta: { progressToken: 'task-progress-token' },
+        arguments: { goal: 'Task progress correlation probe' },
+        name: 'chat',
+        task: { ttl: 60_000 },
+      });
+
+      const taskId = (response.result as { task?: { taskId?: string } }).task?.taskId;
+      assert.ok(taskId, 'Expected task augmentation to return a task ID');
+
+      deferred.release();
+      await flushEventLoop(4);
+
+      const progressNotifications = harness.client
+        .getNotifications()
+        .slice(offset)
+        .filter((notification) => notification.method === 'notifications/progress');
+
+      assert.ok(
+        progressNotifications.length > 0,
+        'Expected at least one notifications/progress for a task call with progressToken',
+      );
+
+      for (const notification of progressNotifications) {
+        const params = notification.params;
+        const meta = params?.['_meta'] as
+          | Record<string, { taskId?: string } | undefined>
+          | undefined;
+        const related = meta?.['io.modelcontextprotocol/related-task'];
+        assert.deepStrictEqual(
+          related,
+          { taskId },
+          'Every progress notification inside a task context must carry related-task meta',
+        );
+      }
+    } finally {
+      await harness.close();
+    }
+  });
+
   it('surfaces input validation failures through tasks/result instead of JSON-RPC', async () => {
     const harness = await createHarness();
 

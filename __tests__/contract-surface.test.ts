@@ -74,4 +74,34 @@ describe('contract surface invariants', () => {
       assert.match(readme, new RegExp(resourceUri.replace(/[{}]/g, '\\$&')));
     }
   });
+
+  it('does not advertise resources.subscribe in the initialize capability set', async () => {
+    const { MockGeminiEnvironment } = await import('./lib/mock-gemini-environment.js');
+    const { createServerHarness } = await import('./lib/mcp-contract-client.js');
+    const { createServerInstance } = await import('../src/server.js');
+
+    process.env.API_KEY ??= 'test-key-for-contract-surface';
+    const env = new MockGeminiEnvironment();
+    env.install();
+    const harness = await createServerHarness(
+      createServerInstance,
+      { capabilities: { roots: {} } },
+      { flushBeforeClose: 2 },
+    );
+    try {
+      const initResult = await harness.client.initialize();
+      const capabilities = initResult.result.capabilities as
+        | { resources?: { listChanged?: boolean; subscribe?: boolean } }
+        | undefined;
+      assert.ok(capabilities?.resources?.listChanged, 'resources.listChanged must remain true');
+      assert.notStrictEqual(
+        capabilities?.resources?.subscribe,
+        true,
+        'resources.subscribe must not be advertised without per-URI subscribe/unsubscribe support',
+      );
+    } finally {
+      await harness.close();
+      env.restore();
+    }
+  });
 });

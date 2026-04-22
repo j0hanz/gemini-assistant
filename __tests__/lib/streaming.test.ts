@@ -481,8 +481,9 @@ describe('consumeStreamWithProgress', () => {
     assert.strictEqual(result.text, 'done');
   });
 
-  it('streams text chunks to the task message queue when task queue context exists', async () => {
+  it('does not enqueue streaming text on the logging channel', async () => {
     const queued: QueuedMessage[] = [];
+    const notifications: { method: string }[] = [];
     const ctx = {
       mcpReq: {
         _meta: { progressToken: 'queue-token' },
@@ -493,7 +494,9 @@ describe('consumeStreamWithProgress', () => {
           warning: async () => {},
           error: async () => {},
         }),
-        notify: async () => {},
+        notify: async (notification: { method: string }) => {
+          notifications.push(notification);
+        },
       },
       task: {
         id: 'task-queue',
@@ -510,17 +513,14 @@ describe('consumeStreamWithProgress', () => {
     const result = await consumeStreamWithProgress(stream, ctx);
 
     assert.strictEqual(result.text, 'stream me');
-    assert.strictEqual(queued.length, 1);
-    const firstQueued = queued[0];
-    assert.ok(firstQueued);
-    assert.deepStrictEqual(firstQueued.message, {
-      jsonrpc: '2.0',
-      method: 'notifications/message',
-      params: { level: 'info', logger: 'stream', data: 'stream me' },
-    });
+    assert.strictEqual(queued.length, 0);
+    assert.ok(
+      !notifications.some((n) => n.method === 'notifications/message'),
+      'Streaming text must not be emitted on the notifications/message channel',
+    );
   });
 
-  it('logs queue enqueue failures without failing the stream', async () => {
+  it('does not surface queue failures as warnings when streaming (enqueue is a no-op)', async () => {
     const logCalls: { level: string; message: string }[] = [];
     const log = Object.assign(
       async (level: string, message: string) => {
@@ -557,9 +557,10 @@ describe('consumeStreamWithProgress', () => {
     );
 
     assert.strictEqual(result.text, 'stream me');
-    assert.deepStrictEqual(logCalls, [
-      { level: 'warning', message: 'Dropped streamed chunk for task task-queue: queue full' },
-    ]);
+    assert.ok(
+      !logCalls.some((call) => call.message.includes('Dropped streamed chunk')),
+      'No dropped-chunk warning should fire because no enqueue is attempted',
+    );
   });
 
   it('captures signature-only parts even when they have no text', async () => {

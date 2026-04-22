@@ -85,6 +85,17 @@ The job-first surface is intentionally opinionated:
 - The public surface does not expose the legacy `discover` callable tool or the retired standalone `search`, `analyze_url`, `agentic_search`, `explain_error`, `diagram`, or `execute_code` tools.
 - The public surface does not expose Gemini File Search stores or Live API sessions.
 
+## Notification Surface
+
+The server emits four MCP notification methods with narrow, contract-stable rules:
+
+- `notifications/progress` — emitted only when the caller supplies `_meta.progressToken`. Inside a task context every progress frame also carries `_meta["io.modelcontextprotocol/related-task"] = { taskId }` so clients can correlate async progress to the owning task.
+- `notifications/resources/list_changed` — fired only when collection membership actually changes (e.g., a session is added or removed). In-place replacements of an existing entry do not trigger `list_changed`.
+- `notifications/resources/updated` — fired at the collection level (for example `memory://sessions`, `memory://caches`). Per-URI detail updates are not broadcast because the server does not advertise `resources.subscribe`. Clients should re-read the affected collection after a `list_changed` or collection-level `updated`.
+- `notifications/message` — reserved for diagnostic log output. Streaming tool content is delivered through the normal `tools/call` response (and `tasks/result` when running under a task); it is never published on the logging channel.
+
+Session-scoped resources such as `discover://context` update only the originating server/session — they are never fanned out to other concurrent clients.
+
 ## Requirements
 
 - Node.js `>=24`

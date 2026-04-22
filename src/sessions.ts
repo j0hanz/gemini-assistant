@@ -244,7 +244,9 @@ export class SessionStore {
   replaceSession(id: string, chat: Chat): void {
     this.storeSession(id, chat);
     this.startEvictionTimer();
-    this.notifyChange([id], true);
+    // Replacement preserves collection membership (same id). Emit detail
+    // updates only; do NOT fire `notifications/resources/list_changed`.
+    this.notifyChange([id], false);
   }
 
   private notifyChange(sessionIds: string[] = [], listChanged = true): void {

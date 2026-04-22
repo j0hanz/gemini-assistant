@@ -1,9 +1,4 @@
-import type {
-  CallToolResult,
-  QueuedMessage,
-  ServerContext,
-  TaskMessageQueue,
-} from '@modelcontextprotocol/server';
+import type { CallToolResult, ServerContext, TaskMessageQueue } from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
 import type {
@@ -528,30 +523,15 @@ function getTaskQueueContext(
 }
 
 async function enqueueStreamText(
-  ctx: ServerContext,
-  taskContext: ReturnType<typeof getTaskQueueContext>,
-  partText: string,
+  _ctx: ServerContext,
+  _taskContext: ReturnType<typeof getTaskQueueContext>,
+  _partText: string,
 ): Promise<void> {
-  if (!taskContext?.queue || !taskContext.id) {
-    return;
-  }
-
-  try {
-    await taskContext.queue.enqueue(taskContext.id, {
-      type: 'notification',
-      message: {
-        jsonrpc: '2.0',
-        method: 'notifications/message',
-        params: { level: 'info', logger: 'stream', data: partText },
-      },
-      timestamp: Date.now(),
-    } satisfies QueuedMessage);
-  } catch (err) {
-    await ctx.mcpReq.log(
-      'warning',
-      `Dropped streamed chunk for task ${taskContext.id}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
+  // Streamed tool text is returned as the terminal CallToolResult (or via
+  // tasks/result for task-augmented calls). It MUST NOT ride the MCP logging
+  // channel (`notifications/message`) — clients filter logs by level and
+  // would either flood on `info` or silently drop streamed content.
+  await Promise.resolve();
 }
 
 async function handleTextPart(

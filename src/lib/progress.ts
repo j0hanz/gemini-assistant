@@ -1,5 +1,7 @@
 import type { ProgressNotification, ServerContext } from '@modelcontextprotocol/server';
 
+import { RELATED_TASK_META_KEY } from './response.js';
+
 // ── Constants ─────────────────────────────────────────────────────────
 
 const MIN_PROGRESS_INTERVAL_MS = 250;
@@ -87,6 +89,7 @@ function buildProgressNotification(
   progress: number,
   total?: number,
   message?: string,
+  taskId?: string,
 ): ProgressNotification {
   return {
     method: 'notifications/progress',
@@ -95,6 +98,7 @@ function buildProgressNotification(
       progress,
       ...(total !== undefined ? { total } : {}),
       ...(message ? { message } : {}),
+      ...(taskId ? { _meta: { [RELATED_TASK_META_KEY]: { taskId } } } : {}),
     },
   };
 }
@@ -183,7 +187,9 @@ export async function sendProgress(
     const now = Date.now();
     if (!shouldThrottleProgress(progressToken, message, now, isTerminal)) {
       try {
-        await ctx.mcpReq.notify(buildProgressNotification(progressToken, progress, total, message));
+        await ctx.mcpReq.notify(
+          buildProgressNotification(progressToken, progress, total, message, ctx.task?.id),
+        );
         updateProgressStateAfterNotify(progressToken, ctx.task?.id, message, now, isTerminal);
       } catch (err: unknown) {
         await logProgressFailure(ctx, err);

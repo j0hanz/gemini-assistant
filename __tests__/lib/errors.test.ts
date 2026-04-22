@@ -21,11 +21,12 @@ import {
 function makeMockContext(overrides: {
   progressToken?: string | number;
   aborted?: boolean;
+  taskId?: string;
 }): ServerContext {
   const controller = new AbortController();
   if (overrides.aborted) controller.abort();
 
-  return {
+  const ctx: Record<string, unknown> = {
     mcpReq: {
       _meta:
         overrides.progressToken !== undefined ? { progressToken: overrides.progressToken } : {},
@@ -45,7 +46,22 @@ function makeMockContext(overrides: {
         /* noop */
       },
     },
-  } as unknown as ServerContext;
+  };
+
+  if (overrides.taskId !== undefined) {
+    ctx['task'] = {
+      id: overrides.taskId,
+      store: {
+        updateTaskStatus: async (
+          _id: string,
+          _status: string,
+          _message?: string,
+        ): Promise<void> => {},
+      },
+    };
+  }
+
+  return ctx as unknown as ServerContext;
 }
 
 function createStatusError(status: number, message = 'error'): Error & { status: number } {
@@ -272,6 +288,35 @@ describe('sendProgress', () => {
     assert.strictEqual(capturedParams['total'], undefined);
     assert.strictEqual(capturedParams['progress'], 1);
     assert.strictEqual(capturedParams['message'], 'phase 1');
+  });
+
+  it('progress carries related-task metadata when ctx.task.id is set', async () => {
+    const ctx = makeMockContext({ progressToken: 'tok-task', taskId: 'task-42' });
+    let capturedParams: Record<string, unknown> = {};
+    (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async (
+      notification: unknown,
+    ) => {
+      capturedParams = (notification as { params: Record<string, unknown> }).params;
+    };
+    await sendProgress(ctx, 10, 100, 'working');
+    const meta = capturedParams['_meta'] as
+      | Record<string, { taskId?: string } | undefined>
+      | undefined;
+    assert.ok(meta, 'progress notification must carry _meta when task context is active');
+    const related = meta['io.modelcontextprotocol/related-task'];
+    assert.deepStrictEqual(related, { taskId: 'task-42' });
+  });
+
+  it('omits related-task metadata when no task context is present', async () => {
+    const ctx = makeMockContext({ progressToken: 'tok-notask' });
+    let capturedParams: Record<string, unknown> = {};
+    (ctx.mcpReq as { notify: (n: unknown) => Promise<void> }).notify = async (
+      notification: unknown,
+    ) => {
+      capturedParams = (notification as { params: Record<string, unknown> }).params;
+    };
+    await sendProgress(ctx, 10, 100, 'working');
+    assert.strictEqual(capturedParams['_meta'], undefined);
   });
 
   it('swallows notify errors', async () => {

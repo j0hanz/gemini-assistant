@@ -242,10 +242,10 @@ describe('research tool contracts', () => {
     const store = makeMockStore();
     const client = getAI();
     const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
-    let observedRequest: any;
+    let observedRequest: Record<string, unknown> | undefined;
 
     // @ts-expect-error test override
-    client.models.generateContentStream = async (req: any) => {
+    client.models.generateContentStream = async (req: Record<string, unknown>) => {
       observedRequest = req;
       return fakeStream([
         {
@@ -270,7 +270,8 @@ describe('research tool contracts', () => {
       );
       await flushTaskWork();
 
-      const tools = observedRequest?.config?.tools as any[];
+      const config = observedRequest?.config as Record<string, unknown> | undefined;
+      const tools = config?.tools as Record<string, unknown>[] | undefined;
       assert.ok(
         tools?.some((t) => 'functionDeclarations' in t),
         'additionalTools were not included',

@@ -218,7 +218,7 @@ describe('ask contract', () => {
     try {
       const askWork = createAskWork(
         createDeps({
-          runWithoutSession: askWithoutSession as any,
+          runWithoutSession: askWithoutSession,
         }),
       );
       await askWork(
@@ -230,8 +230,8 @@ describe('ask contract', () => {
         createContext(),
       );
       assert.strictEqual(stub.calls.length, 1);
-      const callConfig = stub.calls[0]?.config as any;
-      const tools = callConfig?.tools as any[];
+      const callConfig = stub.calls[0]?.config as Record<string, unknown> | undefined;
+      const tools = callConfig?.tools as Record<string, unknown>[] | undefined;
       assert.ok(
         tools?.some((t) => 'codeExecution' in t),
         'codeExecution was not included',

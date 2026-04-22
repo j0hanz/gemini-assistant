@@ -51,7 +51,7 @@ describe('documentation and package metadata', () => {
   it('documents the job-first surface and memory/discovery split', () => {
     assert.match(readme, /job-first public surface/i);
     assert.match(readme, /discover:\/\/catalog/);
-    assert.match(readme, /memory:\/\/sessions/);
+    assert.match(readme, /session:\/\//);
     assert.match(readme, /quick or deep/i);
     assert.match(readme, /no backward-compatible aliases/i);
   });

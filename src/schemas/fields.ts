@@ -1,21 +1,12 @@
-import { completable, type CompletableSchema } from '@modelcontextprotocol/server';
-
 import { isAbsolute, normalize } from 'node:path';
 
 import { z } from 'zod/v4';
 
 import { isPublicHttpUrl } from '../lib/validation.js';
 
-import {
-  completeCacheNames,
-  DEFAULT_TEMPERATURE,
-  DEFAULT_THINKING_LEVEL,
-  THINKING_LEVELS,
-} from '../client.js';
+import { DEFAULT_TEMPERATURE, DEFAULT_THINKING_LEVEL, THINKING_LEVELS } from '../client.js';
 import { PUBLIC_TOOL_NAMES } from '../public-contract.js';
 
-const CACHE_NAME_PATTERN = /^cachedContents\/.+$/;
-const TTL_SECONDS_PATTERN = /^[1-9]\d*s$/;
 const WINDOWS_DRIVE_RELATIVE_PATH_PATTERN = /^[A-Za-z]:(?![\\/])/;
 const PUBLIC_HTTP_URL_ERROR = 'URL must be a valid public http:// or https:// URL';
 const MEDIA_RESOLUTIONS = [
@@ -30,18 +21,6 @@ export const RESEARCH_MODE_OPTIONS = ['quick', 'deep'] as const;
 const ANALYZE_TARGET_KIND_OPTIONS = ['file', 'url', 'multi'] as const;
 const ANALYZE_OUTPUT_KIND_OPTIONS = ['summary', 'diagram'] as const;
 export const REVIEW_SUBJECT_OPTIONS = ['diff', 'comparison', 'failure'] as const;
-export const MEMORY_ACTION_OPTIONS = [
-  'sessions.list',
-  'sessions.get',
-  'sessions.transcript',
-  'sessions.events',
-  'caches.list',
-  'caches.get',
-  'caches.create',
-  'caches.update',
-  'workspace.context',
-  'workspace.cache',
-] as const;
 
 function buildTextSchema(maxLength?: number) {
   const schema = z.string().trim().min(1);
@@ -104,38 +83,8 @@ export function workspacePath(description: string) {
   return withFieldMetadata(schema, description);
 }
 
-export function ttlSeconds(description: string) {
-  const schema = buildTextSchema().regex(TTL_SECONDS_PATTERN, {
-    error: 'TTL must be a positive integer number of seconds ending in "s" (e.g. "3600s")',
-  });
-  return withFieldMetadata(schema, description);
-}
-
 export function nonNegativeInt(description: string) {
   return withFieldMetadata(z.int().nonnegative(), description);
-}
-
-export function cacheName(description: string) {
-  const schema = buildTextSchema().regex(CACHE_NAME_PATTERN, {
-    error: 'Cache name must start with "cachedContents/".',
-  });
-  return withFieldMetadata(schema, description);
-}
-
-export function completableCacheName(
-  description: string,
-  optional?: false,
-): CompletableSchema<ReturnType<typeof cacheName>>;
-export function completableCacheName(
-  description: string,
-  optional: true,
-): CompletableSchema<z.ZodOptional<ReturnType<typeof cacheName>>>;
-export function completableCacheName(description: string, optional = false) {
-  if (optional) {
-    return completable(optionalField(cacheName(description)), completeCacheNames);
-  }
-
-  return completable(cacheName(description), completeCacheNames);
 }
 
 export const PublicHttpUrlSchema = z.httpUrl().refine(isPublicHttpUrl, {

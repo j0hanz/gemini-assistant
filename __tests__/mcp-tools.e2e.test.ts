@@ -167,13 +167,6 @@ const MUTABLE_ANNOTATIONS = {
   readOnlyHint: false,
 } as const;
 
-const DESTRUCTIVE_ANNOTATIONS = {
-  destructiveHint: true,
-  idempotentHint: false,
-  openWorldHint: true,
-  readOnlyHint: false,
-} as const;
-
 const READONLY_NON_IDEMPOTENT_ANNOTATIONS = {
   ...READONLY_ANNOTATIONS,
   idempotentHint: false,
@@ -193,20 +186,6 @@ const EXPECTED_TOOL_CONTRACTS = {
     requiredOutput: ['status', 'answer'],
     taskSupport: 'optional',
     title: 'Chat',
-  },
-  memory: {
-    annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
-    requiredInput: ['action'],
-    requiredOutput: ['status', 'action', 'summary'],
-    taskSupport: 'optional',
-    title: 'Memory',
-  },
-  delete_cache: {
-    annotations: DESTRUCTIVE_ANNOTATIONS,
-    requiredInput: ['cacheName'],
-    requiredOutput: ['status', 'summary', 'cacheName'],
-    taskSupport: 'optional',
-    title: 'Delete Cache',
   },
   research: {
     annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
@@ -243,10 +222,7 @@ describe('MCP tool smoke coverage', () => {
       const tools = await listTools(harness.client);
       const toolMap = new Map(tools.map((tool) => [tool.name, tool]));
 
-      assert.deepStrictEqual(
-        [...toolMap.keys()],
-        ['chat', 'research', 'analyze', 'review', 'memory', 'delete_cache'],
-      );
+      assert.deepStrictEqual([...toolMap.keys()], ['chat', 'research', 'analyze', 'review']);
 
       for (const [toolName, contract] of Object.entries(EXPECTED_TOOL_CONTRACTS)) {
         assertToolContract(toolMap.get(toolName), contract);
@@ -274,9 +250,9 @@ describe('MCP tool smoke coverage', () => {
       assert.equal(getObjectProperty(chatSchema, 'session'), undefined);
       assert.equal(getObjectProperty(chatSchema, 'memory'), undefined);
       assert.equal(getObjectProperty(chatSchema, 'responseSchema'), undefined);
+      assert.equal(getObjectProperty(chatSchema, 'cacheName'), undefined);
       const goal = getObjectProperty(chatSchema, 'goal');
       const sessionId = getObjectProperty(chatSchema, 'sessionId');
-      const cacheName = getObjectProperty(chatSchema, 'cacheName');
       const responseSchemaJson = getObjectProperty(chatSchema, 'responseSchemaJson');
       const temperature = getObjectProperty(chatSchema, 'temperature');
       const seed = getObjectProperty(chatSchema, 'seed');
@@ -286,12 +262,6 @@ describe('MCP tool smoke coverage', () => {
 
       assert.ok(sessionId);
       assert.equal(sessionId.description, 'Server-managed in-memory session identifier.');
-
-      assert.ok(cacheName);
-      assert.equal(
-        cacheName.description,
-        'Gemini cache resource name to attach as reusable context.',
-      );
 
       assert.ok(responseSchemaJson);
       assert.equal(
@@ -337,9 +307,7 @@ describe('MCP tool smoke coverage', () => {
       const reviewSchema = toolMap.get('review')?.inputSchema;
       const reviewSubjectKind = findPropertyInSchema(reviewSchema, 'subjectKind');
       const researchSchema = toolMap.get('research')?.inputSchema;
-      const memorySchema = toolMap.get('memory')?.inputSchema;
       const researchMode = getObjectProperty(researchSchema, 'mode');
-      const memoryAction = findPropertyInSchema(memorySchema, 'action');
 
       assert.ok(reviewSubjectKind);
       assert.equal(
@@ -350,10 +318,6 @@ describe('MCP tool smoke coverage', () => {
       assert.equal(researchMode.description, 'Research mode selector (`quick` or `deep`).');
       assert.equal(researchMode.default, 'quick');
       assert.equal((researchSchema as { oneOf?: unknown }).oneOf, undefined);
-      assert.ok(memoryAction);
-      assert.equal(memoryAction.description, 'Memory action selector.');
-      assert.ok(Array.isArray((memorySchema as { oneOf?: unknown }).oneOf));
-      assert.match(toolMap.get('memory')?.description ?? '', /delete_cache/i);
       assert.equal(reviewSubjectKind.default, 'diff');
 
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);
@@ -479,16 +443,6 @@ describe('MCP tool smoke coverage', () => {
       assert.ok(reviewTool);
       assertAdvertisedOutputSchema(reviewTool, reviewResult);
 
-      const sessionListResult = await callTool(harness.client, 'memory', {
-        action: 'sessions.list',
-      });
-      expectSuccess(sessionListResult);
-      assert.strictEqual(sessionListResult.structuredContent.action, 'sessions.list');
-      assert.ok(Array.isArray(sessionListResult.structuredContent.sessions));
-      const memoryTool = toolMap.get('memory');
-      assert.ok(memoryTool);
-      assertAdvertisedOutputSchema(memoryTool, sessionListResult);
-
       env.queueStream(makeChunk([{ text: 'Session ready' }], FinishReason.STOP));
 
       const encodedSessionId = 'sess special%/#';
@@ -500,29 +454,12 @@ describe('MCP tool smoke coverage', () => {
       assert.deepStrictEqual(sessionResult.structuredContent.session, {
         id: encodedSessionId,
         resources: {
-          detail: `memory://sessions/${encodeURIComponent(encodedSessionId)}`,
-          events: `memory://sessions/${encodeURIComponent(encodedSessionId)}/events`,
-          transcript: `memory://sessions/${encodeURIComponent(encodedSessionId)}/transcript`,
+          detail: `session://${encodeURIComponent(encodedSessionId)}`,
+          events: `session://${encodeURIComponent(encodedSessionId)}/events`,
+          transcript: `session://${encodeURIComponent(encodedSessionId)}/transcript`,
         },
       });
       assertAdvertisedOutputSchema(chatTool, sessionResult);
-
-      const createCacheResult = await callTool(harness.client, 'memory', {
-        action: 'caches.create',
-        filePaths: ['package.json'],
-        systemInstruction: 'Cache this package metadata for later questions.',
-      });
-      expectSuccess(createCacheResult);
-      assert.strictEqual(createCacheResult.structuredContent.action, 'caches.create');
-      assertAdvertisedOutputSchema(memoryTool, createCacheResult);
-
-      const listCachesResult = await callTool(harness.client, 'memory', {
-        action: 'caches.list',
-      });
-      expectSuccess(listCachesResult);
-      assert.strictEqual(listCachesResult.structuredContent.action, 'caches.list');
-      assert.ok(Array.isArray(listCachesResult.structuredContent.caches));
-      assertAdvertisedOutputSchema(memoryTool, listCachesResult);
 
       const serverRequestMethods = harness.client.getServerRequestMethods();
       assert.ok(serverRequestMethods.includes('roots/list'));
@@ -552,14 +489,6 @@ describe('MCP tool smoke coverage', () => {
         name: 'analyze',
       });
       assertProtocolError(invalidAnalyzeTargets, -32602, /public http:\/\/ or https:\/\//i);
-
-      const invalidMemoryAction = await harness.client.requestRaw('tools/call', {
-        arguments: {
-          action: 'caches.create',
-        },
-        name: 'memory',
-      });
-      assertProtocolError(invalidMemoryAction, -32602, /filePaths|systemInstruction/i);
 
       const invalidChatSchema = await harness.client.requestRaw('tools/call', {
         arguments: {

@@ -61,14 +61,14 @@ function assertListChanged(notifications: readonly JsonRpcNotification[]): void 
 }
 
 describe('public MCP resource notifications', () => {
-  it('emits only list_changed (not updated) for session and cache mutations while subscribe is undeclared', async () => {
+  it('emits only list_changed (not updated) for session mutations while subscribe is undeclared', async () => {
     const harness = await createHarness();
 
     try {
       env.queueStream(makeChunk([{ text: 'Session started' }], FinishReason.STOP));
 
       const sessionId = 'notifications session%/#';
-      let offset = harness.client.getNotifications().length;
+      const offset = harness.client.getNotifications().length;
       await harness.client.request('tools/call', {
         arguments: { goal: 'Start a reusable chat session', sessionId },
         name: 'chat',
@@ -82,78 +82,6 @@ describe('public MCP resource notifications', () => {
         [],
         'resources/updated must not be emitted without resources.subscribe capability',
       );
-
-      offset = harness.client.getNotifications().length;
-      await harness.client.request('tools/call', {
-        arguments: {
-          action: 'caches.create',
-          systemInstruction: 'Cache this synthetic system instruction only.',
-        },
-        name: 'memory',
-      });
-
-      await flushEventLoop(2);
-      const cacheNotifications = notificationSlice(harness.client.getNotifications(), offset);
-      assertListChanged(cacheNotifications);
-      assert.deepStrictEqual(
-        updatedUris(cacheNotifications),
-        [],
-        'resources/updated must not be emitted without resources.subscribe capability',
-      );
-    } finally {
-      await harness.close();
-    }
-  });
-
-  it('emits list_changed on caches.create and caches.delete but not on caches.update (TTL only)', async () => {
-    const harness = await createHarness();
-
-    try {
-      // create — MUST emit list_changed
-      let offset = harness.client.getNotifications().length;
-      const created = (await harness.client.request('tools/call', {
-        arguments: {
-          action: 'caches.create',
-          systemInstruction: 'Cache this synthetic system instruction only.',
-        },
-        name: 'memory',
-      })) as { result: { structuredContent?: { cache?: { name?: string } } } };
-
-      await flushEventLoop(2);
-      const createNotifications = notificationSlice(harness.client.getNotifications(), offset);
-      assertListChanged(createNotifications);
-
-      const cacheName = created.result.structuredContent?.cache?.name;
-      assert.ok(cacheName, 'expected caches.create to return a cache name');
-
-      // update — MUST NOT emit list_changed (membership unchanged)
-      offset = harness.client.getNotifications().length;
-      await harness.client.request('tools/call', {
-        arguments: { action: 'caches.update', cacheName, ttl: '3600s' },
-        name: 'memory',
-      });
-
-      await flushEventLoop(2);
-      const updateNotifications = notificationSlice(harness.client.getNotifications(), offset);
-      const updateListChanged = updateNotifications.filter(
-        (notification) => notification.method === 'notifications/resources/list_changed',
-      );
-      assert.deepStrictEqual(
-        updateListChanged,
-        [],
-        'caches.update (TTL) must not emit list_changed',
-      );
-
-      // delete — MUST emit list_changed
-      offset = harness.client.getNotifications().length;
-      await harness.client.request('tools/call', {
-        arguments: { cacheName, confirm: true },
-        name: 'delete_cache',
-      });
-
-      await flushEventLoop(2);
-      const deleteNotifications = notificationSlice(harness.client.getNotifications(), offset);
-      assertListChanged(deleteNotifications);
     } finally {
       await harness.close();
     }
@@ -190,7 +118,7 @@ describe('public MCP resource notifications', () => {
       // updates. Assert the request completed without producing stray
       // per-URI `resources/updated` for those singletons.
       const workspaceUpdates = updatedUris(notifications).filter((uri) =>
-        uri.startsWith('memory://workspace/'),
+        uri.startsWith('workspace://'),
       );
       assert.deepStrictEqual(
         workspaceUpdates,
@@ -260,7 +188,7 @@ describe('public MCP resource notifications', () => {
         'discover://context must not fan out to non-originating harnesses',
       );
       assert.ok(
-        !leakedUpdatedUris.some((uri) => uri.startsWith('memory://sessions/harness-a-session')),
+        !leakedUpdatedUris.some((uri) => uri.startsWith('session://harness-a-session')),
         'Harness A session URIs must not appear on Harness B',
       );
     } finally {

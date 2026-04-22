@@ -5,7 +5,6 @@ import { z } from 'zod/v4';
 import {
   enumField,
   goalText,
-  MEMORY_ACTION_OPTIONS,
   PublicJobNameSchema,
   RESEARCH_MODE_OPTIONS,
   REVIEW_SUBJECT_OPTIONS,
@@ -118,13 +117,6 @@ export const ReviewPromptSchema = z
   })
   .describe('Guide diff review, file comparison, or failure triage.');
 
-export const MemoryPromptSchema = z
-  .strictObject({
-    action: enumField(MEMORY_ACTION_OPTIONS, 'Memory action to focus on.').optional(),
-    task: textField('Task context.').optional(),
-  })
-  .describe('Explain how sessions, caches, and workspace memory fit together.');
-
 export function buildDiscoverPrompt(args: z.infer<typeof DiscoverPromptSchema>) {
   return userPromptMessage(
     [
@@ -159,17 +151,6 @@ export function buildReviewPrompt(args: z.infer<typeof ReviewPromptSchema>) {
   );
 }
 
-export function buildMemoryPrompt(args: z.infer<typeof MemoryPromptSchema>) {
-  return userPromptMessage(
-    [
-      ...(args.action ? [`Preferred memory action: ${args.action}`] : []),
-      ...(args.task ? [`Task context: ${args.task}`] : []),
-      renderWorkflowSection('memory'),
-      'Explain whether the job needs session state, reusable caches, or workspace memory inspection.',
-    ].join('\n\n'),
-  );
-}
-
 export function createPromptDefinitions(): PromptDefinition[] {
   return [
     definePrompt({
@@ -192,13 +173,6 @@ export function createPromptDefinitions(): PromptDefinition[] {
       description: 'Guide diff review, file comparison, or failure triage.',
       argsSchema: ReviewPromptSchema,
       buildMessage: buildReviewPrompt,
-    }),
-    definePrompt({
-      name: 'memory',
-      title: 'Memory',
-      description: 'Explain how sessions, caches, and workspace memory fit together.',
-      argsSchema: MemoryPromptSchema,
-      buildMessage: buildMemoryPrompt,
     }),
   ];
 }

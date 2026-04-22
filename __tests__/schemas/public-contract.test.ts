@@ -4,14 +4,12 @@ import { describe, it } from 'node:test';
 import {
   AnalyzeInputSchema,
   ChatInputSchema,
-  MemoryInputSchema,
   ResearchInputSchema,
   ReviewInputSchema,
 } from '../../src/schemas/inputs.js';
 import {
   AnalyzeOutputSchema,
   ChatOutputSchema,
-  MemoryOutputSchema,
   ResearchOutputSchema,
   ReviewOutputSchema,
 } from '../../src/schemas/outputs.js';
@@ -33,59 +31,6 @@ describe('public contract schemas', () => {
     );
   });
 
-  it('keeps memory.action flat with per-action validation', () => {
-    assert.strictEqual(MemoryInputSchema.safeParse({ action: 'sessions.get' }).success, false);
-    assert.strictEqual(
-      MemoryInputSchema.safeParse({ action: 'sessions.get', sessionId: 'sess-1' }).success,
-      true,
-    );
-    assert.strictEqual(
-      MemoryInputSchema.safeParse({ action: 'caches.get', cacheName: 'cachedContents/test' })
-        .success,
-      true,
-    );
-    assert.strictEqual(
-      MemoryInputSchema.safeParse({
-        action: 'caches.update',
-        cacheName: 'cachedContents/test',
-      }).success,
-      false,
-    );
-    assert.strictEqual(
-      MemoryInputSchema.safeParse({
-        action: 'caches.update',
-        cacheName: 'cachedContents/test',
-        ttl: '3600s',
-      }).success,
-      true,
-    );
-    assert.strictEqual(
-      MemoryInputSchema.safeParse({
-        action: 'caches.create',
-      }).success,
-      false,
-    );
-    assert.strictEqual(
-      MemoryInputSchema.safeParse({
-        action: 'caches.create',
-        filePaths: ['src/index.ts'],
-      }).success,
-      true,
-    );
-    assert.strictEqual(
-      MemoryInputSchema.safeParse({
-        action: 'workspace.cache',
-        cacheName: 'cachedContents/test',
-      }).success,
-      false,
-    );
-    assert.strictEqual(
-      MemoryInputSchema.safeParse({ action: 'caches.list', cacheName: 'cachedContents/test' })
-        .success,
-      false,
-    );
-  });
-
   it('rejects legacy public top-level fields across the job-first surface', () => {
     assert.strictEqual(ChatInputSchema.safeParse({ goal: 'x', message: 'legacy' }).success, false);
     assert.strictEqual(
@@ -94,10 +39,6 @@ describe('public contract schemas', () => {
     );
     assert.strictEqual(
       ReviewInputSchema.safeParse({ subjectKind: 'diff', topic: 'legacy' }).success,
-      false,
-    );
-    assert.strictEqual(
-      MemoryInputSchema.safeParse({ action: 'caches.list', cacheName: 'legacy' }).success,
       false,
     );
     assert.strictEqual(
@@ -162,10 +103,6 @@ describe('public contract schemas', () => {
     assert.ok(
       ReviewOutputSchema.safeParse({ ...base, subjectKind: 'failure', summary: 'x' }).success,
       'review output should parse',
-    );
-    assert.ok(
-      MemoryOutputSchema.safeParse({ ...base, action: 'sessions.list', summary: 'x' }).success,
-      'memory output should parse',
     );
   });
 });

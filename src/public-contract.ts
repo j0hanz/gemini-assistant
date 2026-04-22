@@ -1,24 +1,16 @@
-export type PublicJobName = 'chat' | 'research' | 'analyze' | 'review' | 'memory' | 'delete_cache';
-export type PublicPromptName = 'discover' | 'research' | 'review' | 'memory';
-export type PublicWorkflowName =
-  | 'start-here'
-  | 'chat'
-  | 'research'
-  | 'analyze'
-  | 'review'
-  | 'memory';
+export type PublicJobName = 'chat' | 'research' | 'analyze' | 'review';
+export type PublicPromptName = 'discover' | 'research' | 'review';
+export type PublicWorkflowName = 'start-here' | 'chat' | 'research' | 'analyze' | 'review';
 export type PublicResourceUri =
   | 'discover://catalog'
   | 'discover://context'
   | 'discover://workflows'
-  | 'memory://sessions'
-  | 'memory://sessions/{sessionId}'
-  | 'memory://sessions/{sessionId}/transcript'
-  | 'memory://sessions/{sessionId}/events'
-  | 'memory://caches'
-  | 'memory://caches/{cacheName}'
-  | 'memory://workspace/context'
-  | 'memory://workspace/cache';
+  | 'session://'
+  | 'session://{sessionId}'
+  | 'session://{sessionId}/transcript'
+  | 'session://{sessionId}/events'
+  | 'workspace://context'
+  | 'workspace://cache';
 
 export type DiscoveryKind = 'tool' | 'prompt' | 'resource';
 
@@ -61,29 +53,24 @@ export const PUBLIC_TOOL_NAMES = [
   'research',
   'analyze',
   'review',
-  'memory',
-  'delete_cache',
 ] as const satisfies readonly PublicJobName[];
 
 export const PUBLIC_PROMPT_NAMES = [
   'discover',
   'research',
   'review',
-  'memory',
 ] as const satisfies readonly PublicPromptName[];
 
 export const PUBLIC_RESOURCE_URIS = [
   'discover://catalog',
   'discover://context',
   'discover://workflows',
-  'memory://sessions',
-  'memory://sessions/{sessionId}',
-  'memory://sessions/{sessionId}/transcript',
-  'memory://sessions/{sessionId}/events',
-  'memory://caches',
-  'memory://caches/{cacheName}',
-  'memory://workspace/context',
-  'memory://workspace/cache',
+  'session://',
+  'session://{sessionId}',
+  'session://{sessionId}/transcript',
+  'session://{sessionId}/events',
+  'workspace://context',
+  'workspace://cache',
 ] as const satisfies readonly PublicResourceUri[];
 
 export const PUBLIC_WORKFLOW_NAMES = [
@@ -92,7 +79,6 @@ export const PUBLIC_WORKFLOW_NAMES = [
   'research',
   'analyze',
   'review',
-  'memory',
 ] as const satisfies readonly PublicWorkflowName[];
 
 export const JOB_METADATA = [
@@ -118,17 +104,6 @@ export const JOB_METADATA = [
     summary: 'Review local diffs, compare files, or diagnose failures under one job-first surface.',
     recommendedPrompt: 'review',
   },
-  {
-    name: 'memory',
-    title: 'Memory',
-    summary: 'Inspect and manage sessions, caches, and workspace memory resources.',
-    recommendedPrompt: 'memory',
-  },
-  {
-    name: 'delete_cache',
-    title: 'Delete Cache',
-    summary: 'Destructively delete a Gemini cache with confirmation.',
-  },
 ] as const satisfies readonly JobMetadata[];
 
 export const DISCOVERY_ENTRIES = [
@@ -141,7 +116,6 @@ export const DISCOVERY_ENTRIES = [
     inputs: [
       'goal',
       'sessionId?',
-      'cacheName?',
       'systemInstruction?',
       'thinkingLevel?',
       'responseSchemaJson?',
@@ -149,16 +123,15 @@ export const DISCOVERY_ENTRIES = [
       'seed?',
     ],
     returns:
-      'A direct answer, optional structured data, usage metadata, and memory resource links for active sessions.',
+      'A direct answer, optional structured data, usage metadata, and session resource links for active sessions.',
     limitations: [
       'Sessions are stored in server memory only and expire or evict over time.',
       'Sessions require a stateful server connection path; stateless transport mode does not preserve chat continuity across requests.',
       'Structured output is intended for single-turn calls and new sessions, not resumed sessions.',
     ],
     related: [
-      { kind: 'tool', name: 'memory' },
-      { kind: 'resource', name: 'memory://sessions' },
-      { kind: 'resource', name: 'memory://sessions/{sessionId}/events' },
+      { kind: 'resource', name: 'session://' },
+      { kind: 'resource', name: 'session://{sessionId}/events' },
     ],
   },
   {
@@ -214,7 +187,7 @@ export const DISCOVERY_ENTRIES = [
     ],
     related: [
       { kind: 'tool', name: 'research' },
-      { kind: 'resource', name: 'memory://workspace/context' },
+      { kind: 'resource', name: 'workspace://context' },
     ],
   },
   {
@@ -229,7 +202,6 @@ export const DISCOVERY_ENTRIES = [
       'language?',
       'focus?',
       'thinkingLevel?',
-      'cacheName?',
       'filePathA?',
       'filePathB?',
       'question?',
@@ -250,58 +222,10 @@ export const DISCOVERY_ENTRIES = [
     ],
   },
   {
-    name: 'memory',
-    kind: 'tool',
-    title: 'Memory',
-    bestFor:
-      'Inspecting or mutating server-managed sessions, Gemini caches, and workspace memory state.',
-    whenToUse: 'Use to list, inspect, create, or update sessions and caches.',
-    inputs: [
-      'action',
-      'sessionId?',
-      'cacheName?',
-      'filePaths?',
-      'systemInstruction?',
-      'ttl?',
-      'displayName?',
-    ],
-    returns:
-      'A memory operation result with summaries, inline data for the selected action, and related resource URIs.',
-    limitations: [
-      'Actions are explicit discriminated variants; generic target/input bags are not accepted.',
-      'Workspace inspection actions are read-only mirrors of the corresponding memory resources.',
-      'Cache deletion is exposed via the dedicated `delete_cache` tool.',
-    ],
-    related: [
-      { kind: 'prompt', name: 'memory' },
-      { kind: 'resource', name: 'memory://sessions' },
-      { kind: 'resource', name: 'memory://caches' },
-      { kind: 'tool', name: 'delete_cache' },
-    ],
-  },
-  {
-    name: 'delete_cache',
-    kind: 'tool',
-    title: 'Delete Cache',
-    bestFor: 'Destructively removing a Gemini cache with confirmation.',
-    whenToUse: 'Use to delete an existing cache resource by name.',
-    inputs: ['cacheName', 'confirm?'],
-    returns:
-      'A deletion result with `deleted`, optional `confirmationRequired`, and a memory cache resource link.',
-    limitations: [
-      'Requires interactive confirmation or `confirm=true` for non-interactive clients.',
-      'Deletion is final; callers must re-create caches to restore access.',
-    ],
-    related: [
-      { kind: 'tool', name: 'memory' },
-      { kind: 'resource', name: 'memory://caches' },
-    ],
-  },
-  {
     name: 'discover',
     kind: 'prompt',
     title: 'Discover Prompt',
-    bestFor: 'Orienting a user to the five public jobs and the most relevant starting point.',
+    bestFor: 'Orienting a user to the public jobs and the most relevant starting point.',
     whenToUse: 'Use to guide a client on which public job to use.',
     inputs: ['job?', 'goal?'],
     returns: 'A single prompt that frames the discover workflow and related public resources.',
@@ -338,22 +262,6 @@ export const DISCOVERY_ENTRIES = [
     ],
   },
   {
-    name: 'memory',
-    kind: 'prompt',
-    title: 'Memory Prompt',
-    bestFor:
-      'Explaining when to use chat sessions, reusable caches, or workspace memory inspection.',
-    whenToUse: 'Use to guide users on choosing sessions, caches, or resource reads.',
-    inputs: ['action?', 'task?'],
-    returns:
-      'A memory-oriented prompt that points to the memory job and the related memory resources.',
-    related: [
-      { kind: 'tool', name: 'memory' },
-      { kind: 'resource', name: 'memory://sessions' },
-      { kind: 'resource', name: 'memory://caches' },
-    ],
-  },
-  {
     name: 'discover://catalog',
     kind: 'resource',
     title: 'Discovery Catalog Resource',
@@ -377,31 +285,27 @@ export const DISCOVERY_ENTRIES = [
     name: 'discover://context',
     kind: 'resource',
     title: 'Server Context Dashboard',
-    bestFor:
-      'Inspecting the server knowledge state: workspace files, sessions, caches, and config.',
+    bestFor: 'Inspecting the server knowledge state: workspace files, sessions, and config.',
     whenToUse: 'Use to understand available server context.',
     inputs: [],
     returns: 'JSON and Markdown snapshot of the server context state.',
     related: [
       { kind: 'resource', name: 'discover://catalog' },
-      { kind: 'resource', name: 'memory://workspace/context' },
+      { kind: 'resource', name: 'workspace://context' },
     ],
   },
   {
-    name: 'memory://sessions',
+    name: 'session://',
     kind: 'resource',
     title: 'Session List Resource',
     bestFor: 'Browsing active in-memory chat sessions.',
     whenToUse: 'Use to inspect or resume a chat session.',
     inputs: [],
     returns: 'JSON list of active session IDs and their last access timestamps.',
-    related: [
-      { kind: 'tool', name: 'chat' },
-      { kind: 'tool', name: 'memory' },
-    ],
+    related: [{ kind: 'tool', name: 'chat' }],
   },
   {
-    name: 'memory://sessions/{sessionId}',
+    name: 'session://{sessionId}',
     kind: 'resource',
     title: 'Session Detail Resource',
     bestFor: 'Inspecting a single active session entry.',
@@ -409,76 +313,56 @@ export const DISCOVERY_ENTRIES = [
     inputs: ['sessionId'],
     returns: 'JSON metadata for the selected session.',
     related: [
-      { kind: 'resource', name: 'memory://sessions' },
-      { kind: 'resource', name: 'memory://sessions/{sessionId}/transcript' },
+      { kind: 'resource', name: 'session://' },
+      { kind: 'resource', name: 'session://{sessionId}/transcript' },
     ],
   },
   {
-    name: 'memory://sessions/{sessionId}/transcript',
+    name: 'session://{sessionId}/transcript',
     kind: 'resource',
     title: 'Session Transcript Resource',
     bestFor: 'Inspecting the text transcript for one active session.',
     whenToUse: 'Use for read-only visibility into recent turns.',
     inputs: ['sessionId'],
     returns: 'JSON and Markdown transcript entries.',
-    related: [{ kind: 'resource', name: 'memory://sessions/{sessionId}' }],
+    related: [{ kind: 'resource', name: 'session://{sessionId}' }],
   },
   {
-    name: 'memory://sessions/{sessionId}/events',
+    name: 'session://{sessionId}/events',
     kind: 'resource',
     title: 'Session Events Resource',
     bestFor: 'Inspecting normalized Gemini tool and function activity for one active session.',
     whenToUse: 'Use to get the server-managed inspection summary.',
     inputs: ['sessionId'],
     returns: 'JSON and Markdown event summaries.',
-    related: [{ kind: 'resource', name: 'memory://sessions/{sessionId}' }],
+    related: [{ kind: 'resource', name: 'session://{sessionId}' }],
   },
   {
-    name: 'memory://caches',
-    kind: 'resource',
-    title: 'Cache List Resource',
-    bestFor: 'Browsing active Gemini caches available to the memory job.',
-    whenToUse: 'Use when deciding to reuse, update, or delete caches.',
-    inputs: [],
-    returns: 'JSON list of active caches and their summary metadata.',
-    related: [{ kind: 'tool', name: 'memory' }],
-  },
-  {
-    name: 'memory://caches/{cacheName}',
-    kind: 'resource',
-    title: 'Cache Detail Resource',
-    bestFor: 'Inspecting one Gemini cache in full detail.',
-    whenToUse: 'Use to get exact metadata for one cache.',
-    inputs: ['cacheName'],
-    returns: 'JSON cache metadata.',
-    related: [{ kind: 'resource', name: 'memory://caches' }],
-  },
-  {
-    name: 'memory://workspace/context',
+    name: 'workspace://context',
     kind: 'resource',
     title: 'Workspace Context Resource',
     bestFor: 'Viewing the assembled workspace context used for Gemini calls.',
     whenToUse: 'Use to inspect which local files are summarized for the model.',
     inputs: [],
     returns: 'Markdown workspace context with sources and token estimate.',
-    related: [{ kind: 'resource', name: 'memory://workspace/cache' }],
+    related: [{ kind: 'resource', name: 'workspace://cache' }],
   },
   {
-    name: 'memory://workspace/cache',
+    name: 'workspace://cache',
     kind: 'resource',
     title: 'Workspace Cache Resource',
     bestFor: 'Inspecting automatic workspace cache state.',
     whenToUse: 'Use to verify workspace caching status.',
     inputs: [],
     returns: 'JSON workspace cache status.',
-    related: [{ kind: 'resource', name: 'memory://workspace/context' }],
+    related: [{ kind: 'resource', name: 'workspace://context' }],
   },
 ] as const satisfies readonly DiscoveryEntry[];
 
 export const WORKFLOW_ENTRIES = [
   {
     name: 'start-here',
-    goal: 'Orient a new client to the five public jobs and the recommended next step.',
+    goal: 'Orient a new client to the public jobs and the recommended next step.',
     whenToUse: 'Use when the user asks what this server does.',
     steps: [
       'Read discover://catalog for the current public surface.',
@@ -487,24 +371,23 @@ export const WORKFLOW_ENTRIES = [
     ],
     recommendedTools: ['chat'],
     recommendedPrompts: ['discover'],
-    relatedResources: ['discover://catalog', 'discover://workflows', 'memory://sessions'],
+    relatedResources: ['discover://catalog', 'discover://workflows', 'session://'],
   },
   {
     name: 'chat',
-    goal: 'Start or continue a server-managed chat session with optional reusable memory.',
+    goal: 'Start or continue a server-managed chat session.',
     whenToUse: 'Use when the task is conversational and may span multiple turns.',
     steps: [
       'Call chat with a goal and optional sessionId.',
-      'Inspect memory://sessions if you need to find an active session.',
-      'Inspect memory://sessions/{sessionId}/transcript or /events when you need read-only inspection.',
-      'Use memory cache actions when the same large context should be reused across calls.',
+      'Inspect session:// if you need to find an active session.',
+      'Inspect session://{sessionId}/transcript or /events when you need read-only inspection.',
     ],
-    recommendedTools: ['chat', 'memory'],
-    recommendedPrompts: ['memory'],
+    recommendedTools: ['chat'],
+    recommendedPrompts: ['discover'],
     relatedResources: [
-      'memory://sessions',
-      'memory://sessions/{sessionId}/transcript',
-      'memory://sessions/{sessionId}/events',
+      'session://',
+      'session://{sessionId}/transcript',
+      'session://{sessionId}/events',
     ],
   },
   {
@@ -532,7 +415,7 @@ export const WORKFLOW_ENTRIES = [
     ],
     recommendedTools: ['analyze'],
     recommendedPrompts: ['discover'],
-    relatedResources: ['memory://workspace/context', 'discover://catalog'],
+    relatedResources: ['workspace://context', 'discover://catalog'],
   },
   {
     name: 'review',
@@ -545,24 +428,6 @@ export const WORKFLOW_ENTRIES = [
     ],
     recommendedTools: ['review'],
     recommendedPrompts: ['review'],
-    relatedResources: ['discover://workflows', 'memory://sessions'],
-  },
-  {
-    name: 'memory',
-    goal: 'Inspect and manage sessions, caches, and workspace memory state from one job.',
-    whenToUse: 'Use to understand or mutate server-managed sessions, caches, and workspace memory.',
-    steps: [
-      'Use session actions to list or inspect active chat sessions.',
-      'Use cache actions to list, inspect, create, update, or delete Gemini caches.',
-      'Use workspace actions to inspect workspace context and automatic workspace cache state.',
-    ],
-    recommendedTools: ['memory'],
-    recommendedPrompts: ['memory'],
-    relatedResources: [
-      'memory://sessions',
-      'memory://caches',
-      'memory://workspace/context',
-      'memory://workspace/cache',
-    ],
+    relatedResources: ['discover://workflows', 'session://'],
   },
 ] as const satisfies readonly WorkflowEntry[];

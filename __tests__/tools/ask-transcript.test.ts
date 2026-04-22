@@ -98,12 +98,12 @@ describe('ask transcript capture', () => {
     ]);
     assert.ok(
       result.content.some(
-        (item) => item.type === 'resource_link' && item.uri === 'memory://sessions/sess-new',
+        (item) => item.type === 'resource_link' && item.uri === 'session://sess-new',
       ),
     );
     assert.ok(
       result.content.some(
-        (item) => item.type === 'resource_link' && item.uri === 'memory://sessions/sess-new/events',
+        (item) => item.type === 'resource_link' && item.uri === 'session://sess-new/events',
       ),
     );
   });
@@ -119,15 +119,13 @@ describe('ask transcript capture', () => {
     assert.strictEqual(result.isError, undefined);
     assert.ok(
       result.content.some(
-        (item) =>
-          item.type === 'resource_link' && item.uri === `memory://sessions/${encodedSessionId}`,
+        (item) => item.type === 'resource_link' && item.uri === `session://${encodedSessionId}`,
       ),
     );
     assert.ok(
       result.content.some(
         (item) =>
-          item.type === 'resource_link' &&
-          item.uri === `memory://sessions/${encodedSessionId}/events`,
+          item.type === 'resource_link' && item.uri === `session://${encodedSessionId}/events`,
       ),
     );
   });

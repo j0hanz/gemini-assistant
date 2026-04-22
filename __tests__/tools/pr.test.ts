@@ -475,52 +475,6 @@ describe('buildAnalysisPrompt', () => {
   });
 });
 
-describe('analyzePrWork cache prompt integration', () => {
-  it('keeps concise live review guidance when using cacheName', async () => {
-    const repoRoot = await createTempRepo();
-    const cwd = process.cwd();
-    const client = getAI();
-    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
-    let observedArgs: Record<string, unknown> | undefined;
-
-    // @ts-expect-error test override
-    client.models.generateContentStream = async (args: Record<string, unknown>) => {
-      observedArgs = args;
-      return fakeStream('## Findings\n\nNo issues found.');
-    };
-
-    try {
-      await mkdir(join(repoRoot, 'src'), { recursive: true });
-      await writeFile(join(repoRoot, 'src', 'a.ts'), 'export const value = 1;\n');
-      runGit(repoRoot, ['add', '.']);
-      runGit(repoRoot, ['commit', '-m', 'initial']);
-      await writeFile(join(repoRoot, 'src', 'a.ts'), 'export const value = 2;\n');
-
-      process.chdir(repoRoot);
-      const result = await analyzePrWork(
-        {
-          cacheName: 'cachedContents/workspace-1',
-        },
-        makeContext(),
-      );
-
-      assert.strictEqual(result.isError, undefined);
-      const config = observedArgs?.config as Record<string, unknown> | undefined;
-      const contents = observedArgs?.contents;
-      assert.strictEqual(config?.cachedContent, 'cachedContents/workspace-1');
-      assert.strictEqual(config?.systemInstruction, undefined);
-      assert.strictEqual(typeof contents, 'string');
-      assert.match(contents, /TASK: Review the diff for bugs, regressions, and behavior risk\./);
-      assert.match(contents, /## Snapshot/);
-      assert.match(contents, /```diff/);
-    } finally {
-      process.chdir(cwd);
-      client.models.generateContentStream = originalGenerateContentStream;
-      await rm(repoRoot, { recursive: true, force: true });
-    }
-  });
-});
-
 describe('analyzePrWork diff budgeting metadata', () => {
   it('reports reviewedPaths only for files kept in the prompt and omittedPaths for the rest', async () => {
     const repoRoot = await createTempRepo();

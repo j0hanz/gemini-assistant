@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-import {
-  assertNoStructuredContentOnError,
-  assertProtocolError,
-  assertToolExecutionError,
-} from './lib/mcp-contract-assertions.js';
+import { assertProtocolError, assertToolExecutionError } from './lib/mcp-contract-assertions.js';
 import { createServerHarness, type ToolCallResult } from './lib/mcp-contract-client.js';
 import { MockGeminiEnvironment } from './lib/mock-gemini-environment.js';
 
@@ -48,24 +44,6 @@ describe('public MCP error taxonomy', () => {
     }
   });
 
-  it('keeps valid requests with invalid business state as tool errors', async () => {
-    const harness = await createHarness();
-
-    try {
-      const response = await harness.client.request('tools/call', {
-        arguments: {
-          action: 'caches.get',
-          cacheName: 'cachedContents/missing-cache',
-        },
-        name: 'memory',
-      });
-
-      assertToolExecutionError(response.result as ToolCallResult, /Missing cache|not found/i);
-    } finally {
-      await harness.close();
-    }
-  });
-
   it('maps controlled runtime failures to tool errors instead of protocol errors', async () => {
     const harness = await createHarness();
 
@@ -87,31 +65,10 @@ describe('public MCP error taxonomy', () => {
     }
   });
 
-  it('never returns structuredContent on a failed tool call', async () => {
-    const harness = await createHarness();
-
-    try {
-      const response = await harness.client.request('tools/call', {
-        arguments: {
-          action: 'caches.get',
-          cacheName: 'cachedContents/missing-cache',
-        },
-        name: 'memory',
-      });
-
-      assertNoStructuredContentOnError(response.result as ToolCallResult);
-    } finally {
-      await harness.close();
-    }
-  });
-
   it('returns isError:true with non-empty content for every tool when the upstream rejects', async () => {
     const harness = await createHarness();
 
     try {
-      // Each tool below triggers a runtime failure without queueing a stream;
-      // the mock environment rejects generateContentStream, so the tool body
-      // must surface isError:true with a descriptive content entry.
       const toolFailureCases: { name: string; arguments: Record<string, unknown> }[] = [
         { name: 'chat', arguments: { goal: 'force runtime failure' } },
         { name: 'research', arguments: { goal: 'force runtime failure', mode: 'quick' } },
@@ -130,13 +87,6 @@ describe('public MCP error taxonomy', () => {
             subjectKind: 'failure',
             error: 'force runtime failure',
             language: 'typescript',
-          },
-        },
-        {
-          name: 'memory',
-          arguments: {
-            action: 'caches.get',
-            cacheName: 'cachedContents/missing-cache',
           },
         },
       ];
@@ -170,21 +120,6 @@ describe('public MCP error taxonomy', () => {
       const response = await harness.client.requestRaw('tools/call', {
         arguments: { goal: 'say hi', foo: 'bar' },
         name: 'chat',
-      });
-
-      assertProtocolError(response, -32602, /foo|unrecognized|unknown/i);
-    } finally {
-      await harness.close();
-    }
-  });
-
-  it('rejects unknown top-level keys on memory arguments at the protocol boundary', async () => {
-    const harness = await createHarness();
-
-    try {
-      const response = await harness.client.requestRaw('tools/call', {
-        arguments: { action: 'sessions.list', foo: 'bar' },
-        name: 'memory',
       });
 
       assertProtocolError(response, -32602, /foo|unrecognized|unknown/i);

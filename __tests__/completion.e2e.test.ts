@@ -6,7 +6,6 @@ import { FinishReason } from '@google/genai';
 import { createServerHarness, type JsonRpcTestClient } from './lib/mcp-contract-client.js';
 import { makeChunk, MockGeminiEnvironment } from './lib/mock-gemini-environment.js';
 
-import { getAI } from '../src/client.js';
 import { createServerInstance } from '../src/server.js';
 
 process.env.API_KEY ??= 'test-key-for-completion';
@@ -52,7 +51,7 @@ async function requestCompletion(
 }
 
 describe('MCP completion/complete for parameterized resources', () => {
-  it('returns only prefix-matching, live session IDs for memory://sessions/{sessionId}', async () => {
+  it('returns only prefix-matching, live session IDs for session://{sessionId}', async () => {
     const harness = await createHarness();
 
     try {
@@ -70,7 +69,7 @@ describe('MCP completion/complete for parameterized resources', () => {
 
       const result = await requestCompletion(
         harness.client,
-        'memory://sessions/{sessionId}',
+        'session://{sessionId}',
         'sessionId',
         'alpha',
       );
@@ -86,45 +85,6 @@ describe('MCP completion/complete for parameterized resources', () => {
       assert.ok(
         !result.completion.values.includes('beta-two'),
         'Non-matching session IDs must be excluded',
-      );
-    } finally {
-      await harness.close();
-    }
-  });
-
-  it('returns only prefix-matching cache names for memory://caches/{cacheName}', async () => {
-    const client = getAI();
-    client.caches.list = (async () => ({
-      async *[Symbol.asyncIterator]() {
-        yield {
-          name: 'cachedContents/prod-alpha',
-          displayName: 'Production Alpha',
-          expireTime: '2099-01-01T00:00:00.000Z',
-          model: 'models/mock-gemini',
-        };
-        yield {
-          name: 'cachedContents/staging-alpha',
-          displayName: 'Staging with alpha tag',
-          expireTime: '2099-01-01T00:00:00.000Z',
-          model: 'models/mock-gemini',
-        };
-      },
-    })) as typeof client.caches.list;
-
-    const harness = await createHarness();
-
-    try {
-      const result = await requestCompletion(
-        harness.client,
-        'memory://caches/{cacheName}',
-        'cacheName',
-        'prod',
-      );
-
-      assert.deepStrictEqual(
-        result.completion.values,
-        ['cachedContents/prod-alpha'],
-        'Only the prefix-matching cache must surface; infix-only matches are excluded',
       );
     } finally {
       await harness.close();

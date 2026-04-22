@@ -250,32 +250,6 @@ function hasExpiredSession(
   return !!sessionId && deps.isEvicted(sessionId);
 }
 
-function hasExistingSessionCacheConflict(
-  sessionId: string | undefined,
-  cacheName: string | undefined,
-  hasExistingSession: boolean,
-): boolean {
-  return !!sessionId && !!cacheName && hasExistingSession;
-}
-
-function hasCacheInstructionConflict(
-  cacheName: string | undefined,
-  systemInstruction: string | undefined,
-): boolean {
-  return !!cacheName && !!systemInstruction;
-}
-
-function hasCacheGenerationControlConflict(
-  cacheName: string | undefined,
-  temperature: number | undefined,
-  seed: number | undefined,
-): boolean {
-  return (
-    !!cacheName &&
-    ((temperature !== undefined && temperature !== DEFAULT_TEMPERATURE) || seed !== undefined)
-  );
-}
-
 function hasExistingSessionResponseSchemaConflict(
   responseSchema: GeminiResponseSchema | undefined,
   sessionId: string | undefined,
@@ -296,7 +270,7 @@ function validateAskRequest(
   args: AskArgs,
   deps: Pick<AskDependencies, 'getSessionEntry' | 'isEvicted'>,
 ): CallToolResult | undefined {
-  const { cacheName, responseSchema, seed, sessionId, systemInstruction, temperature } = args;
+  const { responseSchema, sessionId } = args;
   const urls = getAskUrls(args);
   const invalidUrlResult = validateUrls(urls);
   if (invalidUrlResult) {
@@ -306,18 +280,6 @@ function validateAskRequest(
   const hasExistingSession = sessionId ? deps.getSessionEntry(sessionId) !== undefined : false;
   const conflicts: [boolean, string][] = [
     [hasExpiredSession(sessionId, deps), `chat: Session '${sessionId}' has expired.`],
-    [
-      hasExistingSessionCacheConflict(sessionId, cacheName, hasExistingSession),
-      'chat: Cannot apply cached content to an existing chat session. Please omit cacheName, or start a new chat with a different sessionId.',
-    ],
-    [
-      hasCacheInstructionConflict(cacheName, systemInstruction),
-      'chat: systemInstruction cannot be used with cacheName. Embed the system instruction in the cache via memory action=caches.create instead.',
-    ],
-    [
-      hasCacheGenerationControlConflict(cacheName, temperature, seed),
-      'chat: temperature and seed cannot be used with cacheName. Generation parameters are fixed when the cache is created.',
-    ],
     [
       hasExistingSessionResponseSchemaConflict(responseSchema, sessionId, hasExistingSession),
       'chat: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
@@ -628,7 +590,6 @@ async function resolveWorkspaceCacheName(
   workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): Promise<string | undefined> {
   if (
-    args.cacheName ||
     args.systemInstruction ||
     (args.temperature !== undefined && args.temperature !== DEFAULT_TEMPERATURE) ||
     args.seed !== undefined ||
@@ -888,7 +849,6 @@ export async function chatWork(
     {
       message: args.goal,
       sessionId: args.sessionId,
-      cacheName: args.cacheName,
       responseSchema:
         args.responseSchemaJson !== undefined
           ? parseResponseSchemaJsonValue(args.responseSchemaJson)

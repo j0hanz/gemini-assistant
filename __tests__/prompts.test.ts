@@ -3,12 +3,10 @@ import { describe, it } from 'node:test';
 
 import {
   buildDiscoverPrompt,
-  buildMemoryPrompt,
   buildResearchPrompt,
   buildReviewPrompt,
   createPromptDefinitions,
   DiscoverPromptSchema,
-  MemoryPromptSchema,
   PUBLIC_JOB_OPTIONS,
   PUBLIC_PROMPT_NAMES,
   renderWorkflowSection,
@@ -29,7 +27,7 @@ describe('prompt definitions', () => {
   it('keeps prompt titles aligned with stable prompt ordering', () => {
     assert.deepStrictEqual(
       promptDefinitions.map((definition) => definition.title),
-      ['Discover', 'Research', 'Review', 'Memory'],
+      ['Discover', 'Research', 'Review'],
     );
   });
 });
@@ -37,8 +35,8 @@ describe('prompt definitions', () => {
 describe('discover prompt', () => {
   it('accepts optional job and goal input', () => {
     const result = DiscoverPromptSchema.safeParse({
-      goal: 'I need to inspect memory state',
-      job: 'memory',
+      goal: 'I need to inspect workspace state',
+      job: 'chat',
     });
     assert.ok(result.success);
   });
@@ -56,14 +54,7 @@ describe('discover prompt', () => {
   });
 
   it('derives the public job options from the public job schema', () => {
-    assert.deepStrictEqual(PUBLIC_JOB_OPTIONS, [
-      'chat',
-      'research',
-      'analyze',
-      'review',
-      'memory',
-      'delete_cache',
-    ]);
+    assert.deepStrictEqual(PUBLIC_JOB_OPTIONS, ['chat', 'research', 'analyze', 'review']);
   });
 
   it('gracefully degrades when a workflow entry is unavailable', () => {
@@ -108,22 +99,5 @@ describe('review prompt', () => {
     const text = buildReviewPrompt({ subject: 'failure' }).messages[0]?.content.text ?? '';
     assert.match(text, /Workflow: `review`/);
     assert.match(text, /review subject/i);
-  });
-});
-
-describe('memory prompt', () => {
-  it('accepts optional action and task', () => {
-    const result = MemoryPromptSchema.safeParse({
-      action: 'sessions.transcript',
-      task: 'I need to inspect a recent chat',
-    });
-    assert.ok(result.success);
-  });
-
-  it('references the memory workflow and resources', () => {
-    const text = buildMemoryPrompt({ action: 'caches.list' }).messages[0]?.content.text ?? '';
-    assert.match(text, /Workflow: `memory`/);
-    assert.match(text, /memory:\/\/sessions/);
-    assert.match(text, /memory:\/\/caches/);
   });
 });

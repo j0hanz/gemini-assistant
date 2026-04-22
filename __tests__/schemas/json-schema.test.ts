@@ -6,7 +6,6 @@ import { z } from 'zod/v4';
 import {
   AnalyzeInputSchema,
   ChatInputSchema,
-  MemoryInputSchema,
   ResearchInputSchema,
   ReviewInputSchema,
 } from '../../src/schemas/inputs.js';
@@ -102,22 +101,15 @@ describe('public input JSON Schema', () => {
     );
   });
 
-  it('publishes review and memory as action-specific oneOf schemas', () => {
+  it('publishes review as an action-specific oneOf schema', () => {
     const reviewBranches = oneOfBranches(z.toJSONSchema(ReviewInputSchema));
-    const memoryBranches = oneOfBranches(z.toJSONSchema(MemoryInputSchema));
 
     assert.strictEqual(reviewBranches.length, 3);
-    assert.strictEqual(memoryBranches.length, 10);
     assert.ok(
       reviewBranches.some((branch) =>
         ((branch as { required?: unknown }).required as unknown[] | undefined)?.includes(
           'filePathA',
         ),
-      ),
-    );
-    assert.ok(
-      memoryBranches.some((branch) =>
-        ((branch as { required?: unknown }).required as unknown[] | undefined)?.includes('ttl'),
       ),
     );
   });

@@ -4,18 +4,14 @@ import { describe, it } from 'node:test';
 
 import { z } from 'zod/v4';
 
-import { completeCacheNames } from '../../src/client.js';
 import {
   AgenticSearchInputSchema,
   AnalyzeFileInputSchema,
   AnalyzeInputSchema,
-  AnalyzePrInputSchema,
   AnalyzeUrlInputSchema,
   AskInputSchema,
   ChatInputSchema,
   CompareFilesInputSchema,
-  CreateCacheInputSchema,
-  DeleteCacheInputSchema,
   ExecuteCodeInputSchema,
   ExplainErrorInputSchema,
   GenerateDiagramInputSchema,
@@ -23,11 +19,9 @@ import {
   ResearchInputSchema,
   ReviewInputSchema,
   SearchInputSchema,
-  UpdateCacheInputSchema,
 } from '../../src/schemas/inputs.js';
 
 const absolutePath = (...segments: string[]) => join(process.cwd(), ...segments);
-const COMPLETABLE_SYMBOL = Symbol.for('mcp.completable');
 
 function getObjectShape(schema: unknown): Record<string, z.ZodType> {
   if (schema && typeof schema === 'object' && 'shape' in schema) {
@@ -54,15 +48,6 @@ function getObjectShape(schema: unknown): Record<string, z.ZodType> {
   }
 
   throw new Error('Expected object-like schema');
-}
-
-function getCompleter(schema: unknown) {
-  if (!schema || typeof schema !== 'object') {
-    return undefined;
-  }
-
-  return (schema as Record<symbol, { complete?: unknown } | undefined>)[COMPLETABLE_SYMBOL]
-    ?.complete;
 }
 
 describe('AskInputSchema', () => {
@@ -101,7 +86,6 @@ describe('AskInputSchema', () => {
       sessionId: 'sess-1',
       systemInstruction: 'Be concise',
       thinkingLevel: 'LOW',
-      cacheName: 'cachedContents/abc123',
       responseSchema: { type: 'object', properties: { answer: { type: 'string' } } },
       temperature: 0.2,
       seed: 42,
@@ -188,7 +172,6 @@ describe('ChatInputSchema', () => {
     const result = ChatInputSchema.safeParse({
       goal: 'continue this thread',
       sessionId: 'sess-1',
-      cacheName: 'cachedContents/abc123',
       responseSchemaJson: JSON.stringify({
         type: 'object',
         properties: { answer: { type: 'string' } },
@@ -197,7 +180,6 @@ describe('ChatInputSchema', () => {
     assert.ok(result.success);
     if (result.success) {
       assert.strictEqual(result.data.sessionId, 'sess-1');
-      assert.strictEqual(result.data.cacheName, 'cachedContents/abc123');
     }
   });
 
@@ -218,7 +200,7 @@ describe('ChatInputSchema', () => {
 
     const memoryResult = ChatInputSchema.safeParse({
       goal: 'continue this thread',
-      memory: { cacheName: 'cachedContents/abc123' },
+      memory: { sessionId: 'sess-1' },
     });
     assert.strictEqual(memoryResult.success, false);
   });
@@ -578,190 +560,6 @@ describe('AnalyzeFileInputSchema', () => {
   });
 });
 
-describe('CreateCacheInputSchema', () => {
-  it('accepts with filePaths', () => {
-    const result = CreateCacheInputSchema.safeParse({
-      filePaths: [absolutePath('fixtures', 'big-file.pdf')],
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts relative filePaths', () => {
-    const result = CreateCacheInputSchema.safeParse({
-      filePaths: ['fixtures/big-file.pdf'],
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts with systemInstruction only', () => {
-    const result = CreateCacheInputSchema.safeParse({
-      systemInstruction: 'You are a helpful assistant with deep knowledge...',
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts with both filePaths and systemInstruction', () => {
-    const result = CreateCacheInputSchema.safeParse({
-      filePaths: [absolutePath('fixtures', 'a.pdf')],
-      systemInstruction: 'Analyze these.',
-      ttl: '7200s',
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects when neither filePaths nor systemInstruction provided', () => {
-    const result = CreateCacheInputSchema.safeParse({});
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects empty filePaths without systemInstruction', () => {
-    const result = CreateCacheInputSchema.safeParse({ filePaths: [] });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects empty filePaths when systemInstruction is present', () => {
-    const result = CreateCacheInputSchema.safeParse({
-      filePaths: [],
-      systemInstruction: 'Cache this instruction',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects filePaths exceeding 50 entries', () => {
-    const paths = Array.from({ length: 51 }, (_, i) => absolutePath(`file${i}.txt`));
-    const result = CreateCacheInputSchema.safeParse({ filePaths: paths });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects root-escaping relative filePaths', () => {
-    const result = CreateCacheInputSchema.safeParse({
-      filePaths: ['../file.txt'],
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects malformed ttl values', () => {
-    const result = CreateCacheInputSchema.safeParse({
-      systemInstruction: 'Cache this',
-      ttl: '2 hours',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects the removed CURRENT_WORKSPACE_ROOT field', () => {
-    const result = CreateCacheInputSchema.safeParse({
-      CURRENT_WORKSPACE_ROOT: process.cwd(),
-      systemInstruction: 'Cache this',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown fields', () => {
-    const result = CreateCacheInputSchema.safeParse({
-      systemInstruction: 'Cache this',
-      extra: true,
-    });
-    assert.strictEqual(result.success, false);
-  });
-});
-
-describe('DeleteCacheInputSchema', () => {
-  it('accepts cache deletion input', () => {
-    const result = DeleteCacheInputSchema.safeParse({ cacheName: 'cachedContents/abc123' });
-    assert.ok(result.success);
-  });
-
-  it('accepts explicit confirmation override', () => {
-    const result = DeleteCacheInputSchema.safeParse({
-      cacheName: 'cachedContents/abc123',
-      confirm: true,
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects unknown fields', () => {
-    const result = DeleteCacheInputSchema.safeParse({
-      cacheName: 'cachedContents/abc123',
-      extra: true,
-    });
-    assert.strictEqual(result.success, false);
-  });
-});
-
-describe('UpdateCacheInputSchema', () => {
-  it('accepts cache ttl updates', () => {
-    const result = UpdateCacheInputSchema.safeParse({
-      cacheName: 'cachedContents/abc123',
-      ttl: '7200s',
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects empty ttl', () => {
-    const result = UpdateCacheInputSchema.safeParse({
-      cacheName: 'cachedContents/abc123',
-      ttl: '',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects malformed ttl', () => {
-    const result = UpdateCacheInputSchema.safeParse({
-      cacheName: 'cachedContents/abc123',
-      ttl: 'ten minutes',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown fields', () => {
-    const result = UpdateCacheInputSchema.safeParse({
-      cacheName: 'cachedContents/abc123',
-      ttl: '7200s',
-      extra: true,
-    });
-    assert.strictEqual(result.success, false);
-  });
-});
-
-describe('AnalyzePrInputSchema', () => {
-  it('accepts valid minimal input', () => {
-    const result = AnalyzePrInputSchema.safeParse({});
-    assert.ok(result.success);
-    if (result.success) {
-      assert.strictEqual(result.data.thinkingLevel, 'MEDIUM');
-    }
-  });
-
-  it('accepts supported fields', () => {
-    const result = AnalyzePrInputSchema.safeParse({
-      dryRun: true,
-      cacheName: 'cachedContents/abc123',
-      thinkingLevel: 'HIGH',
-      language: 'TypeScript',
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects removed mode field', () => {
-    const result = AnalyzePrInputSchema.safeParse({ mode: 'unstaged' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects removed base field', () => {
-    const result = AnalyzePrInputSchema.safeParse({ base: 'origin/main' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects removed paths field', () => {
-    const result = AnalyzePrInputSchema.safeParse({ paths: ['src/'] });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('keeps cacheName wired to live cache completion', () => {
-    assert.strictEqual(getCompleter(AnalyzePrInputSchema.shape.cacheName), completeCacheNames);
-  });
-});
-
 describe('shared thinkingLevel defaults', () => {
   it('defaults analyze input to MEDIUM', () => {
     const result = AnalyzeInputSchema.safeParse({
@@ -1062,14 +860,6 @@ describe('ExplainErrorInputSchema', () => {
     assert.ok(result.success);
   });
 
-  it('accepts with cacheName', () => {
-    const result = ExplainErrorInputSchema.safeParse({
-      error: 'Build failed',
-      cacheName: 'cachedContents/abc123',
-    });
-    assert.ok(result.success);
-  });
-
   it('rejects more than 20 urls', () => {
     const urls = Array.from({ length: 21 }, (_, i) => `https://example.com/${i}`);
     const result = ExplainErrorInputSchema.safeParse({ error: 'test', urls });
@@ -1101,12 +891,7 @@ describe('ExplainErrorInputSchema', () => {
     });
     assert.strictEqual(result.success, false);
   });
-
-  it('keeps cacheName wired to live cache completion', () => {
-    assert.strictEqual(getCompleter(ExplainErrorInputSchema.shape.cacheName), completeCacheNames);
-  });
 });
-
 describe('CompareFilesInputSchema', () => {
   it('accepts valid minimal input', () => {
     const result = CompareFilesInputSchema.safeParse({
@@ -1138,15 +923,6 @@ describe('CompareFilesInputSchema', () => {
       filePathA: absolutePath('a.ts'),
       filePathB: absolutePath('b.ts'),
       googleSearch: true,
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts with cacheName', () => {
-    const result = CompareFilesInputSchema.safeParse({
-      filePathA: absolutePath('a.ts'),
-      filePathB: absolutePath('b.ts'),
-      cacheName: 'cachedContents/abc',
     });
     assert.ok(result.success);
   });
@@ -1208,12 +984,7 @@ describe('CompareFilesInputSchema', () => {
       false,
     );
   });
-
-  it('keeps cacheName wired to live cache completion', () => {
-    assert.strictEqual(getCompleter(CompareFilesInputSchema.shape.cacheName), completeCacheNames);
-  });
 });
-
 describe('GenerateDiagramInputSchema', () => {
   it('accepts valid minimal input', () => {
     const result = GenerateDiagramInputSchema.safeParse({ description: 'auth flow' });
@@ -1286,14 +1057,6 @@ describe('GenerateDiagramInputSchema', () => {
     assert.ok(result.success);
   });
 
-  it('accepts with cacheName', () => {
-    const result = GenerateDiagramInputSchema.safeParse({
-      description: 'test',
-      cacheName: 'cachedContents/xyz',
-    });
-    assert.ok(result.success);
-  });
-
   it('rejects root-escaping relative source file paths', () => {
     const result = GenerateDiagramInputSchema.safeParse({
       description: 'test',
@@ -1342,13 +1105,6 @@ describe('GenerateDiagramInputSchema', () => {
         sourceFilePaths: ['C:..\\diagram.ts'],
       }).success,
       false,
-    );
-  });
-
-  it('keeps cacheName wired to live cache completion', () => {
-    assert.strictEqual(
-      getCompleter(GenerateDiagramInputSchema.shape.cacheName),
-      completeCacheNames,
     );
   });
 });

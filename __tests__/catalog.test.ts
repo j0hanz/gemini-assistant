@@ -12,8 +12,6 @@ import { PUBLIC_RESOURCE_URIS, PUBLIC_TOOL_NAMES } from '../src/public-contract.
 import {
   AnalyzeInputSchema,
   ChatInputSchema,
-  createMemoryInputSchema,
-  DeleteCacheInputSchema,
   ResearchInputSchema,
   ReviewInputSchema,
 } from '../src/schemas/inputs.js';
@@ -85,8 +83,6 @@ const toolSchemas = new Map<string, string[]>([
   ['research', schemaInputs(ResearchInputSchema)],
   ['analyze', schemaInputs(AnalyzeInputSchema)],
   ['review', schemaInputs(ReviewInputSchema)],
-  ['memory', schemaInputs(createMemoryInputSchema(() => []))],
-  ['delete_cache', schemaInputs(DeleteCacheInputSchema)],
 ]);
 
 const promptSchemas = new Map(
@@ -193,7 +189,7 @@ describe('catalog', () => {
   });
 
   it('documents limitations for contract-sensitive jobs', () => {
-    for (const toolName of ['chat', 'research', 'analyze', 'review', 'memory']) {
+    for (const toolName of ['chat', 'research', 'analyze', 'review']) {
       const entry = findDiscoveryEntry('tool', toolName);
       assert.ok(entry, `Missing tool entry for ${toolName}`);
       assert.ok(entry?.limitations && entry.limitations.length > 0);

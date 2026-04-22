@@ -102,7 +102,7 @@ describe('public MCP task lifecycle', () => {
     try {
       const tools = new Map((await listTools(harness.client)).map((tool) => [tool.name, tool]));
 
-      for (const toolName of ['chat', 'research', 'analyze', 'review', 'memory'] as const) {
+      for (const toolName of ['chat', 'research', 'analyze', 'review'] as const) {
         assert.equal(tools.get(toolName)?.execution?.taskSupport, 'optional');
       }
       assert.strictEqual(tools.has('discover'), false);
@@ -151,20 +151,6 @@ describe('public MCP task lifecycle', () => {
 
       const completedTask = await harness.client.request('tasks/get', { taskId: researchTaskId });
       assert.equal(completedTask.result.status, 'completed');
-
-      const memoryTaskId = await createTask(harness.client, 'memory', {
-        action: 'sessions.list',
-      });
-      const memoryResult = await getTaskResult(harness.client, memoryTaskId);
-      assert.notEqual(memoryResult.isError, true);
-      const memoryTool = tools.get('memory');
-      assert.ok(memoryTool);
-      assertAdvertisedOutputSchema(memoryTool, memoryResult);
-
-      const completedMemoryTask = await harness.client.request('tasks/get', {
-        taskId: memoryTaskId,
-      });
-      assert.equal(completedMemoryTask.result.status, 'completed');
     } finally {
       await harness.close();
     }
@@ -174,13 +160,15 @@ describe('public MCP task lifecycle', () => {
     const harness = await createHarness();
 
     try {
-      const failedTaskId = await createTask(harness.client, 'memory', {
-        action: 'caches.get',
-        cacheName: 'cachedContents/missing-cache',
+      const failedTaskId = await createTask(harness.client, 'analyze', {
+        goal: 'Trigger a runtime failure',
+        targetKind: 'file',
+        filePath: 'src/client.ts',
+        outputKind: 'summary',
       });
 
       const failedResult = await getTaskResult(harness.client, failedTaskId);
-      assertToolExecutionError(failedResult, /Missing cache|not found/i);
+      assertToolExecutionError(failedResult, /.+/);
 
       const failedTask = await harness.client.request('tasks/get', { taskId: failedTaskId });
       assert.equal(failedTask.result.status, 'failed');
@@ -286,12 +274,16 @@ describe('public MCP task lifecycle', () => {
     try {
       const taskId = await createTask(
         harness.client,
-        'memory',
+        'research',
         {
-          action: 'sessions.list',
+          goal: 'Probe defaults',
+          mode: 'quick',
         },
         undefined,
       );
+
+      env.queueStream(makeChunk([{ text: 'done' }], FinishReason.STOP));
+      await getTaskResult(harness.client, taskId);
 
       const task = await harness.client.request('tasks/get', { taskId });
       assert.equal(task.result.ttl, 300_000);
@@ -307,12 +299,16 @@ describe('public MCP task lifecycle', () => {
     try {
       const taskId = await createTask(
         harness.client,
-        'memory',
+        'research',
         {
-          action: 'sessions.list',
+          goal: 'Probe explicit ttl',
+          mode: 'quick',
         },
         60_000,
       );
+
+      env.queueStream(makeChunk([{ text: 'done' }], FinishReason.STOP));
+      await getTaskResult(harness.client, taskId);
 
       const task = await harness.client.request('tasks/get', { taskId });
       assert.equal(task.result.ttl, 60_000);
@@ -337,23 +333,6 @@ describe('public MCP task lifecycle', () => {
       });
 
       deferred.release();
-
-      const result = await getTaskResult(harness.client, taskId);
-      assert.equal(getRelatedTaskId(result), taskId);
-    } finally {
-      await harness.close();
-    }
-  });
-
-  it('preserves related-task metadata on memory resource links', async () => {
-    const harness = await createHarness();
-
-    try {
-      const taskId = await createTask(harness.client, 'memory', {
-        action: 'sessions.list',
-      });
-
-      await flushEventLoop(2);
 
       const result = await getTaskResult(harness.client, taskId);
       assert.equal(getRelatedTaskId(result), taskId);

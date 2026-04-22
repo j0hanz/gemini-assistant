@@ -8,13 +8,11 @@ import { describe, it } from 'node:test';
 
 import { listDiscoveryEntries, listWorkflowEntries } from '../src/catalog.js';
 import {
-  cacheDetailUri,
   DISCOVER_CATALOG_URI,
   DISCOVER_CONTEXT_URI,
   DISCOVER_WORKFLOWS_URI,
-  MEMORY_CACHES_URI,
-  MEMORY_WORKSPACE_CACHE_URI,
-  MEMORY_WORKSPACE_CONTEXT_URI,
+  WORKSPACE_CACHE_URI,
+  WORKSPACE_CONTEXT_URI,
 } from '../src/lib/resource-uris.js';
 import { workspaceCacheManager } from '../src/lib/workspace-context.js';
 import { PUBLIC_RESOURCE_URIS, PUBLIC_WORKFLOW_NAMES } from '../src/public-contract.js';
@@ -22,7 +20,6 @@ import {
   buildServerContextSnapshot,
   getSessionEventsResourceData,
   getSessionTranscriptResourceData,
-  readCacheDetailResource,
   readDiscoverCatalogResource,
   readDiscoverContextResource,
   readDiscoverWorkflowsResource,
@@ -59,25 +56,20 @@ describe('discovery resources', () => {
       [
         'tool:analyze',
         'tool:chat',
-        'tool:delete_cache',
-        'tool:memory',
         'tool:research',
         'tool:review',
         'prompt:discover',
-        'prompt:memory',
         'prompt:research',
         'prompt:review',
         'resource:discover://catalog',
         'resource:discover://context',
         'resource:discover://workflows',
-        'resource:memory://caches',
-        'resource:memory://caches/{cacheName}',
-        'resource:memory://sessions',
-        'resource:memory://sessions/{sessionId}',
-        'resource:memory://sessions/{sessionId}/events',
-        'resource:memory://sessions/{sessionId}/transcript',
-        'resource:memory://workspace/cache',
-        'resource:memory://workspace/context',
+        'resource:session://',
+        'resource:session://{sessionId}',
+        'resource:session://{sessionId}/events',
+        'resource:session://{sessionId}/transcript',
+        'resource:workspace://cache',
+        'resource:workspace://context',
       ],
     );
     assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
@@ -183,20 +175,14 @@ describe('discovery resources', () => {
         'discover://catalog',
         'discover://context',
         'discover://workflows',
-        'memory://sessions',
-        'memory://caches',
-        'memory://workspace/context',
-        'memory://workspace/cache',
+        'session://',
+        'workspace://context',
+        'workspace://cache',
       ],
     );
     assert.deepStrictEqual(
       [...PUBLIC_RESOURCE_URIS].filter((uri) => uri.includes('{')),
-      [
-        'memory://sessions/{sessionId}',
-        'memory://sessions/{sessionId}/transcript',
-        'memory://sessions/{sessionId}/events',
-        'memory://caches/{cacheName}',
-      ],
+      ['session://{sessionId}', 'session://{sessionId}/transcript', 'session://{sessionId}/events'],
     );
   });
 });
@@ -219,13 +205,13 @@ describe('workspace context resource', () => {
   });
 
   it('returns workspace context as markdown text content', () => {
-    const result = readWorkspaceContextResource('memory://workspace/context', {
+    const result = readWorkspaceContextResource('workspace://context', {
       content: 'Workspace body',
       estimatedTokens: 42,
       sources: [],
     });
 
-    assert.strictEqual(result.contents[0]?.uri, 'memory://workspace/context');
+    assert.strictEqual(result.contents[0]?.uri, 'workspace://context');
     assert.strictEqual(result.contents[0]?.mimeType, 'text/markdown');
     assert.match(result.contents[0]?.text ?? '', /^# Workspace Context/m);
     assert.throws(() => {
@@ -316,7 +302,7 @@ describe('session transcript resource', () => {
 
     const result = readSessionTranscriptResource(
       store,
-      'memory://sessions/sess-resource-transcript/transcript',
+      'session://sess-resource-transcript/transcript',
       'sess-resource-transcript',
     );
     assert.strictEqual(result.contents.length, 2);
@@ -344,18 +330,18 @@ describe('session transcript resource', () => {
 
     const result = readSessionTranscriptResource(
       store,
-      `memory://sessions/${encodedSessionId}/transcript`,
+      `session://${encodedSessionId}/transcript`,
       encodedSessionId,
     );
 
-    assert.strictEqual(result.contents[0]?.uri, `memory://sessions/${encodedSessionId}/transcript`);
+    assert.strictEqual(result.contents[0]?.uri, `session://${encodedSessionId}/transcript`);
     assert.match(result.contents[1]?.text ?? '', /# Session Transcript `sess resource%\/#`/);
   });
 
   it('renders a not-found error for a missing session transcript', () => {
     const store = createStore();
     assert.throws(
-      () => readSessionTranscriptResource(store, 'memory://sessions/missing/transcript', 'missing'),
+      () => readSessionTranscriptResource(store, 'session://missing/transcript', 'missing'),
       { message: /not found/i },
     );
   });
@@ -372,7 +358,7 @@ describe('session transcript resource', () => {
     store.setSession('sess-resource-transcript', mockChat('resource-transcript'));
 
     assert.throws(
-      () => readSessionTranscriptResource(store, 'memory://sessions/%E0%A4/transcript', '%E0%A4'),
+      () => readSessionTranscriptResource(store, 'session://%E0%A4/transcript', '%E0%A4'),
       (error) => error instanceof ProtocolError && /percent-encoding/i.test(error.message),
     );
   });
@@ -397,7 +383,7 @@ describe('session events resource', () => {
 
     const result = readSessionEventsResource(
       store,
-      'memory://sessions/sess-resource-events/events',
+      'session://sess-resource-events/events',
       'sess-resource-events',
     );
     assert.strictEqual(result.contents.length, 2);
@@ -426,20 +412,19 @@ describe('session events resource', () => {
 
     const result = readSessionEventsResource(
       store,
-      `memory://sessions/${encodedSessionId}/events`,
+      `session://${encodedSessionId}/events`,
       encodedSessionId,
     );
 
-    assert.strictEqual(result.contents[0]?.uri, `memory://sessions/${encodedSessionId}/events`);
+    assert.strictEqual(result.contents[0]?.uri, `session://${encodedSessionId}/events`);
     assert.match(result.contents[1]?.text ?? '', /# Session Events `sess resource%\/#`/);
   });
 
   it('throws ProtocolError for a missing session events resource', () => {
     const store = createStore();
-    assert.throws(
-      () => readSessionEventsResource(store, 'memory://sessions/missing/events', 'missing'),
-      { message: /not found/i },
-    );
+    assert.throws(() => readSessionEventsResource(store, 'session://missing/events', 'missing'), {
+      message: /not found/i,
+    });
   });
 
   it('throws ProtocolError for a missing session events data', () => {
@@ -450,53 +435,12 @@ describe('session events resource', () => {
   });
 });
 
-describe('cache detail resource', () => {
-  it('maps malformed cache URI encoding to InvalidParams', async () => {
-    await assert.rejects(
-      () => readCacheDetailResource('memory://caches/%E0%A4', '%E0%A4'),
-      (error) => error instanceof ProtocolError && /percent-encoding/i.test(error.message),
-    );
-  });
-
-  it('maps cache backend failures to InternalError', async () => {
-    await assert.rejects(
-      () =>
-        readCacheDetailResource(
-          'memory://caches/cachedContents%2Fworkspace-1',
-          'cachedContents%2Fworkspace-1',
-          async () => {
-            throw new Error('boom');
-          },
-        ),
-      (error) => error instanceof ProtocolError && /failed to read cache/i.test(error.message),
-    );
-  });
-
-  it('maps missing cache summaries to ResourceNotFound', async () => {
-    await assert.rejects(
-      () =>
-        readCacheDetailResource(
-          'memory://caches/cachedContents%2Fworkspace-1',
-          'cachedContents%2Fworkspace-1',
-          async () => null,
-        ),
-      (error) => error instanceof ProtocolError && /not found/i.test(error.message),
-    );
-  });
-});
-
 describe('resource URI constants', () => {
   it('match the concrete and templated resource contract strings', () => {
     assert.strictEqual(DISCOVER_CATALOG_URI, 'discover://catalog');
     assert.strictEqual(DISCOVER_WORKFLOWS_URI, 'discover://workflows');
     assert.strictEqual(DISCOVER_CONTEXT_URI, 'discover://context');
-    assert.strictEqual(MEMORY_CACHES_URI, 'memory://caches');
-    assert.strictEqual(MEMORY_WORKSPACE_CONTEXT_URI, 'memory://workspace/context');
-    assert.strictEqual(MEMORY_WORKSPACE_CACHE_URI, 'memory://workspace/cache');
-    assert.strictEqual(
-      cacheDetailUri('cachedContents/workspace-1'),
-      'memory://caches/cachedContents%2Fworkspace-1',
-    );
-    assert.ok(PUBLIC_RESOURCE_URIS.includes(`${MEMORY_CACHES_URI}/{cacheName}`));
+    assert.strictEqual(WORKSPACE_CONTEXT_URI, 'workspace://context');
+    assert.strictEqual(WORKSPACE_CACHE_URI, 'workspace://cache');
   });
 });

@@ -4,16 +4,15 @@ import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontex
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
 import {
-  cacheDetailUri,
   DISCOVER_CATALOG_URI,
   DISCOVER_CONTEXT_URI,
   DISCOVER_WORKFLOWS_URI,
-  MEMORY_CACHES_URI,
-  MEMORY_WORKSPACE_CACHE_URI,
-  MEMORY_WORKSPACE_CONTEXT_URI,
   sessionDetailUri,
   sessionEventsUri,
+  SESSIONS_LIST_URI,
   sessionTranscriptUri,
+  WORKSPACE_CACHE_URI,
+  WORKSPACE_CONTEXT_URI,
 } from './lib/resource-uris.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from './lib/validation.js';
 import {
@@ -29,7 +28,6 @@ import {
   renderDiscoveryCatalogMarkdown,
   renderWorkflowCatalogMarkdown,
 } from './catalog.js';
-import { completeCacheNames, getCacheSummary, listCacheSummaries } from './client.js';
 import {
   getExposeThoughts,
   getGeminiModel,
@@ -216,44 +214,6 @@ function sessionEventResources(sessionStore: SessionStore): ResourceListEntry[] 
     sessionEventsUri,
     (sessionId) => `Events ${sessionId}`,
   );
-}
-
-function cacheDetailResources(
-  caches: Awaited<ReturnType<typeof listCacheSummaries>>,
-): ResourceListEntry[] {
-  return caches
-    .filter((cache): cache is typeof cache & { name: string } => typeof cache.name === 'string')
-    .map((cache) => ({
-      uri: cacheDetailUri(cache.name),
-      name: cache.displayName ?? cache.name,
-    }));
-}
-
-export async function readCacheDetailResource(
-  uri: URL | string,
-  cacheName: string | string[] | undefined,
-  getCacheSummaryImpl: (
-    name: string,
-  ) => Promise<Awaited<ReturnType<typeof getCacheSummary>> | null | undefined> = getCacheSummary,
-): Promise<ReadResourceResult> {
-  const log = logger.child('resources');
-  const decoded = requireTemplateParam(cacheName, 'Cache name');
-
-  try {
-    const summary = await getCacheSummaryImpl(decoded);
-    if (!summary) {
-      throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Cache '${decoded}' not found`);
-    }
-
-    return jsonResource(toResourceUri(uri), summary);
-  } catch (err) {
-    if (err instanceof ProtocolError) {
-      throw err;
-    }
-
-    log.error(`Failed to get cache '${decoded}': ${AppError.formatMessage(err)}`);
-    throw new ProtocolError(ProtocolErrorCode.InternalError, `Failed to read cache '${decoded}'`);
-  }
 }
 
 export function readDiscoverCatalogResource(
@@ -518,8 +478,8 @@ export function readSessionEventsResource(
 
 function registerSessionResources(server: McpServer, sessionStore: SessionStore): void {
   server.registerResource(
-    'memory-sessions',
-    'memory://sessions',
+    'session-list',
+    SESSIONS_LIST_URI,
     {
       title: 'Active Chat Sessions',
       description: 'List of active server-managed chat sessions and their last access time.',
@@ -533,8 +493,8 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
   );
 
   server.registerResource(
-    'memory-session-detail',
-    new ResourceTemplate('memory://sessions/{sessionId}', {
+    'session-detail',
+    new ResourceTemplate('session://{sessionId}', {
       list: () => ({ resources: sessionDetailResources(sessionStore) }),
       complete: {
         sessionId: sessionStore.completeSessionIds.bind(sessionStore),
@@ -560,8 +520,8 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
   );
 
   server.registerResource(
-    'memory-session-transcript',
-    new ResourceTemplate('memory://sessions/{sessionId}/transcript', {
+    'session-transcript',
+    new ResourceTemplate('session://{sessionId}/transcript', {
       list: () => ({ resources: sessionTranscriptResources(sessionStore) }),
       complete: {
         sessionId: sessionStore.completeSessionIds.bind(sessionStore),
@@ -583,8 +543,8 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
   );
 
   server.registerResource(
-    'memory-session-events',
-    new ResourceTemplate('memory://sessions/{sessionId}/events', {
+    'session-events',
+    new ResourceTemplate('session://{sessionId}/events', {
       list: () => ({ resources: sessionEventResources(sessionStore) }),
       complete: {
         sessionId: sessionStore.completeSessionIds.bind(sessionStore),
@@ -618,52 +578,6 @@ function isWorkspaceCacheFresh(createdAt: number | undefined, ttl: string): bool
   }
 
   return Date.now() - createdAt < ttlSeconds * 1000;
-}
-
-function registerCacheResources(server: McpServer): void {
-  const log = logger.child('resources');
-
-  server.registerResource(
-    'memory-caches',
-    MEMORY_CACHES_URI,
-    {
-      title: 'Gemini Context Caches',
-      description: 'List of active Gemini context caches with name, model, and expiry.',
-      mimeType: 'application/json',
-      annotations: {
-        audience: ['assistant'],
-        priority: 0.7,
-      },
-    },
-    async (uri): Promise<ReadResourceResult> => {
-      try {
-        return jsonResource(uri.href, await listCacheSummaries());
-      } catch (err) {
-        log.error(`Failed to list caches: ${AppError.formatMessage(err)}`);
-        throw new ProtocolError(ProtocolErrorCode.InternalError, 'Failed to list caches');
-      }
-    },
-  );
-
-  server.registerResource(
-    'memory-cache-detail',
-    new ResourceTemplate(`${MEMORY_CACHES_URI}/{cacheName}`, {
-      list: async () => ({ resources: cacheDetailResources(await listCacheSummaries()) }),
-      complete: {
-        cacheName: completeCacheNames,
-      },
-    }),
-    {
-      title: 'Cache Detail',
-      description: 'Full detail for a single Gemini context cache including token count.',
-      mimeType: 'application/json',
-      annotations: {
-        audience: ['assistant'],
-        priority: 0.7,
-      },
-    },
-    async (uri, { cacheName }) => await readCacheDetailResource(uri, cacheName),
-  );
 }
 
 function registerDiscoveryResources(server: McpServer): void {
@@ -735,8 +649,8 @@ function registerWorkspaceResources(
   const log = logger.child('resources');
 
   server.registerResource(
-    'memory-workspace-context',
-    MEMORY_WORKSPACE_CONTEXT_URI,
+    'workspace-context',
+    WORKSPACE_CONTEXT_URI,
     {
       title: 'Workspace Context',
       description: 'Assembled project context from workspace files for Gemini.',
@@ -766,8 +680,8 @@ function registerWorkspaceResources(
   );
 
   server.registerResource(
-    'memory-workspace-cache',
-    MEMORY_WORKSPACE_CACHE_URI,
+    'workspace-cache',
+    WORKSPACE_CACHE_URI,
     {
       title: 'Workspace Cache Status',
       description: 'Current status of the Gemini workspace context cache.',
@@ -789,7 +703,6 @@ export function registerResources(
   workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): void {
   registerSessionResources(server, sessionStore);
-  registerCacheResources(server);
   registerDiscoveryResources(server);
   registerContextResource(server, sessionStore, rootsFetcher, workspaceCacheManagerInstance);
   registerWorkspaceResources(server, rootsFetcher, workspaceCacheManagerInstance);

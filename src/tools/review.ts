@@ -203,7 +203,7 @@ interface GitDiffArgsOptions {
 
 function createCompareFileWork(rootsFetcher: RootsFetcher) {
   return async function compareFileWork(
-    { filePathA, filePathB, question, thinkingLevel, googleSearch, cacheName }: CompareFilesInput,
+    { filePathA, filePathB, question, thinkingLevel, googleSearch }: CompareFilesInput,
     ctx: ServerContext,
   ): Promise<CallToolResult> {
     const uploadedNames: string[] = [];
@@ -223,7 +223,6 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
       await progress.step(2, 4, 'Analyzing differences');
 
       const prompt = buildDiffReviewPrompt({
-        cacheName,
         focus: question,
         mode: 'compare',
         promptParts: [
@@ -246,7 +245,6 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
               {
                 systemInstruction: prompt.systemInstruction,
                 thinkingLevel,
-                cacheName,
                 ...buildOrchestrationConfig({
                   toolProfile: googleSearch ? 'search' : 'none',
                 }),
@@ -278,7 +276,6 @@ interface FailureReviewSubject {
 async function diagnoseFailureWork(
   subject: FailureReviewSubject,
   focus: string | undefined,
-  cacheName: string | undefined,
   thinkingLevel: ReviewInput['thinkingLevel'],
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -288,7 +285,6 @@ async function diagnoseFailureWork(
   if (invalidUrlResult) return invalidUrlResult;
 
   const prompt = buildErrorDiagnosisPrompt({
-    cacheName,
     codeContext: focus
       ? [codeContext, 'Review focus: ' + focus].filter(Boolean).join('\n\n')
       : codeContext,
@@ -324,7 +320,6 @@ async function diagnoseFailureWork(
           {
             systemInstruction: prompt.systemInstruction,
             thinkingLevel,
-            cacheName,
             ...orchestration,
           },
           ctx.mcpReq.signal,
@@ -922,7 +917,7 @@ export async function buildLocalDiffSnapshot(
 }
 
 export async function analyzePrWork(
-  { thinkingLevel, language, dryRun, cacheName, focus }: AnalyzePrInput,
+  { thinkingLevel, language, dryRun, focus }: AnalyzePrInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const progress = new ProgressReporter(ctx, REVIEW_DIFF_TOOL_LABEL);
@@ -983,7 +978,6 @@ export async function analyzePrWork(
   );
 
   const modelPrompt = buildDiffReviewPrompt({
-    cacheName,
     mode: 'review',
     promptText: prompt,
   });
@@ -1000,7 +994,6 @@ export async function analyzePrWork(
           {
             systemInstruction: modelPrompt.systemInstruction,
             thinkingLevel,
-            cacheName,
           },
           ctx.mcpReq.signal,
         ),
@@ -1053,7 +1046,6 @@ async function reviewWork(
     result = await analyzePrWork(
       {
         dryRun: args.dryRun,
-        cacheName: args.cacheName,
         language: args.language,
         thinkingLevel: args.thinkingLevel,
         focus: args.focus,
@@ -1068,7 +1060,6 @@ async function reviewWork(
         question: args.question ?? args.focus,
         thinkingLevel: args.thinkingLevel,
         googleSearch: args.googleSearch,
-        cacheName: args.cacheName,
       },
       ctx,
     );
@@ -1083,7 +1074,6 @@ async function reviewWork(
         urls: args.urls,
       },
       args.focus,
-      args.cacheName,
       args.thinkingLevel,
       ctx,
     );

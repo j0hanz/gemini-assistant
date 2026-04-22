@@ -11,7 +11,6 @@ process.env.API_KEY ??= 'test-key-for-registration';
 
 const { registerAnalyzeTool } = await import('../../src/tools/analyze.js');
 const { registerChatTool } = await import('../../src/tools/chat.js');
-const { registerMemoryTool, registerDeleteCacheTool } = await import('../../src/tools/memory.js');
 const { registerResearchTool } = await import('../../src/tools/research.js');
 const { registerReviewTool } = await import('../../src/tools/review.js');
 const { createPromptDefinitions, PUBLIC_PROMPT_NAMES, registerPrompts } =
@@ -60,16 +59,6 @@ describe('tool registration', () => {
     assert.doesNotThrow(() => registerReviewTool(server, queue));
   });
 
-  it('registers memory without error', () => {
-    const server = createServer();
-    assert.doesNotThrow(() => registerMemoryTool(server, sessionStore, queue));
-  });
-
-  it('registers delete_cache without error', () => {
-    const server = createServer();
-    assert.doesNotThrow(() => registerDeleteCacheTool(server, queue));
-  });
-
   it('registers resources without error', () => {
     const server = createServer();
     assert.doesNotThrow(() => registerResources(server, sessionStore));
@@ -87,8 +76,6 @@ describe('tool registration', () => {
       registerResearchTool(server, queue);
       registerAnalyzeTool(server, queue);
       registerReviewTool(server, queue);
-      registerMemoryTool(server, sessionStore, queue);
-      registerDeleteCacheTool(server, queue);
       registerPrompts(server);
       registerResources(server, sessionStore);
     });
@@ -105,19 +92,14 @@ describe('tool registration', () => {
         'discover://catalog',
         'discover://context',
         'discover://workflows',
-        'memory://sessions',
-        'memory://sessions/{sessionId}',
-        'memory://sessions/{sessionId}/transcript',
-        'memory://sessions/{sessionId}/events',
-        'memory://caches',
-        'memory://caches/{cacheName}',
-        'memory://workspace/context',
-        'memory://workspace/cache',
+        'session://',
+        'session://{sessionId}',
+        'session://{sessionId}/transcript',
+        'session://{sessionId}/events',
+        'workspace://context',
+        'workspace://cache',
       ],
     );
-    assert.deepStrictEqual(
-      [...PUBLIC_TOOL_NAMES],
-      ['chat', 'research', 'analyze', 'review', 'memory', 'delete_cache'],
-    );
+    assert.deepStrictEqual([...PUBLIC_TOOL_NAMES], ['chat', 'research', 'analyze', 'review']);
   });
 });

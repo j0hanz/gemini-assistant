@@ -28,13 +28,12 @@ afterEach(async () => {
 
 function expectedConcreteResourceUris(): string[] {
   return [
-    'memory://sessions',
-    'memory://caches',
+    'session://',
     'discover://catalog',
     'discover://workflows',
     'discover://context',
-    'memory://workspace/context',
-    'memory://workspace/cache',
+    'workspace://context',
+    'workspace://cache',
   ];
 }
 
@@ -90,7 +89,7 @@ describe('in-memory MCP server e2e', () => {
         (entry) => typeof entry.text === 'string',
       )?.text ?? '';
     assert.match(discoveryText, /chat/);
-    assert.match(discoveryText, /memory:\/\/sessions/);
+    assert.match(discoveryText, /session:\/\//);
 
     const promptText =
       ((discoverPrompt.result.messages as { content?: { text?: string } }[]) ?? []).find(
@@ -136,7 +135,7 @@ describe('in-memory MCP server e2e', () => {
     assertProtocolError(invalidChatSchema, -32602, /responseSchemaJson|type|number/i);
   });
 
-  it('reads memory://workspace/context as markdown through MCP', async () => {
+  it('reads workspace://context as markdown through MCP', async () => {
     const harness = await createServerHarness(createServerInstance, {
       capabilities: { roots: {} },
     });
@@ -144,7 +143,7 @@ describe('in-memory MCP server e2e', () => {
 
     await harness.client.initialize();
     const response = await harness.client.request('resources/read', {
-      uri: 'memory://workspace/context',
+      uri: 'workspace://context',
     });
 
     const text =
@@ -173,7 +172,7 @@ describe('in-memory MCP server e2e', () => {
     try {
       await harness.client.initialize();
       const response = await harness.client.request('resources/read', {
-        uri: 'memory://workspace/context',
+        uri: 'workspace://context',
       });
 
       const text =

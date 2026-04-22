@@ -75,38 +75,6 @@ export function validateExclusiveSourceFileFields(
   );
 }
 
-interface MeaningfulCacheCreateInput {
-  filePaths?: string[] | undefined;
-  systemInstruction?: string | undefined;
-}
-
-export function validateMeaningfulCacheCreateInput(
-  value: MeaningfulCacheCreateInput,
-  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
-): void {
-  const hasFilePathsField = value.filePaths !== undefined;
-  const filePathCount = value.filePaths?.length ?? 0;
-  const hasSystemInstruction = value.systemInstruction !== undefined;
-
-  if (hasFilePathsField && filePathCount === 0) {
-    addCustomIssue(
-      ctx,
-      'filePaths must be omitted or contain at least one path.',
-      ['filePaths'],
-      value.filePaths,
-    );
-  }
-
-  if (!hasSystemInstruction && filePathCount === 0) {
-    addCustomIssue(
-      ctx,
-      'Provide filePaths, systemInstruction, or both for caches.create.',
-      ['filePaths'],
-      value.filePaths,
-    );
-  }
-}
-
 type FlatAnalyzeInput = z.input<typeof AnalyzeInputBaseSchema>;
 
 function addForbiddenFieldIssue(
@@ -188,18 +156,3 @@ export function validateFlatResearchInput(
 
   forbidFields(ctx, value, ['urls', 'systemInstruction'], 'mode', mode);
 }
-
-export const MEMORY_ACTIONS = [
-  'sessions.list',
-  'sessions.get',
-  'sessions.transcript',
-  'sessions.events',
-  'caches.list',
-  'caches.get',
-  'caches.create',
-  'caches.update',
-  'workspace.context',
-  'workspace.cache',
-] as const;
-
-export type MemoryAction = (typeof MEMORY_ACTIONS)[number];

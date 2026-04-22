@@ -8,7 +8,6 @@ import {
   analyzeTargetKind,
   ASK_NON_URL_TOOL_PROFILES,
   ASK_URL_TOOL_PROFILES,
-  completableCacheName,
   DIAGRAM_TYPES,
   enumField,
   goalText,
@@ -20,24 +19,16 @@ import {
   temperatureField,
   textField,
   thinkingLevel,
-  ttlSeconds,
   withFieldMetadata,
   workspacePath,
   workspacePathArray,
 } from './fields.js';
-import {
-  createFilePairFields,
-  createOptionalCacheReferenceFields,
-  createUrlContextFields,
-} from './fragments.js';
+import { createFilePairFields, createUrlContextFields } from './fragments.js';
 import { GeminiResponseSchema } from './json-schema.js';
 import {
-  MEMORY_ACTIONS,
-  type MemoryAction,
   validateExclusiveSourceFileFields,
   validateFlatAnalyzeInput,
   validateFlatResearchInput,
-  validateMeaningfulCacheCreateInput,
 } from './validators.js';
 
 type SessionIdCompleter = (prefix?: string) => string[];
@@ -78,10 +69,6 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
     sessionId: completable(
       optionalField(sessionId('Server-managed in-memory session identifier.')),
       completeSessionIds,
-    ),
-    cacheName: completableCacheName(
-      'Gemini cache resource name to attach as reusable context.',
-      true,
     ),
     systemInstruction: optionalField(
       textField('System instructions for response style, constraints, or behavior.'),
@@ -163,10 +150,6 @@ const reviewSubjectKindLiteral = <T extends 'diff' | 'comparison' | 'failure'>(v
 const reviewCommonShape = {
   focus: optionalField(textField('Review priorities (e.g. regressions, security, performance).')),
   thinkingLevel: thinkingLevelField,
-  cacheName: completableCacheName(
-    'Cache resource name to provide project context during review.',
-    true,
-  ),
 };
 
 const ReviewDiffInputSchema = z.strictObject({
@@ -227,81 +210,6 @@ export const ReviewInputSchema = z.preprocess((value) => {
 }, ReviewInputUnionSchema);
 export type ReviewInput = z.infer<typeof ReviewInputSchema>;
 
-const memoryActionField = <T extends MemoryAction>(action: T) =>
-  withFieldMetadata(z.literal(action), 'Memory action selector.');
-
-function createSessionIdField(completeSessionIds: SessionIdCompleter) {
-  return completable(sessionId('Session identifier to inspect'), completeSessionIds);
-}
-
-function createMemoryNoArgumentSchema<T extends MemoryAction>(action: T) {
-  return z.strictObject({
-    action: memoryActionField(action),
-  });
-}
-
-function createMemorySessionSchema<T extends MemoryAction>(
-  action: T,
-  completeSessionIds: SessionIdCompleter,
-) {
-  return z.strictObject({
-    action: memoryActionField(action),
-    sessionId: createSessionIdField(completeSessionIds),
-  });
-}
-
-function createMemoryCacheGetSchema<T extends MemoryAction>(action: T) {
-  return z.strictObject({
-    action: memoryActionField(action),
-    cacheName: completableCacheName('Cache resource name'),
-  });
-}
-
-function createMemoryCacheCreateSchema() {
-  return z
-    .strictObject({
-      action: memoryActionField('caches.create'),
-      filePaths: workspacePathArray({
-        description: 'Files to include in the cache.',
-        itemDescription: 'Workspace-relative or absolute path to a file to cache',
-        max: 50,
-        optional: true,
-      }),
-      systemInstruction: optionalField(
-        requiredText('System instruction to store alongside the cached files.'),
-      ),
-      ttl: optionalField(ttlSeconds('Time-to-live for the cache (e.g. "3600s").')),
-      displayName: optionalField(textField('Human-readable label for the cache.')),
-    })
-    .superRefine(validateMeaningfulCacheCreateInput);
-}
-
-function createMemoryCacheUpdateSchema() {
-  return z.strictObject({
-    action: memoryActionField('caches.update'),
-    cacheName: completableCacheName('Cache resource name'),
-    ttl: ttlSeconds('Time-to-live for the cache (e.g. "3600s").'),
-  });
-}
-
-export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
-  return z.discriminatedUnion('action', [
-    createMemoryNoArgumentSchema(MEMORY_ACTIONS[0]),
-    createMemorySessionSchema(MEMORY_ACTIONS[1], completeSessionIds),
-    createMemorySessionSchema(MEMORY_ACTIONS[2], completeSessionIds),
-    createMemorySessionSchema(MEMORY_ACTIONS[3], completeSessionIds),
-    createMemoryNoArgumentSchema(MEMORY_ACTIONS[4]),
-    createMemoryCacheGetSchema(MEMORY_ACTIONS[5]),
-    createMemoryCacheCreateSchema(),
-    createMemoryCacheUpdateSchema(),
-    createMemoryNoArgumentSchema(MEMORY_ACTIONS[8]),
-    createMemoryNoArgumentSchema(MEMORY_ACTIONS[9]),
-  ]);
-}
-
-export const MemoryInputSchema = createMemoryInputSchema();
-export type MemoryInput = z.infer<typeof MemoryInputSchema>;
-
 function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
   const askCommonShape = {
     message: requiredText('User message or prompt', 100_000),
@@ -313,10 +221,6 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
       textField('System instructions for response style, constraints, or behavior.'),
     ),
     thinkingLevel: thinkingLevelField,
-    cacheName: completableCacheName(
-      'Cache name from memory action=caches.create. Cannot be applied to an existing chat session.',
-      true,
-    ),
     responseSchema: withFieldMetadata(
       GeminiResponseSchema.optional(),
       'JSON Schema for structured output.',
@@ -426,56 +330,11 @@ export const AnalyzePrInputSchema = z.strictObject({
     z.boolean().optional(),
     'Skip model review, return diff snapshot only.',
   ),
-  ...createOptionalCacheReferenceFields(
-    'Cache resource name to provide project context during review.',
-  ),
   thinkingLevel: thinkingLevelField,
   language: optionalField(textField('Primary language hint.')),
   focus: optionalField(textField('Optional review focus hint.')),
 });
 export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
-
-const createCacheSystemInstructionSchema = requiredText(
-  'System instruction to store in the cache.',
-);
-const createCacheSharedShape = {
-  ttl: optionalField(ttlSeconds('Time-to-live for the cache (e.g., "3600s").')),
-  displayName: optionalField(textField('Human-readable label for the cache.')),
-};
-
-export const CreateCacheInputSchema = z
-  .strictObject({
-    filePaths: workspacePathArray({
-      description: 'Workspace-relative or absolute paths to files to cache.',
-      itemDescription: 'Workspace-relative or absolute path to a file to cache',
-      max: 50,
-      optional: true,
-    }),
-    systemInstruction: createCacheSystemInstructionSchema.optional(),
-    ...createCacheSharedShape,
-  })
-  .superRefine(validateMeaningfulCacheCreateInput)
-  .describe('Create a Gemini API cache for reusable large context (requires ~32k tokens min).');
-export type CreateCacheInput = z.infer<typeof CreateCacheInputSchema>;
-
-function createCacheNameSchema(action: 'delete' | 'update') {
-  return completableCacheName(`Cache resource name to ${action} (e.g., "cachedContents/...")`);
-}
-
-export const DeleteCacheInputSchema = z.strictObject({
-  cacheName: createCacheNameSchema('delete'),
-  confirm: withFieldMetadata(
-    z.boolean().optional(),
-    'Confirmation override for non-interactive clients.',
-  ),
-});
-export type DeleteCacheInput = z.infer<typeof DeleteCacheInputSchema>;
-
-export const UpdateCacheInputSchema = z.strictObject({
-  cacheName: createCacheNameSchema('update'),
-  ttl: ttlSeconds('New TTL from now (e.g., "7200s" for 2 hours)'),
-});
-export type UpdateCacheInput = z.infer<typeof UpdateCacheInputSchema>;
 
 export const ExplainErrorInputSchema = z.strictObject({
   error: requiredText('Error message, stack trace, or log output to diagnose'),
@@ -492,9 +351,6 @@ export const ExplainErrorInputSchema = z.strictObject({
     max: 20,
     optional: true,
   }),
-  ...createOptionalCacheReferenceFields(
-    'Cache resource name to provide project context during diagnosis.',
-  ),
 });
 
 export const CompareFilesInputSchema = z.strictObject({
@@ -507,9 +363,6 @@ export const CompareFilesInputSchema = z.strictObject({
   googleSearch: withFieldMetadata(
     z.boolean().optional(),
     'Enable Google Search for best practices or migration context.',
-  ),
-  ...createOptionalCacheReferenceFields(
-    'Cache resource name to provide project context during comparison.',
   ),
 });
 export type CompareFilesInput = z.infer<typeof CompareFilesInputSchema>;
@@ -537,9 +390,6 @@ export const GenerateDiagramInputSchema = z
     googleSearch: withFieldMetadata(
       z.boolean().optional(),
       'Enable Google Search for diagram syntax help or pattern reference.',
-    ),
-    ...createOptionalCacheReferenceFields(
-      'Cache resource name to provide project context for diagram generation.',
     ),
     validateSyntax: withFieldMetadata(
       z.boolean().optional(),

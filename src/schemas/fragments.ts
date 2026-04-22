@@ -1,12 +1,10 @@
 import { z } from 'zod/v4';
 
 import {
-  completableCacheName,
   nonNegativeInt,
   publicHttpUrl,
   publicHttpUrlArray,
   PublicHttpUrlSchema,
-  timestamp,
   workspacePath,
 } from './fields.js';
 
@@ -113,18 +111,6 @@ export const diffStatsFields = {
   deletions: nonNegativeInt('Lines deleted'),
 };
 
-export const cacheSummaryFields = {
-  name: completableCacheName('Cache resource name', true),
-  displayName: z.string().describe('Human-readable label').optional(),
-  model: z.string().describe('Model used').optional(),
-  expireTime: timestamp('Expiration timestamp').optional(),
-  createTime: timestamp('Creation timestamp').optional(),
-  updateTime: timestamp('Last update timestamp').optional(),
-  totalTokenCount: nonNegativeInt('Total cached tokens').optional(),
-};
-
-export const CacheSummarySchema = z.strictObject(cacheSummaryFields);
-
 const sessionSummaryFields = {
   id: z.string().describe('Server-managed session identifier'),
   lastAccess: z.number().describe('Last access timestamp in epoch milliseconds'),
@@ -136,12 +122,6 @@ export function createFilePairFields(firstDescription: string, secondDescription
   return {
     filePathA: workspacePath(firstDescription),
     filePathB: workspacePath(secondDescription),
-  };
-}
-
-export function createOptionalCacheReferenceFields(description: string) {
-  return {
-    cacheName: completableCacheName(description, true),
   };
 }
 

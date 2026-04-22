@@ -174,10 +174,6 @@ const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 10_000;
 const JITTER_MS = 500;
 
-function isRetryableError(err: unknown): boolean {
-  return AppError.isRetryable(err);
-}
-
 function extractRetryAfterMs(err: unknown): number | undefined {
   if (typeof err !== 'object' || err === null) return undefined;
   const details = err as Record<string, unknown>;
@@ -226,7 +222,7 @@ export async function withRetry<T>(
     try {
       return await fn();
     } catch (err) {
-      if (attempt >= maxRetries || !isRetryableError(err)) throw err;
+      if (attempt >= maxRetries || !AppError.isRetryable(err)) throw err;
       if (options?.signal?.aborted) throw err;
 
       const delay = computeDelay(attempt, extractRetryAfterMs(err));

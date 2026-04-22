@@ -54,17 +54,21 @@ function formatLogLine(entry: LogEntry): string {
   return JSON.stringify(entry) + '\n';
 }
 
+function isPrimitiveLogValue(value: unknown): value is null | number | boolean | undefined {
+  return (
+    value === null ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'undefined'
+  );
+}
+
 export function summarizeLogValue(value: unknown, depth = 0): unknown {
   if (typeof value === 'string') {
     return { type: 'string', length: value.length };
   }
 
-  if (
-    value === null ||
-    typeof value === 'number' ||
-    typeof value === 'boolean' ||
-    typeof value === 'undefined'
-  ) {
+  if (isPrimitiveLogValue(value)) {
     return value;
   }
 
@@ -100,12 +104,7 @@ function redactOrBoundVerboseValue(value: unknown, depth = 0): unknown {
     };
   }
 
-  if (
-    value === null ||
-    typeof value === 'number' ||
-    typeof value === 'boolean' ||
-    typeof value === 'undefined'
-  ) {
+  if (isPrimitiveLogValue(value)) {
     return value;
   }
 

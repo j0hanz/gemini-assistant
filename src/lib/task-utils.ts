@@ -320,10 +320,7 @@ async function handleStandardToolCall(
     await server.validateToolOutput(tool, result, request.params.name);
     return result;
   } catch (error) {
-    if (error instanceof UrlElicitationRequiredError) {
-      throw error;
-    }
-
+    rethrowElicitation(error);
     return server.createToolError(error instanceof Error ? error.message : String(error));
   }
 }
@@ -337,9 +334,7 @@ async function handleTaskAugmentedToolCall(
   try {
     return await validateAndExecute<CreateTaskResult>(server, tool, request, ctx);
   } catch (error) {
-    if (error instanceof UrlElicitationRequiredError) {
-      throw error;
-    }
+    rethrowElicitation(error);
 
     const { task, taskContext } = await createTaskOrFail(ctx);
     await materializeTaskFailure(
@@ -350,6 +345,12 @@ async function handleTaskAugmentedToolCall(
       request.params.arguments,
     );
     return { task };
+  }
+}
+
+function rethrowElicitation(error: unknown): void {
+  if (error instanceof UrlElicitationRequiredError) {
+    throw error;
   }
 }
 

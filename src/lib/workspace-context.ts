@@ -503,6 +503,16 @@ export class WorkspaceCacheManagerImpl {
     this.lastHashCheck = undefined;
   }
 
+  private isBelowCacheThreshold(estimatedTokens: number): boolean {
+    if (estimatedTokens >= MIN_CACHE_TOKENS) {
+      return false;
+    }
+    log.warn(
+      `Workspace context too small for caching (${estimatedTokens} tokens, need ${MIN_CACHE_TOKENS})`,
+    );
+    return true;
+  }
+
   private async createCache(
     roots: string[],
     rootsKey: string,
@@ -524,10 +534,7 @@ export class WorkspaceCacheManagerImpl {
     const refresh = (async () => {
       const previousCacheName = this.cacheName;
 
-      if (ctx.estimatedTokens < MIN_CACHE_TOKENS) {
-        log.warn(
-          `Workspace context too small for caching (${ctx.estimatedTokens} tokens, need ${MIN_CACHE_TOKENS})`,
-        );
+      if (this.isBelowCacheThreshold(ctx.estimatedTokens)) {
         this.invalidate();
         if (previousCacheName) {
           await this.deleteCacheBestEffort(previousCacheName, signal);
@@ -562,10 +569,7 @@ export class WorkspaceCacheManagerImpl {
   ): Promise<string | undefined> {
     const gen = this.generation;
     try {
-      if (ctx.estimatedTokens < MIN_CACHE_TOKENS) {
-        log.warn(
-          `Workspace context too small for caching (${ctx.estimatedTokens} tokens, need ${MIN_CACHE_TOKENS})`,
-        );
+      if (this.isBelowCacheThreshold(ctx.estimatedTokens)) {
         return undefined;
       }
 

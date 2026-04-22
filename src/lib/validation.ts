@@ -432,8 +432,7 @@ function isRejectedHost(hostname: string): boolean {
 }
 
 export function isPublicHttpUrl(url: string): boolean {
-  const parsed = tryParseUrl(url);
-  return parsed !== undefined && isAllowedHttpUrl(parsed);
+  return classifyHttpUrl(url) === undefined;
 }
 
 function tryParseUrl(url: string): URL | undefined {
@@ -444,11 +443,7 @@ function tryParseUrl(url: string): URL | undefined {
   }
 }
 
-function isAllowedHttpUrl(url: URL): boolean {
-  return (url.protocol === 'http:' || url.protocol === 'https:') && !isRejectedHost(url.hostname);
-}
-
-function buildUrlValidationMessage(url: string): string | undefined {
+function classifyHttpUrl(url: string): string | undefined {
   const parsed = tryParseUrl(url);
   if (!parsed) {
     return `Invalid URL provided: ${url}`;
@@ -469,7 +464,7 @@ export function validateUrls(urls: readonly string[] | undefined): CallToolResul
   if (!urls) return undefined;
 
   for (const url of urls) {
-    const validationMessage = buildUrlValidationMessage(url);
+    const validationMessage = classifyHttpUrl(url);
     if (validationMessage) {
       return {
         content: [{ type: 'text', text: validationMessage }],

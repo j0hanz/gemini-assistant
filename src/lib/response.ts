@@ -151,17 +151,18 @@ function buildStructuredValidationErrorResult(
   };
 }
 
-export function safeValidateStructuredContent(
+function attachValidatedStructuredContent(
   toolName: string,
   outputSchema: unknown,
-  structuredContent: unknown,
+  candidate: unknown,
   result: CallToolResult,
+  logOnMismatch: boolean,
 ): CallToolResult {
   if (result.isError || result.structuredContent === undefined || !hasSafeParse(outputSchema)) {
     return result;
   }
 
-  const parsed = outputSchema.safeParse(structuredContent);
+  const parsed = outputSchema.safeParse(candidate);
   if (parsed.success) {
     return {
       ...result,
@@ -169,16 +170,23 @@ export function safeValidateStructuredContent(
     };
   }
 
-  responseLog.debug('structuredContent validation mismatch short-circuited', {
-    toolName,
-    error: z.prettifyError(parsed.error),
-  });
-  responseLog.error('structuredContent validation failed', {
-    toolName,
-    error: z.prettifyError(parsed.error),
-  });
+  if (logOnMismatch) {
+    responseLog.error('structuredContent validation failed', {
+      toolName,
+      error: z.prettifyError(parsed.error),
+    });
+  }
 
   return buildStructuredValidationErrorResult(toolName, result, parsed.error);
+}
+
+export function safeValidateStructuredContent(
+  toolName: string,
+  outputSchema: unknown,
+  structuredContent: unknown,
+  result: CallToolResult,
+): CallToolResult {
+  return attachValidatedStructuredContent(toolName, outputSchema, structuredContent, result, true);
 }
 
 export function validateStructuredToolResult(
@@ -186,19 +194,13 @@ export function validateStructuredToolResult(
   outputSchema: unknown,
   result: CallToolResult,
 ): CallToolResult {
-  if (result.isError || result.structuredContent === undefined || !hasSafeParse(outputSchema)) {
-    return result;
-  }
-
-  const parsed = outputSchema.safeParse(result.structuredContent);
-  if (parsed.success) {
-    return {
-      ...result,
-      structuredContent: parsed.data as CallToolResult['structuredContent'],
-    };
-  }
-
-  return buildStructuredValidationErrorResult(toolName, result, parsed.error);
+  return attachValidatedStructuredContent(
+    toolName,
+    outputSchema,
+    result.structuredContent,
+    result,
+    false,
+  );
 }
 
 function appendBulletListSection(

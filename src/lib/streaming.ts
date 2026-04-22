@@ -1,4 +1,4 @@
-import type { CallToolResult, ServerContext, TaskMessageQueue } from '@modelcontextprotocol/server';
+import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
 import type {
@@ -517,24 +517,10 @@ async function handleThoughtOrSignaturePart(
   return true;
 }
 
-function getTaskQueueContext(
-  ctx: ServerContext,
-): (NonNullable<ServerContext['task']> & { queue?: TaskMessageQueue }) | undefined {
-  return ctx.task;
-}
-
-async function enqueueStreamText(
-  _ctx: ServerContext,
-  _taskContext: ReturnType<typeof getTaskQueueContext>,
-  _partText: string,
-): Promise<void> {
-  // Streamed tool text is returned as the terminal CallToolResult (or via
-  // tasks/result for task-augmented calls). It MUST NOT ride the MCP logging
-  // channel (`notifications/message`) — clients filter logs by level and
-  // would either flood on `info` or silently drop streamed content.
-  await Promise.resolve();
-}
-
+// Streamed tool text is returned as the terminal CallToolResult (or via
+// tasks/result for task-augmented calls). It MUST NOT ride the MCP logging
+// channel (`notifications/message`) — clients filter logs by level and would
+// either flood on `info` or silently drop streamed content.
 async function handleTextPart(
   ctx: ServerContext,
   state: StreamProcessingState,
@@ -547,7 +533,6 @@ async function handleTextPart(
 
   await transitionToGenerating(ctx, state, msg);
   state.text += partText;
-  await enqueueStreamText(ctx, getTaskQueueContext(ctx), partText);
 }
 
 async function handleStreamPart(

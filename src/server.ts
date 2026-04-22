@@ -14,6 +14,7 @@ import {
   DISCOVER_CONTEXT_URI,
   MEMORY_CACHES_URI,
   MEMORY_WORKSPACE_CACHE_URI,
+  MEMORY_WORKSPACE_CONTEXT_URI,
 } from './lib/resource-uris.js';
 import { installTaskSafeToolCallHandler } from './lib/task-utils.js';
 import { buildServerRootsFetcher } from './lib/validation.js';
@@ -131,6 +132,7 @@ function handleCacheChange({ detailUris }: CacheChangeEvent): void {
 }
 
 function handleWorkspaceCacheChange(): void {
+  sendResourceChanged(undefined, [MEMORY_WORKSPACE_CONTEXT_URI]);
   sendResourceChanged(undefined, [MEMORY_WORKSPACE_CACHE_URI]);
   sendResourceChanged(undefined, [DISCOVER_CONTEXT_URI]);
 }

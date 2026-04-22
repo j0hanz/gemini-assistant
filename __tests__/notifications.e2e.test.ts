@@ -138,6 +138,7 @@ describe('public MCP resource notifications', () => {
       await flushEventLoop(2);
       const notifications = notificationSlice(harness.client.getNotifications(), offset);
       assert.ok(updatedUris(notifications).includes('memory://workspace/cache'));
+      assert.ok(updatedUris(notifications).includes('memory://workspace/context'));
     } finally {
       process.env.ALLOWED_FILE_ROOTS = originalAllowedRoots;
       process.env.WORKSPACE_CACHE_ENABLED = originalWorkspaceCacheEnabled;

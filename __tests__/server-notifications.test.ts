@@ -55,4 +55,33 @@ describe('server resource notifications', () => {
       'Blocked resource notification with unregistered URI: memory://unknown',
     ]);
   });
+
+  it('emits list_changed and never updated for a known listUri', async () => {
+    const updatedUris: string[] = [];
+    let listChangedCalls = 0;
+    const server = {
+      isConnected: () => true,
+      sendResourceListChanged: () => {
+        listChangedCalls += 1;
+      },
+      server: {
+        sendResourceUpdated: async ({ uri }: { uri: string }) => {
+          updatedUris.push(uri);
+        },
+      },
+    } as unknown as McpServer;
+
+    sendResourceChangedForServer(server, 'memory://sessions', [
+      'memory://sessions/session-1',
+      'memory://sessions/session-1/transcript',
+    ]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(listChangedCalls, 1);
+    assert.deepStrictEqual(
+      updatedUris,
+      [],
+      'resources/updated must never be emitted without resources.subscribe capability',
+    );
+  });
 });

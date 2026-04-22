@@ -61,7 +61,7 @@ function assertListChanged(notifications: readonly JsonRpcNotification[]): void 
 }
 
 describe('public MCP resource notifications', () => {
-  it('emits session and cache resource notifications after public mutations', async () => {
+  it('emits only list_changed (not updated) for session and cache mutations while subscribe is undeclared', async () => {
     const harness = await createHarness();
 
     try {
@@ -77,14 +77,11 @@ describe('public MCP resource notifications', () => {
       await flushEventLoop(2);
       const sessionNotifications = notificationSlice(harness.client.getNotifications(), offset);
       assertListChanged(sessionNotifications);
-      const sessionUpdatedUris = new Set(updatedUris(sessionNotifications));
-      assert.ok(
-        sessionUpdatedUris.has('memory://sessions'),
-        'Expected collection-level memory://sessions update',
+      assert.deepStrictEqual(
+        updatedUris(sessionNotifications),
+        [],
+        'resources/updated must not be emitted without resources.subscribe capability',
       );
-      // Per-detail session URIs are NOT emitted: `resources/subscribe` is not
-      // advertised, so per-URI updates would be unscoped broadcasts. Clients
-      // re-read the collection after `list_changed`.
 
       offset = harness.client.getNotifications().length;
       await harness.client.request('tools/call', {
@@ -98,8 +95,11 @@ describe('public MCP resource notifications', () => {
       await flushEventLoop(2);
       const cacheNotifications = notificationSlice(harness.client.getNotifications(), offset);
       assertListChanged(cacheNotifications);
-      assert.ok(updatedUris(cacheNotifications).includes('memory://caches'));
-      // Per-cache detail URIs are not emitted without subscribe tracking.
+      assert.deepStrictEqual(
+        updatedUris(cacheNotifications),
+        [],
+        'resources/updated must not be emitted without resources.subscribe capability',
+      );
     } finally {
       await harness.close();
     }
@@ -212,6 +212,45 @@ describe('public MCP resource notifications', () => {
     } finally {
       await harnessA.close();
       await harnessB.close();
+    }
+  });
+
+  it('does not emit list_changed when appending to an existing session (list membership unchanged)', async () => {
+    const harness = await createHarness();
+
+    try {
+      env.queueStream(makeChunk([{ text: 'first turn' }], FinishReason.STOP));
+
+      const sessionId = 'persistent-session';
+      await harness.client.request('tools/call', {
+        arguments: { goal: 'Open a reusable session', sessionId },
+        name: 'chat',
+      });
+
+      await flushEventLoop(2);
+
+      env.queueStream(makeChunk([{ text: 'second turn' }], FinishReason.STOP));
+
+      const offset = harness.client.getNotifications().length;
+      await harness.client.request('tools/call', {
+        arguments: { goal: 'Append a follow-up to the existing session', sessionId },
+        name: 'chat',
+      });
+
+      await flushEventLoop(2);
+
+      const followUpNotifications = notificationSlice(harness.client.getNotifications(), offset);
+      const listChanged = followUpNotifications.filter(
+        (notification) => notification.method === 'notifications/resources/list_changed',
+      );
+
+      assert.deepStrictEqual(
+        listChanged,
+        [],
+        'list_changed must not be emitted when the active session list is unchanged',
+      );
+    } finally {
+      await harness.close();
     }
   });
 });

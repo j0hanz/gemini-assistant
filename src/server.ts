@@ -10,15 +10,9 @@ import { join } from 'node:path';
 import { AppError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
-import {
-  DISCOVER_CONTEXT_URI,
-  MEMORY_CACHES_URI,
-  MEMORY_WORKSPACE_CACHE_URI,
-  MEMORY_WORKSPACE_CONTEXT_URI,
-} from './lib/resource-uris.js';
+import { MEMORY_CACHES_URI } from './lib/resource-uris.js';
 import { installTaskSafeToolCallHandler } from './lib/task-utils.js';
 import { buildServerRootsFetcher } from './lib/validation.js';
-import { subscribeWorkspaceCacheChange } from './lib/workspace-context.js';
 
 import { registerPrompts } from './prompts.js';
 import { PUBLIC_RESOURCE_URIS } from './public-contract.js';
@@ -106,11 +100,12 @@ export function sendResourceChangedForServer(
       return;
     }
     server.sendResourceListChanged();
-    void server.server.sendResourceUpdated({ uri: listUri });
   }
-  // Per-URI `resources/updated` fan-out requires `resources/subscribe`
-  // tracking, which the server does not currently implement. Validate the
-  // provided detail URIs for logging parity, but do not emit updates.
+  // `notifications/resources/updated` requires the `resources.subscribe`
+  // capability (MCP spec); this server does not declare it and does not
+  // track subscriptions, so it never emits `resources/updated`. Clients
+  // rely on `notifications/resources/list_changed` + re-read. Detail URIs
+  // are still validated here for log-warning parity with the firewall.
   for (const uri of detailUris) {
     if (!isKnownResourceUri(uri)) {
       log.warn(`Blocked resource notification with unregistered URI: ${uri}`);
@@ -132,11 +127,6 @@ function handleCacheChange({ detailUris }: CacheChangeEvent): void {
   // `discover://context` is a per-session aggregation and must not be
   // broadcast across servers. The session-change subscriber (bound to the
   // originating `server`) owns scoped updates to that URI.
-}
-
-function handleWorkspaceCacheChange(): void {
-  sendResourceChanged(undefined, [MEMORY_WORKSPACE_CONTEXT_URI, MEMORY_WORKSPACE_CACHE_URI]);
-  // Intentionally skip `discover://context`; see handleCacheChange comment.
 }
 
 export function createServerInstance(): ServerInstance {
@@ -173,14 +163,9 @@ export function createServerInstance(): ServerInstance {
         ...transcriptUris,
         ...eventUris,
       ]);
-      // Context dashboard includes active session counts, update it if list changed
-      if (listChanged) {
-        sendResourceChangedForServer(server, undefined, [DISCOVER_CONTEXT_URI]);
-      }
     },
   );
   const unsubscribeCacheChange = subscribeCacheChange(handleCacheChange);
-  const unsubscribeWorkspaceCacheChange = subscribeWorkspaceCacheChange(handleWorkspaceCacheChange);
 
   activeServers.add(server);
 
@@ -210,7 +195,6 @@ export function createServerInstance(): ServerInstance {
       };
       safeRun('unsubscribeSessionChange', unsubscribeSessionChange);
       safeRun('unsubscribeCacheChange', unsubscribeCacheChange);
-      safeRun('unsubscribeWorkspaceCacheChange', unsubscribeWorkspaceCacheChange);
       safeRun('sessionStore.close', () => {
         sessionStore.close();
       });

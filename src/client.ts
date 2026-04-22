@@ -272,13 +272,5 @@ function cacheMatchRank(cache: CacheSummary, normalizedPrefix: string): number {
     return 3;
   }
 
-  if (directCandidates.some((value) => value.includes(normalizedPrefix))) {
-    return 4;
-  }
-
-  if (labelCandidates.some((value) => value.includes(normalizedPrefix))) {
-    return 5;
-  }
-
   return Number.POSITIVE_INFINITY;
 }

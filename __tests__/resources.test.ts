@@ -11,6 +11,7 @@ import {
   DISCOVER_CATALOG_URI,
   DISCOVER_CONTEXT_URI,
   DISCOVER_WORKFLOWS_URI,
+  sessionTurnPartsUri,
   WORKSPACE_CACHE_URI,
   WORKSPACE_CONTEXT_URI,
 } from '../src/lib/resource-uris.js';
@@ -20,11 +21,13 @@ import {
   buildServerContextSnapshot,
   getSessionEventsResourceData,
   getSessionTranscriptResourceData,
+  getSessionTurnPartsResourceData,
   readDiscoverCatalogResource,
   readDiscoverContextResource,
   readDiscoverWorkflowsResource,
   readSessionEventsResource,
   readSessionTranscriptResource,
+  readSessionTurnPartsResource,
   readWorkspaceContextResource,
   renderServerContextMarkdown,
   renderWorkspaceContextMarkdown,
@@ -64,6 +67,7 @@ describe('discovery resources', () => {
         'resource:discover://catalog',
         'resource:discover://context',
         'resource:discover://workflows',
+        'resource:gemini://sessions/{sessionId}/turns/{turnIndex}/parts',
         'resource:session://',
         'resource:session://{sessionId}',
         'resource:session://{sessionId}/events',
@@ -182,7 +186,12 @@ describe('discovery resources', () => {
     );
     assert.deepStrictEqual(
       [...PUBLIC_RESOURCE_URIS].filter((uri) => uri.includes('{')),
-      ['session://{sessionId}', 'session://{sessionId}/transcript', 'session://{sessionId}/events'],
+      [
+        'session://{sessionId}',
+        'session://{sessionId}/transcript',
+        'session://{sessionId}/events',
+        'gemini://sessions/{sessionId}/turns/{turnIndex}/parts',
+      ],
     );
   });
 });
@@ -435,6 +444,51 @@ describe('session events resource', () => {
   });
 });
 
+describe('session turn parts resource', () => {
+  it('reads raw persisted parts for a session turn', () => {
+    const store = createStore();
+    store.setSession('sess-resource-parts', mockChat('resource-parts'));
+    store.appendSessionContent('sess-resource-parts', {
+      role: 'user',
+      parts: [{ text: 'Hello' }],
+      timestamp: 1,
+    });
+    store.appendSessionContent('sess-resource-parts', {
+      role: 'model',
+      parts: [{ text: 'Hi', thoughtSignature: 'sig-1' }],
+      timestamp: 2,
+    });
+
+    const uri = sessionTurnPartsUri('sess-resource-parts', 1);
+    const result = readSessionTurnPartsResource(store, uri, 'sess-resource-parts', '1');
+
+    assert.strictEqual(result.contents.length, 1);
+    assert.strictEqual(result.contents[0]?.uri, uri);
+    assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
+    assert.deepStrictEqual(parseResourceText(result), [{ text: 'Hi', thoughtSignature: 'sig-1' }]);
+  });
+
+  it('throws ResourceNotFound for missing session turn parts', () => {
+    const store = createStore();
+    store.setSession('sess-resource-parts', mockChat('resource-parts'));
+
+    assert.throws(
+      () => getSessionTurnPartsResourceData(store, 'sess-resource-parts', '9'),
+      (error) => error instanceof ProtocolError && /turn 9 not found/i.test(error.message),
+    );
+    assert.throws(
+      () =>
+        readSessionTurnPartsResource(
+          store,
+          'gemini://sessions/missing/turns/0/parts',
+          'missing',
+          '0',
+        ),
+      (error) => error instanceof ProtocolError && /not found/i.test(error.message),
+    );
+  });
+});
+
 describe('resource URI constants', () => {
   it('match the concrete and templated resource contract strings', () => {
     assert.strictEqual(DISCOVER_CATALOG_URI, 'discover://catalog');
@@ -442,5 +496,9 @@ describe('resource URI constants', () => {
     assert.strictEqual(DISCOVER_CONTEXT_URI, 'discover://context');
     assert.strictEqual(WORKSPACE_CONTEXT_URI, 'workspace://context');
     assert.strictEqual(WORKSPACE_CACHE_URI, 'workspace://cache');
+    assert.strictEqual(
+      sessionTurnPartsUri('sess resource%/#', 3),
+      'gemini://sessions/sess%20resource%25%2F%23/turns/3/parts',
+    );
   });
 });

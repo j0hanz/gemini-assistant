@@ -19,7 +19,12 @@ import {
 } from '../lib/orchestration.js';
 import { validateGeminiRequest } from '../lib/preflight.js';
 import { ProgressReporter } from '../lib/progress.js';
-import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from '../lib/resource-uris.js';
+import {
+  sessionDetailUri,
+  sessionEventsUri,
+  sessionTranscriptUri,
+  sessionTurnPartsUri,
+} from '../lib/resource-uris.js';
 import {
   buildBaseStructuredOutput,
   buildSharedStructuredMetadata,
@@ -376,32 +381,6 @@ async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
   } as const;
 }
 
-export function buildRebuiltChatHistory(
-  transcript: TranscriptEntry[],
-  maxChars: number,
-): { role: 'user' | 'model'; parts: [{ text: string }] }[] {
-  const selected: TranscriptEntry[] = [];
-  let totalChars = 0;
-
-  for (let index = transcript.length - 1; index >= 0; index--) {
-    const entry = transcript[index];
-    if (!entry) continue;
-
-    const nextChars = totalChars + entry.text.length;
-    if (selected.length > 0 && nextChars > maxChars) {
-      break;
-    }
-
-    selected.push(entry);
-    totalChars = nextChars;
-  }
-
-  return selected.reverse().map((entry) => ({
-    role: entry.role === 'user' ? 'user' : 'model',
-    parts: [{ text: entry.text }],
-  }));
-}
-
 export function buildRebuiltChatContents(contents: ContentEntry[], maxBytes: number): Content[] {
   const selected: ContentEntry[] = [];
   let totalBytes = 0;
@@ -447,8 +426,18 @@ async function runAskStream(
       const hasThoughts = streamResult.thoughtText.length > 0;
 
       return {
-        resultMod: (baseResult) =>
-          formatStructuredResult(baseResult, streamResult, jsonMode, responseSchema),
+        resultMod: (baseResult) => {
+          const formatted = formatStructuredResult(
+            baseResult,
+            streamResult,
+            jsonMode,
+            responseSchema,
+          );
+          return {
+            content: formatted.content,
+            structuredContent: formatted.structuredContent,
+          };
+        },
         reportMessage: hasThoughts ? 'completed with reasoning' : 'completed',
       };
     },
@@ -458,6 +447,7 @@ async function runAskStream(
     capturedStreamResult ??
     ({
       text: '',
+      textByWave: [''],
       thoughtText: '',
       parts: [],
       toolsUsed: [],
@@ -475,7 +465,12 @@ async function runAskStream(
   };
 }
 
-function appendSessionResource(result: CallToolResult, sessionId: string, taskId?: string): void {
+function appendSessionResource(
+  result: CallToolResult,
+  sessionId: string,
+  turnIndex?: number,
+  taskId?: string,
+): void {
   if (result.isError) return;
   result.content.push(
     withRelatedTaskMeta(
@@ -489,6 +484,17 @@ function appendSessionResource(result: CallToolResult, sessionId: string, taskId
       taskId,
     ),
   );
+  if (turnIndex !== undefined && turnIndex >= 0) {
+    result.content.push(
+      withRelatedTaskMeta(
+        createResourceLink(
+          sessionTurnPartsUri(sessionId, turnIndex),
+          `Chat Session ${sessionId} Turn ${String(turnIndex)} Parts`,
+        ),
+        taskId,
+      ),
+    );
+  }
 }
 
 export async function askWithoutSession(
@@ -502,6 +508,7 @@ export async function askWithoutSession(
       result: resolved.error,
       streamResult: {
         text: '',
+        textByWave: [''],
         thoughtText: '',
         parts: [],
         toolsUsed: [],
@@ -832,9 +839,7 @@ function createDefaultAskDependencies(sessionStore: SessionStore): AskDependenci
     listSessionTranscriptEntries: sessionStore.listSessionTranscriptEntries.bind(sessionStore),
     rebuildChat: (sessionId, args) => {
       const contents = sessionStore.listSessionContentEntries(sessionId) ?? [];
-      const transcript =
-        contents.length === 0 ? (sessionStore.listSessionTranscriptEntries(sessionId) ?? []) : [];
-      if (contents.length === 0 && transcript.length === 0) {
+      if (contents.length === 0) {
         return undefined;
       }
 
@@ -842,10 +847,7 @@ function createDefaultAskDependencies(sessionStore: SessionStore): AskDependenci
       const chat = getAI().chats.create({
         model: MODEL,
         config: buildGenerateContentConfig({ ...args, toolConfig, tools }),
-        history:
-          contents.length > 0
-            ? buildRebuiltChatContents(contents, 200_000)
-            : buildRebuiltChatHistory(transcript, 200_000),
+        history: buildRebuiltChatContents(contents, 200_000),
       });
       sessionStore.setSession(sessionId, chat, Date.now());
       return chat;
@@ -898,6 +900,8 @@ async function askExistingSession(
     deps.getSessionEntry(args.sessionId)?.rebuiltAt,
   );
   appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id, resumedArgs);
+  const turnIndex = (deps.listSessionContentEntries(args.sessionId)?.length ?? 0) - 1;
+  appendSessionResource(askResult.result, args.sessionId, turnIndex, ctx.task?.id);
   return askResult.result;
 }
 
@@ -917,7 +921,8 @@ async function askNewSession(
     deps.setSession(args.sessionId, chat);
     askResult.result = attachSessionMetadata(askResult.result, args.sessionId);
     appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id);
-    appendSessionResource(askResult.result, args.sessionId, ctx.task?.id);
+    const turnIndex = (deps.listSessionContentEntries(args.sessionId)?.length ?? 0) - 1;
+    appendSessionResource(askResult.result, args.sessionId, turnIndex, ctx.task?.id);
   } else {
     await ctx.mcpReq.log('debug', `Session ${args.sessionId} not stored due to stream error`);
   }
@@ -1007,6 +1012,14 @@ export function createAskWork(
           sessionSummary,
         );
         if (resumed) return resumed;
+      } else {
+        const transcript = deps.listSessionTranscriptEntries(sessionId) ?? [];
+        if (transcript.length > 0) {
+          return new AppError(
+            'chat',
+            `session ${sessionId} cannot be resumed: no turn parts persisted`,
+          ).toToolResult();
+        }
       }
     }
 
@@ -1043,6 +1056,10 @@ function sessionResources(sessionId: string) {
     detail: sessionDetailUri(sessionId),
     events: sessionEventsUri(sessionId),
     transcript: sessionTranscriptUri(sessionId),
+    turnParts: sessionTurnPartsUri(sessionId, 0).replace(
+      '/turns/0/parts',
+      '/turns/{turnIndex}/parts',
+    ),
   };
 }
 

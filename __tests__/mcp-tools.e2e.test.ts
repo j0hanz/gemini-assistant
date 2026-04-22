@@ -460,8 +460,16 @@ describe('MCP tool smoke coverage', () => {
           detail: `session://${encodeURIComponent(encodedSessionId)}`,
           events: `session://${encodeURIComponent(encodedSessionId)}/events`,
           transcript: `session://${encodeURIComponent(encodedSessionId)}/transcript`,
+          turnParts: `gemini://sessions/${encodeURIComponent(encodedSessionId)}/turns/{turnIndex}/parts`,
         },
       });
+      assert.ok(
+        sessionResult.content.some(
+          (item) =>
+            item.type === 'resource_link' &&
+            item.uri === `gemini://sessions/${encodeURIComponent(encodedSessionId)}/turns/1/parts`,
+        ),
+      );
       assertAdvertisedOutputSchema(chatTool, sessionResult);
 
       const serverRequestMethods = harness.client.getServerRequestMethods();

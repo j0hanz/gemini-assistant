@@ -9,6 +9,7 @@ export type PublicResourceUri =
   | 'session://{sessionId}'
   | 'session://{sessionId}/transcript'
   | 'session://{sessionId}/events'
+  | 'gemini://sessions/{sessionId}/turns/{turnIndex}/parts'
   | 'workspace://context'
   | 'workspace://cache';
 
@@ -69,6 +70,7 @@ export const PUBLIC_RESOURCE_URIS = [
   'session://{sessionId}',
   'session://{sessionId}/transcript',
   'session://{sessionId}/events',
+  'gemini://sessions/{sessionId}/turns/{turnIndex}/parts',
   'workspace://context',
   'workspace://cache',
 ] as const satisfies readonly PublicResourceUri[];
@@ -125,7 +127,7 @@ export const DISCOVERY_ENTRIES = [
       'seed?',
     ],
     returns:
-      'A direct answer, optional structured data, usage metadata, and session resource links for active sessions.',
+      'A direct answer, optional structured data, usage metadata, and session resource links, including raw turn parts for replay orchestration when sessions are active.',
     limitations: [
       'Sessions are stored in server memory only and expire or evict over time.',
       'Sessions require a stateful server connection path; stateless transport mode does not preserve chat continuity across requests.',
@@ -134,6 +136,7 @@ export const DISCOVERY_ENTRIES = [
     related: [
       { kind: 'resource', name: 'session://' },
       { kind: 'resource', name: 'session://{sessionId}/events' },
+      { kind: 'resource', name: 'gemini://sessions/{sessionId}/turns/{turnIndex}/parts' },
     ],
   },
   {
@@ -347,6 +350,16 @@ export const DISCOVERY_ENTRIES = [
     related: [{ kind: 'resource', name: 'session://{sessionId}' }],
   },
   {
+    name: 'gemini://sessions/{sessionId}/turns/{turnIndex}/parts',
+    kind: 'resource',
+    title: 'Session Turn Parts Resource',
+    bestFor: 'Retrieving raw Gemini Part[] for one persisted model turn.',
+    whenToUse: 'Use for replay-safe multi-turn orchestration that needs SDK-faithful parts.',
+    inputs: ['sessionId', 'turnIndex'],
+    returns: 'JSON array of raw Gemini Part objects for the selected persisted turn.',
+    related: [{ kind: 'resource', name: 'session://{sessionId}' }],
+  },
+  {
     name: 'workspace://context',
     kind: 'resource',
     title: 'Workspace Context Resource',
@@ -390,6 +403,7 @@ export const WORKFLOW_ENTRIES = [
       'Call chat with a goal and optional sessionId.',
       'Inspect session:// if you need to find an active session.',
       'Inspect session://{sessionId}/transcript or /events when you need read-only inspection.',
+      'Use gemini://sessions/{sessionId}/turns/{turnIndex}/parts when an orchestrator needs replay-safe raw turn parts.',
     ],
     recommendedTools: ['chat'],
     recommendedPrompts: ['discover'],
@@ -397,6 +411,7 @@ export const WORKFLOW_ENTRIES = [
       'session://',
       'session://{sessionId}/transcript',
       'session://{sessionId}/events',
+      'gemini://sessions/{sessionId}/turns/{turnIndex}/parts',
     ],
   },
   {

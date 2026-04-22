@@ -35,6 +35,10 @@ const functionCallEntryFields = {
   name: z.string().describe('Function/tool name'),
   args: z.record(z.string(), z.unknown()).describe('Function call arguments').optional(),
   id: z.string().describe('Function call identifier when present').optional(),
+  thoughtSignature: z
+    .string()
+    .optional()
+    .describe('Thought signature returned by Gemini for this function-call part'),
 };
 
 const FunctionCallEntrySchema = z.strictObject(functionCallEntryFields);
@@ -45,6 +49,7 @@ const ToolEventKindSchema = z.enum([
   'tool_response',
   'function_call',
   'function_response',
+  'thought',
   'executable_code',
   'code_execution_result',
 ]);

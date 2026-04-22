@@ -20,6 +20,7 @@ describe('server resource notifications', () => {
     assert.equal(isKnownResourceUri('session://session-1'), true);
     assert.equal(isKnownResourceUri('session://session-1/transcript'), true);
     assert.equal(isKnownResourceUri('session://session-1/events'), true);
+    assert.equal(isKnownResourceUri('gemini://sessions/session-1/turns/0/parts'), true);
     assert.equal(isKnownResourceUri('session://session-1/unknown'), false);
     assert.equal(isKnownResourceUri('memory://bogus'), false);
     assert.equal(isKnownResourceUri('discover://unknown'), false);

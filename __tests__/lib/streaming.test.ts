@@ -425,6 +425,32 @@ describe('consumeStreamWithProgress', () => {
     assert.ok(messages.includes('Tool: customTool'));
   });
 
+  it('captures function call thought signatures and dedupes structured function calls', async () => {
+    const { ctx } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([
+        {
+          functionCall: { id: 'fn-1', name: 'customTool', args: { q: 'x' } },
+          thoughtSignature: 'sig-fn',
+        },
+        {
+          functionCall: { id: 'fn-1', name: 'customTool', args: { q: 'x' } },
+          thoughtSignature: 'sig-fn-repeat',
+        },
+      ]),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.deepStrictEqual(result.functionCalls, [
+      { id: 'fn-1', name: 'customTool', args: { q: 'x' }, thoughtSignature: 'sig-fn' },
+    ]);
+    assert.strictEqual(
+      result.toolEvents.filter((event) => event.kind === 'function_call').length,
+      2,
+    );
+  });
+
   it('captures tool call and tool response parts with ids and signatures', async () => {
     const { ctx, progressCalls } = makeMockContext();
     const stream = fakeStream([
@@ -520,10 +546,28 @@ describe('consumeStreamWithProgress', () => {
 
     assert.strictEqual(result.thoughtText, 'private reasoning');
     assert.deepStrictEqual(result.toolEvents[0], {
-      kind: 'part',
+      kind: 'thought',
       text: 'private reasoning',
       thoughtSignature: 'sig-thought',
     });
+  });
+
+  it('keeps thought events distinct from signature-only parts', async () => {
+    const { ctx } = makeMockContext();
+    const result = await consumeStreamWithProgress(
+      fakeStream([
+        makeChunk([
+          { text: 'private reasoning', thought: true, thoughtSignature: 'sig-thought' },
+          { thoughtSignature: 'sig-carrier' },
+        ]),
+      ]),
+      ctx,
+    );
+
+    assert.deepStrictEqual(
+      result.toolEvents.map((event) => event.kind),
+      ['thought', 'part'],
+    );
   });
 
   it('captures model text signatures without dropping visible text', async () => {
@@ -604,6 +648,21 @@ describe('consumeStreamWithProgress', () => {
       (call) => call.message === 'Compiling results',
     ).length;
     assert.strictEqual(compileCount, 2);
+  });
+
+  it('tracks text by tool wave', async () => {
+    const { ctx } = makeMockContext();
+    const result = await consumeStreamWithProgress(
+      fakeStream([
+        makeChunk([{ text: 'intro' }]),
+        makeChunk([{ functionCall: { name: 'lookup', args: {} } }]),
+        makeChunk([{ text: 'final' }]),
+      ]),
+      ctx,
+    );
+
+    assert.strictEqual(result.text, 'introfinal');
+    assert.deepStrictEqual(result.textByWave, ['intro', 'final']);
   });
 
   it('captures toolsUsedOccurrences in event order with duplicates', async () => {
@@ -765,6 +824,20 @@ describe('consumeStreamWithProgress', () => {
     assert.deepStrictEqual(result.toolEvents, [
       { kind: 'part', thoughtSignature: 'sig-undefined' },
     ]);
+    const messages = progressCalls.map((call) => call.message);
+    assert.ok(!messages.includes('Generating response'));
+  });
+
+  it('does not transition to generating for empty text without a thought signature', async () => {
+    const { ctx, progressCalls } = makeMockContext();
+
+    const result = await consumeStreamWithProgress(
+      fakeStream([makeChunk([{ text: '' }], FinishReason.STOP)]),
+      ctx,
+    );
+
+    assert.strictEqual(result.text, '');
+    assert.deepStrictEqual(result.textByWave, ['']);
     const messages = progressCalls.map((call) => call.message);
     assert.ok(!messages.includes('Generating response'));
   });

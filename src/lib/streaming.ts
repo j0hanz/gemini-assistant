@@ -21,6 +21,7 @@ export interface FunctionCallEntry {
   id?: string;
   name: string;
   args?: Record<string, unknown>;
+  thoughtSignature?: string;
 }
 
 export interface ToolEvent {
@@ -30,6 +31,7 @@ export interface ToolEvent {
     | 'tool_response'
     | 'function_call'
     | 'function_response'
+    | 'thought'
     | 'model_text'
     | 'executable_code'
     | 'code_execution_result';
@@ -48,6 +50,7 @@ export interface ToolEvent {
 
 export interface StreamResult {
   text: string;
+  textByWave: string[];
   thoughtText: string;
   parts: Part[];
   toolsUsed: string[];
@@ -81,11 +84,13 @@ interface ThoughtHeaderState {
 interface StreamProcessingState extends StreamMetadata {
   completedToolWaves: number;
   currentProgress: number;
+  _fnSeen: Set<string>;
   functionCalls: FunctionCallEntry[];
   hadToolActivity: boolean;
   parts: Part[];
   phase: Phase;
   text: string;
+  textByWave: string[];
   thoughtHeaderState: ThoughtHeaderState;
   thoughtText: string;
   toolEvents: ToolEvent[];
@@ -174,12 +179,14 @@ function createStreamProcessingState(): StreamProcessingState {
     aborted: false,
     completedToolWaves: 0,
     currentProgress: 0,
+    _fnSeen: new Set<string>(),
     functionCalls: [],
     hadToolActivity: false,
     hadCandidate: false,
     parts: [],
     phase: Phase.Waiting,
     text: '',
+    textByWave: [''],
     thoughtHeaderState: {
       scanIndex: 0,
       currentProgress: 0,
@@ -212,6 +219,7 @@ async function recordToolActivity(
   if (state.text.length > 0 && state.phase >= Phase.Generating) {
     state.toolWaves += 1;
     state.phase = Phase.Thinking;
+    state.textByWave.push('');
   } else if (state.toolWaves === 0) {
     state.toolWaves = 1;
   }
@@ -318,14 +326,20 @@ async function handleFunctionCallPart(
   }
 
   if (!functionCall.name) {
-    await ctx.mcpReq.log('warning', 'Received functionCall with missing name');
+    await ctx.mcpReq.log('debug', 'Received functionCall with missing name');
   }
 
   const fnName = functionCall.name ?? 'tool';
-  const fnEntry: FunctionCallEntry = { name: fnName };
-  if (functionCall.id) fnEntry.id = functionCall.id;
-  if (functionCall.args) fnEntry.args = functionCall.args;
-  state.functionCalls.push(fnEntry);
+  const fnKey = functionCall.id ?? `${fnName}:${JSON.stringify(functionCall.args ?? {})}`;
+  if (!state._fnSeen.has(fnKey)) {
+    state._fnSeen.add(fnKey);
+    state.functionCalls.push({
+      name: fnName,
+      ...(functionCall.id ? { id: functionCall.id } : {}),
+      ...(functionCall.args ? { args: functionCall.args } : {}),
+      ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+    });
+  }
   appendToolEvent(
     state,
     toolEvent('function_call', {
@@ -535,7 +549,7 @@ async function handleThoughtOrSignaturePart(
   if (part.thought) {
     appendToolEvent(
       state,
-      toolEvent('part', {
+      toolEvent('thought', {
         text: partText,
         thoughtSignature: part.thoughtSignature,
       }),
@@ -571,6 +585,10 @@ async function handleTextPart(
     return;
   }
 
+  if (partText.length === 0 && part.thoughtSignature === undefined) {
+    return;
+  }
+
   if (part.thoughtSignature !== undefined) {
     appendToolEvent(
       state,
@@ -582,6 +600,8 @@ async function handleTextPart(
   }
   await transitionToGenerating(ctx, state, msg);
   state.text += partText;
+  const waveIndex = state.textByWave.length - 1;
+  state.textByWave[waveIndex] = `${state.textByWave[waveIndex] ?? ''}${partText}`;
 }
 
 async function handleStreamPart(
@@ -634,6 +654,7 @@ function toolsUsedOccurrences(toolEvents: ToolEvent[]): string[] {
 function finalizeStreamResult(state: StreamProcessingState): StreamResult {
   return {
     text: state.text,
+    textByWave: state.textByWave,
     thoughtText: state.thoughtText,
     parts: state.parts,
     toolsUsed: [...state.toolsUsed],

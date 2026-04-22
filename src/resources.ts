@@ -11,6 +11,7 @@ import {
   sessionEventsUri,
   SESSIONS_LIST_URI,
   sessionTranscriptUri,
+  sessionTurnPartsUri,
   WORKSPACE_CACHE_URI,
   WORKSPACE_CONTEXT_URI,
 } from './lib/resource-uris.js';
@@ -216,6 +217,22 @@ function sessionEventResources(sessionStore: SessionStore): ResourceListEntry[] 
   );
 }
 
+function sessionTurnPartsResources(sessionStore: SessionStore): ResourceListEntry[] {
+  return sessionStore.listSessionEntries().flatMap((session) => {
+    const entries = sessionStore.listSessionContentEntries(session.id) ?? [];
+    return entries.flatMap((entry, index) =>
+      entry.role === 'model'
+        ? [
+            {
+              uri: sessionTurnPartsUri(session.id, index),
+              name: `Turn ${String(index)} Parts ${session.id}`,
+            },
+          ]
+        : [],
+    );
+  });
+}
+
 export function readDiscoverCatalogResource(
   uri: URL | string = DISCOVER_CATALOG_RESOURCE.uri,
 ): ReadResourceResult {
@@ -405,6 +422,36 @@ export function getSessionEventsResourceData(
   return events;
 }
 
+export function getSessionTurnPartsResourceData(
+  sessionStore: SessionStore,
+  sessionId: string | undefined,
+  turnIndexText: string | undefined,
+): unknown[] {
+  if (!sessionId) {
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Session ID required');
+  }
+
+  const entry = sessionStore.getSessionEntry(sessionId);
+  if (!entry) {
+    throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Session '${sessionId}' not found`);
+  }
+
+  if (!turnIndexText || !/^\d+$/.test(turnIndexText)) {
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Turn index required');
+  }
+
+  const turnIndex = Number.parseInt(turnIndexText, 10);
+  const contentEntry = sessionStore.listSessionContentEntries(sessionId)?.[turnIndex];
+  if (!contentEntry) {
+    throw new ProtocolError(
+      ProtocolErrorCode.ResourceNotFound,
+      `Session '${sessionId}' turn ${String(turnIndex)} not found`,
+    );
+  }
+
+  return structuredClone(contentEntry.parts);
+}
+
 export function readSessionTranscriptResource(
   sessionStore: SessionStore,
   uri: URL | string,
@@ -481,6 +528,18 @@ export function readSessionEventsResource(
   const id = decodeTemplateParam(sessionId);
   const data = getSessionEventsResourceData(sessionStore, id);
   return dualContentResource(toResourceUri(uri), data, renderSessionEventsMarkdown(id, data));
+}
+
+export function readSessionTurnPartsResource(
+  sessionStore: SessionStore,
+  uri: URL | string,
+  sessionId: string | string[] | undefined,
+  turnIndex: string | string[] | undefined,
+): ReadResourceResult {
+  const id = decodeTemplateParam(sessionId);
+  const index = normalizeTemplateParam(turnIndex);
+  const data = getSessionTurnPartsResourceData(sessionStore, id, index);
+  return jsonResource(toResourceUri(uri), data);
 }
 
 function registerSessionResources(server: McpServer, sessionStore: SessionStore): void {
@@ -571,6 +630,29 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
     },
     (uri, { sessionId }): ReadResourceResult =>
       readSessionEventsResource(sessionStore, uri, sessionId),
+  );
+
+  server.registerResource(
+    'session-turn-parts',
+    new ResourceTemplate('gemini://sessions/{sessionId}/turns/{turnIndex}/parts', {
+      list: () => ({ resources: sessionTurnPartsResources(sessionStore) }),
+      complete: {
+        sessionId: sessionStore.completeSessionIds.bind(sessionStore),
+      },
+    }),
+    {
+      title: 'Chat Session Turn Parts',
+      description:
+        'Raw Gemini model-turn Part[] for replay-safe orchestration. ' +
+        'This resource serves the verbatim persisted parts for one session content entry.',
+      mimeType: 'application/json',
+      annotations: {
+        audience: ['assistant'],
+        priority: 0.8,
+      },
+    },
+    (uri, { sessionId, turnIndex }): ReadResourceResult =>
+      readSessionTurnPartsResource(sessionStore, uri, sessionId, turnIndex),
   );
 }
 

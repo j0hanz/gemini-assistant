@@ -77,13 +77,15 @@ const STATIC_RESOURCE_URIS = new Set<string>(
 const SESSION_DETAIL_URI_PATTERN = /^session:\/\/[^/]+$/;
 const SESSION_TRANSCRIPT_URI_PATTERN = /^session:\/\/[^/]+\/transcript$/;
 const SESSION_EVENTS_URI_PATTERN = /^session:\/\/[^/]+\/events$/;
+const SESSION_TURN_PARTS_URI_PATTERN = /^gemini:\/\/sessions\/[^/]+\/turns\/\d+\/parts$/;
 
 export function isKnownResourceUri(uri: string): boolean {
   return (
     STATIC_RESOURCE_URIS.has(uri) ||
     SESSION_DETAIL_URI_PATTERN.test(uri) ||
     SESSION_TRANSCRIPT_URI_PATTERN.test(uri) ||
-    SESSION_EVENTS_URI_PATTERN.test(uri)
+    SESSION_EVENTS_URI_PATTERN.test(uri) ||
+    SESSION_TURN_PARTS_URI_PATTERN.test(uri)
   );
 }
 

@@ -145,21 +145,27 @@ export class ToolExecutor {
 
         const text = extractTextContent(result.content);
         const built = responseBuilder(streamResult, text);
+        const resultOverlay = built.resultMod ? built.resultMod(result) : {};
+        const overlayStructuredContent =
+          resultOverlay.structuredContent && typeof resultOverlay.structuredContent === 'object'
+            ? resultOverlay.structuredContent
+            : undefined;
         const finalResult: CallToolResult = {
           ...result,
-          ...(built.resultMod ? built.resultMod(result) : {}),
+          ...resultOverlay,
         };
 
         const usage = extractUsage(streamResult.usageMetadata);
-        const existingStructuredContent =
-          finalResult.structuredContent && typeof finalResult.structuredContent === 'object'
-            ? finalResult.structuredContent
+        const baseStructuredContent =
+          result.structuredContent && typeof result.structuredContent === 'object'
+            ? result.structuredContent
             : undefined;
 
         const mergedStructuredContent =
-          existingStructuredContent || built.structuredContent
+          baseStructuredContent || overlayStructuredContent || built.structuredContent
             ? {
-                ...(existingStructuredContent ?? {}),
+                ...(baseStructuredContent ?? {}),
+                ...(overlayStructuredContent ?? {}),
                 ...(built.structuredContent ?? {}),
                 ...buildSharedStructuredMetadata({
                   functionCalls: streamResult.functionCalls,

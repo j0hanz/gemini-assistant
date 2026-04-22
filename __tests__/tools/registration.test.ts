@@ -96,6 +96,7 @@ describe('tool registration', () => {
         'session://{sessionId}',
         'session://{sessionId}/transcript',
         'session://{sessionId}/events',
+        'gemini://sessions/{sessionId}/turns/{turnIndex}/parts',
         'workspace://context',
         'workspace://cache',
       ],

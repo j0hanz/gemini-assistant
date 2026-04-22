@@ -16,3 +16,7 @@ export function sessionTranscriptUri(sessionId: string): string {
 export function sessionEventsUri(sessionId: string): string {
   return `${sessionDetailUri(sessionId)}/events`;
 }
+
+export function sessionTurnPartsUri(sessionId: string, turnIndex: number): string {
+  return `gemini://sessions/${encodeURIComponent(sessionId)}/turns/${String(turnIndex)}/parts`;
+}

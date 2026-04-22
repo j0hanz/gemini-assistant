@@ -352,6 +352,35 @@ describe('ToolExecutor', () => {
     });
   });
 
+  it('runStream merges result overlays and structured content exactly once', async () => {
+    const executor = createExecutor();
+    const { ctx } = makeMockContext();
+
+    const result = await executor.runStream(
+      ctx,
+      'search',
+      'Web Search',
+      async () => fakeStream([makeChunk([{ text: 'answer' }], FinishReason.STOP)]),
+      (_streamResult, text) => ({
+        resultMod: () => ({
+          structuredContent: {
+            answer: text,
+            overlayOnly: true,
+          },
+        }),
+        structuredContent: {
+          builtOnly: true,
+        },
+      }),
+    );
+
+    assert.deepStrictEqual(result.structuredContent, {
+      answer: 'answer',
+      overlayOnly: true,
+      builtOnly: true,
+    });
+  });
+
   it('registerTaskTool emits a single terminal completion from the inner stream executor', async () => {
     const queue = new InMemoryTaskMessageQueue();
     const store = makeMockTaskStore();

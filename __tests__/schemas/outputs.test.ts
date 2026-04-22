@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   AnalyzeOutputSchema,
+  ChatOutputSchema,
   ContextUsedSchema,
   ResearchOutputSchema,
   ReviewOutputSchema,
@@ -123,6 +124,41 @@ describe('ResearchOutputSchema', () => {
       extra: true,
     });
     assert.strictEqual(unknown.success, false);
+  });
+});
+
+describe('ChatOutputSchema', () => {
+  it('accepts function-call signatures and thought tool events', () => {
+    const result = ChatOutputSchema.safeParse({
+      status: 'completed',
+      answer: 'Done',
+      functionCalls: [
+        {
+          name: 'lookup',
+          args: { q: 'x' },
+          thoughtSignature: 'sig-fn',
+        },
+      ],
+      toolEvents: [
+        {
+          kind: 'thought',
+          text: 'reasoning',
+          thoughtSignature: 'sig-thought',
+        },
+      ],
+    });
+
+    assert.ok(result.success);
+  });
+
+  it('rejects unknown tool event kinds', () => {
+    const result = ChatOutputSchema.safeParse({
+      status: 'completed',
+      answer: 'Done',
+      toolEvents: [{ kind: 'unknown' }],
+    });
+
+    assert.strictEqual(result.success, false);
   });
 });
 

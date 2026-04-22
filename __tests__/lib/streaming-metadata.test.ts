@@ -81,7 +81,12 @@ describe('streaming Gemini metadata preservation', () => {
 
     assert.strictEqual(result.finishReason, FinishReason.STOP);
     assert.deepStrictEqual(result.functionCalls, [
-      { id: 'call-1', name: 'lookup', args: { q: 'mcp' } },
+      {
+        id: 'call-1',
+        name: 'lookup',
+        args: { q: 'mcp' },
+        thoughtSignature: 'sig-function-call',
+      },
     ]);
     assert.deepStrictEqual(result.toolEvents.slice(0, 2), [
       {

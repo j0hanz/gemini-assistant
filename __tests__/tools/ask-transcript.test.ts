@@ -71,6 +71,7 @@ function createHarness() {
           functionCalls: [],
           parts: [],
           text: 'Assistant answer',
+          textByWave: ['Assistant answer'],
           thoughtText: '',
           toolEvents: [],
           toolsUsed: [],
@@ -81,6 +82,7 @@ function createHarness() {
       setSession: (sessionId: string) => {
         sessions.set(sessionId, { contents: [], events: [], transcript: [] });
       },
+      rebuildChat: () => undefined,
     },
   };
 }
@@ -118,6 +120,12 @@ describe('ask transcript capture', () => {
         (item) => item.type === 'resource_link' && item.uri === 'session://sess-new/events',
       ),
     );
+    assert.ok(
+      result.content.some(
+        (item) =>
+          item.type === 'resource_link' && item.uri === 'gemini://sessions/sess-new/turns/1/parts',
+      ),
+    );
   });
 
   it('encodes session resource links for session IDs with spaces, %, /, and #', async () => {
@@ -139,6 +147,36 @@ describe('ask transcript capture', () => {
         (item) =>
           item.type === 'resource_link' && item.uri === `session://${encodedSessionId}/events`,
       ),
+    );
+    assert.ok(
+      result.content.some(
+        (item) =>
+          item.type === 'resource_link' &&
+          item.uri === `gemini://sessions/${encodedSessionId}/turns/1/parts`,
+      ),
+    );
+  });
+
+  it('returns an explicit error for transcript-only sessions that cannot be rebuilt', async () => {
+    const harness = createHarness();
+    harness.sessions.set('sess-legacy', {
+      contents: [],
+      events: [],
+      transcript: [{ role: 'assistant', text: 'Old answer', timestamp: 1 }],
+    });
+    harness.deps.getSession = () => undefined;
+    harness.deps.rebuildChat = () => undefined;
+    const askWork = createAskWork(harness.deps as never);
+
+    const result = await askWork(
+      { message: 'Follow up', sessionId: 'sess-legacy' },
+      createContext(),
+    );
+
+    assert.strictEqual(result.isError, true);
+    assert.match(
+      result.content[0]?.text ?? '',
+      /session sess-legacy cannot be resumed: no turn parts persisted/,
     );
   });
 
@@ -175,6 +213,7 @@ describe('ask transcript capture', () => {
         functionCalls: [],
         parts: [],
         text: 'ask failed',
+        textByWave: ['ask failed'],
         thoughtText: '',
         toolEvents: [],
         toolsUsed: [],
@@ -210,6 +249,7 @@ describe('ask transcript capture', () => {
         functionCalls: [],
         parts: [],
         text: '{\n  "status": "ok"\n}',
+        textByWave: ['{\n  "status": "ok"\n}'],
         thoughtText: '',
         toolEvents: [],
         toolsUsed: [],
@@ -280,6 +320,7 @@ describe('ask transcript capture', () => {
         functionCalls: [],
         parts: [],
         text: 'Assistant answer',
+        textByWave: ['Assistant answer'],
         thoughtText: '',
         toolEvents: [],
         toolsUsed: [],

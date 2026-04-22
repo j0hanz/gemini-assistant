@@ -32,6 +32,7 @@ Public resources:
 - `session://{sessionId}`
 - `session://{sessionId}/transcript`
 - `session://{sessionId}/events`
+- `gemini://sessions/{sessionId}/turns/{turnIndex}/parts`
 - `workspace://context`
 - `workspace://cache`
 
@@ -58,9 +59,12 @@ Workflow entries:
 - `session://{sessionId}`
 - `session://{sessionId}/transcript`
 - `session://{sessionId}/events`
+- `gemini://sessions/{sessionId}/turns/{turnIndex}/parts`
 
 `session://{sessionId}/events` is a normalized inspection summary, not a replay-ready Gemini history.
 Large event payloads may be truncated into previews.
+`gemini://sessions/{sessionId}/turns/{turnIndex}/parts` exposes the raw persisted Gemini `Part[]`
+for replay-safe orchestration of a specific model turn.
 
 Internally, sessions also keep a replay-safe Gemini `Content[]` log alongside the display
 transcript. Rebuilt sessions use that log so thinking signatures, function calls, and function

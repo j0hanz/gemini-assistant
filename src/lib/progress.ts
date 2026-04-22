@@ -103,6 +103,20 @@ function buildProgressNotification(
   };
 }
 
+async function isCancelledTaskContext(ctx: ServerContext): Promise<boolean> {
+  const task = ctx.task;
+  if (!task?.id) {
+    return false;
+  }
+
+  try {
+    const current = await task.store.getTask(task.id);
+    return current.status === 'cancelled';
+  } catch {
+    return false;
+  }
+}
+
 function clearProgressState(progressToken: string | number, taskId?: string): void {
   for (const key of lastEmitTime.keys()) {
     if (key.startsWith(`${String(progressToken)}:`)) {
@@ -179,6 +193,7 @@ export async function sendProgress(
   message?: string,
 ): Promise<void> {
   if (ctx.mcpReq.signal.aborted) return;
+  if (await isCancelledTaskContext(ctx)) return;
 
   const isTerminal = isTerminalProgress(progress, total);
   const progressToken = ctx.mcpReq._meta?.progressToken;

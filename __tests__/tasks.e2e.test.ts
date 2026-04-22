@@ -230,6 +230,56 @@ describe('public MCP task lifecycle', () => {
     }
   });
 
+  it('does not emit further progress notifications after task cancellation', async () => {
+    const harness = await createHarness();
+
+    try {
+      const deferred = createDeferredStream(
+        makeChunk([{ text: 'Deferred research answer' }], FinishReason.STOP),
+      );
+      env.queueGenerator(deferred.stream);
+
+      const response = await harness.client.request('tools/call', {
+        _meta: { progressToken: 'cancel-progress-token' },
+        arguments: {
+          goal: 'Cancellation progress probe',
+          mode: 'quick',
+        },
+        name: 'research',
+        task: { ttl: 60_000 },
+      });
+
+      const taskId = (response.result as { task?: { taskId?: string } }).task?.taskId;
+      assert.ok(taskId, 'Expected task augmentation to return a task ID');
+
+      await harness.client.request('tasks/cancel', { taskId });
+      const offsetAfterCancel = harness.client.getNotifications().length;
+
+      deferred.release();
+      await flushEventLoop(4);
+
+      const leakedProgress = harness.client
+        .getNotifications()
+        .slice(offsetAfterCancel)
+        .filter((notification) => notification.method === 'notifications/progress')
+        .filter((notification) => {
+          const meta = notification.params?.['_meta'] as Record<string, unknown> | undefined;
+          const related = meta?.['io.modelcontextprotocol/related-task'] as
+            | { taskId?: unknown }
+            | undefined;
+          return related?.taskId === taskId;
+        });
+
+      assert.deepStrictEqual(
+        leakedProgress,
+        [],
+        'Cancelled tasks must not emit progress notifications after cancellation',
+      );
+    } finally {
+      await harness.close();
+    }
+  });
+
   it('defaults task ttl to 300000 when omitted', async () => {
     const harness = await createHarness();
 

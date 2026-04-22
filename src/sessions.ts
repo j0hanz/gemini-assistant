@@ -11,6 +11,18 @@ const MAX_EVICTED_ENTRIES = 1000;
 const EVICTED_TRIM_TARGET = Math.floor(MAX_EVICTED_ENTRIES / 2);
 const EVICTION_SWEEP_INTERVAL_MS = 60_000;
 
+function buildSessionChangeEvent(
+  sessionIds: readonly string[],
+  listChanged: boolean,
+): SessionChangeEvent {
+  return {
+    listChanged,
+    detailUris: sessionIds.map((id) => sessionDetailUri(id)),
+    eventUris: sessionIds.map((id) => sessionEventsUri(id)),
+    transcriptUris: sessionIds.map((id) => sessionTranscriptUri(id)),
+  };
+}
+
 export interface TranscriptEntry {
   role: 'user' | 'assistant';
   text: string;
@@ -186,20 +198,37 @@ export class SessionStore {
   }
 
   appendSessionTranscript(id: string, item: TranscriptEntry): boolean {
-    const entry = this.getActiveSessionEntry(id);
-    if (!entry) return false;
-    entry.transcript.push({ ...item });
-    this.trimSessionHistory(entry.transcript, this.maxTranscriptEntries);
-    this.touchSessionEntry(id, entry);
-    this.notifyChange([id], false);
-    return true;
+    return this.appendSessionHistoryEntry(
+      id,
+      item,
+      (entry) => entry.transcript,
+      (value) => ({ ...value }),
+      this.maxTranscriptEntries,
+    );
   }
 
   appendSessionEvent(id: string, item: SessionEventEntry): boolean {
+    return this.appendSessionHistoryEntry(
+      id,
+      item,
+      (entry) => entry.events,
+      cloneSessionEventEntry,
+      this.maxEventEntries,
+    );
+  }
+
+  private appendSessionHistoryEntry<T>(
+    id: string,
+    item: T,
+    selectEntries: (entry: SessionEntry) => T[],
+    cloneItem: (item: T) => T,
+    maxEntries: number,
+  ): boolean {
     const entry = this.getActiveSessionEntry(id);
     if (!entry) return false;
-    entry.events.push(cloneSessionEventEntry(item));
-    this.trimSessionHistory(entry.events, this.maxEventEntries);
+    const entries = selectEntries(entry);
+    entries.push(cloneItem(item));
+    this.trimSessionHistory(entries, maxEntries);
     this.touchSessionEntry(id, entry);
     this.notifyChange([id], false);
     return true;
@@ -252,12 +281,7 @@ export class SessionStore {
   private notifyChange(sessionIds: string[] = [], listChanged = true): void {
     if (this.subscribers.size === 0) return;
 
-    const event = {
-      listChanged,
-      detailUris: sessionIds.map((id) => sessionDetailUri(id)),
-      eventUris: sessionIds.map((id) => sessionEventsUri(id)),
-      transcriptUris: sessionIds.map((id) => sessionTranscriptUri(id)),
-    };
+    const event = buildSessionChangeEvent(sessionIds, listChanged);
 
     for (const subscriber of this.subscribers) {
       subscriber(event);

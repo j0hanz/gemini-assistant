@@ -129,6 +129,35 @@ function handleCacheChange({ detailUris }: CacheChangeEvent): void {
   // originating `server`) owns scoped updates to that URI.
 }
 
+function registerServerTools(server: McpServer, services: ServerServices): void {
+  for (const register of SERVER_TOOL_REGISTRARS) {
+    register(server, services);
+  }
+}
+
+function runCloseStep(closeErrors: Error[], label: string, fn: () => void): void {
+  try {
+    fn();
+  } catch (err) {
+    const error = new Error(`close: ${label} failed: ${AppError.formatMessage(err)}`);
+    closeErrors.push(error);
+    log.warn(error.message, { stack: err instanceof Error ? err.stack : undefined });
+  }
+}
+
+function throwCloseErrors(closeErrors: Error[]): void {
+  if (closeErrors.length === 1) {
+    const firstError = closeErrors[0];
+    if (firstError) {
+      throw firstError;
+    }
+  }
+
+  if (closeErrors.length > 1) {
+    throw new AggregateError(closeErrors, 'Server instance shutdown failed');
+  }
+}
+
 export function createServerInstance(): ServerInstance {
   const sessionStore = createSessionStore();
   const taskStore = new InMemoryTaskStore();
@@ -170,9 +199,7 @@ export function createServerInstance(): ServerInstance {
 
   activeServers.add(server);
 
-  for (const register of SERVER_TOOL_REGISTRARS) {
-    register(server, { sessionStore, taskMessageQueue });
-  }
+  registerServerTools(server, { sessionStore, taskMessageQueue });
   installTaskSafeToolCallHandler(server);
 
   const rootsFetcher = buildServerRootsFetcher(server);
@@ -185,25 +212,16 @@ export function createServerInstance(): ServerInstance {
       if (closed) return;
       closed = true;
       const closeErrors: Error[] = [];
-      const safeRun = (label: string, fn: () => void): void => {
-        try {
-          fn();
-        } catch (err) {
-          const error = new Error(`close: ${label} failed: ${AppError.formatMessage(err)}`);
-          closeErrors.push(error);
-          log.warn(error.message, { stack: err instanceof Error ? err.stack : undefined });
-        }
-      };
-      safeRun('unsubscribeSessionChange', unsubscribeSessionChange);
-      safeRun('unsubscribeCacheChange', unsubscribeCacheChange);
-      safeRun('sessionStore.close', () => {
+      runCloseStep(closeErrors, 'unsubscribeSessionChange', unsubscribeSessionChange);
+      runCloseStep(closeErrors, 'unsubscribeCacheChange', unsubscribeCacheChange);
+      runCloseStep(closeErrors, 'sessionStore.close', () => {
         sessionStore.close();
       });
-      safeRun('activeServers.delete', () => {
+      runCloseStep(closeErrors, 'activeServers.delete', () => {
         activeServers.delete(server);
       });
-      safeRun('detachLogger', detachLogger);
-      safeRun('taskStore.cleanup', () => {
+      runCloseStep(closeErrors, 'detachLogger', detachLogger);
+      runCloseStep(closeErrors, 'taskStore.cleanup', () => {
         taskStore.cleanup();
       });
       try {
@@ -214,16 +232,7 @@ export function createServerInstance(): ServerInstance {
         log.warn(error.message, { stack: err instanceof Error ? err.stack : undefined });
       }
 
-      if (closeErrors.length === 1) {
-        const firstError = closeErrors[0];
-        if (firstError) {
-          throw firstError;
-        }
-      }
-
-      if (closeErrors.length > 1) {
-        throw new AggregateError(closeErrors, 'Server instance shutdown failed');
-      }
+      throwCloseErrors(closeErrors);
     },
   };
 }

@@ -46,6 +46,8 @@ interface ResourceListEntry {
   name: string;
 }
 
+type SessionResourceUriBuilder = (sessionId: string) => string;
+
 type SessionTranscriptResourceData = {
   role: 'user' | 'assistant';
   text: string;
@@ -131,6 +133,14 @@ function decodeTemplateParam(value: string | string[] | undefined): string | und
   }
 }
 
+function requireTemplateParam(value: string | string[] | undefined, label: string): string {
+  const decoded = decodeTemplateParam(value);
+  if (!decoded) {
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, `${label} required`);
+  }
+  return decoded;
+}
+
 function toResourceUri(uri: URL | string): string {
   return typeof uri === 'string' ? uri : uri.href;
 }
@@ -169,25 +179,39 @@ export function readWorkspaceContextResource(
   return textResource(toResourceUri(uri), renderWorkspaceContextMarkdown(data), 'text/markdown');
 }
 
-function sessionDetailResources(sessionStore: SessionStore): ResourceListEntry[] {
+function buildSessionResourceEntries(
+  sessionStore: SessionStore,
+  uriFor: SessionResourceUriBuilder,
+  labelFor: (sessionId: string) => string,
+): ResourceListEntry[] {
   return sessionStore.listSessionEntries().map((session) => ({
-    uri: sessionDetailUri(session.id),
-    name: `Session ${session.id}`,
+    uri: uriFor(session.id),
+    name: labelFor(session.id),
   }));
+}
+
+function sessionDetailResources(sessionStore: SessionStore): ResourceListEntry[] {
+  return buildSessionResourceEntries(
+    sessionStore,
+    sessionDetailUri,
+    (sessionId) => `Session ${sessionId}`,
+  );
 }
 
 function sessionTranscriptResources(sessionStore: SessionStore): ResourceListEntry[] {
-  return sessionStore.listSessionEntries().map((session) => ({
-    uri: sessionTranscriptUri(session.id),
-    name: `Transcript ${session.id}`,
-  }));
+  return buildSessionResourceEntries(
+    sessionStore,
+    sessionTranscriptUri,
+    (sessionId) => `Transcript ${sessionId}`,
+  );
 }
 
 function sessionEventResources(sessionStore: SessionStore): ResourceListEntry[] {
-  return sessionStore.listSessionEntries().map((session) => ({
-    uri: sessionEventsUri(session.id),
-    name: `Events ${session.id}`,
-  }));
+  return buildSessionResourceEntries(
+    sessionStore,
+    sessionEventsUri,
+    (sessionId) => `Events ${sessionId}`,
+  );
 }
 
 function cacheDetailResources(
@@ -209,10 +233,7 @@ export async function readCacheDetailResource(
   ) => Promise<Awaited<ReturnType<typeof getCacheSummary>> | null | undefined> = getCacheSummary,
 ): Promise<ReadResourceResult> {
   const log = logger.child('resources');
-  const decoded = decodeTemplateParam(cacheName);
-  if (!decoded) {
-    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Cache name required');
-  }
+  const decoded = requireTemplateParam(cacheName, 'Cache name');
 
   try {
     const summary = await getCacheSummaryImpl(decoded);
@@ -519,10 +540,7 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
       },
     },
     (uri, { sessionId }): ReadResourceResult => {
-      const id = decodeTemplateParam(sessionId);
-      if (!id) {
-        throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Session ID required');
-      }
+      const id = requireTemplateParam(sessionId, 'Session ID');
       const entry = sessionStore.getSessionEntry(id);
       if (!entry) {
         throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Session '${id}' not found`);

@@ -97,6 +97,29 @@ interface ManagedRequestOptions<TTransport, TResult> {
   acquireStatefulCreationLock: () => Promise<() => void>;
 }
 
+interface ResolvedTransportConfig {
+  allowedHosts: ReturnType<typeof resolveAllowedHosts>;
+  corsOrigin: string;
+  host: string;
+  isStateless: boolean;
+  maxSessions: number;
+  port: number;
+  sessionTtlMs: number;
+}
+
+function resolveTransportRuntimeConfig(): ResolvedTransportConfig {
+  const { port, host, corsOrigin, isStateless, maxSessions, sessionTtlMs } = getTransportConfig();
+  return {
+    allowedHosts: resolveAllowedHosts(host),
+    corsOrigin,
+    host,
+    isStateless,
+    maxSessions,
+    port,
+    sessionTtlMs,
+  };
+}
+
 function createAsyncLock(): () => Promise<() => void> {
   let current = Promise.resolve();
 
@@ -284,10 +307,12 @@ function logRequestFailure(
   err: unknown,
   meta: { requestMethod: string; sessionId?: string },
 ): void {
+  const errorMessage = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? err.stack : undefined;
   log.error(label, {
     ...meta,
-    error: err instanceof Error ? err.message : String(err),
-    stack: err instanceof Error ? err.stack : undefined,
+    error: errorMessage,
+    stack,
   });
 }
 
@@ -577,8 +602,8 @@ export async function startHttpTransport(
   createServer: ServerFactory,
   createEventStore?: EventStoreFactory,
 ): Promise<HttpTransportResult> {
-  const { port, host, corsOrigin, isStateless, maxSessions, sessionTtlMs } = getTransportConfig();
-  const allowedHosts = resolveAllowedHosts(host);
+  const { port, host, corsOrigin, isStateless, maxSessions, sessionTtlMs, allowedHosts } =
+    resolveTransportRuntimeConfig();
   warnIfUnprotected(host, !!allowedHosts);
 
   const app = createMcpExpressApp({
@@ -678,8 +703,8 @@ export function startWebStandardTransport(
   createServer: ServerFactory,
   createEventStore?: EventStoreFactory,
 ): Promise<WebStandardTransportResult> {
-  const { port, host, corsOrigin, isStateless, maxSessions, sessionTtlMs } = getTransportConfig();
-  const allowedHosts = resolveAllowedHosts(host);
+  const { port, host, corsOrigin, isStateless, maxSessions, sessionTtlMs, allowedHosts } =
+    resolveTransportRuntimeConfig();
   warnIfUnprotected(host, !!allowedHosts);
 
   const statefulPairs = new Map<string, ManagedPair<WebStandardStreamableHTTPServerTransport>>();

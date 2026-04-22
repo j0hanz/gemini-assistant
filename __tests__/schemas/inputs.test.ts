@@ -295,6 +295,84 @@ describe('ChatInputSchema', () => {
       'Fixed random seed for reproducible outputs.',
     );
   });
+
+  it('validates fileSearch, functions, and serverSideToolInvocations', () => {
+    const result = ChatInputSchema.safeParse({
+      goal: 'Use tools',
+      fileSearch: { fileSearchStoreNames: ['fileSearchStores/docs_1'] },
+      functions: {
+        declarations: [
+          {
+            name: 'lookup_doc',
+            description: 'Lookup a document',
+            parametersJsonSchema: { type: 'object' },
+          },
+        ],
+        mode: 'AUTO',
+      },
+      serverSideToolInvocations: 'never',
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects invalid fileSearch, functions, and serverSideToolInvocations values', () => {
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'bad stores',
+        fileSearch: { fileSearchStoreNames: [] },
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'bad store chars',
+        fileSearch: { fileSearchStoreNames: ['bad store'] },
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'bad store length',
+        fileSearch: { fileSearchStoreNames: ['x'.repeat(257)] },
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'bad function',
+        functions: {
+          declarations: [{ name: '1bad', description: 'Bad identifier' }],
+        },
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'bad function key',
+        functions: {
+          declarations: [{ name: 'valid', description: 'Has extra key', extra: true }],
+        },
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'bad mode',
+        functions: {
+          declarations: [{ name: 'valid', description: 'Valid declaration' }],
+          mode: 'FORCED',
+        },
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'bad trace policy',
+        serverSideToolInvocations: 'sometimes',
+      }).success,
+      false,
+    );
+  });
 });
 
 describe('ExecuteCodeInputSchema', () => {
@@ -355,6 +433,14 @@ describe('SearchInputSchema', () => {
     const result = SearchInputSchema.safeParse({
       query: 'compare recipes',
       urls: ['https://example.com/recipe1', 'https://example.com/recipe2'],
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts fileSearch', () => {
+    const result = SearchInputSchema.safeParse({
+      query: 'latest news',
+      fileSearch: { fileSearchStoreNames: ['fileSearchStores/research'] },
     });
     assert.ok(result.success);
   });
@@ -448,6 +534,15 @@ describe('ResearchInputSchema', () => {
     });
     assert.strictEqual(result.success, false);
   });
+
+  it('accepts fileSearch on research input', () => {
+    const result = ResearchInputSchema.safeParse({
+      mode: 'quick',
+      goal: 'test',
+      fileSearch: { fileSearchStoreNames: ['fileSearchStores/research'] },
+    });
+    assert.strictEqual(result.success, true);
+  });
 });
 
 describe('AgenticSearchInputSchema', () => {
@@ -491,6 +586,14 @@ describe('AgenticSearchInputSchema', () => {
 
   it('accepts with thinkingLevel', () => {
     const result = AgenticSearchInputSchema.safeParse({ topic: 'test', thinkingLevel: 'HIGH' });
+    assert.ok(result.success);
+  });
+
+  it('accepts fileSearch', () => {
+    const result = AgenticSearchInputSchema.safeParse({
+      topic: 'test',
+      fileSearch: { fileSearchStoreNames: ['fileSearchStores/agentic'] },
+    });
     assert.ok(result.success);
   });
 
@@ -693,6 +796,15 @@ describe('AnalyzeUrlInputSchema', () => {
       urls: ['https://example.com'],
       question: 'Summarize',
       systemInstruction: 'Be concise',
+    });
+    assert.ok(result.success);
+  });
+
+  it('accepts fileSearch', () => {
+    const result = AnalyzeUrlInputSchema.safeParse({
+      urls: ['https://example.com'],
+      question: 'Summarize',
+      fileSearch: { fileSearchStoreNames: ['fileSearchStores/url'] },
     });
     assert.ok(result.success);
   });

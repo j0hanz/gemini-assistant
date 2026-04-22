@@ -85,6 +85,27 @@ describe('contract surface invariants', () => {
     assert.match(SERVER_INSTRUCTIONS, /discover:\/\/workflows/);
   });
 
+  it('exposes new tool parameters only on intended public surfaces', () => {
+    const chat = DISCOVERY_ENTRIES.find((entry) => entry.kind === 'tool' && entry.name === 'chat');
+    const research = DISCOVERY_ENTRIES.find(
+      (entry) => entry.kind === 'tool' && entry.name === 'research',
+    );
+    const analyze = DISCOVERY_ENTRIES.find(
+      (entry) => entry.kind === 'tool' && entry.name === 'analyze',
+    );
+    const review = DISCOVERY_ENTRIES.find(
+      (entry) => entry.kind === 'tool' && entry.name === 'review',
+    );
+
+    assert.ok(chat?.inputs.includes('fileSearch?'));
+    assert.ok(chat?.inputs.includes('functions?'));
+    assert.ok(chat?.inputs.includes('serverSideToolInvocations?'));
+    assert.ok(research?.inputs.includes('fileSearch?'));
+    assert.strictEqual(research?.inputs.includes('functions?'), false);
+    assert.strictEqual(analyze?.inputs.includes('fileSearch?'), false);
+    assert.strictEqual(review?.inputs.includes('functions?'), false);
+  });
+
   it('does not advertise resources.subscribe in the initialize capability set', async () => {
     const { MockGeminiEnvironment } = await import('./lib/mock-gemini-environment.js');
     const { createServerHarness } = await import('./lib/mcp-contract-client.js');

@@ -114,6 +114,7 @@ function getHandlers() {
       searchDepth?: number;
       thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH';
       urls?: string[];
+      fileSearch?: { fileSearchStoreNames: string[] };
     }>,
   };
 }
@@ -293,6 +294,51 @@ describe('research tool contracts', () => {
         tools?.some((t) => 'functionDeclarations' in t),
         'additionalTools were not included',
       );
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
+  it('composes fileSearch with googleSearch and urlContext', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+    let observedRequest: Record<string, unknown> | undefined;
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async (req: Record<string, unknown>) => {
+      observedRequest = req;
+      return fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'ok' }] },
+              finishReason: 'STOP',
+            },
+          ],
+        },
+      ]);
+    };
+
+    try {
+      await research.createTask(
+        {
+          goal: 'test file search',
+          mode: 'quick',
+          urls: ['https://example.com/context'],
+          fileSearch: { fileSearchStoreNames: ['fileSearchStores/research'] },
+        },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+
+      const config = observedRequest?.config as Record<string, unknown> | undefined;
+      assert.deepStrictEqual(config?.tools, [
+        { googleSearch: {} },
+        { urlContext: {} },
+        { fileSearch: { fileSearchStoreNames: ['fileSearchStores/research'] } },
+      ]);
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
     }

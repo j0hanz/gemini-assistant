@@ -52,6 +52,17 @@ function joinNonEmpty(sections: readonly (string | undefined)[]): string {
   return sections.filter((section): section is string => Boolean(section?.trim())).join('\n\n');
 }
 
+export function appendFunctionCallingInstruction(
+  systemInstruction: string | undefined,
+  functionsActive: boolean,
+): string | undefined {
+  if (!functionsActive) return systemInstruction;
+  return joinNonEmpty([
+    systemInstruction,
+    'When you call a declared function, wait for the MCP client to provide the function response. Do not invent function results.',
+  ]);
+}
+
 function buildOutputInstruction(title: string, sections: readonly string[]): string {
   return joinNonEmpty([title, ...sections]);
 }

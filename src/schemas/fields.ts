@@ -15,6 +15,8 @@ export const RESEARCH_MODE_OPTIONS = ['quick', 'deep'] as const;
 const ANALYZE_TARGET_KIND_OPTIONS = ['file', 'url', 'multi'] as const;
 const ANALYZE_OUTPUT_KIND_OPTIONS = ['summary', 'diagram'] as const;
 export const REVIEW_SUBJECT_OPTIONS = ['diff', 'comparison', 'failure'] as const;
+export const SERVER_SIDE_TOOL_INVOCATIONS_OPTIONS = ['auto', 'always', 'never'] as const;
+export const FUNCTION_CALLING_MODE_OPTIONS = ['AUTO', 'ANY', 'NONE'] as const;
 
 function buildTextSchema(maxLength?: number) {
   const schema = z.string().trim().min(1);
@@ -196,3 +198,60 @@ export function mediaResolution(description: string) {
     description,
   );
 }
+
+export const FileSearchSpecSchema = z.strictObject({
+  fileSearchStoreNames: withFieldMetadata(
+    z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(256)
+          .regex(/^[A-Za-z0-9_\-/]+$/),
+      )
+      .min(1)
+      .max(32),
+    'Gemini File Search store names to retrieve from.',
+  ),
+  metadataFilter: withFieldMetadata(
+    z.unknown().optional(),
+    'Optional Gemini File Search metadata filter.',
+  ),
+});
+export type FileSearchSpecInput = z.infer<typeof FileSearchSpecSchema>;
+
+export const FunctionDeclarationSchema = z.strictObject({
+  name: withFieldMetadata(
+    z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+    'Function name the model may call.',
+  ),
+  description: withFieldMetadata(
+    z.string().min(1).max(1024),
+    'Function purpose. The MCP client owns execution and returns function responses.',
+  ),
+  parametersJsonSchema: withFieldMetadata(
+    z.record(z.string(), z.unknown()).optional(),
+    'Optional JSON Schema object for function parameters.',
+  ),
+});
+
+export const FunctionsSpecSchema = z.strictObject({
+  declarations: withFieldMetadata(
+    z.array(FunctionDeclarationSchema).min(1).max(32),
+    'Typed function declarations exposed to Gemini. The MCP client executes calls.',
+  ),
+  mode: withFieldMetadata(
+    z.enum(FUNCTION_CALLING_MODE_OPTIONS).optional(),
+    'Gemini function-calling mode for the declared functions.',
+  ),
+});
+export type FunctionsSpecInput = z.infer<typeof FunctionsSpecSchema>;
+
+export const ServerSideToolInvocationsSchema = withFieldMetadata(
+  z.enum(SERVER_SIDE_TOOL_INVOCATIONS_OPTIONS).default('auto'),
+  'Server-side Gemini tool trace policy: auto enables traces only when tools are active; always forces traces; never omits them.',
+);

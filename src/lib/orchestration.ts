@@ -1,17 +1,53 @@
 import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 
-import type { FunctionCallingConfigMode, ToolConfig, ToolListUnion } from '@google/genai';
+import type {
+  FunctionCallingConfigMode,
+  FunctionDeclaration,
+  ToolConfig,
+  ToolListUnion,
+} from '@google/genai';
 
+import { AppError } from './errors.js';
 import { logger } from './logger.js';
 import { validateUrls } from './validation.js';
 
-export const BUILT_IN_TOOL_NAMES = ['googleSearch', 'urlContext', 'codeExecution'] as const;
+export const BUILT_IN_TOOL_NAMES = [
+  'googleSearch',
+  'urlContext',
+  'codeExecution',
+  'fileSearch',
+] as const;
 export type BuiltInToolName = (typeof BUILT_IN_TOOL_NAMES)[number];
+export type ActiveCapability = BuiltInToolName | 'functions';
 
-const BUILT_IN_TOOL_FACTORIES: Record<BuiltInToolName, () => ToolListUnion[number]> = {
+export type BuiltInToolSpec =
+  | { kind: 'googleSearch' }
+  | { kind: 'urlContext' }
+  | { kind: 'codeExecution' }
+  | {
+      kind: 'fileSearch';
+      fileSearchStoreNames: readonly string[];
+      metadataFilter?: unknown;
+    };
+
+const BUILT_IN_TOOL_FACTORIES: Record<
+  BuiltInToolName,
+  (spec: BuiltInToolSpec) => ToolListUnion[number]
+> = {
   googleSearch: () => ({ googleSearch: {} }),
   urlContext: () => ({ urlContext: {} }),
   codeExecution: () => ({ codeExecution: {} }),
+  fileSearch: (spec) => {
+    if (spec.kind !== 'fileSearch') {
+      throw new AppError('orchestration', 'fileSearch requires a fileSearch tool spec');
+    }
+    return {
+      fileSearch: {
+        fileSearchStoreNames: [...spec.fileSearchStoreNames],
+        ...(spec.metadataFilter !== undefined ? { metadataFilter: spec.metadataFilter } : {}),
+      },
+    } as ToolListUnion[number];
+  },
 };
 
 /**
@@ -21,9 +57,21 @@ const BUILT_IN_TOOL_FACTORIES: Record<BuiltInToolName, () => ToolListUnion[numbe
  */
 export type ToolProfile = string;
 
-function buildBuiltInTools(names: readonly BuiltInToolName[] | undefined): ToolListUnion {
-  if (!names || names.length === 0) return [];
-  return names.map((name) => BUILT_IN_TOOL_FACTORIES[name]());
+function specsFromNames(names: readonly BuiltInToolName[]): BuiltInToolSpec[] {
+  return names.map((name) => {
+    if (name === 'fileSearch') {
+      throw new AppError(
+        'orchestration',
+        'fileSearch requires builtInToolSpecs with fileSearchStoreNames',
+      );
+    }
+    return { kind: name };
+  });
+}
+
+function buildBuiltInTools(specs: readonly BuiltInToolSpec[]): ToolListUnion {
+  if (specs.length === 0) return [];
+  return specs.map((spec) => BUILT_IN_TOOL_FACTORIES[spec.kind](spec));
 }
 
 function cloneTools(tools: ToolListUnion | undefined): ToolListUnion {
@@ -47,11 +95,15 @@ export function buildToolProfile(tools: ToolListUnion | undefined): string {
   return [...keys].sort().join('+');
 }
 
-interface OrchestrationRequest {
+export type ServerSideToolInvocationsPolicy = 'auto' | 'always' | 'never';
+
+export interface OrchestrationRequest {
+  builtInToolSpecs?: readonly BuiltInToolSpec[] | undefined;
   builtInToolNames?: readonly BuiltInToolName[] | undefined;
   additionalTools?: ToolListUnion | undefined;
+  functionDeclarations?: readonly FunctionDeclaration[] | undefined;
   functionCallingMode?: FunctionCallingConfigMode | undefined;
-  includeServerSideToolInvocations?: boolean | undefined;
+  serverSideToolInvocations?: ServerSideToolInvocationsPolicy | undefined;
   urls?: readonly string[] | undefined;
 }
 
@@ -60,19 +112,36 @@ interface OrchestrationConfig {
   toolConfig?: ToolConfig;
   toolProfile: string;
   tools?: ToolListUnion;
-  activeCapabilities: Set<BuiltInToolName>;
+  activeCapabilities: Set<ActiveCapability>;
+}
+
+export function resolveServerSideToolInvocations(
+  policy: ServerSideToolInvocationsPolicy | undefined,
+  activeCapabilities: ReadonlySet<string>,
+): boolean | undefined {
+  if (policy === 'never') return undefined;
+  if (policy === 'always') return true;
+  return activeCapabilities.size > 0 ? true : undefined;
 }
 
 export function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationConfig {
-  const builtInTools = buildBuiltInTools(request.builtInToolNames);
+  const specs = request.builtInToolSpecs ?? specsFromNames(request.builtInToolNames ?? []);
+  const builtInTools = buildBuiltInTools(specs);
   const extraTools = cloneTools(request.additionalTools);
-  const tools: ToolListUnion = [...builtInTools, ...extraTools];
+  const functionTools: ToolListUnion =
+    request.functionDeclarations && request.functionDeclarations.length > 0
+      ? [{ functionDeclarations: [...request.functionDeclarations] }]
+      : [];
+  const tools: ToolListUnion = [...builtInTools, ...functionTools, ...extraTools];
 
-  const activeCapabilities = new Set<BuiltInToolName>();
+  const activeCapabilities = new Set<ActiveCapability>();
   for (const name of BUILT_IN_TOOL_NAMES) {
     if (hasTool(tools, name)) {
       activeCapabilities.add(name);
     }
+  }
+  if (request.functionDeclarations && request.functionDeclarations.length > 0) {
+    activeCapabilities.add('functions');
   }
 
   const config: OrchestrationConfig = {
@@ -80,7 +149,11 @@ export function buildOrchestrationConfig(request: OrchestrationRequest): Orchest
     activeCapabilities,
   };
 
-  if (request.includeServerSideToolInvocations === true) {
+  const includeServerSideToolInvocations = resolveServerSideToolInvocations(
+    request.serverSideToolInvocations,
+    activeCapabilities,
+  );
+  if (includeServerSideToolInvocations === true) {
     config.toolConfig = { includeServerSideToolInvocations: true };
   }
 
@@ -117,10 +190,13 @@ export async function resolveOrchestration(
 
   const config = buildOrchestrationConfig(request);
   const urlCount = request.urls?.length ?? 0;
+  const serverSideToolInvocations =
+    config.toolConfig?.includeServerSideToolInvocations === true ? true : undefined;
   const payload = {
     toolKey,
     toolProfile: config.toolProfile,
     activeCapabilities: [...config.activeCapabilities],
+    serverSideToolInvocations,
     urlCount,
   };
 
@@ -131,6 +207,20 @@ export async function resolveOrchestration(
     await ctx.mcpReq.log(
       'warning',
       `orchestration: ${toolKey} received ${String(urlCount)} URL(s) but resolved profile '${config.toolProfile}' does not expose URL Context`,
+    );
+  }
+
+  const fileSearchSpec = (request.builtInToolSpecs ?? []).find(
+    (spec) => spec.kind === 'fileSearch',
+  );
+  if (
+    config.activeCapabilities.has('fileSearch') &&
+    fileSearchSpec?.kind === 'fileSearch' &&
+    fileSearchSpec.fileSearchStoreNames.length === 0
+  ) {
+    await ctx.mcpReq.log(
+      'warning',
+      `orchestration: ${toolKey} resolved File Search without fileSearchStoreNames`,
     );
   }
 

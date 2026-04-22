@@ -6,21 +6,22 @@ import type {
 } from '@modelcontextprotocol/server';
 
 import { Validator } from '@cfworker/json-schema';
-import { FinishReason } from '@google/genai';
+import { FinishReason, FunctionCallingConfigMode } from '@google/genai';
 import type {
   Chat,
   Content,
-  FunctionCallingConfigMode,
+  FunctionDeclaration,
   FunctionResponse,
   GenerateContentConfig,
 } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
+import { appendFunctionCallingInstruction } from '../lib/model-prompts.js';
 import { pickDefined } from '../lib/object.js';
 import {
   buildOrchestrationConfig,
-  type BuiltInToolName,
+  type BuiltInToolSpec,
   resolveOrchestration,
 } from '../lib/orchestration.js';
 import { validateGeminiRequest } from '../lib/preflight.js';
@@ -335,15 +336,53 @@ function getAskUrls(args: AskArgs): readonly string[] | undefined {
   return 'urls' in args ? args.urls : undefined;
 }
 
+function buildFunctionDeclarations(args: AskArgs): FunctionDeclaration[] | undefined {
+  if (!args.functions?.declarations.length) return undefined;
+  return args.functions.declarations.map((declaration) => ({
+    name: declaration.name,
+    description: declaration.description,
+    ...(declaration.parametersJsonSchema !== undefined
+      ? { parameters: declaration.parametersJsonSchema }
+      : {}),
+  }));
+}
+
+type FunctionModeInput = NonNullable<NonNullable<AskArgs['functions']>['mode']>;
+
+function toFunctionCallingConfigMode(
+  mode: FunctionModeInput | undefined,
+): FunctionCallingConfigMode | undefined {
+  if (mode === undefined) return undefined;
+  switch (mode) {
+    case 'AUTO':
+      return FunctionCallingConfigMode.AUTO;
+    case 'ANY':
+      return FunctionCallingConfigMode.ANY;
+    case 'NONE':
+      return FunctionCallingConfigMode.NONE;
+  }
+}
+
 function buildChatOrchestrationRequest(args: AskArgs) {
   const urls = getAskUrls(args);
-  const builtInToolNames: BuiltInToolName[] = [];
-  if (args.googleSearch) builtInToolNames.push('googleSearch');
-  if ((urls?.length ?? 0) > 0) builtInToolNames.push('urlContext');
-  if (args.codeExecution) builtInToolNames.push('codeExecution');
+  const builtInToolSpecs: BuiltInToolSpec[] = [];
+  if (args.googleSearch) builtInToolSpecs.push({ kind: 'googleSearch' });
+  if ((urls?.length ?? 0) > 0) builtInToolSpecs.push({ kind: 'urlContext' });
+  if (args.codeExecution) builtInToolSpecs.push({ kind: 'codeExecution' });
+  if (args.fileSearch) {
+    builtInToolSpecs.push({
+      kind: 'fileSearch',
+      fileSearchStoreNames: args.fileSearch.fileSearchStoreNames,
+      ...(args.fileSearch.metadataFilter !== undefined
+        ? { metadataFilter: args.fileSearch.metadataFilter }
+        : {}),
+    });
+  }
   return {
-    builtInToolNames,
-    includeServerSideToolInvocations: true,
+    builtInToolSpecs,
+    functionDeclarations: buildFunctionDeclarations(args),
+    functionCallingMode: toFunctionCallingConfigMode(args.functions?.mode),
+    serverSideToolInvocations: args.serverSideToolInvocations,
     ...(urls ? { urls } : {}),
     ...(args.additionalTools
       ? { additionalTools: args.additionalTools as import('@google/genai').ToolListUnion }
@@ -370,6 +409,7 @@ function validateAskRequest(
     responseSchema,
     sessionId,
     activeCapabilities: orchestration.activeCapabilities,
+    fileSearchStoreNames: args.fileSearch?.fileSearchStoreNames,
   });
   if (preflightResult) {
     return preflightResult;
@@ -466,6 +506,24 @@ function buildConfigFromSessionContract(
     responseMimeType: contract.responseMimeType,
     responseJsonSchema: contract.responseJsonSchema,
   });
+}
+
+function buildAskGenerationOptions(
+  args: AskArgs,
+  toolConfig: GenerateContentConfig['toolConfig'],
+  tools: GenerateContentConfig['tools'],
+  functionCallingMode: FunctionCallingConfigMode | undefined,
+) {
+  return {
+    ...args,
+    systemInstruction: appendFunctionCallingInstruction(
+      args.systemInstruction,
+      args.functions?.declarations.length ? true : false,
+    ),
+    toolConfig,
+    tools,
+    ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
+  };
 }
 
 async function runAskStream(
@@ -587,12 +645,7 @@ export async function askWithoutSession(
   const { prompt, toolConfig, toolProfile, tools, urls, functionCallingMode } = resolved;
   const jsonMode = !!args.responseSchema;
   const config = buildGenerateContentConfig(
-    {
-      ...args,
-      toolConfig,
-      tools,
-      ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
-    },
+    buildAskGenerationOptions(args, toolConfig, tools, functionCallingMode),
     ctx.mcpReq.signal,
   );
   const perTurnConfig = buildPerTurnConfig(config);
@@ -985,12 +1038,9 @@ export function createDefaultAskDependencies(sessionStore: SessionStore): AskDep
     appendSessionTranscript: sessionStore.appendSessionTranscript.bind(sessionStore),
     createChat: (args) => {
       const { toolConfig, tools, functionCallingMode } = buildAskToolingConfig(args);
-      const config = buildGenerateContentConfig({
-        ...args,
-        toolConfig,
-        tools,
-        ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
-      });
+      const config = buildGenerateContentConfig(
+        buildAskGenerationOptions(args, toolConfig, tools, functionCallingMode),
+      );
       const chat = getAI().chats.create({
         model: MODEL,
         config,
@@ -1032,12 +1082,9 @@ export function createDefaultAskDependencies(sessionStore: SessionStore): AskDep
           )
         : (() => {
             const { toolConfig, tools, functionCallingMode } = buildAskToolingConfig(args);
-            return buildGenerateContentConfig({
-              ...rebuildArgs,
-              toolConfig,
-              tools,
-              ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
-            });
+            return buildGenerateContentConfig(
+              buildAskGenerationOptions(rebuildArgs, toolConfig, tools, functionCallingMode),
+            );
           })();
       const chat = getAI().chats.create({
         model: contract?.model ?? MODEL,
@@ -1377,6 +1424,11 @@ export async function chatWork(
       maxOutputTokens: args.maxOutputTokens,
       seed: args.seed,
       safetySettings: args.safetySettings,
+      codeExecution: args.codeExecution,
+      fileSearch: args.fileSearch,
+      functions: args.functions,
+      serverSideToolInvocations: args.serverSideToolInvocations,
+      additionalTools: args.additionalTools,
       systemInstruction: args.systemInstruction,
       temperature: args.temperature,
       thinkingLevel: args.thinkingLevel,

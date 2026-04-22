@@ -85,7 +85,7 @@ The job-first surface is intentionally opinionated:
 - `subjectKind="failure"` is the public failure-diagnosis path.
 - `chat.responseSchemaJson` is intended for single-turn calls and brand-new sessions.
 - The public surface does not expose the legacy `discover` callable tool or the retired standalone `search`, `analyze_url`, `agentic_search`, `explain_error`, `diagram`, or `execute_code` tools.
-- The public surface does not expose Gemini File Search stores or Live API sessions.
+- `chat` and `research` can use Gemini File Search stores; Live API sessions are not exposed.
 - `thinkingBudget` is available anywhere `thinkingLevel` is accepted and maps directly to
   Gemini `thinkingConfig.thinkingBudget`.
 
@@ -111,7 +111,7 @@ Research results separate Google Search grounding from URL Context:
 
 ### Tool Capability Matrix
 
-Orchestration resolves one of seven server-side tool profiles per call. `googleSearch` and `urls` are additive flags — supplying both yields a combined profile.
+Orchestration composes server-side tool capabilities per call. `googleSearch`, `urls`, File Search, Code Execution, and chat function declarations are additive when supported by the selected job.
 
 | Profile       | Google Search | URL Context | Code Execution |
 | ------------- | :-----------: | :---------: | :------------: |
@@ -123,12 +123,12 @@ Orchestration resolves one of seven server-side tool profiles per call. `googleS
 | `search_code` |       ✓       |      -      |       ✓        |
 | `url_code`    |       -       |      ✓      |       ✓        |
 
-| Tool       | `googleSearch?` | `urls?` | Notes                                                         |
-| ---------- | :-------------: | :-----: | ------------------------------------------------------------- |
-| `chat`     |        ✓        |    ✓    | URLs are retrieved via URL Context when active.               |
-| `research` |        ✓        |    ✓    | `mode="deep"` always enables Google Search.                   |
-| `analyze`  |        ✓        |    ✓    | Diagram + URL target auto-selects `url_code` when validating. |
-| `review`   |        ✓        |    ✓    | `urls` available on `comparison` and `failure` subjects.      |
+| Tool       | `googleSearch?` | `urls?` | `fileSearch?` | `functions?` | Notes                                                         |
+| ---------- | :-------------: | :-----: | :-----------: | :----------: | ------------------------------------------------------------- |
+| `chat`     |        ✓        |    ✓    |       ✓       |      ✓       | Function execution is owned by the MCP client.                |
+| `research` |        ✓        |    ✓    |       ✓       |      -       | `mode="deep"` always enables Google Search.                   |
+| `analyze`  |        ✓        |    ✓    |       -       |      -       | Diagram + URL target auto-selects `url_code` when validating. |
+| `review`   |        ✓        |    ✓    |       -       |      -       | `urls` available on `comparison` and `failure` subjects.      |
 
 ## Notification Surface
 

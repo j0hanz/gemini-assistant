@@ -20,7 +20,11 @@ import {
   buildGroundedAnswerPrompt,
 } from '../lib/model-prompts.js';
 import { pickDefined } from '../lib/object.js';
-import { resolveOrchestration } from '../lib/orchestration.js';
+import {
+  type BuiltInToolName,
+  type BuiltInToolSpec,
+  resolveOrchestration,
+} from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import {
   appendSources,
@@ -76,8 +80,25 @@ type StreamResponseBuilder<T extends Record<string, unknown>> = Parameters<
 >[4];
 type GenerationConfigFields = Pick<
   ResearchInput,
-  'maxOutputTokens' | 'safetySettings' | 'thinkingBudget' | 'additionalTools'
+  'maxOutputTokens' | 'safetySettings' | 'thinkingBudget' | 'additionalTools' | 'fileSearch'
 >;
+
+function buildResearchBuiltInSpecs(
+  names: readonly BuiltInToolName[] | undefined,
+  fileSearch: ResearchInput['fileSearch'] | undefined,
+): BuiltInToolSpec[] {
+  const specs: BuiltInToolSpec[] = (names ?? []).map((kind) => ({ kind }) as BuiltInToolSpec);
+  if (fileSearch) {
+    specs.push({
+      kind: 'fileSearch',
+      fileSearchStoreNames: fileSearch.fileSearchStoreNames,
+      ...(fileSearch.metadataFilter !== undefined
+        ? { metadataFilter: fileSearch.metadataFilter }
+        : {}),
+    });
+  }
+  return specs;
+}
 
 async function runToolStream<T extends Record<string, unknown>>(
   ctx: ServerContext,
@@ -621,6 +642,7 @@ async function runDeepResearchPlan(
     maxOutputTokens?: number | undefined;
     safetySettings?: ResearchInput['safetySettings'] | undefined;
     additionalTools?: ResearchInput['additionalTools'] | undefined;
+    fileSearch?: ResearchInput['fileSearch'] | undefined;
   },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -664,12 +686,14 @@ async function runDeepResearchPlan(
 
   const resolvedRetrieval = await resolveOrchestration(
     {
-      builtInToolNames:
+      builtInToolSpecs: buildResearchBuiltInSpecs(
         (args.urls?.length ?? 0) > 0
           ? (['googleSearch', 'urlContext'] as const)
           : (['googleSearch'] as const),
+        args.fileSearch,
+      ),
       urls: args.urls,
-      includeServerSideToolInvocations: true,
+      serverSideToolInvocations: 'always',
       ...(args.additionalTools
         ? { additionalTools: args.additionalTools as import('@google/genai').ToolListUnion }
         : {}),
@@ -714,8 +738,11 @@ async function runDeepResearchPlan(
     .join('\n\n');
   const resolvedSynthesis = await resolveOrchestration(
     {
-      builtInToolNames: args.searchDepth >= 4 ? (['codeExecution'] as const) : undefined,
-      includeServerSideToolInvocations: true,
+      builtInToolSpecs: buildResearchBuiltInSpecs(
+        args.searchDepth >= 4 ? (['codeExecution'] as const) : undefined,
+        args.fileSearch,
+      ),
+      serverSideToolInvocations: 'always',
     },
     ctx,
     'agentic_search',
@@ -789,17 +816,20 @@ async function searchWork(
     maxOutputTokens,
     safetySettings,
     additionalTools,
+    fileSearch,
   }: SearchInput & GenerationConfigFields,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const resolved = await resolveOrchestration(
     {
-      builtInToolNames:
+      builtInToolSpecs: buildResearchBuiltInSpecs(
         (urls?.length ?? 0) > 0
           ? (['googleSearch', 'urlContext'] as const)
           : (['googleSearch'] as const),
+        fileSearch,
+      ),
       urls,
-      includeServerSideToolInvocations: true,
+      serverSideToolInvocations: 'always',
       ...(additionalTools
         ? { additionalTools: additionalTools as import('@google/genai').ToolListUnion }
         : {}),
@@ -848,11 +878,16 @@ export async function analyzeUrlWork(
     thinkingBudget,
     maxOutputTokens,
     safetySettings,
+    fileSearch,
   }: AnalyzeUrlInput & GenerationConfigFields,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const resolved = await resolveOrchestration(
-    { builtInToolNames: ['urlContext'] as const, urls, includeServerSideToolInvocations: true },
+    {
+      builtInToolSpecs: buildResearchBuiltInSpecs(['urlContext'] as const, fileSearch),
+      urls,
+      serverSideToolInvocations: 'always',
+    },
     ctx,
     'analyze_url',
   );
@@ -904,6 +939,7 @@ async function agenticSearchWork(
     maxOutputTokens,
     safetySettings,
     additionalTools,
+    fileSearch,
   }: Omit<AgenticSearchInput, 'thinkingLevel'> &
     GenerationConfigFields & {
       deliverable?: string | undefined;
@@ -942,6 +978,7 @@ async function agenticSearchWork(
         maxOutputTokens,
         safetySettings,
         additionalTools,
+        fileSearch,
       },
       ctx,
     );
@@ -956,12 +993,14 @@ async function agenticSearchWork(
 
   const resolved = await resolveOrchestration(
     {
-      builtInToolNames:
+      builtInToolSpecs: buildResearchBuiltInSpecs(
         (urls?.length ?? 0) > 0
           ? (['googleSearch', 'urlContext', 'codeExecution'] as const)
           : (['googleSearch', 'codeExecution'] as const),
+        fileSearch,
+      ),
       urls,
-      includeServerSideToolInvocations: true,
+      serverSideToolInvocations: 'always',
       ...(additionalTools
         ? { additionalTools: additionalTools as import('@google/genai').ToolListUnion }
         : {}),
@@ -1017,6 +1056,7 @@ async function runQuickResearch(
       maxOutputTokens: args.maxOutputTokens,
       safetySettings: args.safetySettings,
       additionalTools: args.additionalTools,
+      fileSearch: args.fileSearch,
     },
     ctx,
   );
@@ -1044,6 +1084,7 @@ async function runDeepResearch(args: ResearchInput, ctx: ServerContext): Promise
       maxOutputTokens: args.maxOutputTokens,
       safetySettings: args.safetySettings,
       additionalTools: args.additionalTools,
+      fileSearch: args.fileSearch,
     },
     ctx,
   );

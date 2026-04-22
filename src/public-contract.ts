@@ -127,6 +127,9 @@ export const DISCOVERY_ENTRIES = [
       'temperature?',
       'seed?',
       'codeExecution?',
+      'fileSearch?',
+      'functions?',
+      'serverSideToolInvocations?',
       'additionalTools?',
     ],
     returns:
@@ -135,6 +138,7 @@ export const DISCOVERY_ENTRIES = [
       'Sessions are stored in server memory only and expire or evict over time.',
       'Sessions require a stateful server connection path; stateless transport mode does not preserve chat continuity across requests.',
       'Structured output is intended for single-turn calls and new sessions, not resumed sessions.',
+      'Declared functions are executed by the MCP client, not by this server.',
     ],
     related: [
       { kind: 'resource', name: 'session://' },
@@ -159,13 +163,14 @@ export const DISCOVERY_ENTRIES = [
       'thinkingBudget?',
       'maxOutputTokens?',
       'safetySettings?',
+      'fileSearch?',
       'additionalTools?',
     ],
     returns:
       'A summary with grounding status, grounding signals, claim-linked findings, Google Search sources, URL Context provenance, warnings, and tool-usage details from the multi-step research path.',
     limitations: [
       'Mode defaults to quick; this contract does not accept legacy top-level query or topic fields.',
-      'Grounding uses Google Search and optional URL Context, not persistent File Search indexes.',
+      'Grounding uses Google Search, optional URL Context, and optional Gemini File Search stores.',
     ],
     related: [
       { kind: 'prompt', name: 'research' },

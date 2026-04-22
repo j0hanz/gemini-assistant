@@ -182,7 +182,7 @@ describe('ask contract', () => {
       content: [
         {
           type: 'text',
-          text: 'chat: responseSchema cannot be combined with built-in tools (googleSearch, urlContext, codeExecution)',
+          text: 'chat: responseSchema cannot be combined with built-in tools (googleSearch, urlContext, codeExecution, fileSearch)',
         },
       ],
       isError: true,
@@ -208,7 +208,7 @@ describe('ask contract', () => {
       content: [
         {
           type: 'text',
-          text: 'chat: responseSchema cannot be combined with built-in tools (googleSearch, urlContext, codeExecution)',
+          text: 'chat: responseSchema cannot be combined with built-in tools (googleSearch, urlContext, codeExecution, fileSearch)',
         },
       ],
       isError: true,
@@ -242,6 +242,77 @@ describe('ask contract', () => {
         tools?.some((t) => 'functionDeclarations' in t),
         'additionalTools were not included',
       );
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('resolves orchestration config with fileSearch and functions', async () => {
+    const stub = withGeminiStreamStub([
+      async function* () {
+        yield {
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    functionCall: {
+                      name: 'lookup_doc',
+                      args: { query: 'x' },
+                    },
+                  },
+                  { text: 'Need lookup' },
+                ],
+              },
+              finishReason: 'STOP',
+            },
+          ],
+        };
+      },
+    ]);
+    try {
+      const askWork = createAskWork(
+        createDeps({
+          runWithoutSession: askWithoutSession,
+        }),
+      );
+      const result = await askWork(
+        {
+          message: 'Hello',
+          fileSearch: { fileSearchStoreNames: ['fileSearchStores/docs'] },
+          functions: {
+            declarations: [
+              {
+                name: 'lookup_doc',
+                description: 'Lookup a document',
+                parametersJsonSchema: { type: 'object' },
+              },
+            ],
+            mode: 'AUTO',
+          },
+        },
+        createContext(),
+      );
+      assert.strictEqual(stub.calls.length, 1);
+      const callConfig = stub.calls[0]?.config as Record<string, unknown> | undefined;
+      const tools = callConfig?.tools as Record<string, unknown>[] | undefined;
+      assert.ok(
+        tools?.some((tool) => 'fileSearch' in tool),
+        'fileSearch was not included',
+      );
+      assert.ok(
+        tools?.some((tool) => 'functionDeclarations' in tool),
+        'function declarations were not included',
+      );
+      assert.deepStrictEqual(
+        (callConfig?.toolConfig as { functionCallingConfig?: { mode?: string } } | undefined)
+          ?.functionCallingConfig,
+        { mode: 'AUTO' },
+      );
+      const structured = result.structuredContent as Record<string, unknown>;
+      assert.deepStrictEqual(structured.functionCalls, [
+        { name: 'lookup_doc', args: { query: 'x' } },
+      ]);
     } finally {
       stub.restore();
     }

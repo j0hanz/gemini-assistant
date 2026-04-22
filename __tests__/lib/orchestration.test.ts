@@ -6,11 +6,13 @@ import { describe, it } from 'node:test';
 import { FunctionCallingConfigMode } from '@google/genai';
 
 import { buildMergedToolConfig } from '../../src/client.js';
+import { AppError } from '../../src/lib/errors.js';
 import {
   buildOrchestrationConfig,
   buildToolProfile,
   BUILT_IN_TOOL_NAMES,
   resolveOrchestration,
+  resolveServerSideToolInvocations,
 } from '../../src/lib/orchestration.js';
 
 interface Call {
@@ -44,7 +46,8 @@ function subsets<T>(items: readonly T[]): T[][] {
 }
 
 describe('buildOrchestrationConfig', () => {
-  for (const subset of subsets(BUILT_IN_TOOL_NAMES)) {
+  const legacyBuiltInNames = BUILT_IN_TOOL_NAMES.filter((name) => name !== 'fileSearch');
+  for (const subset of subsets(legacyBuiltInNames)) {
     const label = subset.length > 0 ? subset.join('+') : 'none';
     it(`composes built-in tool subset [${label}]`, () => {
       const result = buildOrchestrationConfig({ builtInToolNames: subset });
@@ -53,7 +56,7 @@ describe('buildOrchestrationConfig', () => {
       for (const name of BUILT_IN_TOOL_NAMES) {
         assert.strictEqual(
           result.activeCapabilities.has(name),
-          subset.includes(name),
+          subset.includes(name as (typeof legacyBuiltInNames)[number]),
           `${name} capability`,
         );
       }
@@ -67,13 +70,24 @@ describe('buildOrchestrationConfig', () => {
   it('exposes includeServerSideToolInvocations when requested', () => {
     const result = buildOrchestrationConfig({
       builtInToolNames: ['googleSearch'],
-      includeServerSideToolInvocations: true,
+      serverSideToolInvocations: 'always',
     });
     assert.deepStrictEqual(result.toolConfig, { includeServerSideToolInvocations: true });
   });
 
-  it('omits toolConfig when includeServerSideToolInvocations is not set', () => {
+  it('auto-enables server-side tool invocations only when capabilities are active', () => {
     const result = buildOrchestrationConfig({ builtInToolNames: ['googleSearch'] });
+    assert.deepStrictEqual(result.toolConfig, { includeServerSideToolInvocations: true });
+
+    const empty = buildOrchestrationConfig({});
+    assert.strictEqual(empty.toolConfig, undefined);
+  });
+
+  it('omits server-side tool invocations when policy is never', () => {
+    const result = buildOrchestrationConfig({
+      builtInToolNames: ['googleSearch'],
+      serverSideToolInvocations: 'never',
+    });
     assert.strictEqual(result.toolConfig, undefined);
   });
 
@@ -94,6 +108,41 @@ describe('buildOrchestrationConfig', () => {
       functionCallingMode: FunctionCallingConfigMode.ANY,
     });
     assert.strictEqual(result.functionCallingMode, FunctionCallingConfigMode.ANY);
+  });
+
+  it('builds fileSearch from typed built-in specs', () => {
+    const result = buildOrchestrationConfig({
+      builtInToolSpecs: [{ kind: 'fileSearch', fileSearchStoreNames: ['fileSearchStores/docs'] }],
+    });
+    assert.deepStrictEqual(result.tools, [
+      { fileSearch: { fileSearchStoreNames: ['fileSearchStores/docs'] } },
+    ]);
+    assert.strictEqual(result.activeCapabilities.has('fileSearch'), true);
+  });
+
+  it('appends typed function declarations and function calling mode', () => {
+    const declarations = [
+      {
+        name: 'lookup',
+        description: 'Lookup a thing',
+        parameters: { type: 'object' },
+      },
+    ];
+    const result = buildOrchestrationConfig({
+      functionDeclarations: declarations,
+      functionCallingMode: FunctionCallingConfigMode.ANY,
+    });
+    assert.deepStrictEqual(result.tools, [{ functionDeclarations: declarations }]);
+    assert.strictEqual(result.activeCapabilities.has('functions'), true);
+    assert.strictEqual(result.functionCallingMode, FunctionCallingConfigMode.ANY);
+    assert.deepStrictEqual(result.toolConfig, { includeServerSideToolInvocations: true });
+  });
+
+  it('rejects legacy builtInToolNames fileSearch without a spec', () => {
+    assert.throws(
+      () => buildOrchestrationConfig({ builtInToolNames: ['fileSearch'] }),
+      (error) => error instanceof AppError && error.message.includes('fileSearch requires'),
+    );
   });
 
   it('returns toolProfile "none" for no built-in and no additional tools', () => {
@@ -141,6 +190,19 @@ describe('buildMergedToolConfig', () => {
   });
 });
 
+describe('resolveServerSideToolInvocations', () => {
+  it('resolves the policy truth table', () => {
+    assert.strictEqual(resolveServerSideToolInvocations('auto', new Set()), undefined);
+    assert.strictEqual(resolveServerSideToolInvocations(undefined, new Set()), undefined);
+    assert.strictEqual(resolveServerSideToolInvocations('auto', new Set(['googleSearch'])), true);
+    assert.strictEqual(resolveServerSideToolInvocations('always', new Set()), true);
+    assert.strictEqual(
+      resolveServerSideToolInvocations('never', new Set(['googleSearch'])),
+      undefined,
+    );
+  });
+});
+
 describe('resolveOrchestration', () => {
   it('returns an error result for invalid URLs', async () => {
     const { ctx } = makeCtx();
@@ -152,7 +214,7 @@ describe('resolveOrchestration', () => {
   it('emits an info log with resolved capabilities', async () => {
     const { ctx, calls } = makeCtx();
     const resolved = await resolveOrchestration(
-      { builtInToolNames: ['googleSearch'], includeServerSideToolInvocations: true },
+      { builtInToolNames: ['googleSearch'], serverSideToolInvocations: 'always' },
       ctx,
       'research',
     );

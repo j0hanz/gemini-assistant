@@ -21,13 +21,6 @@ import { executor } from './tool-executor.js';
 
 const DEFAULT_TTL = 300_000;
 
-export const READONLY_ANNOTATIONS = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true,
-} as const;
-
 export const READONLY_NON_IDEMPOTENT_ANNOTATIONS = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -255,7 +248,7 @@ function isTaskHandler(handler: unknown): handler is TaskToolHandler {
   return typeof handler === 'object' && handler !== null && 'createTask' in handler;
 }
 
-export function wrapTaskSafeWork<TArgs>(toolName: string, work: TaskWork<TArgs>): TaskWork<TArgs> {
+function wrapTaskSafeWork<TArgs>(toolName: string, work: TaskWork<TArgs>): TaskWork<TArgs> {
   return async (args, ctx) => {
     try {
       return await work(args, ctx);

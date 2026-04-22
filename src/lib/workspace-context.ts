@@ -243,10 +243,6 @@ interface WorkspaceCacheStatus {
   ttl: string;
 }
 
-type CacheChangeCallback = (status: WorkspaceCacheStatus) => void;
-
-// ── Utilities ─────────────────────────────────────────────────────────
-
 function normalizeRootsKey(roots: readonly string[]): string {
   return [
     ...new Set(roots.filter((root) => root && isAbsolute(root)).map(normalizePathForComparison)),
@@ -294,7 +290,7 @@ async function listScanFileNames(root: string): Promise<string[]> {
   }
 }
 
-export async function scanRootForFiles(root: string): Promise<Map<string, string>> {
+async function scanRootForFiles(root: string): Promise<Map<string, string>> {
   const files = new Map<string, string>();
   for (const name of await listScanFileNames(root)) {
     const filePath = join(root, name);
@@ -415,25 +411,6 @@ export async function assembleWorkspaceContext(
 
 // ── Cache Lifecycle Manager ───────────────────────────────────────────
 
-const workspaceCacheChangeSubscribers = new Set<CacheChangeCallback>();
-
-export function subscribeWorkspaceCacheChange(callback: CacheChangeCallback): () => void {
-  workspaceCacheChangeSubscribers.add(callback);
-  return () => {
-    workspaceCacheChangeSubscribers.delete(callback);
-  };
-}
-
-function emitWorkspaceCacheChange(status: WorkspaceCacheStatus): void {
-  for (const subscriber of workspaceCacheChangeSubscribers) {
-    try {
-      subscriber(status);
-    } catch (err) {
-      log.warn(`Workspace cache change subscriber threw: ${String(err)}`);
-    }
-  }
-}
-
 class WorkspaceCacheManagerImpl {
   private activeRootsKey: string | undefined;
   private cacheName: string | undefined;
@@ -508,7 +485,6 @@ class WorkspaceCacheManagerImpl {
     this.sources = [];
     this.createdAt = undefined;
     this.lastHashCheck = undefined;
-    this.emitChange();
   }
 
   private async createCache(
@@ -608,7 +584,6 @@ class WorkspaceCacheManagerImpl {
       this.createdAt = Date.now();
 
       log.info(`Workspace cache created: ${cache.name}`);
-      this.emitChange();
 
       return this.cacheName;
     } catch (err) {
@@ -630,10 +605,6 @@ class WorkspaceCacheManagerImpl {
     } catch (err) {
       log.warn(`Failed to delete workspace cache ${cacheName}: ${String(err)}`);
     }
-  }
-
-  private emitChange(): void {
-    emitWorkspaceCacheChange(this.getCacheStatus());
   }
 }
 

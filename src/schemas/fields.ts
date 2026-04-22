@@ -27,8 +27,8 @@ export const DIAGRAM_TYPES = ['mermaid', 'plantuml'] as const;
 export const ASK_URL_TOOL_PROFILES = ['url', 'search_url'] as const;
 export const ASK_NON_URL_TOOL_PROFILES = ['none', 'search', 'code', 'search_code'] as const;
 export const RESEARCH_MODE_OPTIONS = ['quick', 'deep'] as const;
-export const ANALYZE_TARGET_KIND_OPTIONS = ['file', 'url', 'multi'] as const;
-export const ANALYZE_OUTPUT_KIND_OPTIONS = ['summary', 'diagram'] as const;
+const ANALYZE_TARGET_KIND_OPTIONS = ['file', 'url', 'multi'] as const;
+const ANALYZE_OUTPUT_KIND_OPTIONS = ['summary', 'diagram'] as const;
 export const REVIEW_SUBJECT_OPTIONS = ['diff', 'comparison', 'failure'] as const;
 export const MEMORY_ACTION_OPTIONS = [
   'sessions.list',
@@ -83,14 +83,6 @@ export function requiredText(description: string, maxLength?: number) {
 
 export function goalText(description = 'User goal or requested outcome', maxLength = 100_000) {
   return textField(description, maxLength);
-}
-
-export function boundedFloat(description: string, minimum: number, maximum: number) {
-  return withFieldMetadata(z.number().min(minimum).max(maximum), description);
-}
-
-export function boundedInt(description: string, minimum: number, maximum: number) {
-  return withFieldMetadata(z.int().min(minimum).max(maximum), description);
 }
 
 function escapesRelativeRoot(value: string): boolean {

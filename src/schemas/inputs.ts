@@ -15,7 +15,6 @@ import {
   goalText,
   mediaResolution,
   optionalField,
-  PublicJobNameSchema,
   requiredText,
   researchMode,
   reviewSubjectKind,
@@ -252,15 +251,6 @@ export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter =
 export const MemoryInputSchema = createMemoryInputSchema();
 export type MemoryInput = z.infer<typeof MemoryInputSchema>;
 
-export const DiscoverInputSchema = z.strictObject({
-  job: withFieldMetadata(
-    optionalField(PublicJobNameSchema),
-    'Public job to focus discovery guidance on.',
-  ),
-  goal: optionalField(textField('User outcome to optimize for.')),
-});
-export type DiscoverInput = z.infer<typeof DiscoverInputSchema>;
-
 function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
   const askCommonShape = {
     message: requiredText('User message or prompt', 100_000),
@@ -327,7 +317,6 @@ export const ExecuteCodeInputSchema = z.strictObject({
   ),
   thinkingLevel: thinkingLevelField,
 });
-export type ExecuteCodeInput = z.infer<typeof ExecuteCodeInputSchema>;
 
 export const SearchInputSchema = z.strictObject({
   query: requiredText('Question or topic to research'),
@@ -456,7 +445,6 @@ export const ExplainErrorInputSchema = z.strictObject({
     'Cache resource name to provide project context during diagnosis.',
   ),
 });
-export type ExplainErrorInput = z.infer<typeof ExplainErrorInputSchema>;
 
 export const CompareFilesInputSchema = z.strictObject({
   ...createFilePairFields(
@@ -508,4 +496,3 @@ export const GenerateDiagramInputSchema = z
     ),
   })
   .superRefine(validateExclusiveSourceFileFields);
-export type GenerateDiagramInput = z.infer<typeof GenerateDiagramInputSchema>;

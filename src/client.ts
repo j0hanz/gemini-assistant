@@ -10,7 +10,7 @@ import { FunctionCallingConfigMode, GoogleGenAI } from '@google/genai';
 
 import { withRetry } from './lib/errors.js';
 import { logger } from './lib/logger.js';
-import { pickDefined } from './lib/response.js';
+import { pickDefined } from './lib/object.js';
 import type { GeminiResponseSchema } from './schemas/json-schema.js';
 
 import { getApiKey, getExposeThoughts, getGeminiModel } from './config.js';

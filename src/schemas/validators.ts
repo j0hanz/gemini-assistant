@@ -20,20 +20,6 @@ function hasDuplicates(values: readonly string[]): boolean {
   return new Set(values).size !== values.length;
 }
 
-export function validateBounds(
-  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
-  minimum: number | undefined,
-  maximum: number | undefined,
-  maximumPath: 'maximum' | 'maxItems',
-  errorMessage: string,
-): void {
-  if (minimum === undefined || maximum === undefined || minimum <= maximum) {
-    return;
-  }
-
-  addCustomIssue(ctx, errorMessage, [maximumPath], maximum);
-}
-
 export function validatePropertyKeyList(
   ctx: z.core.$RefinementCtx<Record<string, unknown>>,
   propertyNames: Set<string> | undefined,

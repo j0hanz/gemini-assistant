@@ -10,7 +10,7 @@ import {
   workspacePath,
 } from './fields.js';
 
-export const usageMetadataFields = {
+const usageMetadataFields = {
   promptTokenCount: nonNegativeInt('Tokens in the prompt').optional(),
   candidatesTokenCount: nonNegativeInt('Tokens in the response').optional(),
   thoughtsTokenCount: nonNegativeInt('Tokens used for thinking').optional(),
@@ -19,7 +19,7 @@ export const usageMetadataFields = {
 
 export const UsageMetadataSchema = z.strictObject(usageMetadataFields);
 
-export const functionCallEntryFields = {
+const functionCallEntryFields = {
   name: z.string().describe('Function/tool name'),
   args: z.record(z.string(), z.unknown()).describe('Function call arguments').optional(),
   id: z.string().describe('Function call identifier when present').optional(),
@@ -27,7 +27,7 @@ export const functionCallEntryFields = {
 
 export const FunctionCallEntrySchema = z.strictObject(functionCallEntryFields);
 
-export const ToolEventKindSchema = z.enum([
+const ToolEventKindSchema = z.enum([
   'part',
   'tool_call',
   'tool_response',
@@ -37,7 +37,7 @@ export const ToolEventKindSchema = z.enum([
   'code_execution_result',
 ]);
 
-export const toolEventFields = {
+const toolEventFields = {
   kind: ToolEventKindSchema.describe('Normalized Gemini tool/function event type'),
   name: z.string().describe('Function name when available').optional(),
   toolType: z.string().describe('Built-in tool type when available').optional(),
@@ -82,14 +82,14 @@ export const publicBaseOutputFields = {
   ...streamMetadataOutputFields,
 };
 
-export const urlMetadataEntryFields = {
+const urlMetadataEntryFields = {
   url: PublicHttpUrlSchema.describe('Retrieved URL'),
   status: z.string().describe('Retrieval status (e.g. URL_RETRIEVAL_STATUS_SUCCESS)'),
 };
 
 export const UrlMetadataEntrySchema = z.strictObject(urlMetadataEntryFields);
 
-export const sourceDetailFields = {
+const sourceDetailFields = {
   title: z.string().describe('Source title when Gemini provides one').optional(),
   url: PublicHttpUrlSchema.describe('Source URL'),
 };
@@ -114,7 +114,7 @@ export const cacheSummaryFields = {
 
 export const CacheSummarySchema = z.strictObject(cacheSummaryFields);
 
-export const sessionSummaryFields = {
+const sessionSummaryFields = {
   id: z.string().describe('Server-managed session identifier'),
   lastAccess: z.number().describe('Last access timestamp in epoch milliseconds'),
 };

@@ -1,6 +1,5 @@
 import { z } from 'zod/v4';
 
-import { textField } from './fields.js';
 import { validatePropertyKeyList } from './validators.js';
 
 const JSON_LITERAL_SCHEMA = z.union([z.string(), z.number(), z.boolean(), z.null()]);
@@ -31,6 +30,10 @@ function hasSchemaShape(value: Record<string, unknown>): boolean {
 
 function propertyNameField(description: string) {
   return z.string().min(1).describe(description);
+}
+
+function textField(description: string) {
+  return z.string().trim().min(1).describe(description);
 }
 
 export const GeminiResponseSchema: z.ZodType<Record<string, unknown>> = z.lazy(() =>

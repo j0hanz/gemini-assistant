@@ -12,6 +12,7 @@ import {
   buildFileAnalysisPrompt,
   buildGroundedAnswerPrompt,
 } from '../lib/model-prompts.js';
+import { pickDefined } from '../lib/object.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import {
@@ -22,7 +23,6 @@ import {
   collectGroundedSources,
   collectUrlMetadata,
   formatCountLabel,
-  pickDefined,
   validateStructuredContent,
 } from '../lib/response.js';
 import { type StreamResult } from '../lib/streaming.js';
@@ -133,7 +133,7 @@ async function enrichTopicWithSampling(topic: string, ctx: ServerContext): Promi
   }
 }
 
-export function buildAgenticSearchResult(streamResult: StreamResult, textContent: string) {
+function buildAgenticSearchResult(streamResult: StreamResult, textContent: string) {
   const sources = collectGroundedSources(streamResult.groundingMetadata);
   const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
   const contentAdditions: CallToolResult['content'] = [];

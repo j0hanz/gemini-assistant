@@ -1,6 +1,8 @@
-import type { ProgressNotification, ServerContext } from '@modelcontextprotocol/server';
-
-import { RELATED_TASK_META_KEY } from './response.js';
+import {
+  type ProgressNotification,
+  RELATED_TASK_META_KEY,
+  type ServerContext,
+} from '@modelcontextprotocol/server';
 
 // ── Constants ─────────────────────────────────────────────────────────
 

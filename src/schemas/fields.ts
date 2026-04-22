@@ -208,7 +208,7 @@ export function workspacePathArray(options: WorkspacePathArrayOptions) {
 }
 
 export function timestamp(description: string) {
-  return withFieldMetadata(z.iso.datetime({ offset: true }), description);
+  return withFieldMetadata(z.iso.datetime(), description);
 }
 
 export function sessionId(description: string) {
@@ -246,21 +246,9 @@ export function analyzeOutputKind(
   return withFieldMetadata(z.enum(ANALYZE_OUTPUT_KIND_OPTIONS).default('summary'), description);
 }
 
-export function analyzeDiagramType(
-  description = 'Diagram syntax to generate when outputKind=diagram.',
-) {
-  return withFieldMetadata(z.enum(DIAGRAM_TYPES), description);
-}
-
 export function mediaResolution(description: string) {
   return withFieldMetadata(
     z.enum(MEDIA_RESOLUTIONS).default('MEDIA_RESOLUTION_MEDIUM'),
     description,
   );
-}
-
-export function reviewSubjectKind(
-  description = 'What to review: the current diff, a file comparison, or a failure report.',
-) {
-  return withFieldMetadata(z.enum(REVIEW_SUBJECT_OPTIONS).default('diff'), description);
 }

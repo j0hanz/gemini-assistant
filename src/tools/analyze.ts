@@ -7,6 +7,7 @@ import type {
 
 import { createPartFromUri } from '@google/genai';
 import type { Part } from '@google/genai';
+import type { z } from 'zod/v4';
 
 import { cleanupErrorLogger } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
@@ -179,7 +180,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
         },
         (_streamResult, textContent: string) => ({
           structuredContent: {
-            analysis: textContent || '',
+            summary: textContent || '',
           },
         }),
       );
@@ -403,23 +404,11 @@ async function runAnalyzeTarget(
   );
 }
 
-function extractAnalyzeSummary(structured: Record<string, unknown>): string {
-  if (typeof structured.analysis === 'string') {
-    return structured.analysis;
-  }
-
-  if (typeof structured.answer === 'string') {
-    return structured.answer;
-  }
-
-  return typeof structured.summary === 'string' ? structured.summary : '';
-}
-
 function buildAnalyzeStructuredContent(
   args: AnalyzeInput,
   ctx: ServerContext,
   structured: Record<string, unknown>,
-): Record<string, unknown> {
+): z.infer<typeof AnalyzeOutputSchema> {
   const base = {
     ...buildBaseStructuredOutput(ctx.task?.id),
     ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
@@ -437,9 +426,7 @@ function buildAnalyzeStructuredContent(
       targetKind: args.targetKind,
       diagramType,
       diagram:
-        typeof structured.diagram === 'string' && structured.diagram
-          ? structured.diagram
-          : extractAnalyzeSummary(structured),
+        typeof structured.diagram === 'string' && structured.diagram ? structured.diagram : '',
       ...(typeof structured.explanation === 'string' && structured.explanation
         ? { explanation: structured.explanation }
         : {}),
@@ -449,17 +436,17 @@ function buildAnalyzeStructuredContent(
         : args.targetKind === 'multi'
           ? { analyzedPaths: requireAnalyzeFilePaths(args) }
           : {}),
-    };
+    } as z.infer<typeof AnalyzeOutputSchema>;
   }
 
   return {
     ...base,
     kind: 'summary',
     targetKind: args.targetKind,
-    summary: extractAnalyzeSummary(structured),
+    summary: typeof structured.summary === 'string' ? structured.summary : '',
     ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
     ...(args.targetKind === 'multi' ? { analyzedPaths: requireAnalyzeFilePaths(args) } : {}),
-  };
+  } as z.infer<typeof AnalyzeOutputSchema>;
 }
 
 export function registerAnalyzeTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {

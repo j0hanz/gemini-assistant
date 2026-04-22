@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { createPartFromUri } from '@google/genai';
+import type { z } from 'zod/v4';
 
 import { cleanupErrorLogger } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
@@ -168,7 +169,7 @@ interface UntrackedPatchResult {
 }
 
 type AnalyzePrStructuredContent = Record<string, unknown> & {
-  analysis: string;
+  summary: string;
   stats: DiffStats;
   reviewedPaths: string[];
   includedUntracked: string[];
@@ -255,7 +256,7 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
           }),
         (_streamResult, textContent: string) => ({
           structuredContent: {
-            comparison: textContent || '',
+            summary: textContent || '',
           },
         }),
       );
@@ -331,7 +332,7 @@ async function diagnoseFailureWork(
       }),
     (_streamResult, textContent: string) => ({
       structuredContent: {
-        explanation: textContent || '',
+        summary: textContent || '',
       },
     }),
   );
@@ -811,13 +812,13 @@ function buildBudgetedSnapshotDiff(snapshot: LocalDiffSnapshot): BudgetedSnapsho
 
 function buildStructuredContent(
   snapshot: LocalDiffSnapshot,
-  analysis: string,
+  summary: string,
   reviewedPaths: string[],
   omittedPaths: string[] = [],
   truncated?: boolean,
 ): AnalyzePrStructuredContent {
   return {
-    analysis,
+    summary,
     stats: snapshot.stats,
     reviewedPaths,
     includedUntracked: snapshot.includedUntracked,
@@ -1019,22 +1020,13 @@ export async function analyzePrWork(
 
 function buildReviewStructuredContent(
   taskId: string | undefined,
-  subjectKind: string,
+  subjectKind: ReviewInput['subjectKind'],
   structured: Record<string, unknown>,
-): Record<string, unknown> {
-  const summary =
-    typeof structured.analysis === 'string'
-      ? structured.analysis
-      : typeof structured.comparison === 'string'
-        ? structured.comparison
-        : typeof structured.explanation === 'string'
-          ? structured.explanation
-          : '';
-
+): z.infer<typeof ReviewOutputSchema> {
   return {
     ...buildBaseStructuredOutput(taskId),
     subjectKind,
-    summary,
+    summary: typeof structured.summary === 'string' ? structured.summary : '',
     ...(structured.stats ? { stats: structured.stats } : {}),
     ...(structured.reviewedPaths ? { reviewedPaths: structured.reviewedPaths } : {}),
     ...(structured.includedUntracked ? { includedUntracked: structured.includedUntracked } : {}),
@@ -1047,23 +1039,7 @@ function buildReviewStructuredContent(
     ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
     ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
     ...(structured.usage ? { usage: structured.usage } : {}),
-  };
-}
-
-function requireComparisonFilePath(value: string | undefined, field: string): string {
-  if (value) {
-    return value;
-  }
-
-  throw new Error(`ReviewInput validation requires ${field} when subjectKind=comparison.`);
-}
-
-function requireFailureError(value: string | undefined): string {
-  if (value) {
-    return value;
-  }
-
-  throw new Error('ReviewInput validation requires error when subjectKind=failure.');
+  } as z.infer<typeof ReviewOutputSchema>;
 }
 
 async function reviewWork(
@@ -1087,8 +1063,8 @@ async function reviewWork(
   } else if (args.subjectKind === 'comparison') {
     result = await compareWork(
       {
-        filePathA: requireComparisonFilePath(args.filePathA, 'filePathA'),
-        filePathB: requireComparisonFilePath(args.filePathB, 'filePathB'),
+        filePathA: args.filePathA,
+        filePathB: args.filePathB,
         question: args.question ?? args.focus,
         thinkingLevel: args.thinkingLevel,
         googleSearch: args.googleSearch,
@@ -1099,7 +1075,7 @@ async function reviewWork(
   } else {
     result = await diagnoseFailureWork(
       {
-        error: requireFailureError(args.error),
+        error: args.error,
         codeContext: args.codeContext,
         kind: 'failure',
         language: args.language,

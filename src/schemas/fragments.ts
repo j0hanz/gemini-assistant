@@ -62,7 +62,7 @@ const toolEventFields = {
 
 export const ToolEventSchema = z.strictObject(toolEventFields);
 
-export const streamMetadataOutputFields = {
+const streamMetadataOutputFields = {
   thoughts: z.string().describe('Internal model reasoning.').optional(),
   usage: UsageMetadataSchema.describe('Token usage').optional(),
   functionCalls: z
@@ -84,7 +84,18 @@ export const publicBaseOutputFields = {
 
 const urlMetadataEntryFields = {
   url: PublicHttpUrlSchema.describe('Retrieved URL'),
-  status: z.string().describe('Retrieval status (e.g. URL_RETRIEVAL_STATUS_SUCCESS)'),
+  status: z
+    .enum([
+      'URL_RETRIEVAL_STATUS_SUCCESS',
+      'URL_RETRIEVAL_STATUS_ERROR',
+      'URL_RETRIEVAL_STATUS_UNSAFE',
+      'URL_RETRIEVAL_STATUS_PAYWALL',
+      'URL_RETRIEVAL_STATUS_UNSPECIFIED',
+    ])
+    .or(z.string())
+    .describe(
+      'Gemini URL retrieval status. Known URL_RETRIEVAL_STATUS_* values are documented while unknown strings remain forward-compatible.',
+    ),
 };
 
 export const UrlMetadataEntrySchema = z.strictObject(urlMetadataEntryFields);

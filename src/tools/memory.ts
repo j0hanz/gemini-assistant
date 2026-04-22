@@ -590,7 +590,7 @@ function isNotFoundCacheError(err: unknown): boolean {
 async function handleCachesCreate(
   createCacheWork: ReturnType<typeof buildCreateCacheWork>,
   base: Record<string, unknown>,
-  args: MemoryInput,
+  args: Extract<MemoryInput, { action: 'caches.create' }>,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const createArgs =
@@ -654,7 +654,7 @@ async function handleCachesUpdate(
 
 async function handleCachesDelete(
   base: Record<string, unknown>,
-  args: MemoryInput & { cacheName: string },
+  args: Extract<MemoryInput, { action: 'caches.delete' }>,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const result = await deleteCacheWork({ cacheName: args.cacheName, confirm: args.confirm }, ctx);
@@ -728,17 +728,6 @@ function handleWorkspaceCache(
   };
 }
 
-function requireMemoryString(
-  value: string | undefined,
-  fieldLabel: string,
-): string | CallToolResult {
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  return new AppError('memory', `memory: ${fieldLabel} is required.`).toToolResult();
-}
-
 export async function memoryWork(
   sessionStore: SessionStore,
   rootsFetcher: RootsFetcher,
@@ -752,42 +741,22 @@ export async function memoryWork(
   switch (args.action) {
     case 'sessions.list':
       return handleSessionsList(sessionStore, base, args.action, taskId);
-    case 'sessions.get': {
-      const sessionId = requireMemoryString(args.sessionId, 'Session ID');
-      if (typeof sessionId !== 'string') return sessionId;
-      return handleSessionsGet(sessionStore, base, args.action, sessionId, taskId);
-    }
-    case 'sessions.transcript': {
-      const sessionId = requireMemoryString(args.sessionId, 'Session ID');
-      if (typeof sessionId !== 'string') return sessionId;
-      return handleSessionsTranscript(sessionStore, base, args.action, sessionId, taskId);
-    }
-    case 'sessions.events': {
-      const sessionId = requireMemoryString(args.sessionId, 'Session ID');
-      if (typeof sessionId !== 'string') return sessionId;
-      return handleSessionsEvents(sessionStore, base, args.action, sessionId, taskId);
-    }
+    case 'sessions.get':
+      return handleSessionsGet(sessionStore, base, args.action, args.sessionId, taskId);
+    case 'sessions.transcript':
+      return handleSessionsTranscript(sessionStore, base, args.action, args.sessionId, taskId);
+    case 'sessions.events':
+      return handleSessionsEvents(sessionStore, base, args.action, args.sessionId, taskId);
     case 'caches.list':
       return await handleCachesList(base, args.action, taskId, ctx.mcpReq.signal);
-    case 'caches.get': {
-      const cacheName = requireMemoryString(args.cacheName, 'Cache name');
-      if (typeof cacheName !== 'string') return cacheName;
-      return await handleCachesGet(base, args.action, cacheName, taskId, ctx.mcpReq.signal);
-    }
+    case 'caches.get':
+      return await handleCachesGet(base, args.action, args.cacheName, taskId, ctx.mcpReq.signal);
     case 'caches.create':
       return await handleCachesCreate(createCacheWork, base, args, ctx);
-    case 'caches.update': {
-      const cacheName = requireMemoryString(args.cacheName, 'Cache name');
-      if (typeof cacheName !== 'string') return cacheName;
-      const ttl = requireMemoryString(args.ttl, 'TTL');
-      if (typeof ttl !== 'string') return ttl;
-      return await handleCachesUpdate(base, { ...args, cacheName, ttl }, ctx);
-    }
-    case 'caches.delete': {
-      const cacheName = requireMemoryString(args.cacheName, 'Cache name');
-      if (typeof cacheName !== 'string') return cacheName;
-      return await handleCachesDelete(base, { ...args, cacheName }, ctx);
-    }
+    case 'caches.update':
+      return await handleCachesUpdate(base, args, ctx);
+    case 'caches.delete':
+      return await handleCachesDelete(base, args, ctx);
     case 'workspace.context':
       return await handleWorkspaceContext(rootsFetcher, base, args.action, taskId);
     case 'workspace.cache':

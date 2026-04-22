@@ -328,11 +328,11 @@ describe('MCP tool smoke coverage', () => {
       assert.equal(analyzeMediaResolution.default, 'MEDIA_RESOLUTION_MEDIUM');
 
       const reviewSchema = toolMap.get('review')?.inputSchema;
-      const reviewSubjectKind = getObjectProperty(reviewSchema, 'subjectKind');
+      const reviewSubjectKind = findPropertyInSchema(reviewSchema, 'subjectKind');
       const researchSchema = toolMap.get('research')?.inputSchema;
       const memorySchema = toolMap.get('memory')?.inputSchema;
       const researchMode = getObjectProperty(researchSchema, 'mode');
-      const memoryAction = getObjectProperty(memorySchema, 'action');
+      const memoryAction = findPropertyInSchema(memorySchema, 'action');
 
       assert.ok(reviewSubjectKind);
       assert.equal(
@@ -345,7 +345,7 @@ describe('MCP tool smoke coverage', () => {
       assert.equal((researchSchema as { oneOf?: unknown }).oneOf, undefined);
       assert.ok(memoryAction);
       assert.equal(memoryAction.description, 'Memory action selector.');
-      assert.equal((memorySchema as { oneOf?: unknown }).oneOf, undefined);
+      assert.ok(Array.isArray((memorySchema as { oneOf?: unknown }).oneOf));
       assert.match(toolMap.get('memory')?.description ?? '', /caches\.delete/i);
       assert.equal(reviewSubjectKind.default, 'diff');
 

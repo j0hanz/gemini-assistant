@@ -199,7 +199,7 @@ function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) 
       content: [...result.content, ...contentAdditions],
     }),
     structuredContent: pickDefined({
-      answer: textContent,
+      summary: textContent,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
     }),
     reportMessage: `${formatCountLabel(urlMetadata.length, 'URL')} retrieved`,

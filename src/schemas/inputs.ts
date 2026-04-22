@@ -4,7 +4,6 @@ import { z } from 'zod/v4';
 import type { ParsePayload } from 'zod/v4/core';
 
 import {
-  analyzeDiagramType,
   analyzeOutputKind,
   analyzeTargetKind,
   ASK_NON_URL_TOOL_PROFILES,
@@ -17,7 +16,6 @@ import {
   optionalField,
   requiredText,
   researchMode,
-  reviewSubjectKind,
   sessionId,
   temperatureField,
   textField,
@@ -35,11 +33,10 @@ import {
 import { GeminiResponseSchema } from './json-schema.js';
 import {
   MEMORY_ACTIONS,
+  type MemoryAction,
   validateExclusiveSourceFileFields,
   validateFlatAnalyzeInput,
-  validateFlatMemoryInput,
   validateFlatResearchInput,
-  validateFlatReviewInput,
   validateMeaningfulCacheCreateInput,
 } from './validators.js';
 
@@ -91,7 +88,7 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
     ),
     thinkingLevel: thinkingLevelField,
     responseSchemaJson: responseSchemaJsonField(),
-    temperature: optionalField(temperatureField()),
+    temperature: temperatureField(),
     seed: withFieldMetadata(z.int().optional(), 'Fixed random seed for reproducible outputs.'),
   });
 }
@@ -99,122 +96,171 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
 export const ChatInputSchema = createChatInputSchema();
 export type ChatInput = z.infer<typeof ChatInputSchema>;
 
-export const ResearchInputSchema = z
-  .strictObject({
-    mode: researchMode(),
-    goal: goalText('Question or research goal to answer quickly'),
-    ...createUrlContextFields({
-      itemDescription: 'Public URL to analyze alongside search results',
-      description: 'Public URLs to inspect alongside web search results.',
-      max: 20,
-      optional: true,
-    }),
-    systemInstruction: optionalField(
-      textField('Instructions for output presentation (format, audience, tone).'),
-    ),
-    deliverable: optionalField(
-      textField('Requested output form (brief, report, checklist, etc.).'),
-    ),
-    searchDepth: withFieldMetadata(
-      z.int().min(1).max(5).optional(),
-      'How many search-and-synthesis passes to perform. Use higher values for broader or more thorough deep research.',
-    ),
-    thinkingLevel: thinkingLevelField,
-  })
-  .superRefine(validateFlatResearchInput)
-  .transform((value) =>
-    value.mode === 'deep' && value.searchDepth === undefined ? { ...value, searchDepth: 3 } : value,
-  );
+export const ResearchInputBaseSchema = z.strictObject({
+  mode: researchMode(),
+  goal: goalText('Question or research goal to answer quickly'),
+  ...createUrlContextFields({
+    itemDescription: 'Public URL to analyze alongside search results',
+    description: 'Public URLs to inspect alongside web search results.',
+    max: 20,
+    optional: true,
+  }),
+  systemInstruction: optionalField(
+    textField('Instructions for output presentation (format, audience, tone).'),
+  ),
+  deliverable: optionalField(textField('Requested output form (brief, report, checklist, etc.).')),
+  searchDepth: withFieldMetadata(
+    z.int().min(1).max(5).default(3).optional(),
+    'How many search-and-synthesis passes to perform. Use higher values for broader or more thorough deep research.',
+  ),
+  thinkingLevel: thinkingLevelField,
+});
+export const ResearchInputSchema = ResearchInputBaseSchema.superRefine(validateFlatResearchInput);
 export type ResearchInput = z.infer<typeof ResearchInputSchema>;
 
-export const AnalyzeInputSchema = z
-  .strictObject({
-    goal: goalText('Question or analysis goal for the selected targets'),
-    targetKind: analyzeTargetKind(),
-    filePath: optionalField(
-      workspacePath('Workspace-relative or absolute path to analyze when targetKind=file'),
-    ),
-    urls: createUrlContextFields({
-      itemDescription: 'Public URL to analyze',
-      description: 'Public URLs to analyze when targetKind=url.',
-      min: 1,
-      max: 20,
-      optional: true,
-    }).urls,
-    filePaths: workspacePathArray({
-      description: 'Local files to analyze when targetKind=multi.',
-      itemDescription: 'Workspace-relative or absolute path to a local file',
-      min: 2,
-      max: 5,
-      optional: true,
-    }),
-    outputKind: analyzeOutputKind(),
-    diagramType: optionalField(analyzeDiagramType()),
-    validateSyntax: z
-      .boolean()
-      .optional()
-      .describe('Validate generated diagram syntax when outputKind=diagram.'),
-    thinkingLevel: thinkingLevelField,
-    mediaResolution: mediaResolution(
-      'Resolution for image/video processing. Higher = more detail, more tokens.',
-    ),
-  })
-  .superRefine(validateFlatAnalyzeInput)
-  .transform((value) =>
-    value.outputKind === 'diagram' && value.diagramType === undefined
-      ? { ...value, diagramType: 'mermaid' as const }
-      : value,
-  );
+export const AnalyzeInputBaseSchema = z.strictObject({
+  goal: goalText('Question or analysis goal for the selected targets'),
+  targetKind: analyzeTargetKind(),
+  filePath: optionalField(
+    workspacePath('Workspace-relative or absolute path to analyze when targetKind=file'),
+  ),
+  urls: createUrlContextFields({
+    itemDescription: 'Public URL to analyze',
+    description: 'Public URLs to analyze when targetKind=url.',
+    min: 1,
+    max: 20,
+    optional: true,
+  }).urls,
+  filePaths: workspacePathArray({
+    description: 'Local files to analyze when targetKind=multi.',
+    itemDescription: 'Workspace-relative or absolute path to a local file',
+    min: 2,
+    max: 5,
+    optional: true,
+  }),
+  outputKind: analyzeOutputKind(),
+  diagramType: withFieldMetadata(
+    z.enum(DIAGRAM_TYPES).default('mermaid').optional(),
+    'Diagram syntax to generate when outputKind=diagram.',
+  ),
+  validateSyntax: z
+    .boolean()
+    .optional()
+    .describe('Validate generated diagram syntax when outputKind=diagram.'),
+  thinkingLevel: thinkingLevelField,
+  mediaResolution: mediaResolution(
+    'Resolution for image/video processing. Higher = more detail, more tokens.',
+  ),
+});
+export const AnalyzeInputSchema = AnalyzeInputBaseSchema.superRefine(validateFlatAnalyzeInput);
 export type AnalyzeInput = z.infer<typeof AnalyzeInputSchema>;
-export const ReviewInputSchema = z
-  .strictObject({
-    subjectKind: reviewSubjectKind(),
-    dryRun: withFieldMetadata(z.boolean().optional(), 'Skip model review for subjectKind=diff.'),
-    language: optionalField(textField('Primary language hint for diff or failure review.')),
-    filePathA: optionalField(
-      workspacePath(
-        'Workspace-relative or absolute path to the first file when subjectKind=comparison',
-      ),
-    ),
-    filePathB: optionalField(
-      workspacePath(
-        'Workspace-relative or absolute path to the second file when subjectKind=comparison',
-      ),
-    ),
-    question: optionalField(
-      textField('Comparison focus when subjectKind=comparison (behavior, APIs, security, etc.).'),
-    ),
-    googleSearch: withFieldMetadata(
-      z.boolean().optional(),
-      'Enable Google Search when subjectKind=comparison or subjectKind=failure.',
-    ),
-    error: optionalField(textField('Error message or stack trace when subjectKind=failure.')),
-    codeContext: optionalField(textField('Relevant source code context when subjectKind=failure.')),
-    ...createUrlContextFields({
-      itemDescription: 'Public URL for additional context',
-      description: 'Public URLs for additional context when subjectKind=failure.',
-      max: 20,
-      optional: true,
-    }),
-    focus: optionalField(textField('Review priorities (e.g. regressions, security, performance).')),
-    thinkingLevel: thinkingLevelField,
-    cacheName: completableCacheName(
-      'Cache resource name to provide project context during review.',
-      true,
-    ),
-  })
-  .superRefine(validateFlatReviewInput);
+const reviewSubjectKindLiteral = <T extends 'diff' | 'comparison' | 'failure'>(value: T) =>
+  withFieldMetadata(
+    value === 'diff' ? z.literal(value).default(value) : z.literal(value),
+    'What to review: the current diff, a file comparison, or a failure report.',
+  );
+
+const reviewCommonShape = {
+  focus: optionalField(textField('Review priorities (e.g. regressions, security, performance).')),
+  thinkingLevel: thinkingLevelField,
+  cacheName: completableCacheName(
+    'Cache resource name to provide project context during review.',
+    true,
+  ),
+};
+
+const ReviewDiffInputSchema = z.strictObject({
+  subjectKind: reviewSubjectKindLiteral('diff'),
+  dryRun: withFieldMetadata(z.boolean().optional(), 'Skip model review for subjectKind=diff.'),
+  language: optionalField(textField('Primary language hint for diff or failure review.')),
+  ...reviewCommonShape,
+});
+
+const ReviewComparisonInputSchema = z.strictObject({
+  subjectKind: reviewSubjectKindLiteral('comparison'),
+  filePathA: workspacePath(
+    'Workspace-relative or absolute path to the first file when subjectKind=comparison',
+  ),
+  filePathB: workspacePath(
+    'Workspace-relative or absolute path to the second file when subjectKind=comparison',
+  ),
+  question: optionalField(
+    textField('Comparison focus when subjectKind=comparison (behavior, APIs, security, etc.).'),
+  ),
+  googleSearch: withFieldMetadata(
+    z.boolean().optional(),
+    'Enable Google Search when subjectKind=comparison or subjectKind=failure.',
+  ),
+  ...reviewCommonShape,
+});
+
+const ReviewFailureInputSchema = z.strictObject({
+  subjectKind: reviewSubjectKindLiteral('failure'),
+  language: optionalField(textField('Primary language hint for diff or failure review.')),
+  error: textField('Error message or stack trace when subjectKind=failure.'),
+  codeContext: optionalField(textField('Relevant source code context when subjectKind=failure.')),
+  ...createUrlContextFields({
+    itemDescription: 'Public URL for additional context',
+    description: 'Public URLs for additional context when subjectKind=failure.',
+    max: 20,
+    optional: true,
+  }),
+  googleSearch: withFieldMetadata(
+    z.boolean().optional(),
+    'Enable Google Search when subjectKind=comparison or subjectKind=failure.',
+  ),
+  ...reviewCommonShape,
+});
+
+const ReviewInputUnionSchema = z.discriminatedUnion('subjectKind', [
+  ReviewDiffInputSchema,
+  ReviewComparisonInputSchema,
+  ReviewFailureInputSchema,
+]);
+
+export const ReviewInputSchema = z.preprocess((value) => {
+  if (value && typeof value === 'object' && !('subjectKind' in value)) {
+    return { ...value, subjectKind: 'diff' };
+  }
+
+  return value;
+}, ReviewInputUnionSchema);
 export type ReviewInput = z.infer<typeof ReviewInputSchema>;
 
-export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
+const memoryActionField = <T extends MemoryAction>(action: T) =>
+  withFieldMetadata(z.literal(action), 'Memory action selector.');
+
+function createSessionIdField(completeSessionIds: SessionIdCompleter) {
+  return completable(sessionId('Session identifier to inspect'), completeSessionIds);
+}
+
+function createMemoryNoArgumentSchema<T extends MemoryAction>(action: T) {
+  return z.strictObject({
+    action: memoryActionField(action),
+  });
+}
+
+function createMemorySessionSchema<T extends MemoryAction>(
+  action: T,
+  completeSessionIds: SessionIdCompleter,
+) {
+  return z.strictObject({
+    action: memoryActionField(action),
+    sessionId: createSessionIdField(completeSessionIds),
+  });
+}
+
+function createMemoryCacheGetSchema<T extends MemoryAction>(action: T) {
+  return z.strictObject({
+    action: memoryActionField(action),
+    cacheName: completableCacheName('Cache resource name'),
+  });
+}
+
+function createMemoryCacheCreateSchema() {
   return z
     .strictObject({
-      action: withFieldMetadata(z.enum(MEMORY_ACTIONS), 'Memory action selector.'),
-      sessionId: completable(
-        sessionId('Session identifier to inspect').optional(),
-        completeSessionIds,
-      ),
-      cacheName: completableCacheName('Cache resource name', true),
+      action: memoryActionField('caches.create'),
       filePaths: workspacePathArray({
         description: 'Files to include in the cache.',
         itemDescription: 'Workspace-relative or absolute path to a file to cache',
@@ -226,12 +272,43 @@ export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter =
       ),
       ttl: optionalField(ttlSeconds('Time-to-live for the cache (e.g. "3600s").')),
       displayName: optionalField(textField('Human-readable label for the cache.')),
-      confirm: withFieldMetadata(
-        z.boolean().optional(),
-        'Confirmation override for non-interactive clients.',
-      ),
     })
-    .superRefine(validateFlatMemoryInput);
+    .superRefine(validateMeaningfulCacheCreateInput);
+}
+
+function createMemoryCacheUpdateSchema() {
+  return z.strictObject({
+    action: memoryActionField('caches.update'),
+    cacheName: completableCacheName('Cache resource name'),
+    ttl: ttlSeconds('Time-to-live for the cache (e.g. "3600s").'),
+  });
+}
+
+function createMemoryCacheDeleteSchema() {
+  return z.strictObject({
+    action: memoryActionField('caches.delete'),
+    cacheName: completableCacheName('Cache resource name'),
+    confirm: withFieldMetadata(
+      z.boolean().optional(),
+      'Confirmation override for non-interactive clients.',
+    ),
+  });
+}
+
+export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
+  return z.discriminatedUnion('action', [
+    createMemoryNoArgumentSchema(MEMORY_ACTIONS[0]),
+    createMemorySessionSchema(MEMORY_ACTIONS[1], completeSessionIds),
+    createMemorySessionSchema(MEMORY_ACTIONS[2], completeSessionIds),
+    createMemorySessionSchema(MEMORY_ACTIONS[3], completeSessionIds),
+    createMemoryNoArgumentSchema(MEMORY_ACTIONS[4]),
+    createMemoryCacheGetSchema(MEMORY_ACTIONS[5]),
+    createMemoryCacheCreateSchema(),
+    createMemoryCacheUpdateSchema(),
+    createMemoryCacheDeleteSchema(),
+    createMemoryNoArgumentSchema(MEMORY_ACTIONS[9]),
+    createMemoryNoArgumentSchema(MEMORY_ACTIONS[10]),
+  ]);
 }
 
 export const MemoryInputSchema = createMemoryInputSchema();
@@ -256,7 +333,7 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
       GeminiResponseSchema.optional(),
       'JSON Schema for structured output.',
     ),
-    temperature: optionalField(temperatureField()),
+    temperature: temperatureField(),
     seed: withFieldMetadata(z.int().optional(), 'Fixed random seed for reproducible outputs.'),
     googleSearch: withFieldMetadata(
       z.boolean().optional(),

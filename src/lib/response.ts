@@ -151,6 +151,10 @@ export function safeValidateStructuredContent(
     };
   }
 
+  responseLog.debug('structuredContent validation mismatch short-circuited', {
+    toolName,
+    error: z.prettifyError(parsed.error),
+  });
   responseLog.error('structuredContent validation failed', {
     toolName,
     error: z.prettifyError(parsed.error),

@@ -38,13 +38,14 @@ function isUnionLikeSchema(schema: unknown): schema is { options: unknown[] } {
   );
 }
 
-function isPipeLikeSchema(schema: unknown): schema is { in: unknown } {
+function isPipeLikeSchema(schema: unknown): schema is { in: unknown; out?: unknown } {
   return !!schema && typeof schema === 'object' && 'in' in schema;
 }
 
 function schemaInputs(schema: unknown): string[] {
   if (isPipeLikeSchema(schema)) {
-    return schemaInputs(schema.in);
+    const inputKeys = schemaInputs(schema.in);
+    return inputKeys.length > 0 || schema.out === undefined ? inputKeys : schemaInputs(schema.out);
   }
 
   if (isObjectLikeSchema(schema)) {

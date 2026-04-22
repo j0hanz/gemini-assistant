@@ -61,7 +61,10 @@ import {
   type TranscriptEntry,
 } from '../sessions.js';
 
-type AskArgs = AskInput;
+type WithOptionalTemperature<T> = T extends { temperature: infer Temperature }
+  ? Omit<T, 'temperature'> & { temperature?: Temperature }
+  : T;
+type AskArgs = WithOptionalTemperature<AskInput>;
 
 interface AskStructuredContent extends Record<string, unknown> {
   answer: string;

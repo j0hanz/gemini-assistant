@@ -35,7 +35,22 @@ function getObjectShape(schema: unknown): Record<string, z.ZodType> {
   }
 
   if (schema && typeof schema === 'object' && 'in' in schema) {
-    return getObjectShape(schema.in);
+    try {
+      return getObjectShape(schema.in);
+    } catch (error) {
+      if ('out' in schema) {
+        return getObjectShape(schema.out);
+      }
+      throw error;
+    }
+  }
+
+  if (schema && typeof schema === 'object' && 'options' in schema) {
+    const shape: Record<string, z.ZodType> = {};
+    for (const option of (schema as { options?: unknown[] }).options ?? []) {
+      Object.assign(shape, getObjectShape(option));
+    }
+    return shape;
   }
 
   throw new Error('Expected object-like schema');
@@ -411,13 +426,13 @@ describe('ResearchInputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
-  it('rejects deep-only fields in quick mode', () => {
+  it('allows declarative searchDepth default in quick mode', () => {
     const result = ResearchInputSchema.safeParse({
       mode: 'quick',
       goal: 'test',
       searchDepth: 3,
     });
-    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.success, true);
   });
 
   it('rejects quick-only fields in deep mode', () => {
@@ -933,13 +948,13 @@ describe('AnalyzeInputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
-  it('rejects diagram-only fields when outputKind=summary', () => {
+  it('rejects validateSyntax when outputKind=summary', () => {
     const result = AnalyzeInputSchema.safeParse({
       goal: 'Summarize this file',
       targetKind: 'file',
       filePath: absolutePath('src', 'index.ts'),
       outputKind: 'summary',
-      diagramType: 'mermaid',
+      validateSyntax: true,
     });
     assert.strictEqual(result.success, false);
   });
@@ -1010,7 +1025,7 @@ describe('ReviewInputSchema', () => {
 
   it('keeps the standard description for subject selection', () => {
     assert.strictEqual(
-      ReviewInputSchema.shape.subjectKind.description,
+      getObjectShape(ReviewInputSchema).subjectKind.description,
       'What to review: the current diff, a file comparison, or a failure report.',
     );
   });

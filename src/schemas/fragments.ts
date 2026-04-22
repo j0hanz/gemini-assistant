@@ -15,6 +15,16 @@ const usageMetadataFields = {
   thoughtsTokenCount: nonNegativeInt('Tokens used for thinking').optional(),
   cachedContentTokenCount: nonNegativeInt('Tokens reused from cached content').optional(),
   totalTokenCount: nonNegativeInt('Total tokens for the request').optional(),
+  toolUsePromptTokenCount: nonNegativeInt('Tokens in tool-use prompts').optional(),
+  promptTokensDetails: z
+    .array(z.object({ modality: z.string(), tokenCount: z.number() }).partial())
+    .optional(),
+  cacheTokensDetails: z
+    .array(z.object({ modality: z.string(), tokenCount: z.number() }).partial())
+    .optional(),
+  candidatesTokensDetails: z
+    .array(z.object({ modality: z.string(), tokenCount: z.number() }).partial())
+    .optional(),
 };
 
 export const UsageMetadataSchema = z.strictObject(usageMetadataFields);
@@ -32,7 +42,7 @@ export const SafetySettingInputSchema = z.strictObject({
 export type SafetySettingInput = z.infer<typeof SafetySettingInputSchema>;
 
 const functionCallEntryFields = {
-  name: z.string().describe('Function/tool name'),
+  name: z.string().describe('Function/tool name').optional(),
   args: z.record(z.string(), z.unknown()).describe('Function call arguments').optional(),
   id: z.string().describe('Function call identifier when present').optional(),
   thoughtSignature: z
@@ -50,6 +60,7 @@ const ToolEventKindSchema = z.enum([
   'function_call',
   'function_response',
   'thought',
+  'model_text',
   'executable_code',
   'code_execution_result',
 ]);
@@ -82,6 +93,9 @@ const ToolEventSchema = z.strictObject(toolEventFields);
 const streamMetadataOutputFields = {
   thoughts: z.string().describe('Internal model reasoning.').optional(),
   usage: UsageMetadataSchema.describe('Token usage').optional(),
+  safetyRatings: z.array(z.unknown()).describe('Candidate safety ratings').optional(),
+  finishMessage: z.string().describe('Candidate finish message when present').optional(),
+  citationMetadata: z.unknown().describe('Candidate citation metadata when present').optional(),
   functionCalls: z
     .array(FunctionCallEntrySchema)
     .optional()
@@ -118,6 +132,7 @@ const urlMetadataEntryFields = {
 export const UrlMetadataEntrySchema = z.strictObject(urlMetadataEntryFields);
 
 const sourceDetailFields = {
+  origin: z.enum(['googleSearch', 'urlContext', 'both']).optional().describe('Source provenance'),
   title: z.string().describe('Source title when Gemini provides one').optional(),
   url: PublicHttpUrlSchema.describe('Source URL'),
 };

@@ -738,4 +738,30 @@ describe('ask contract', () => {
       stub.restore();
     }
   });
+
+  it('passes thinkingBudget through to the Gemini config', async () => {
+    const stub = withGeminiStreamStub(['Assistant answer']);
+    const originalCache = process.env.CACHE;
+    process.env.CACHE = 'false';
+
+    try {
+      const askWork = createAskWork();
+      await askWork(
+        {
+          message: 'Use a capped reasoning budget',
+          thinkingBudget: 128,
+        },
+        createContext(),
+      );
+
+      assert.strictEqual(
+        (stub.calls[0]?.config as { thinkingConfig?: { thinkingBudget?: number } } | undefined)
+          ?.thinkingConfig?.thinkingBudget,
+        128,
+      );
+    } finally {
+      process.env.CACHE = originalCache;
+      stub.restore();
+    }
+  });
 });

@@ -39,6 +39,7 @@ interface AnalyzeDiagramInput {
   mediaResolution?: AnalyzeInput['mediaResolution'];
   safetySettings?: AnalyzeInput['safetySettings'];
   targetKind: AnalyzeInput['targetKind'];
+  thinkingBudget?: AnalyzeInput['thinkingBudget'];
   thinkingLevel?: AnalyzeInput['thinkingLevel'];
   urls?: string[] | undefined;
   validateSyntax?: boolean | undefined;
@@ -168,6 +169,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
       filePath,
       question,
       thinkingLevel,
+      thinkingBudget,
       mediaResolution,
       maxOutputTokens,
       safetySettings,
@@ -230,6 +232,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
               {
                 systemInstruction,
                 thinkingLevel,
+                thinkingBudget,
                 mediaResolution,
                 maxOutputTokens,
                 safetySettings,
@@ -259,6 +262,7 @@ interface AnalyzeMultiExtra {
   googleSearch?: boolean | undefined;
   maxOutputTokens?: AnalyzeInput['maxOutputTokens'];
   safetySettings?: AnalyzeInput['safetySettings'];
+  thinkingBudget?: AnalyzeInput['thinkingBudget'];
   urls?: readonly string[] | undefined;
 }
 
@@ -271,6 +275,7 @@ async function analyzeMultiFileWork(
   extra: AnalyzeMultiExtra = {},
 ): Promise<CallToolResult> {
   const { maxOutputTokens, safetySettings, googleSearch, urls } = extra;
+  const { thinkingBudget } = extra;
   const uploadedNames: string[] = [];
   const progress = new ProgressReporter(ctx, ANALYZE_TOOL_LABEL);
   const totalSteps = filePaths.length + 1;
@@ -324,6 +329,7 @@ async function analyzeMultiFileWork(
             {
               systemInstruction: prompt.systemInstruction,
               thinkingLevel,
+              thinkingBudget,
               maxOutputTokens,
               safetySettings,
               tools,
@@ -424,6 +430,7 @@ async function analyzeDiagramWork(
             {
               systemInstruction: prompt.systemInstruction,
               thinkingLevel: args.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+              thinkingBudget: args.thinkingBudget,
               maxOutputTokens: args.maxOutputTokens,
               safetySettings: args.safetySettings,
               tools,
@@ -490,6 +497,7 @@ async function runAnalyzeTarget(
         filePath: requireAnalyzeFilePath(args),
         question: args.goal,
         thinkingLevel: args.thinkingLevel,
+        thinkingBudget: args.thinkingBudget,
         mediaResolution: args.mediaResolution,
         maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
@@ -506,6 +514,7 @@ async function runAnalyzeTarget(
         urls: requireAnalyzeUrls(args),
         question: args.goal,
         thinkingLevel: args.thinkingLevel,
+        thinkingBudget: args.thinkingBudget,
         maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
       },
@@ -521,6 +530,7 @@ async function runAnalyzeTarget(
     ctx,
     {
       maxOutputTokens: args.maxOutputTokens,
+      thinkingBudget: args.thinkingBudget,
       safetySettings: args.safetySettings,
       googleSearch: args.googleSearch,
       urls: args.urls,
@@ -550,6 +560,9 @@ function buildAnalyzeStructuredContent(
   const base = {
     ...buildBaseStructuredOutput(ctx.task?.id),
     functionCalls: structured.functionCalls,
+    safetyRatings: structured.safetyRatings,
+    finishMessage: structured.finishMessage,
+    citationMetadata: structured.citationMetadata,
     thoughts: structured.thoughts,
     toolEvents: structured.toolEvents,
     usage: structured.usage,

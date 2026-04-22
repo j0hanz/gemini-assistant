@@ -114,9 +114,15 @@ export const ResearchOutputSchema = z.strictObject({
     .array(SourceDetailSchema)
     .optional()
     .describe('Structured source entries for client consumption'),
+  urlContextSources: publicHttpUrlArray({
+    description: 'URL Context source URLs',
+    itemDescription: 'URL Context source URL',
+    optional: true,
+  }),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
   toolsUsed: z.array(z.string()).optional().describe('Tools invoked during deep research'),
   grounded: z.boolean().optional().describe('Whether grounded sources were surfaced'),
+  urlContextUsed: z.boolean().optional().describe('Whether URL Context retrieval succeeded'),
   citations: z
     .array(GroundingCitationSchema)
     .optional()

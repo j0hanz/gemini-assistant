@@ -170,6 +170,12 @@ export function thinkingLevel(
   return withFieldMetadata(z.enum(THINKING_LEVELS).default(DEFAULT_THINKING_LEVEL), description);
 }
 
+export function thinkingBudget(
+  description = 'Override thinking token budget. Combines with thinkingLevel when both are set.',
+) {
+  return withFieldMetadata(z.number().int().min(0).optional(), description);
+}
+
 export function researchMode(description = 'Research mode selector (`quick` or `deep`).') {
   return withFieldMetadata(z.enum(RESEARCH_MODE_OPTIONS).default('quick'), description);
 }

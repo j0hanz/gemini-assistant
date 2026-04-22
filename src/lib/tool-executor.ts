@@ -173,6 +173,9 @@ export class ToolExecutor {
                   thoughtText: streamResult.thoughtText,
                   toolEvents: streamResult.toolEvents,
                   usage,
+                  safetyRatings: streamResult.safetyRatings,
+                  finishMessage: streamResult.finishMessage,
+                  citationMetadata: streamResult.citationMetadata,
                 }),
               }
             : undefined;

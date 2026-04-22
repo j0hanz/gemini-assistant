@@ -8,7 +8,7 @@ import {
   type SessionStore,
   type SessionStoreOptions,
 } from '../src/sessions.js';
-import { chatWork, createAskWork } from '../src/tools/chat.js';
+import { buildRebuiltChatContents, chatWork, createAskWork } from '../src/tools/chat.js';
 
 function mockChat(label = 'chat'): { _label: string } {
   return { _label: label };
@@ -41,7 +41,7 @@ afterEach(() => {
 
 describe('sessions', () => {
   describe('sanitizeHistoryParts', () => {
-    it('drops thought-only and signature-only parts while preserving tool signatures', () => {
+    it('drops thought parts while preserving non-thought signature parts', () => {
       const parts = [
         { text: 'summary', thought: true },
         { text: '', thoughtSignature: 'sig-empty' },
@@ -54,6 +54,8 @@ describe('sessions', () => {
       ];
 
       assert.deepStrictEqual(sanitizeHistoryParts(parts as never), [
+        { text: '', thoughtSignature: 'sig-empty' },
+        { text: 'visible', thoughtSignature: 'sig-text' },
         { functionCall: { name: 'lookup', args: { q: 'x' } }, thoughtSignature: 'sig-fn' },
         { toolCall: { toolType: 'URL_CONTEXT' }, thoughtSignature: 'sig-tool' },
         { executableCode: { code: 'print(1)' }, thoughtSignature: 'sig-code' },
@@ -74,6 +76,29 @@ describe('sessions', () => {
       assert.deepStrictEqual(sanitizeHistoryParts(persisted), [
         { text: 'old answer' },
         { functionCall: { name: 'lookup' }, thoughtSignature: 'sig-old' },
+      ]);
+    });
+
+    it('keeps signed text parts in rebuilt chat contents and drops thought parts', () => {
+      const rebuilt = buildRebuiltChatContents(
+        [
+          {
+            role: 'model',
+            parts: [
+              { text: 'private', thought: true, thoughtSignature: 'sig-thought' },
+              { text: 'visible', thoughtSignature: 'sig-visible' },
+            ],
+            timestamp: 1,
+          },
+        ],
+        200_000,
+      );
+
+      assert.deepStrictEqual(rebuilt, [
+        {
+          role: 'model',
+          parts: [{ text: 'visible', thoughtSignature: 'sig-visible' }],
+        },
       ]);
     });
   });

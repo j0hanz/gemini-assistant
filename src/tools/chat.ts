@@ -85,7 +85,10 @@ interface AskStructuredContent extends Record<string, unknown> {
   contextUsed?: ContextUsed;
   data?: unknown;
   functionCalls?: FunctionCallEntry[];
+  citationMetadata?: unknown;
+  finishMessage?: string | undefined;
   schemaWarnings?: string[];
+  safetyRatings?: unknown;
   session?: {
     id: string;
     rebuiltAt?: number;
@@ -198,7 +201,13 @@ export function buildAskStructuredContent(
   text: string,
   streamResult: Pick<
     StreamResult,
-    'functionCalls' | 'thoughtText' | 'toolEvents' | 'usageMetadata'
+    | 'functionCalls'
+    | 'thoughtText'
+    | 'toolEvents'
+    | 'usageMetadata'
+    | 'safetyRatings'
+    | 'finishMessage'
+    | 'citationMetadata'
   >,
   jsonMode?: boolean,
   responseSchema?: GeminiResponseSchema,
@@ -215,6 +224,9 @@ export function buildAskStructuredContent(
     thoughtText: streamResult.thoughtText,
     toolEvents: streamResult.toolEvents,
     usage,
+    safetyRatings: streamResult.safetyRatings,
+    finishMessage: streamResult.finishMessage,
+    citationMetadata: streamResult.citationMetadata,
   });
 
   return {
@@ -229,7 +241,13 @@ export function formatStructuredResult(
   result: CallToolResult,
   streamResult: Pick<
     StreamResult,
-    'functionCalls' | 'thoughtText' | 'toolEvents' | 'usageMetadata'
+    | 'functionCalls'
+    | 'thoughtText'
+    | 'toolEvents'
+    | 'usageMetadata'
+    | 'safetyRatings'
+    | 'finishMessage'
+    | 'citationMetadata'
   >,
   jsonMode?: boolean,
   responseSchema?: GeminiResponseSchema,
@@ -740,11 +758,14 @@ function buildSessionEventResponse(
     text: extractTextContent(askResult.result.content),
     ...pickDefined({
       finishReason: askResult.streamResult.finishReason,
+      finishMessage: askResult.streamResult.finishMessage,
       promptBlockReason: askResult.streamResult.promptBlockReason,
     }),
     ...buildSessionEventData(structured),
     ...buildSessionEventFunctionCalls(structured),
     ...buildSessionEventSchemaWarnings(structured),
+    ...buildSessionEventSafetyRatings(structured),
+    ...buildSessionEventCitationMetadata(structured),
     ...buildSessionEventThoughts(structured),
     ...buildSessionEventToolEvents(structured),
     ...buildSessionEventUsage(structured),
@@ -769,6 +790,22 @@ function buildSessionEventSchemaWarnings(
   structured: AskStructuredContent | undefined,
 ): Partial<SessionEventEntry['response']> {
   return structured?.schemaWarnings ? { schemaWarnings: structured.schemaWarnings } : {};
+}
+
+function buildSessionEventSafetyRatings(
+  structured: AskStructuredContent | undefined,
+): Partial<SessionEventEntry['response']> {
+  return structured?.safetyRatings !== undefined
+    ? { safetyRatings: sanitizeSessionValue(structured.safetyRatings, 'safetyRatings') }
+    : {};
+}
+
+function buildSessionEventCitationMetadata(
+  structured: AskStructuredContent | undefined,
+): Partial<SessionEventEntry['response']> {
+  return structured?.citationMetadata !== undefined
+    ? { citationMetadata: sanitizeSessionValue(structured.citationMetadata, 'citationMetadata') }
+    : {};
 }
 
 function buildSessionEventThoughts(
@@ -1160,6 +1197,9 @@ function assembleChatOutput(
       thoughts: structured.thoughts,
       toolEvents: structured.toolEvents,
       usage: structured.usage,
+      safetyRatings: structured.safetyRatings,
+      finishMessage: structured.finishMessage,
+      citationMetadata: structured.citationMetadata,
       contextUsed: structured.contextUsed,
       workspaceCacheApplied:
         (structured.contextUsed as ContextUsed | undefined)?.workspaceCacheApplied ?? false,
@@ -1195,6 +1235,7 @@ export async function chatWork(
       systemInstruction: args.systemInstruction,
       temperature: args.temperature,
       thinkingLevel: args.thinkingLevel,
+      thinkingBudget: args.thinkingBudget,
     },
     ctx,
   );

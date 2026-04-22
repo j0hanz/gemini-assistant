@@ -25,6 +25,7 @@ import {
   collectSearchEntryPoint,
   collectUrlMetadata,
   formatCountLabel,
+  mergeSourceDetails,
   safeValidateStructuredContent,
 } from '../lib/response.js';
 import { type StreamResult } from '../lib/streaming.js';
@@ -57,7 +58,10 @@ type StreamGenerator = () => Promise<
 type StreamResponseBuilder<T extends Record<string, unknown>> = Parameters<
   typeof executor.runStream<T>
 >[4];
-type GenerationConfigFields = Pick<ResearchInput, 'maxOutputTokens' | 'safetySettings'>;
+type GenerationConfigFields = Pick<
+  ResearchInput,
+  'maxOutputTokens' | 'safetySettings' | 'thinkingBudget'
+>;
 
 async function runToolStream<T extends Record<string, unknown>>(
   ctx: ServerContext,
@@ -88,6 +92,37 @@ function formatSourceLabels(
   return sourceDetails.map((source) =>
     source.title ? `${source.title}: ${source.url}` : source.url,
   );
+}
+
+function collectUrlContextSources(
+  urlMetadata: readonly { status: string; url: string }[],
+): string[] {
+  return urlMetadata
+    .filter((entry) => entry.status === 'URL_RETRIEVAL_STATUS_SUCCESS')
+    .map((entry) => entry.url);
+}
+
+function buildUrlContextSourceDetails(
+  urls: readonly string[],
+): { origin: 'urlContext'; url: string }[] {
+  return urls.map((url) => ({ origin: 'urlContext', url }));
+}
+
+function appendSearchEntryPointContent(
+  content: CallToolResult['content'],
+  renderedContent?: string,
+): void {
+  if (!renderedContent) return;
+  content.push({
+    type: 'text',
+    text: `Google Search Suggestions:\n${renderedContent}`,
+  });
+}
+
+function buildDroppedSupportWarnings(droppedSupportCount: number): string[] {
+  return droppedSupportCount > 0
+    ? [`dropped ${String(droppedSupportCount)} non-public grounding supports`]
+    : [];
 }
 
 function extractSampledText(content: unknown): string {
@@ -178,22 +213,22 @@ function buildAgenticSearchResult(
   emitDeepResearchToolBudgetLogs(ctx, streamResult, searchDepth);
 
   const groundedSources = collectGroundedSources(streamResult.groundingMetadata);
-  const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
   const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
-  const citations = collectGroundingCitations(streamResult.groundingMetadata);
+  const urlContextSources = collectUrlContextSources(urlMetadata);
+  const sourceDetails = mergeSourceDetails(
+    collectGroundedSourceDetails(streamResult.groundingMetadata, new Set(urlContextSources)),
+    buildUrlContextSourceDetails(urlContextSources),
+  );
+  const { citations, droppedSupportCount } = collectGroundingCitations(
+    streamResult.groundingMetadata,
+  );
   const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
+  const warnings = buildDroppedSupportWarnings(droppedSupportCount);
   const contentAdditions: CallToolResult['content'] = [];
-
-  const urlFallbackSources =
-    groundedSources.length === 0
-      ? urlMetadata
-          .filter((entry) => entry.status === 'URL_RETRIEVAL_STATUS_SUCCESS')
-          .map((entry) => entry.url)
-      : [];
-  const sources = groundedSources.length > 0 ? groundedSources : urlFallbackSources;
 
   appendSources(contentAdditions, formatSourceLabels(sourceDetails));
   appendUrlStatus(contentAdditions, urlMetadata);
+  appendSearchEntryPointContent(contentAdditions, searchEntryPoint?.renderedContent);
 
   return {
     resultMod: (result: CallToolResult) => ({
@@ -201,39 +236,39 @@ function buildAgenticSearchResult(
     }),
     structuredContent: pickDefined({
       report: textContent,
-      sources,
+      sources: groundedSources,
       sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
+      urlContextSources: urlContextSources.length > 0 ? urlContextSources : undefined,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
       toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
-      grounded: sources.length > 0,
+      grounded: groundedSources.length > 0,
+      urlContextUsed: urlContextSources.length > 0,
       citations: citations.length > 0 ? citations : undefined,
       searchEntryPoint,
+      warnings: warnings.length > 0 ? warnings : undefined,
     }),
-    reportMessage: buildSourceReportMessage(sources.length),
+    reportMessage: buildSourceReportMessage(groundedSources.length),
   };
 }
 
 function buildSearchResult(streamResult: StreamResult, textContent: string) {
   const groundedSources = collectGroundedSources(streamResult.groundingMetadata);
-  const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
   const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
-  const citations = collectGroundingCitations(streamResult.groundingMetadata);
+  const urlContextSources = collectUrlContextSources(urlMetadata);
+  const sourceDetails = mergeSourceDetails(
+    collectGroundedSourceDetails(streamResult.groundingMetadata, new Set(urlContextSources)),
+    buildUrlContextSourceDetails(urlContextSources),
+  );
+  const { citations, droppedSupportCount } = collectGroundingCitations(
+    streamResult.groundingMetadata,
+  );
   const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
+  const warnings = buildDroppedSupportWarnings(droppedSupportCount);
   const contentAdditions: CallToolResult['content'] = [];
-
-  // Fallback: when grounding metadata is empty but URL-context succeeded,
-  // surface the retrieved URLs as sources so the response is transparent
-  // about what was consumed.
-  const urlFallbackSources =
-    groundedSources.length === 0
-      ? urlMetadata
-          .filter((entry) => entry.status === 'URL_RETRIEVAL_STATUS_SUCCESS')
-          .map((entry) => entry.url)
-      : [];
-  const sources = groundedSources.length > 0 ? groundedSources : urlFallbackSources;
 
   appendSources(contentAdditions, formatSourceLabels(sourceDetails));
   appendUrlStatus(contentAdditions, urlMetadata);
+  appendSearchEntryPointContent(contentAdditions, searchEntryPoint?.renderedContent);
   if (groundedSources.length === 0 && urlMetadata.length === 0) {
     contentAdditions.push({
       type: 'text',
@@ -247,35 +282,38 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
     }),
     structuredContent: pickDefined({
       answer: textContent,
-      sources,
+      sources: groundedSources,
       sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
+      urlContextSources: urlContextSources.length > 0 ? urlContextSources : undefined,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
-      grounded: sources.length > 0,
+      grounded: groundedSources.length > 0,
+      urlContextUsed: urlContextSources.length > 0,
       citations: citations.length > 0 ? citations : undefined,
       searchEntryPoint,
+      warnings: warnings.length > 0 ? warnings : undefined,
     }),
-    reportMessage: buildSourceReportMessage(sources.length),
+    reportMessage: buildSourceReportMessage(groundedSources.length),
   };
 }
 
 function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) {
   const groundedSources = collectGroundedSources(streamResult.groundingMetadata);
-  const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
   const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
-  const citations = collectGroundingCitations(streamResult.groundingMetadata);
+  const urlContextSources = collectUrlContextSources(urlMetadata);
+  const sourceDetails = mergeSourceDetails(
+    collectGroundedSourceDetails(streamResult.groundingMetadata, new Set(urlContextSources)),
+    buildUrlContextSourceDetails(urlContextSources),
+  );
+  const { citations, droppedSupportCount } = collectGroundingCitations(
+    streamResult.groundingMetadata,
+  );
   const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
+  const warnings = buildDroppedSupportWarnings(droppedSupportCount);
   const contentAdditions: CallToolResult['content'] = [];
-
-  const urlFallbackSources =
-    groundedSources.length === 0
-      ? urlMetadata
-          .filter((entry) => entry.status === 'URL_RETRIEVAL_STATUS_SUCCESS')
-          .map((entry) => entry.url)
-      : [];
-  const sources = groundedSources.length > 0 ? groundedSources : urlFallbackSources;
 
   appendSources(contentAdditions, formatSourceLabels(sourceDetails));
   appendUrlStatus(contentAdditions, urlMetadata);
+  appendSearchEntryPointContent(contentAdditions, searchEntryPoint?.renderedContent);
 
   return {
     resultMod: (result: CallToolResult) => ({
@@ -283,12 +321,15 @@ function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) 
     }),
     structuredContent: pickDefined({
       summary: textContent,
-      sources: sources.length > 0 ? sources : undefined,
+      sources: groundedSources.length > 0 ? groundedSources : undefined,
       sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
+      urlContextSources: urlContextSources.length > 0 ? urlContextSources : undefined,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
-      grounded: sources.length > 0,
+      grounded: groundedSources.length > 0,
+      urlContextUsed: urlContextSources.length > 0,
       citations: citations.length > 0 ? citations : undefined,
       searchEntryPoint,
+      warnings: warnings.length > 0 ? warnings : undefined,
     }),
     reportMessage: `${formatCountLabel(urlMetadata.length, 'URL')} retrieved`,
   };
@@ -300,6 +341,7 @@ async function searchWork(
     systemInstruction,
     urls,
     thinkingLevel,
+    thinkingBudget,
     maxOutputTokens,
     safetySettings,
   }: SearchInput & GenerationConfigFields,
@@ -333,6 +375,7 @@ async function searchWork(
           {
             systemInstruction: systemInstruction ?? prompt.systemInstruction,
             thinkingLevel,
+            thinkingBudget,
             maxOutputTokens,
             safetySettings,
             tools,
@@ -351,6 +394,7 @@ export async function analyzeUrlWork(
     question,
     systemInstruction,
     thinkingLevel,
+    thinkingBudget,
     maxOutputTokens,
     safetySettings,
   }: AnalyzeUrlInput & GenerationConfigFields,
@@ -385,6 +429,7 @@ export async function analyzeUrlWork(
           {
             systemInstruction: systemInstruction ?? prompt.systemInstruction,
             thinkingLevel,
+            thinkingBudget,
             maxOutputTokens,
             safetySettings,
             tools,
@@ -403,6 +448,7 @@ async function agenticSearchWork(
     topic,
     searchDepth,
     thinkingLevel,
+    thinkingBudget,
     urls,
     maxOutputTokens,
     safetySettings,
@@ -465,6 +511,7 @@ async function agenticSearchWork(
           {
             systemInstruction: prompt.systemInstruction,
             thinkingLevel,
+            thinkingBudget,
             maxOutputTokens,
             safetySettings,
             tools,
@@ -489,6 +536,7 @@ async function runQuickResearch(
       query: args.goal,
       systemInstruction: args.systemInstruction,
       thinkingLevel: args.thinkingLevel,
+      thinkingBudget: args.thinkingBudget,
       urls: args.urls,
       maxOutputTokens: args.maxOutputTokens,
       safetySettings: args.safetySettings,
@@ -514,6 +562,7 @@ async function runDeepResearch(args: ResearchInput, ctx: ServerContext): Promise
       topic: args.goal,
       searchDepth,
       ...(thinkingLevel ? { thinkingLevel } : {}),
+      thinkingBudget: args.thinkingBudget,
       urls: args.urls,
       maxOutputTokens: args.maxOutputTokens,
       safetySettings: args.safetySettings,
@@ -542,14 +591,23 @@ function buildResearchStructuredContent(
   structured: Record<string, unknown>,
 ): Record<string, unknown> {
   return {
-    ...buildBaseStructuredOutput(ctx.task?.id),
+    ...buildBaseStructuredOutput(
+      ctx.task?.id,
+      Array.isArray(structured.warnings)
+        ? structured.warnings.filter((warning): warning is string => typeof warning === 'string')
+        : undefined,
+    ),
     mode: args.mode,
     summary: extractResearchSummary(structured),
     sources: Array.isArray(structured.sources) ? structured.sources : [],
     ...(structured.sourceDetails ? { sourceDetails: structured.sourceDetails } : {}),
+    ...(structured.urlContextSources ? { urlContextSources: structured.urlContextSources } : {}),
     ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
     ...(structured.toolsUsed ? { toolsUsed: structured.toolsUsed } : {}),
     ...(structured.grounded !== undefined ? { grounded: structured.grounded } : {}),
+    ...(structured.urlContextUsed !== undefined
+      ? { urlContextUsed: structured.urlContextUsed }
+      : {}),
     ...(structured.citations ? { citations: structured.citations } : {}),
     ...(structured.searchEntryPoint ? { searchEntryPoint: structured.searchEntryPoint } : {}),
     ...(structured.contextUsed ? { contextUsed: structured.contextUsed } : {}),
@@ -557,6 +615,9 @@ function buildResearchStructuredContent(
     ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
     ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
     ...(structured.usage ? { usage: structured.usage } : {}),
+    ...(structured.safetyRatings ? { safetyRatings: structured.safetyRatings } : {}),
+    ...(structured.finishMessage ? { finishMessage: structured.finishMessage } : {}),
+    ...(structured.citationMetadata ? { citationMetadata: structured.citationMetadata } : {}),
   };
 }
 

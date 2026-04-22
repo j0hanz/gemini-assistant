@@ -299,6 +299,37 @@ describe('consumeStreamWithProgress', () => {
     assert.strictEqual(result.usageMetadata?.totalTokenCount, 15);
   });
 
+  it('captures candidate observability metadata and expanded usage details', async () => {
+    const { ctx } = makeMockContext();
+    const usage = {
+      promptTokenCount: 10,
+      toolUsePromptTokenCount: 3,
+      promptTokensDetails: [{ modality: 'TEXT', tokenCount: 10 }],
+      cacheTokensDetails: [{ modality: 'TEXT', tokenCount: 4 }],
+      candidatesTokensDetails: [{ modality: 'TEXT', tokenCount: 5 }],
+      candidatesTokenCount: 5,
+      totalTokenCount: 18,
+    };
+    const chunk = makeChunk([{ text: 'result' }], FinishReason.STOP);
+    chunk.usageMetadata = usage;
+    const candidate = chunk.candidates?.[0] as Record<string, unknown> | undefined;
+    if (candidate) {
+      candidate['safetyRatings'] = [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT' }];
+      candidate['finishMessage'] = 'done';
+      candidate['citationMetadata'] = { citationSources: [{ startIndex: 0, endIndex: 6 }] };
+    }
+
+    const result = await consumeStreamWithProgress(fakeStream([chunk]), ctx);
+    const extracted = extractUsage(result.usageMetadata);
+
+    assert.deepStrictEqual(result.safetyRatings, [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT' }]);
+    assert.strictEqual(result.finishMessage, 'done');
+    assert.deepStrictEqual(result.citationMetadata, {
+      citationSources: [{ startIndex: 0, endIndex: 6 }],
+    });
+    assert.deepStrictEqual(extracted, usage);
+  });
+
   it('stops consuming when signal is aborted', async () => {
     const controller = new AbortController();
     const ctx = {
@@ -448,6 +479,48 @@ describe('consumeStreamWithProgress', () => {
     assert.strictEqual(
       result.toolEvents.filter((event) => event.kind === 'function_call').length,
       2,
+    );
+  });
+
+  it('omits nameless function calls from rollups and logs a warning', async () => {
+    const logCalls: { level: string; message: string }[] = [];
+    const { ctx } = makeMockContext();
+    ctx.mcpReq.log = Object.assign(
+      async (level: string, message: string) => {
+        logCalls.push({ level, message });
+      },
+      {
+        debug: async (message: string) => {
+          logCalls.push({ level: 'debug', message });
+        },
+        info: async () => {},
+        warning: async (message: string) => {
+          logCalls.push({ level: 'warning', message });
+        },
+        error: async () => {},
+      },
+    ) as never;
+
+    const result = await consumeStreamWithProgress(
+      fakeStream([
+        makeChunk([{ functionCall: { args: { q: 'x' } }, thoughtSignature: 'sig-missing' }]),
+      ]),
+      ctx,
+    );
+
+    assert.deepStrictEqual(result.functionCalls, []);
+    assert.deepStrictEqual(result.toolsUsed, []);
+    assert.deepStrictEqual(result.toolsUsedOccurrences, []);
+    assert.strictEqual(result.namelessFunctionCallCount, 1);
+    assert.deepStrictEqual(result.toolEvents, [
+      { kind: 'function_call', args: { q: 'x' }, thoughtSignature: 'sig-missing' },
+    ]);
+    assert.ok(
+      logCalls.some(
+        (call) =>
+          call.level === 'warning' &&
+          call.message.includes('functionCall part(s) with missing name'),
+      ),
     );
   });
 
@@ -1200,6 +1273,10 @@ describe('extractUsage', () => {
       promptTokenCount: 100,
       candidatesTokenCount: 50,
       thoughtsTokenCount: 20,
+      toolUsePromptTokenCount: 5,
+      promptTokensDetails: [{ modality: 'TEXT', tokenCount: 100 }],
+      cacheTokensDetails: [{ modality: 'TEXT', tokenCount: 10 }],
+      candidatesTokensDetails: [{ modality: 'TEXT', tokenCount: 50 }],
       totalTokenCount: 170,
     };
     const result = extractUsage(meta);
@@ -1207,6 +1284,10 @@ describe('extractUsage', () => {
       promptTokenCount: 100,
       candidatesTokenCount: 50,
       thoughtsTokenCount: 20,
+      toolUsePromptTokenCount: 5,
+      promptTokensDetails: [{ modality: 'TEXT', tokenCount: 100 }],
+      cacheTokensDetails: [{ modality: 'TEXT', tokenCount: 10 }],
+      candidatesTokensDetails: [{ modality: 'TEXT', tokenCount: 50 }],
       totalTokenCount: 170,
     });
   });

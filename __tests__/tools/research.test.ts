@@ -173,8 +173,10 @@ describe('research tool contracts', () => {
         'https://example.com',
       ]);
       assert.deepStrictEqual((structured as Record<string, unknown>).sourceDetails, [
-        { title: 'Example', url: 'https://example.com' },
+        { origin: 'googleSearch', title: 'Example', url: 'https://example.com' },
       ]);
+      assert.strictEqual((structured as Record<string, unknown>).urlContextSources, undefined);
+      assert.strictEqual((structured as Record<string, unknown>).urlContextUsed, false);
       assert.strictEqual((structured as Record<string, unknown>).grounded, true);
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
@@ -226,7 +228,7 @@ describe('research tool contracts', () => {
         'https://example.com/docs',
       ]);
       assert.deepStrictEqual((structured as Record<string, unknown>).sourceDetails, [
-        { title: 'Docs', url: 'https://example.com/docs' },
+        { origin: 'googleSearch', title: 'Docs', url: 'https://example.com/docs' },
       ]);
       assert.deepStrictEqual((structured as Record<string, unknown>).toolsUsed, ['googleSearch']);
       assert.strictEqual((structured as Record<string, unknown>).grounded, true);
@@ -262,12 +264,60 @@ describe('research tool contracts', () => {
       const structured = result?.structuredContent;
       assert.ok(structured && typeof structured === 'object');
       assert.strictEqual((structured as Record<string, unknown>).grounded, false);
+      assert.strictEqual((structured as Record<string, unknown>).urlContextUsed, false);
       assert.deepStrictEqual((structured as Record<string, unknown>).sources, []);
       assert.ok(
         result?.content.some((entry) =>
           entry.text?.includes('No grounded sources were retrieved; the answer may be ungrounded.'),
         ),
       );
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
+  it('separates URL Context-only success from Google Search grounding', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'URL-only answer' }] },
+              finishReason: 'STOP',
+              urlContextMetadata: {
+                urlMetadata: [
+                  {
+                    retrievedUrl: 'https://example.com/context',
+                    urlRetrievalStatus: 'URL_RETRIEVAL_STATUS_SUCCESS',
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ]);
+
+    try {
+      await research.createTask(
+        { goal: 'url only', mode: 'quick', urls: ['https://example.com/context'] },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+
+      const structured = store.stored[0]?.result.structuredContent as Record<string, unknown>;
+      assert.deepStrictEqual(structured.sources, []);
+      assert.deepStrictEqual(structured.urlContextSources, ['https://example.com/context']);
+      assert.deepStrictEqual(structured.sourceDetails, [
+        { origin: 'urlContext', url: 'https://example.com/context' },
+      ]);
+      assert.strictEqual(structured.grounded, false);
+      assert.strictEqual(structured.urlContextUsed, true);
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
     }
@@ -290,11 +340,18 @@ describe('research tool contracts', () => {
               content: { parts: [{ text: 'Deep research report' }] },
               finishReason: 'STOP',
               groundingMetadata: {
-                groundingChunks: [{ web: { title: 'Report', uri: 'https://example.com/report' } }],
+                groundingChunks: [
+                  { web: { title: 'Report', uri: 'https://example.com/report' } },
+                  { web: { title: 'Private', uri: 'file:///etc/passwd' } },
+                ],
                 groundingSupports: [
                   {
                     groundingChunkIndices: [0],
                     segment: { text: 'Supported claim', startIndex: 0, endIndex: 15 },
+                  },
+                  {
+                    groundingChunkIndices: [1],
+                    segment: { text: 'Private claim', startIndex: 16, endIndex: 29 },
                   },
                 ],
                 searchEntryPoint: { renderedContent: '<div>search</div>' },
@@ -343,6 +400,13 @@ describe('research tool contracts', () => {
       assert.deepStrictEqual(structured.urlMetadata, [
         { url: 'https://example.com/report', status: 'URL_RETRIEVAL_STATUS_SUCCESS' },
       ]);
+      assert.deepStrictEqual(structured.sources, ['https://example.com/report']);
+      assert.deepStrictEqual(structured.urlContextSources, ['https://example.com/report']);
+      assert.deepStrictEqual(structured.sourceDetails, [
+        { origin: 'both', title: 'Report', url: 'https://example.com/report' },
+      ]);
+      assert.strictEqual(structured.grounded, true);
+      assert.strictEqual(structured.urlContextUsed, true);
       assert.deepStrictEqual(structured.citations, [
         {
           text: 'Supported claim',
@@ -354,6 +418,12 @@ describe('research tool contracts', () => {
       assert.deepStrictEqual(structured.searchEntryPoint, {
         renderedContent: '<div>search</div>',
       });
+      assert.deepStrictEqual(structured.warnings, ['dropped 1 non-public grounding supports']);
+      assert.ok(
+        store.stored[0]?.result.content.some((entry) =>
+          entry.text?.includes('Google Search Suggestions:\n<div>search</div>'),
+        ),
+      );
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
     }

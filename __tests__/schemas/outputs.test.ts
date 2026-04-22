@@ -113,6 +113,12 @@ describe('ResearchOutputSchema', () => {
       searchEntryPoint: {
         renderedContent: '<div>search</div>',
       },
+      urlContextUsed: true,
+      urlContextSources: ['https://example.com/context'],
+      sourceDetails: [
+        { origin: 'both', title: 'Example', url: 'https://example.com' },
+        { origin: 'urlContext', url: 'https://example.com/context' },
+      ],
     });
     assert.ok(result.success);
 
@@ -208,6 +214,10 @@ describe('UsageMetadataSchema', () => {
       candidatesTokenCount: 50,
       thoughtsTokenCount: 20,
       cachedContentTokenCount: 10,
+      toolUsePromptTokenCount: 5,
+      promptTokensDetails: [{ modality: 'TEXT', tokenCount: 100 }],
+      cacheTokensDetails: [{ modality: 'TEXT', tokenCount: 10 }],
+      candidatesTokensDetails: [{ modality: 'TEXT', tokenCount: 50 }],
       totalTokenCount: 170,
     });
     assert.ok(result.success);

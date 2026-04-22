@@ -36,8 +36,11 @@ export interface SessionEventEntry {
     data?: unknown;
     finishReason?: string;
     functionCalls?: FunctionCallEntry[];
+    citationMetadata?: unknown;
     promptBlockReason?: string;
     schemaWarnings?: string[];
+    safetyRatings?: unknown;
+    finishMessage?: string;
     thoughts?: string;
     text: string;
     toolEvents?: ToolEvent[];
@@ -100,6 +103,15 @@ function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
             functionCalls: item.response.functionCalls.map((functionCall) => ({ ...functionCall })),
           }
         : {}),
+      ...(item.response.citationMetadata !== undefined
+        ? { citationMetadata: cloneValue(item.response.citationMetadata) }
+        : {}),
+      ...(item.response.safetyRatings !== undefined
+        ? { safetyRatings: cloneValue(item.response.safetyRatings) }
+        : {}),
+      ...(item.response.finishMessage !== undefined
+        ? { finishMessage: item.response.finishMessage }
+        : {}),
       ...(item.response.schemaWarnings
         ? { schemaWarnings: [...item.response.schemaWarnings] }
         : {}),
@@ -119,27 +131,8 @@ function cloneContentEntry(item: ContentEntry): ContentEntry {
   };
 }
 
-function isReplaySafeSignaturePart(part: Part): boolean {
-  return (
-    part.functionCall !== undefined ||
-    part.toolCall !== undefined ||
-    part.executableCode !== undefined ||
-    part.codeExecutionResult !== undefined
-  );
-}
-
 export function sanitizeHistoryParts(parts: Part[]): Part[] {
-  return parts.filter((part) => {
-    if (part.thought === true) {
-      return false;
-    }
-
-    if (part.thoughtSignature !== undefined && !isReplaySafeSignaturePart(part)) {
-      return false;
-    }
-
-    return true;
-  });
+  return parts.filter((part) => part.thought !== true);
 }
 
 function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {

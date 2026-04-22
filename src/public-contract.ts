@@ -120,6 +120,7 @@ export const DISCOVERY_ENTRIES = [
       'sessionId?',
       'systemInstruction?',
       'thinkingLevel?',
+      'thinkingBudget?',
       'maxOutputTokens?',
       'safetySettings?',
       'responseSchemaJson?',
@@ -127,7 +128,7 @@ export const DISCOVERY_ENTRIES = [
       'seed?',
     ],
     returns:
-      'A direct answer, optional structured data, usage metadata, and session resource links, including raw turn parts for replay orchestration when sessions are active.',
+      'A direct answer, optional structured data, usage/safety/citation metadata, and session resource links, including raw turn parts for replay orchestration when sessions are active.',
     limitations: [
       'Sessions are stored in server memory only and expire or evict over time.',
       'Sessions require a stateful server connection path; stateless transport mode does not preserve chat continuity across requests.',
@@ -153,11 +154,12 @@ export const DISCOVERY_ENTRIES = [
       'deliverable?',
       'searchDepth?',
       'thinkingLevel?',
+      'thinkingBudget?',
       'maxOutputTokens?',
       'safetySettings?',
     ],
     returns:
-      'A grounded summary with sources and, for deep mode, tool-usage details from the multi-step research path.',
+      'A grounded summary with Google Search sources, URL Context provenance, warnings, and tool-usage details from the multi-step research path.',
     limitations: [
       'Mode defaults to quick; this contract does not accept legacy top-level query or topic fields.',
       'Grounding uses Google Search and optional URL Context, not persistent File Search indexes.',
@@ -184,6 +186,7 @@ export const DISCOVERY_ENTRIES = [
       'diagramType?',
       'validateSyntax?',
       'thinkingLevel?',
+      'thinkingBudget?',
       'maxOutputTokens?',
       'safetySettings?',
       'googleSearch?',
@@ -212,6 +215,7 @@ export const DISCOVERY_ENTRIES = [
       'language?',
       'focus?',
       'thinkingLevel?',
+      'thinkingBudget?',
       'maxOutputTokens?',
       'safetySettings?',
       'filePathA?',

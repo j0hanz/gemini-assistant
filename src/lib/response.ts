@@ -45,6 +45,7 @@ export function collectGroundedSources(groundingMetadata: GroundingMetadata | un
 
 export function collectGroundedSourceDetails(
   groundingMetadata: GroundingMetadata | undefined,
+  urlContextUrls = new Set<string>(),
 ): SourceDetail[] {
   if (!groundingMetadata?.groundingChunks) return [];
 
@@ -56,20 +57,50 @@ export function collectGroundedSourceDetails(
 
     seen.add(uri);
     const title = chunk.web?.title;
-    sources.push(title ? { title, url: uri } : { url: uri });
+    const origin = urlContextUrls.has(uri) ? 'both' : 'googleSearch';
+    sources.push(title ? { origin, title, url: uri } : { origin, url: uri });
   }
 
   return sources;
 }
 
-export function collectGroundingCitations(
-  groundingMetadata: GroundingMetadata | undefined,
-): GroundingCitation[] {
+export function mergeSourceDetails(
+  grounding: readonly SourceDetail[],
+  urlContext: readonly SourceDetail[],
+): SourceDetail[] {
+  const merged = new Map<string, SourceDetail>();
+
+  for (const source of grounding) {
+    merged.set(source.url, source);
+  }
+
+  for (const source of urlContext) {
+    const existing = merged.get(source.url);
+    if (existing) {
+      merged.set(source.url, {
+        ...existing,
+        title: existing.title ?? source.title,
+        origin: 'both',
+      });
+      continue;
+    }
+
+    merged.set(source.url, source);
+  }
+
+  return [...merged.values()];
+}
+
+export function collectGroundingCitations(groundingMetadata: GroundingMetadata | undefined): {
+  citations: GroundingCitation[];
+  droppedSupportCount: number;
+} {
   if (!groundingMetadata?.groundingSupports || !groundingMetadata.groundingChunks) {
-    return [];
+    return { citations: [], droppedSupportCount: 0 };
   }
 
   const citations: GroundingCitation[] = [];
+  let droppedSupportCount = 0;
   for (const support of groundingMetadata.groundingSupports) {
     const text = support.segment?.text;
     if (!text) continue;
@@ -84,7 +115,10 @@ export function collectGroundingCitations(
       sourceUrls.push(url);
     }
 
-    if (sourceUrls.length === 0) continue;
+    if (sourceUrls.length === 0) {
+      droppedSupportCount += 1;
+      continue;
+    }
 
     citations.push(
       pickDefined({
@@ -96,7 +130,7 @@ export function collectGroundingCitations(
     );
   }
 
-  return citations;
+  return { citations, droppedSupportCount };
 }
 
 export function collectSearchEntryPoint(
@@ -116,6 +150,9 @@ interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
   thoughts?: string;
   toolEvents?: TToolEvent[];
   usage?: UsageMetadata;
+  safetyRatings?: unknown;
+  finishMessage?: string | undefined;
+  citationMetadata?: unknown;
 }
 
 export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
@@ -125,6 +162,9 @@ export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
   thoughtText,
   toolEvents,
   usage,
+  safetyRatings,
+  finishMessage,
+  citationMetadata,
 }: {
   contextUsed?: ContextUsed;
   functionCalls?: readonly TFunctionCall[];
@@ -132,6 +172,9 @@ export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
   thoughtText?: string;
   toolEvents?: readonly TToolEvent[];
   usage?: UsageMetadata | undefined;
+  safetyRatings?: unknown;
+  finishMessage?: string | undefined;
+  citationMetadata?: unknown;
 }): SharedStructuredMetadata<TFunctionCall, TToolEvent> {
   return pickDefined({
     contextUsed,
@@ -139,6 +182,9 @@ export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
     thoughts: includeThoughts && thoughtText ? thoughtText : undefined,
     toolEvents: toolEvents && toolEvents.length > 0 ? [...toolEvents] : undefined,
     usage,
+    safetyRatings,
+    finishMessage,
+    citationMetadata,
   });
 }
 

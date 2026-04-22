@@ -69,6 +69,8 @@ for replay-safe orchestration of a specific model turn.
 Internally, sessions also keep a replay-safe Gemini `Content[]` log alongside the display
 transcript. Rebuilt sessions use that log so thinking signatures, function calls, and function
 responses survive live chat eviction without changing the public session resources.
+Non-thought signature-bearing text parts are preserved for Gemini replay; `thought: true` parts are
+not replayed.
 
 Workspace context state is exposed through `discover://context`, `workspace://context`, and `workspace://cache`.
 
@@ -82,6 +84,28 @@ The job-first surface is intentionally opinionated:
 - `chat.responseSchemaJson` is intended for single-turn calls and brand-new sessions.
 - The public surface does not expose the legacy `discover` callable tool or the retired standalone `search`, `analyze_url`, `agentic_search`, `explain_error`, `diagram`, or `execute_code` tools.
 - The public surface does not expose Gemini File Search stores or Live API sessions.
+- `thinkingBudget` is available anywhere `thinkingLevel` is accepted and maps directly to
+  Gemini `thinkingConfig.thinkingBudget`.
+
+### Structured Output Notes
+
+Successful tool results may include these optional metadata fields in `structuredContent`:
+
+- `usage.toolUsePromptTokenCount`, `usage.promptTokensDetails`, `usage.cacheTokensDetails`, and
+  `usage.candidatesTokensDetails` when Gemini returns them.
+- `safetyRatings`, `finishMessage`, and `citationMetadata` from the selected candidate.
+- `functionCalls[]` may omit `name` if Gemini emitted a nameless function-call part; nameless calls
+  are not counted in tool usage rollups.
+
+Research results separate Google Search grounding from URL Context:
+
+- `grounded` is true only when Google Search grounding sources exist.
+- `urlContextUsed` and `urlContextSources[]` report successful URL Context retrieval.
+- `sourceDetails[].origin` is `googleSearch`, `urlContext`, or `both`.
+- `warnings[]` may include dropped non-public grounding-support counts; private URLs are never
+  surfaced.
+- Google Search Suggestions are returned in both `structuredContent.searchEntryPoint` and
+  `content[]` for clients that render only content blocks.
 
 ### Tool Capability Matrix
 

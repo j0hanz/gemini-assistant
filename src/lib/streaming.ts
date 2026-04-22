@@ -19,7 +19,7 @@ export { advanceProgress, PROGRESS_CAP, PROGRESS_TOTAL } from './progress.js';
 
 export interface FunctionCallEntry {
   id?: string;
-  name: string;
+  name?: string;
   args?: Record<string, unknown>;
   thoughtSignature?: string;
 }
@@ -61,6 +61,10 @@ export interface StreamResult {
   aborted?: boolean;
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
+  safetyRatings?: unknown;
+  finishMessage?: string;
+  citationMetadata?: unknown;
+  namelessFunctionCallCount?: number;
   promptBlockReason?: BlockedReason;
   urlContextMetadata?: UrlContextMetadata;
   usageMetadata?: GenerateContentResponseUsageMetadata;
@@ -87,6 +91,7 @@ interface StreamProcessingState extends StreamMetadata {
   _fnSeen: Set<string>;
   functionCalls: FunctionCallEntry[];
   hadToolActivity: boolean;
+  namelessFunctionCallCount: number;
   parts: Part[];
   phase: Phase;
   text: string;
@@ -146,6 +151,9 @@ interface StreamMetadata {
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
   hadCandidate: boolean;
+  safetyRatings?: unknown;
+  finishMessage?: string;
+  citationMetadata?: unknown;
   promptBlockReason?: BlockedReason;
   urlContextMetadata?: UrlContextMetadata;
   usageMetadata?: GenerateContentResponseUsageMetadata;
@@ -163,6 +171,18 @@ function updateStreamMetadata(
 
   if (candidate.groundingMetadata) {
     metadata.groundingMetadata = candidate.groundingMetadata;
+  }
+
+  if (candidate.safetyRatings) {
+    metadata.safetyRatings = candidate.safetyRatings;
+  }
+
+  if (candidate.finishMessage) {
+    metadata.finishMessage = candidate.finishMessage;
+  }
+
+  if (candidate.citationMetadata) {
+    metadata.citationMetadata = candidate.citationMetadata;
   }
 
   if (candidate.urlContextMetadata) {
@@ -183,6 +203,7 @@ function createStreamProcessingState(): StreamProcessingState {
     functionCalls: [],
     hadToolActivity: false,
     hadCandidate: false,
+    namelessFunctionCallCount: 0,
     parts: [],
     phase: Phase.Waiting,
     text: '',
@@ -327,11 +348,12 @@ async function handleFunctionCallPart(
 
   if (!functionCall.name) {
     await ctx.mcpReq.log('debug', 'Received functionCall with missing name');
+    state.namelessFunctionCallCount += 1;
   }
 
-  const fnName = functionCall.name ?? 'tool';
-  const fnKey = functionCall.id ?? `${fnName}:${JSON.stringify(functionCall.args ?? {})}`;
-  if (!state._fnSeen.has(fnKey)) {
+  const fnName = functionCall.name;
+  const fnKey = functionCall.id ?? `${fnName ?? ''}:${JSON.stringify(functionCall.args ?? {})}`;
+  if (fnName && !state._fnSeen.has(fnKey)) {
     state._fnSeen.add(fnKey);
     state.functionCalls.push({
       name: fnName,
@@ -349,7 +371,7 @@ async function handleFunctionCallPart(
       thoughtSignature: part.thoughtSignature,
     }),
   );
-  await recordToolActivity(ctx, state, msg, `Tool: ${fnName}`, fnName);
+  await recordToolActivity(ctx, state, msg, `Tool: ${fnName ?? 'unnamed function'}`, fnName);
 }
 
 async function handleToolCallPart(
@@ -665,7 +687,11 @@ function finalizeStreamResult(state: StreamProcessingState): StreamResult {
     ...pickDefined({
       aborted: state.aborted,
       finishReason: state.finishReason,
+      safetyRatings: state.safetyRatings,
+      finishMessage: state.finishMessage,
+      citationMetadata: state.citationMetadata,
       groundingMetadata: state.groundingMetadata,
+      namelessFunctionCallCount: state.namelessFunctionCallCount,
       promptBlockReason: state.promptBlockReason,
       urlContextMetadata: state.urlContextMetadata,
       usageMetadata: state.usageMetadata,
@@ -702,6 +728,13 @@ export async function consumeStreamWithProgress(
     for (const part of candidate.content?.parts ?? []) {
       await handleStreamPart(ctx, state, msg, part);
     }
+  }
+
+  if (state.namelessFunctionCallCount > 0) {
+    await ctx.mcpReq.log(
+      'warning',
+      `Received ${String(state.namelessFunctionCallCount)} functionCall part(s) with missing name`,
+    );
   }
 
   return finalizeStreamResult(state);
@@ -745,6 +778,10 @@ export function extractUsage(meta?: GenerateContentResponseUsageMetadata) {
     promptTokenCount: meta.promptTokenCount,
     candidatesTokenCount: meta.candidatesTokenCount,
     thoughtsTokenCount: meta.thoughtsTokenCount,
+    toolUsePromptTokenCount: meta.toolUsePromptTokenCount,
+    promptTokensDetails: meta.promptTokensDetails,
+    cacheTokensDetails: meta.cacheTokensDetails,
+    candidatesTokensDetails: meta.candidatesTokensDetails,
     totalTokenCount: meta.totalTokenCount,
   });
 }

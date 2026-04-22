@@ -16,6 +16,7 @@ import {
   createResourceLink,
   extractTextOrError,
   formatCountLabel,
+  mergeSourceDetails,
   safeValidateStructuredContent,
   validateStructuredContent,
   validateStructuredToolResult,
@@ -201,8 +202,8 @@ describe('collectGroundedSourceDetails', () => {
     });
 
     assert.deepStrictEqual(sources, [
-      { title: 'Example', url: 'https://example.com' },
-      { url: 'https://example.org' },
+      { origin: 'googleSearch', title: 'Example', url: 'https://example.com' },
+      { origin: 'googleSearch', url: 'https://example.org' },
     ]);
   });
 
@@ -215,7 +216,39 @@ describe('collectGroundedSourceDetails', () => {
       ],
     });
 
-    assert.deepStrictEqual(sources, [{ title: 'First', url: 'https://example.com' }]);
+    assert.deepStrictEqual(sources, [
+      { origin: 'googleSearch', title: 'First', url: 'https://example.com' },
+    ]);
+  });
+
+  it('marks sources present in URL Context as both origins', () => {
+    const sources = collectGroundedSourceDetails(
+      {
+        groundingChunks: [{ web: { title: 'Both', uri: 'https://example.com' } }],
+      },
+      new Set(['https://example.com']),
+    );
+
+    assert.deepStrictEqual(sources, [
+      { origin: 'both', title: 'Both', url: 'https://example.com' },
+    ]);
+  });
+});
+
+describe('mergeSourceDetails', () => {
+  it('merges google search and URL Context details with both provenance', () => {
+    const merged = mergeSourceDetails(
+      [{ origin: 'googleSearch', title: 'Grounded', url: 'https://example.com' }],
+      [
+        { origin: 'urlContext', url: 'https://example.com' },
+        { origin: 'urlContext', url: 'https://example.org' },
+      ],
+    );
+
+    assert.deepStrictEqual(merged, [
+      { origin: 'both', title: 'Grounded', url: 'https://example.com' },
+      { origin: 'urlContext', url: 'https://example.org' },
+    ]);
   });
 });
 
@@ -244,7 +277,7 @@ describe('collectUrlMetadata', () => {
 
 describe('collectGroundingCitations', () => {
   it('maps grounding supports to public chunk URLs', () => {
-    const citations = collectGroundingCitations({
+    const result = collectGroundingCitations({
       groundingChunks: [
         { web: { uri: 'https://example.com/a' } },
         { web: { uri: 'file:///etc/passwd' } },
@@ -262,7 +295,8 @@ describe('collectGroundingCitations', () => {
       ],
     });
 
-    assert.deepStrictEqual(citations, [
+    assert.strictEqual(result.droppedSupportCount, 1);
+    assert.deepStrictEqual(result.citations, [
       {
         text: 'Supported claim',
         startIndex: 0,

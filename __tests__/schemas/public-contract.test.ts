@@ -57,8 +57,17 @@ describe('public contract schemas', () => {
     const base = {
       requestId: 'task-1',
       status: 'completed' as const,
-      usage: { totalTokenCount: 1 },
+      usage: {
+        totalTokenCount: 1,
+        toolUsePromptTokenCount: 1,
+        promptTokensDetails: [{ modality: 'TEXT', tokenCount: 1 }],
+        cacheTokensDetails: [{ modality: 'TEXT', tokenCount: 1 }],
+        candidatesTokensDetails: [{ modality: 'TEXT', tokenCount: 1 }],
+      },
       warnings: ['note'],
+      safetyRatings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT' }],
+      finishMessage: 'done',
+      citationMetadata: { citationSources: [] },
     };
 
     assert.ok(
@@ -78,7 +87,15 @@ describe('public contract schemas', () => {
       'chat output with contextUsed should parse',
     );
     assert.ok(
-      ResearchOutputSchema.safeParse({ ...base, mode: 'quick', summary: 'x', sources: [] }).success,
+      ResearchOutputSchema.safeParse({
+        ...base,
+        mode: 'quick',
+        summary: 'x',
+        sources: [],
+        urlContextUsed: false,
+        sourceDetails: [{ origin: 'urlContext', url: 'https://example.com' }],
+        urlContextSources: ['https://example.com'],
+      }).success,
       'research output should parse',
     );
     assert.ok(
@@ -105,6 +122,22 @@ describe('public contract schemas', () => {
     assert.ok(
       ReviewOutputSchema.safeParse({ ...base, subjectKind: 'failure', summary: 'x' }).success,
       'review output should parse',
+    );
+  });
+
+  it('keeps new optional fields backward-compatible on inputs and outputs', () => {
+    assert.ok(ChatInputSchema.safeParse({ goal: 'x' }).success);
+    assert.ok(ResearchInputSchema.safeParse({ mode: 'quick', goal: 'x' }).success);
+    assert.ok(
+      ChatInputSchema.safeParse({ goal: 'x', thinkingLevel: 'LOW', thinkingBudget: 32 }).success,
+    );
+    assert.ok(
+      ResearchOutputSchema.safeParse({
+        status: 'completed',
+        mode: 'quick',
+        summary: 'x',
+        sources: [],
+      }).success,
     );
   });
 });

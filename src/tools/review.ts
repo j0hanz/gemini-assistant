@@ -210,6 +210,7 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
       filePathB,
       question,
       thinkingLevel,
+      thinkingBudget,
       googleSearch,
       urls,
       maxOutputTokens,
@@ -217,6 +218,7 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
     }: CompareFilesInput & {
       maxOutputTokens?: ReviewInput['maxOutputTokens'];
       safetySettings?: ReviewInput['safetySettings'];
+      thinkingBudget?: ReviewInput['thinkingBudget'];
     },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
@@ -271,6 +273,7 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
               {
                 systemInstruction: prompt.systemInstruction,
                 thinkingLevel,
+                thinkingBudget,
                 maxOutputTokens,
                 safetySettings,
                 tools,
@@ -299,6 +302,7 @@ interface FailureReviewSubject {
   language?: string | undefined;
   maxOutputTokens?: ReviewInput['maxOutputTokens'];
   safetySettings?: ReviewInput['safetySettings'];
+  thinkingBudget?: ReviewInput['thinkingBudget'];
   urls?: readonly string[] | undefined;
 }
 
@@ -308,8 +312,16 @@ async function diagnoseFailureWork(
   thinkingLevel: ReviewInput['thinkingLevel'],
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const { urls, error, codeContext, language, googleSearch, maxOutputTokens, safetySettings } =
-    subject;
+  const {
+    urls,
+    error,
+    codeContext,
+    language,
+    googleSearch,
+    maxOutputTokens,
+    safetySettings,
+    thinkingBudget,
+  } = subject;
 
   const prompt = buildErrorDiagnosisPrompt({
     codeContext: focus
@@ -348,6 +360,7 @@ async function diagnoseFailureWork(
           {
             systemInstruction: prompt.systemInstruction,
             thinkingLevel,
+            thinkingBudget,
             maxOutputTokens,
             safetySettings,
             tools,
@@ -985,9 +998,11 @@ export async function analyzePrWork(
     dryRun,
     focus,
     maxOutputTokens,
+    thinkingBudget,
     safetySettings,
   }: AnalyzePrInput & {
     maxOutputTokens?: ReviewInput['maxOutputTokens'];
+    thinkingBudget?: ReviewInput['thinkingBudget'];
     safetySettings?: ReviewInput['safetySettings'];
   },
   ctx: ServerContext,
@@ -1069,6 +1084,7 @@ export async function analyzePrWork(
           {
             systemInstruction: modelPrompt.systemInstruction,
             thinkingLevel,
+            thinkingBudget,
             maxOutputTokens,
             safetySettings,
           },
@@ -1106,6 +1122,9 @@ function buildReviewStructuredContent(
     empty: typeof structured.empty === 'boolean' ? structured.empty : undefined,
     truncated: typeof structured.truncated === 'boolean' ? structured.truncated : undefined,
     functionCalls: structured.functionCalls,
+    safetyRatings: structured.safetyRatings,
+    finishMessage: structured.finishMessage,
+    citationMetadata: structured.citationMetadata,
     thoughts: structured.thoughts,
     toolEvents: structured.toolEvents,
     usage: structured.usage,
@@ -1126,6 +1145,7 @@ async function reviewWork(
         dryRun: args.dryRun,
         language: args.language,
         thinkingLevel: args.thinkingLevel,
+        thinkingBudget: args.thinkingBudget,
         focus: args.focus,
         maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
@@ -1140,6 +1160,7 @@ async function reviewWork(
         filePathB: args.filePathB,
         question: args.question ?? args.focus,
         thinkingLevel: args.thinkingLevel,
+        thinkingBudget: args.thinkingBudget,
         googleSearch: args.googleSearch,
         urls: args.urls,
         maxOutputTokens: args.maxOutputTokens,
@@ -1156,6 +1177,7 @@ async function reviewWork(
         language: args.language,
         googleSearch: args.googleSearch,
         maxOutputTokens: args.maxOutputTokens,
+        thinkingBudget: args.thinkingBudget,
         safetySettings: args.safetySettings,
         urls: args.urls,
       },

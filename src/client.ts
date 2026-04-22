@@ -38,6 +38,7 @@ export const DEFAULT_SYSTEM_INSTRUCTION =
 interface ConfigBuilderOptions {
   systemInstruction?: string | undefined;
   thinkingLevel?: AskThinkingLevel | undefined;
+  thinkingBudget?: number | undefined;
   cacheName?: string | undefined;
   responseSchema?: GeminiResponseSchema | undefined;
   jsonMode?: boolean | undefined;
@@ -50,10 +51,11 @@ interface ConfigBuilderOptions {
   toolConfig?: ToolConfig | undefined;
 }
 
-function buildThinkingConfig(thinkingLevel?: AskThinkingLevel) {
+function buildThinkingConfig(thinkingLevel?: AskThinkingLevel, thinkingBudget?: number) {
   return {
     ...(EXPOSE_THOUGHTS ? { includeThoughts: true } : {}),
     ...(thinkingLevel ? { thinkingLevel: THINKING_LEVEL_MAP[thinkingLevel] } : {}),
+    ...(thinkingBudget !== undefined ? { thinkingBudget } : {}),
   };
 }
 
@@ -77,8 +79,9 @@ function buildResponseConfig(
   isJson: boolean,
   responseSchema: GeminiResponseSchema | undefined,
   thinkingLevel: AskThinkingLevel | undefined,
+  thinkingBudget: number | undefined,
 ) {
-  const thinkingConfig = buildThinkingConfig(thinkingLevel);
+  const thinkingConfig = buildThinkingConfig(thinkingLevel, thinkingBudget);
   return {
     ...(cacheName ? { cachedContent: cacheName } : {}),
     ...(cacheName ? {} : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
@@ -99,6 +102,7 @@ export function buildGenerateContentConfig(
   const {
     systemInstruction,
     thinkingLevel,
+    thinkingBudget,
     cacheName,
     responseSchema,
     jsonMode,
@@ -114,7 +118,14 @@ export function buildGenerateContentConfig(
   const resolvedSafetySettings = normalizeSafetySettings(safetySettings ?? getSafetySettings());
 
   return {
-    ...buildResponseConfig(cacheName, systemInstruction, isJson, responseSchema, thinkingLevel),
+    ...buildResponseConfig(
+      cacheName,
+      systemInstruction,
+      isJson,
+      responseSchema,
+      thinkingLevel,
+      thinkingBudget,
+    ),
     maxOutputTokens: maxOutputTokens ?? getMaxOutputTokens(),
     ...(resolvedSafetySettings ? { safetySettings: resolvedSafetySettings } : {}),
     ...(temperature !== undefined ? { temperature } : {}),

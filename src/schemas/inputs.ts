@@ -20,6 +20,7 @@ import {
   sessionId,
   temperatureField,
   textField,
+  thinkingBudget,
   thinkingLevel,
   withFieldMetadata,
   workspacePath,
@@ -41,6 +42,7 @@ import { validateGeminiJsonSchema } from './validators.js';
 type SessionIdCompleter = (prefix?: string) => string[];
 
 const thinkingLevelField = thinkingLevel();
+const thinkingBudgetField = thinkingBudget();
 const generationConfigFields = createGenerationConfigFields();
 
 export function parseResponseSchemaJsonValue(raw: string): GeminiResponseSchema {
@@ -99,6 +101,7 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
       textField('System instructions for response style, constraints, or behavior.'),
     ),
     thinkingLevel: thinkingLevelField,
+    thinkingBudget: thinkingBudgetField,
     ...generationConfigFields,
     responseSchemaJson: responseSchemaJsonField(),
     temperature: temperatureField(),
@@ -127,6 +130,7 @@ export const ResearchInputBaseSchema = z.strictObject({
     'How many search-and-synthesis passes to perform. Use higher values for broader or more thorough deep research.',
   ),
   thinkingLevel: thinkingLevelField,
+  thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
 });
 export const ResearchInputSchema = ResearchInputBaseSchema.superRefine(validateFlatResearchInput);
@@ -162,6 +166,7 @@ export const AnalyzeInputBaseSchema = z.strictObject({
     .optional()
     .describe('Validate generated diagram syntax when outputKind=diagram.'),
   thinkingLevel: thinkingLevelField,
+  thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
   googleSearch: withFieldMetadata(
     z.boolean().optional(),
@@ -182,6 +187,7 @@ const reviewSubjectKindLiteral = <T extends 'diff' | 'comparison' | 'failure'>(v
 const reviewCommonShape = {
   focus: optionalField(textField('Review priorities (e.g. regressions, security, performance).')),
   thinkingLevel: thinkingLevelField,
+  thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
 };
 
@@ -260,6 +266,7 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
       textField('System instructions for response style, constraints, or behavior.'),
     ),
     thinkingLevel: thinkingLevelField,
+    thinkingBudget: thinkingBudgetField,
     ...generationConfigFields,
     responseSchema: withFieldMetadata(
       GeminiResponseSchema.optional(),
@@ -311,6 +318,7 @@ export const ExecuteCodeInputSchema = z.strictObject({
     ),
   ),
   thinkingLevel: thinkingLevelField,
+  thinkingBudget: thinkingBudgetField,
 });
 
 export const SearchInputSchema = z.strictObject({
@@ -327,6 +335,7 @@ export const SearchInputSchema = z.strictObject({
     optional: true,
   }),
   thinkingLevel: thinkingLevelField,
+  thinkingBudget: thinkingBudgetField,
 });
 export type SearchInput = z.infer<typeof SearchInputSchema>;
 
@@ -337,6 +346,7 @@ export const AgenticSearchInputSchema = z.strictObject({
     'How many search iterations to perform during deep research. Use higher values for more exhaustive investigation.',
   ),
   thinkingLevel: thinkingLevelField,
+  thinkingBudget: thinkingBudgetField,
 });
 export type AgenticSearchInput = z.infer<typeof AgenticSearchInputSchema>;
 
@@ -344,6 +354,7 @@ export const AnalyzeFileInputSchema = z.strictObject({
   filePath: workspacePath('Workspace-relative or absolute path to the file'),
   question: requiredText('What to analyze or ask about the file'),
   thinkingLevel: thinkingLevelField,
+  thinkingBudget: thinkingBudgetField,
   mediaResolution: mediaResolution(
     'Resolution for image/video processing. Higher = more detail, more tokens.',
   ),
@@ -362,6 +373,7 @@ export const AnalyzeUrlInputSchema = z.strictObject({
     textField('Instructions for output presentation (format, rubric, audience).'),
   ),
   thinkingLevel: thinkingLevelField,
+  thinkingBudget: thinkingBudgetField,
 });
 export type AnalyzeUrlInput = z.infer<typeof AnalyzeUrlInputSchema>;
 
@@ -371,6 +383,7 @@ export const AnalyzePrInputSchema = z.strictObject({
     'Skip model review, return diff snapshot only.',
   ),
   thinkingLevel: thinkingLevelField,
+  thinkingBudget: thinkingBudgetField,
   language: optionalField(textField('Primary language hint.')),
   focus: optionalField(textField('Optional review focus hint.')),
 });
@@ -381,6 +394,7 @@ export const ExplainErrorInputSchema = z.strictObject({
   codeContext: optionalField(textField('Relevant source code context.')),
   language: optionalField(textField('Programming language hint.')),
   thinkingLevel: thinkingLevelField,
+  thinkingBudget: thinkingBudgetField,
   googleSearch: withFieldMetadata(
     z.boolean().optional(),
     'Enable Google Search to look up error messages in docs, issues, and forums.',
@@ -400,6 +414,7 @@ export const CompareFilesInputSchema = z.strictObject({
   ),
   question: optionalField(textField('Comparison focus (e.g., API changes, behavior, security).')),
   thinkingLevel: thinkingLevelField,
+  thinkingBudget: thinkingBudgetField,
   googleSearch: withFieldMetadata(
     z.boolean().optional(),
     'Enable Google Search for best practices or migration context.',

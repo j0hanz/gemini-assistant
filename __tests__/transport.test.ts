@@ -107,6 +107,8 @@ async function initializeSession(
 
 afterEach(() => {
   delete (globalThis as Record<string, unknown>).Bun;
+  delete process.env.MCP_ALLOWED_HOSTS;
+  delete process.env.MCP_CORS_ORIGIN;
   delete process.env.MCP_HTTP_HOST;
   delete process.env.MCP_MAX_TRANSPORT_SESSIONS;
   delete process.env.MCP_STATELESS;
@@ -116,6 +118,114 @@ afterEach(() => {
 });
 
 describe('startWebStandardTransport', () => {
+  it('returns CORS preflight headers when enabled', async () => {
+    process.env.MCP_STATELESS = 'true';
+    process.env.MCP_CORS_ORIGIN = 'https://app.example.com';
+
+    const transport = await startWebStandardTransport(() => createServerInstance());
+
+    try {
+      const response = await transport.handler(
+        new Request('http://127.0.0.1:3000/mcp', {
+          method: 'OPTIONS',
+          headers: {
+            host: '127.0.0.1:3000',
+            origin: 'https://app.example.com',
+          },
+        }),
+      );
+
+      assert.strictEqual(response.status, 204);
+      assert.strictEqual(
+        response.headers.get('Access-Control-Allow-Origin'),
+        'https://app.example.com',
+      );
+      assert.match(response.headers.get('Access-Control-Expose-Headers') ?? '', /mcp-session-id/);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('exposes MCP headers on normal responses when CORS is enabled', async () => {
+    process.env.MCP_STATELESS = 'false';
+    process.env.MCP_CORS_ORIGIN = 'https://app.example.com';
+
+    const transport = await startWebStandardTransport(() => createServerInstance());
+
+    try {
+      const response = await transport.handler(
+        createRequest({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            capabilities: { roots: {} },
+            clientInfo: { name: 'transport-test', version: '0.0.1' },
+            protocolVersion: LATEST_PROTOCOL_VERSION,
+          },
+        }),
+      );
+
+      assert.strictEqual(response.status, 200);
+      assert.strictEqual(
+        response.headers.get('Access-Control-Allow-Origin'),
+        'https://app.example.com',
+      );
+      assert.match(response.headers.get('Access-Control-Expose-Headers') ?? '', /mcp-session-id/);
+      assert.ok(response.headers.get('mcp-session-id'));
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('omits CORS headers when MCP_CORS_ORIGIN is unset', async () => {
+    process.env.MCP_STATELESS = 'false';
+
+    const transport = await startWebStandardTransport(() => createServerInstance());
+
+    try {
+      const response = await transport.handler(
+        createRequest({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            capabilities: { roots: {} },
+            clientInfo: { name: 'transport-test', version: '0.0.1' },
+            protocolVersion: LATEST_PROTOCOL_VERSION,
+          },
+        }),
+      );
+
+      assert.strictEqual(response.status, 200);
+      assert.strictEqual(response.headers.get('Access-Control-Allow-Origin'), null);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('does not include CORS headers on forbidden host mismatches', async () => {
+    process.env.MCP_STATELESS = 'false';
+    process.env.MCP_HTTP_HOST = '127.0.0.1';
+    process.env.MCP_ALLOWED_HOSTS = '127.0.0.1';
+    process.env.MCP_CORS_ORIGIN = 'https://app.example.com';
+
+    const transport = await startWebStandardTransport(() => createServerInstance());
+
+    try {
+      const response = await transport.handler(
+        createRequest({ jsonrpc: '2.0', id: 1, method: 'ping' }, undefined, {
+          hostHeader: 'evil.example.com',
+        }),
+      );
+
+      assert.strictEqual(response.status, 403);
+      assert.strictEqual(response.headers.get('Access-Control-Allow-Origin'), null);
+    } finally {
+      await transport.close();
+    }
+  });
+
   it('returns 404 for unknown stateful sessions', async () => {
     process.env.MCP_STATELESS = 'false';
     const transport = await startWebStandardTransport(() => createServerInstance());

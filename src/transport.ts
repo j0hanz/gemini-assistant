@@ -467,6 +467,41 @@ function applyCors(app: ReturnType<typeof createMcpExpressApp>, corsOrigin: stri
   });
 }
 
+function applyCorsHeaders(headers: Headers, corsOrigin: string): void {
+  if (!corsOrigin) {
+    return;
+  }
+
+  headers.set('Access-Control-Allow-Origin', corsOrigin);
+  headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  headers.set(
+    'Access-Control-Allow-Headers',
+    'Content-Type, mcp-session-id, Last-Event-Id, mcp-protocol-version',
+  );
+  headers.set('Access-Control-Expose-Headers', 'mcp-session-id, mcp-protocol-version');
+}
+
+function withCors(response: Response, corsOrigin: string): Response {
+  if (!corsOrigin) {
+    return response;
+  }
+
+  const headers = new Headers(response.headers);
+  applyCorsHeaders(headers, corsOrigin);
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function corsPreflightResponse(corsOrigin: string): Response {
+  const headers = new Headers();
+  applyCorsHeaders(headers, corsOrigin);
+  return new Response(null, { status: 204, headers });
+}
+
 function startDetectedRuntime(
   runtimes: RuntimeGlobals,
   handler: (req: Request) => Promise<Response>,
@@ -584,7 +619,7 @@ export function startWebStandardTransport(
   createServer: ServerFactory,
   createEventStore?: EventStoreFactory,
 ): Promise<WebStandardTransportResult> {
-  const { port, host, isStateless, maxSessions, sessionTtlMs } = getTransportConfig();
+  const { port, host, corsOrigin, isStateless, maxSessions, sessionTtlMs } = getTransportConfig();
   const allowedHosts = resolveAllowedHosts(host);
   warnIfUnprotected(host, !!allowedHosts);
 
@@ -598,11 +633,15 @@ export function startWebStandardTransport(
 
     const url = new URL(req.url);
     if (url.pathname !== '/mcp') {
-      return new Response('Not Found', { status: 404 });
+      return withCors(new Response('Not Found', { status: 404 }), corsOrigin);
+    }
+
+    if (corsOrigin && req.method === 'OPTIONS') {
+      return corsPreflightResponse(corsOrigin);
     }
 
     const sessionId = getRequestSessionId(req);
-    return await handleManagedRequest({
+    const response = await handleManagedRequest({
       createPair: (isStatelessTransport) =>
         createWebPair(createServer, isStatelessTransport, createEventStore),
       getSessionId: (transport) => transport.sessionId,
@@ -617,6 +656,8 @@ export function startWebStandardTransport(
       statefulPairs,
       acquireStatefulCreationLock,
     });
+
+    return withCors(response, corsOrigin);
   };
 
   const runtimes = globalThis as unknown as RuntimeGlobals;

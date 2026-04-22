@@ -71,7 +71,7 @@ async function getTaskResult(client: JsonRpcTestClient, taskId: string): Promise
 }
 
 function getRelatedTaskId(result: ToolCallResult): string | undefined {
-  for (const item of result.content as Array<Record<string, unknown>>) {
+  for (const item of result.content as Record<string, unknown>[]) {
     if (item.type !== 'resource_link') {
       continue;
     }

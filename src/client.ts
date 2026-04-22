@@ -1,11 +1,10 @@
 import type {
   GenerateContentConfig,
   MediaResolution,
-  ThinkingLevel,
   ToolConfig,
   ToolListUnion,
 } from '@google/genai';
-import { FunctionCallingConfigMode, GoogleGenAI } from '@google/genai';
+import { FunctionCallingConfigMode, GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 import type { GeminiResponseSchema } from './schemas/json-schema.js';
 
@@ -18,6 +17,13 @@ export const DEFAULT_THINKING_LEVEL = 'MEDIUM' as const;
 export const DEFAULT_TEMPERATURE = 1.0;
 type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
 export const EXPOSE_THOUGHTS = getExposeThoughts();
+
+const THINKING_LEVEL_MAP: Record<AskThinkingLevel, ThinkingLevel> = {
+  MINIMAL: ThinkingLevel.MINIMAL,
+  LOW: ThinkingLevel.LOW,
+  MEDIUM: ThinkingLevel.MEDIUM,
+  HIGH: ThinkingLevel.HIGH,
+};
 
 export const DEFAULT_SYSTEM_INSTRUCTION =
   'Be direct, accurate, and concise. Use Markdown when useful.';
@@ -40,7 +46,7 @@ interface ConfigBuilderOptions {
 function buildThinkingConfig(thinkingLevel?: AskThinkingLevel) {
   return {
     ...(EXPOSE_THOUGHTS ? { includeThoughts: true } : {}),
-    ...(thinkingLevel ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
+    ...(thinkingLevel ? { thinkingLevel: THINKING_LEVEL_MAP[thinkingLevel] } : {}),
   };
 }
 

@@ -268,7 +268,7 @@ describe('ChatInputSchema', () => {
     );
     assert.strictEqual(
       ChatInputSchema.shape.responseSchemaJson.description,
-      'Structured output schema as JSON. Use JSON input instead of nested form fields.',
+      'Optional JSON Schema (Draft 2020-12) for structured output. Only honored on single-turn or new-session turns; IGNORED when combined with an existing sessionId (the server rejects the call).',
     );
     assert.strictEqual(
       ChatInputSchema.shape.temperature.description,

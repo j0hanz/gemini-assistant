@@ -15,6 +15,8 @@ import { startHttpTransport, startWebStandardTransport } from '../src/transport.
 
 const originalScopedLoggerError = Object.getOwnPropertyDescriptor(ScopedLogger.prototype, 'error')
   ?.value as typeof ScopedLogger.prototype.error;
+const originalScopedLoggerWarn = Object.getOwnPropertyDescriptor(ScopedLogger.prototype, 'warn')
+  ?.value as typeof ScopedLogger.prototype.warn;
 const originalWebHandleRequest = Object.getOwnPropertyDescriptor(
   WebStandardStreamableHTTPServerTransport.prototype,
   'handleRequest',
@@ -181,7 +183,10 @@ afterEach(() => {
   delete (globalThis as Record<string, unknown>).Bun;
   delete process.env.HOST;
   delete process.env.PORT;
+  delete process.env.STATELESS;
+  delete process.env.ALLOWED_HOSTS;
   ScopedLogger.prototype.error = originalScopedLoggerError;
+  ScopedLogger.prototype.warn = originalScopedLoggerWarn;
   WebStandardStreamableHTTPServerTransport.prototype.handleRequest = originalWebHandleRequest;
 });
 
@@ -370,6 +375,23 @@ describe('startWebStandardTransport', () => {
     await transport.close();
 
     assert.strictEqual(stopCalls, 1);
+  });
+
+  it('warns when STATELESS=true is exposed without ALLOWED_HOSTS', async () => {
+    const warnings: string[] = [];
+    process.env.HOST = '0.0.0.0';
+    process.env.STATELESS = 'true';
+    ScopedLogger.prototype.warn = function mockWarn(message: string) {
+      warnings.push(message);
+    };
+
+    const transport = await startWebStandardTransport(() => createServerInstance());
+
+    try {
+      assert.ok(warnings.some((message) => message.includes('without DNS rebinding protection')));
+    } finally {
+      await transport.close();
+    }
   });
 });
 

@@ -128,6 +128,11 @@ Optional local transport:
 - `TRANSPORT`: `stdio`, `http`, or `web-standard`, default `stdio`
 - `HOST`: HTTP bind host, default `127.0.0.1`
 - `PORT`: HTTP bind port, default `3000`
+- `CORS_ORIGIN`: optional CORS origin for HTTP transports; use `*` or one `http(s)` origin
+- `STATELESS`: enable stateless HTTP transport behavior when set to `true`, default `false`
+- `ALLOWED_HOSTS`: optional comma-separated Host header allow-list for HTTP transports
+- `MAX_TRANSPORT_SESSIONS`: maximum stateful HTTP transport sessions, default `100`
+- `TRANSPORT_SESSION_TTL_MS`: idle TTL for stateful HTTP transport sessions, default `1800000`
 
 Booleans accept only the literal strings `true` or `false` when set. Old variable names (`GEMINI_MODEL`, `ALLOWED_FILE_ROOTS`, `WORKSPACE_*`, `MCP_TRANSPORT`, `MCP_HTTP_HOST`, `MCP_HTTP_PORT`, `LOG_VERBOSE_PAYLOADS`, etc.) are not supported and have no effect.
 

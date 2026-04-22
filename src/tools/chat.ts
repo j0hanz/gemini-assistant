@@ -6,6 +6,7 @@ import type {
 } from '@modelcontextprotocol/server';
 
 import { Validator } from '@cfworker/json-schema';
+import { FinishReason } from '@google/genai';
 import type { Chat } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
@@ -104,6 +105,8 @@ interface AskExecutionResult {
 
 const ASK_TOOL_LABEL = 'Chat';
 const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
+const JSON_REPAIR_MAX_RETRIES = 1;
+const JSON_REPAIR_WARNING_TEXT_LIMIT = 2_000;
 
 function validateJsonAgainstSchema(data: unknown, schema: GeminiResponseSchema): string[] {
   try {
@@ -152,6 +155,23 @@ function buildAskWarnings(
   }
 
   return warnings;
+}
+
+function isRetryableSchemaFailure(
+  warnings: string[],
+  parsedData: unknown,
+  jsonMode: boolean | undefined,
+): boolean {
+  return jsonMode === true && (parsedData === undefined || warnings.length > 0);
+}
+
+function buildRepairPromptSuffix(warnings: string[]): string {
+  const warningText = warnings
+    .map((warning) => `- ${warning}`)
+    .join('\n')
+    .slice(0, JSON_REPAIR_WARNING_TEXT_LIMIT);
+
+  return `\n\nCRITICAL: The previous response was invalid JSON or failed schema validation. Error(s):\n${warningText}\nReturn ONLY valid JSON that conforms exactly to the provided schema.`;
 }
 
 export function buildAskStructuredContent(
@@ -388,37 +408,64 @@ function appendSessionResource(result: CallToolResult, sessionId: string, taskId
   );
 }
 
-async function askWithoutSession(
+export async function askWithoutSession(
   args: AskArgs,
   ctx: ServerContext,
   chat?: Chat,
 ): Promise<AskExecutionResult> {
   const { prompt, toolConfig, toolProfile, tools, urls, functionCallingMode } =
     resolveAskTooling(args);
-  return await runAskStream(
-    ctx,
-    () =>
-      chat
-        ? chat.sendMessageStream({
-            message: prompt,
-            config: buildGenerateContentConfig(
-              { ...args, functionCallingMode, toolConfig, tools },
-              ctx.mcpReq.signal,
-            ),
-          })
-        : getAI().models.generateContentStream({
-            model: MODEL,
-            contents: prompt,
-            config: buildGenerateContentConfig(
-              { ...args, functionCallingMode, toolConfig, tools },
-              ctx.mcpReq.signal,
-            ),
-          }),
-    toolProfile,
-    urls,
-    !!args.responseSchema,
-    args.responseSchema,
+  const jsonMode = !!args.responseSchema;
+  const config = buildGenerateContentConfig(
+    { ...args, functionCallingMode, toolConfig, tools },
+    ctx.mcpReq.signal,
   );
+  const maxRetries = !chat && jsonMode && !ctx.mcpReq.signal.aborted ? JSON_REPAIR_MAX_RETRIES : 0;
+  let currentPrompt = prompt;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const askResult = await runAskStream(
+      ctx,
+      () =>
+        chat
+          ? chat.sendMessageStream({
+              message: currentPrompt,
+              config,
+            })
+          : getAI().models.generateContentStream({
+              model: MODEL,
+              contents: currentPrompt,
+              config,
+            }),
+      toolProfile,
+      urls,
+      jsonMode,
+      args.responseSchema,
+    );
+
+    const structured = getAskStructuredContent(askResult.result);
+    const warnings = structured?.schemaWarnings ?? [];
+    const parsedData = structured && 'data' in structured ? structured.data : undefined;
+    const shouldRetry =
+      attempt < maxRetries &&
+      !ctx.mcpReq.signal.aborted &&
+      !askResult.result.isError &&
+      askResult.streamResult.finishReason === FinishReason.STOP &&
+      isRetryableSchemaFailure(warnings, parsedData, jsonMode);
+
+    if (!shouldRetry) {
+      return askResult;
+    }
+
+    logger.child('chat').debug('Retrying JSON response with repair suffix', {
+      attempt: attempt + 1,
+      warningCount: warnings.length,
+      hadParsedData: parsedData !== undefined,
+    });
+    currentPrompt = `${prompt}${buildRepairPromptSuffix(warnings)}`;
+  }
+
+  throw new Error('chat: unreachable JSON repair retry state');
 }
 
 const SESSION_VALUE_MAX_STRING_LENGTH = 2000;

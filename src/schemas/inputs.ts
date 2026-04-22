@@ -59,7 +59,7 @@ function validateResponseSchemaJson(payload: ParsePayload<string>): void {
 function responseSchemaJsonField() {
   return withFieldMetadata(
     z.string().trim().min(1).check(validateResponseSchemaJson).optional(),
-    'Structured output schema as JSON. Use JSON input instead of nested form fields.',
+    'Optional JSON Schema (Draft 2020-12) for structured output. Only honored on single-turn or new-session turns; IGNORED when combined with an existing sessionId (the server rejects the call).',
   );
 }
 
@@ -67,7 +67,11 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
   return z.strictObject({
     goal: goalText(),
     sessionId: completable(
-      optionalField(sessionId('Server-managed in-memory session identifier.')),
+      optionalField(
+        sessionId(
+          'Server-managed in-memory session identifier. Omitting sessionId enables structured output (responseSchemaJson) and JSON schema-repair retry.',
+        ),
+      ),
       completeSessionIds,
     ),
     systemInstruction: optionalField(

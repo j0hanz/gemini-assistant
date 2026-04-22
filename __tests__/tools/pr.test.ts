@@ -23,6 +23,7 @@ const {
   computeDiffStats,
   formatGitError,
   matchesNoisyPath,
+  resolveReviewWorkingDirectory,
   scoreDiffUnitRisk,
   splitDiffUnits,
 } = await import('../../src/tools/review.js');
@@ -556,6 +557,49 @@ describe('analyzePrWork diff budgeting metadata', () => {
       client.models.generateContentStream = originalGenerateContentStream;
       await rm(repoRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe('analyzePrWork roots handling', () => {
+  it('uses the first MCP client root as working directory', async () => {
+    const repoRoot = await createTempRepo();
+
+    try {
+      await writeFile(join(repoRoot, 'tracked.txt'), 'before\n');
+      runGit(repoRoot, ['add', '.']);
+      runGit(repoRoot, ['commit', '-m', 'initial']);
+      await writeFile(join(repoRoot, 'tracked.txt'), 'after\n');
+
+      const result = await analyzePrWork({ dryRun: true }, makeContext(), async () => [repoRoot]);
+      const structured = result.structuredContent as Record<string, unknown>;
+
+      assert.strictEqual(result.isError, undefined);
+      assert.deepStrictEqual(structured.reviewedPaths, ['tracked.txt']);
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to process.cwd when no roots are advertised', async () => {
+    const cwd = process.cwd();
+    const selected = await resolveReviewWorkingDirectory(async () => [], {
+      warn: () => undefined,
+    } as never);
+
+    assert.strictEqual(selected, cwd);
+  });
+
+  it('logs a warning and selects the first root when multiple roots are advertised', async () => {
+    const warnings: unknown[] = [];
+    const selected = await resolveReviewWorkingDirectory(async () => ['C:\\first', 'C:\\second'], {
+      warn: (_message: string, data: unknown) => {
+        warnings.push(data);
+      },
+    } as never);
+
+    assert.strictEqual(selected, 'C:\\first');
+    assert.strictEqual(warnings.length, 1);
+    assert.deepStrictEqual(warnings[0], { rootCount: 2, selectedRoot: 'C:\\first' });
   });
 });
 

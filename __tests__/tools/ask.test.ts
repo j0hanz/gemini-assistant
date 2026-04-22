@@ -6,18 +6,58 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { getAI } from '../../src/client.js';
 import { workspaceCacheManager } from '../../src/lib/workspace-context.js';
-import { chatWork, createAskWork } from '../../src/tools/chat.js';
+import { askWithoutSession, chatWork, createAskWork } from '../../src/tools/chat.js';
 
 function createContext(): ServerContext {
+  return createContextWithSignal(new AbortController().signal);
+}
+
+function createContextWithSignal(signal: AbortSignal): ServerContext {
   return {
     mcpReq: {
       _meta: {},
       log: async () => undefined,
       notify: async () => undefined,
-      signal: new AbortController().signal,
+      signal,
     },
   } as unknown as ServerContext;
+}
+
+async function* fakeStream(text: string): AsyncGenerator {
+  yield {
+    candidates: [
+      {
+        content: { parts: [{ text }] },
+        finishReason: 'STOP',
+      },
+    ],
+  };
+}
+
+function withGeminiStreamStub(responses: (string | (() => AsyncGenerator))[]): {
+  calls: Record<string, unknown>[];
+  restore: () => void;
+} {
+  process.env.API_KEY ??= 'test-key-for-ask';
+  const client = getAI();
+  const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+  const calls: Record<string, unknown>[] = [];
+
+  // @ts-expect-error test override
+  client.models.generateContentStream = async (request: Record<string, unknown>) => {
+    calls.push(request);
+    const response = responses[Math.min(calls.length - 1, responses.length - 1)];
+    return typeof response === 'function' ? response() : fakeStream(response ?? '');
+  };
+
+  return {
+    calls,
+    restore: () => {
+      client.models.generateContentStream = originalGenerateContentStream;
+    },
+  };
 }
 
 function createDeps(overrides: Partial<Parameters<typeof createAskWork>[0]> = {}) {
@@ -256,6 +296,145 @@ describe('ask contract', () => {
       });
     } finally {
       JSON.parse = originalJsonParse;
+    }
+  });
+
+  it('retries once with repair suffix when first JSON response fails schema validation', async () => {
+    const originalCache = process.env.CACHE;
+    process.env.CACHE = 'false';
+    const stub = withGeminiStreamStub(['{"count":"bad"}', '{"count":2}']);
+
+    try {
+      const askWork = createAskWork();
+      const result = await askWork(
+        {
+          message: 'Return a count',
+          responseSchema: {
+            type: 'object',
+            properties: { count: { type: 'integer' } },
+            required: ['count'],
+          },
+        },
+        createContext(),
+      );
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      assert.strictEqual(result.isError, undefined);
+      assert.deepStrictEqual(structured.data, { count: 2 });
+      assert.strictEqual(structured.schemaWarnings, undefined);
+      assert.strictEqual(stub.calls.length, 2);
+      assert.strictEqual(typeof stub.calls[1]?.contents, 'string');
+      assert.match(
+        stub.calls[1].contents,
+        /CRITICAL: The previous response was invalid JSON or failed schema validation/,
+      );
+    } finally {
+      process.env.CACHE = originalCache;
+      stub.restore();
+    }
+  });
+
+  it('surfaces schemaWarnings after single retry exhaustion', async () => {
+    const originalCache = process.env.CACHE;
+    process.env.CACHE = 'false';
+    const stub = withGeminiStreamStub(['{not json}', '{still not json}']);
+
+    try {
+      const askWork = createAskWork();
+      const result = await askWork(
+        {
+          message: 'Return a count',
+          responseSchema: {
+            type: 'object',
+            properties: { count: { type: 'integer' } },
+          },
+        },
+        createContext(),
+      );
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      assert.strictEqual(result.isError, undefined);
+      assert.strictEqual(structured.data, undefined);
+      assert.ok(Array.isArray(structured.schemaWarnings));
+      assert.strictEqual(stub.calls.length, 2);
+    } finally {
+      process.env.CACHE = originalCache;
+      stub.restore();
+    }
+  });
+
+  it('does not retry when sessionId is set', async () => {
+    const originalCache = process.env.CACHE;
+    process.env.CACHE = 'false';
+    let sendCalls = 0;
+    const chat = {
+      sendMessageStream: async () => {
+        sendCalls++;
+        return fakeStream('{not json}');
+      },
+    };
+
+    try {
+      const askResult = await askWithoutSession(
+        {
+          message: 'Need JSON',
+          sessionId: 'sess-new-json',
+          responseSchema: {
+            type: 'object',
+            properties: { count: { type: 'integer' } },
+          },
+        },
+        createContext(),
+        chat as never,
+      );
+      const result = askResult.result;
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      assert.strictEqual(sendCalls, 1);
+      assert.ok(Array.isArray(structured.schemaWarnings));
+    } finally {
+      process.env.CACHE = originalCache;
+    }
+  });
+
+  it('does not retry when aborted', async () => {
+    const originalCache = process.env.CACHE;
+    process.env.CACHE = 'false';
+    const controller = new AbortController();
+    const stub = withGeminiStreamStub([
+      async function* () {
+        yield {
+          candidates: [
+            {
+              content: { parts: [{ text: '{not json}' }] },
+              finishReason: 'STOP',
+            },
+          ],
+        };
+        controller.abort();
+      },
+      '{"count":2}',
+    ]);
+
+    try {
+      const askWork = createAskWork();
+      const result = await askWork(
+        {
+          message: 'Return a count',
+          responseSchema: {
+            type: 'object',
+            properties: { count: { type: 'integer' } },
+          },
+        },
+        createContextWithSignal(controller.signal),
+      );
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      assert.strictEqual(stub.calls.length, 1);
+      assert.ok(Array.isArray(structured.schemaWarnings));
+    } finally {
+      process.env.CACHE = originalCache;
+      stub.restore();
     }
   });
 });

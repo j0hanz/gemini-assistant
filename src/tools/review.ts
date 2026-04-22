@@ -15,6 +15,7 @@ import type { z } from 'zod/v4';
 
 import { cleanupErrorLogger } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
+import { logger, type ScopedLogger } from '../lib/logger.js';
 import { buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { buildDiffReviewPrompt } from '../lib/model-prompts.js';
 import { pickDefined } from '../lib/object.js';
@@ -927,16 +928,39 @@ export async function buildLocalDiffSnapshot(
   };
 }
 
+export async function resolveReviewWorkingDirectory(
+  rootsFetcher: RootsFetcher,
+  log: ScopedLogger,
+): Promise<string> {
+  const roots = await rootsFetcher();
+  if (roots.length === 0) {
+    return process.cwd();
+  }
+
+  const selectedRoot = roots[0] ?? process.cwd();
+  if (roots.length > 1) {
+    log.warn('Multiple MCP roots advertised for review; using first root', {
+      rootCount: roots.length,
+      selectedRoot,
+    });
+  }
+
+  return selectedRoot;
+}
+
 export async function analyzePrWork(
   { thinkingLevel, language, dryRun, focus }: AnalyzePrInput,
   ctx: ServerContext,
+  rootsFetcher: RootsFetcher = () => Promise.resolve([]),
 ): Promise<CallToolResult> {
   const progress = new ProgressReporter(ctx, REVIEW_DIFF_TOOL_LABEL);
   await progress.step(0, 3, 'Inspecting local changes');
+  const log = logger.child('review');
 
   let snapshot: LocalDiffSnapshot;
   try {
-    snapshot = await buildLocalDiffSnapshot(process.cwd(), ctx.mcpReq.signal);
+    const workingDirectory = await resolveReviewWorkingDirectory(rootsFetcher, log);
+    snapshot = await buildLocalDiffSnapshot(workingDirectory, ctx.mcpReq.signal);
   } catch (err) {
     return buildAnalyzePrErrorResult(err);
   }
@@ -1048,6 +1072,7 @@ function buildReviewStructuredContent(
 
 async function reviewWork(
   compareWork: ReturnType<typeof createCompareFileWork>,
+  rootsFetcher: RootsFetcher,
   args: ReviewInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -1062,6 +1087,7 @@ async function reviewWork(
         focus: args.focus,
       },
       ctx,
+      rootsFetcher,
     );
   } else if (args.subjectKind === 'comparison') {
     result = await compareWork(
@@ -1104,7 +1130,8 @@ async function reviewWork(
 }
 
 export function registerReviewTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
-  const compareWork = createCompareFileWork(buildServerRootsFetcher(server));
+  const rootsFetcher = buildServerRootsFetcher(server);
+  const compareWork = createCompareFileWork(rootsFetcher);
 
   registerTaskTool(
     server,
@@ -1117,6 +1144,6 @@ export function registerReviewTool(server: McpServer, taskMessageQueue: TaskMess
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
     taskMessageQueue,
-    (args: ReviewInput, ctx: ServerContext) => reviewWork(compareWork, args, ctx),
+    (args: ReviewInput, ctx: ServerContext) => reviewWork(compareWork, rootsFetcher, args, ctx),
   );
 }

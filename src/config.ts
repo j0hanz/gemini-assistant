@@ -63,6 +63,17 @@ function parseNonEmptyStringEnv(name: string, fallback: string): string {
   return trimmed;
 }
 
+function parseCorsOriginEnv(): string {
+  const raw = process.env.CORS_ORIGIN;
+  if (raw === undefined) return '';
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (trimmed === '*' || /^https?:\/\/[^\s,]+$/.test(trimmed)) {
+    return trimmed;
+  }
+  throw new Error('CORS_ORIGIN must be "*" or a single http(s) origin when set.');
+}
+
 function parseTransportModeEnv(): TransportMode {
   const raw = process.env.TRANSPORT ?? DEFAULT_TRANSPORT;
   if (raw === 'stdio' || raw === 'http' || raw === 'web-standard') {
@@ -99,17 +110,23 @@ export function getTransportConfig(): TransportConfig {
   const host = parseNonEmptyStringEnv('HOST', DEFAULT_HTTP_HOST);
 
   return {
-    corsOrigin: '',
+    corsOrigin: parseCorsOriginEnv(),
     host,
-    isStateless: false,
-    maxSessions: DEFAULT_MAX_TRANSPORT_SESSIONS,
+    isStateless: parseBooleanEnv('STATELESS', false),
+    maxSessions: parseIntEnv('MAX_TRANSPORT_SESSIONS', DEFAULT_MAX_TRANSPORT_SESSIONS, {
+      min: 1,
+      max: 10_000,
+    }),
     port: parseIntEnv('PORT', DEFAULT_HTTP_PORT, { min: 1, max: 65_535 }),
-    sessionTtlMs: DEFAULT_TRANSPORT_SESSION_TTL_MS,
+    sessionTtlMs: parseIntEnv('TRANSPORT_SESSION_TTL_MS', DEFAULT_TRANSPORT_SESSION_TTL_MS, {
+      min: 1_000,
+    }),
   };
 }
 
 export function getAllowedHostsEnv(): string | undefined {
-  return undefined;
+  const trimmed = process.env.ALLOWED_HOSTS?.trim();
+  return trimmed === '' ? undefined : trimmed;
 }
 
 export function getRootsEnv(): string | undefined {

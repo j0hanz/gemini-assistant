@@ -22,6 +22,11 @@ const NEW_VARS = [
   'TRANSPORT',
   'HOST',
   'PORT',
+  'CORS_ORIGIN',
+  'STATELESS',
+  'ALLOWED_HOSTS',
+  'MAX_TRANSPORT_SESSIONS',
+  'TRANSPORT_SESSION_TTL_MS',
   'ROOTS',
   'CONTEXT',
   'AUTO_SCAN',
@@ -102,15 +107,52 @@ describe('config parsing', () => {
   it('returns validated transport config values', () => {
     process.env.PORT = '3100';
     process.env.HOST = '0.0.0.0';
+    process.env.CORS_ORIGIN = 'https://example.test';
+    process.env.STATELESS = 'true';
+    process.env.MAX_TRANSPORT_SESSIONS = '250';
+    process.env.TRANSPORT_SESSION_TTL_MS = '60000';
 
     assert.deepStrictEqual(getTransportConfig(), {
-      corsOrigin: '',
+      corsOrigin: 'https://example.test',
       host: '0.0.0.0',
+      isStateless: true,
+      maxSessions: 250,
+      port: 3100,
+      sessionTtlMs: 60_000,
+    });
+  });
+
+  it('returns default transport config values when optional envs are unset', () => {
+    assert.deepStrictEqual(getTransportConfig(), {
+      corsOrigin: '',
+      host: '127.0.0.1',
       isStateless: false,
       maxSessions: 100,
-      port: 3100,
+      port: 3000,
       sessionTtlMs: 30 * 60 * 1000,
     });
+  });
+
+  it('accepts wildcard CORS origin', () => {
+    process.env.CORS_ORIGIN = '*';
+    assert.strictEqual(getTransportConfig().corsOrigin, '*');
+  });
+
+  it('rejects invalid transport option env values', () => {
+    process.env.CORS_ORIGIN = 'https://a.test,https://b.test';
+    assert.throws(() => getTransportConfig(), /CORS_ORIGIN/);
+
+    process.env.CORS_ORIGIN = 'https://example.test';
+    process.env.STATELESS = 'yes';
+    assert.throws(() => getTransportConfig(), /STATELESS/);
+
+    process.env.STATELESS = 'false';
+    process.env.MAX_TRANSPORT_SESSIONS = '0';
+    assert.throws(() => getTransportConfig(), /MAX_TRANSPORT_SESSIONS/);
+
+    process.env.MAX_TRANSPORT_SESSIONS = '100';
+    process.env.TRANSPORT_SESSION_TTL_MS = '999';
+    assert.throws(() => getTransportConfig(), /TRANSPORT_SESSION_TTL_MS/);
   });
 
   it('returns default session limits', () => {

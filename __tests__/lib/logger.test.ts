@@ -7,7 +7,12 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, it } from 'node:test';
 
-import { Logger, summarizeLogValue } from '../../src/lib/logger.js';
+import {
+  logContext,
+  Logger,
+  maybeSummarizePayload,
+  summarizeLogValue,
+} from '../../src/lib/logger.js';
 
 interface MockServer {
   failSend?: (enabled: boolean) => void;
@@ -109,6 +114,40 @@ describe('summarizeLogValue', () => {
   });
 });
 
+describe('maybeSummarizePayload', () => {
+  it('redacts sensitive keys and bounds verbose payloads', () => {
+    const payload = {
+      apiKey: 'secret-key',
+      nested: {
+        accessToken: 'secret-token',
+        message: 'x'.repeat(2_100),
+        promptTokenCount: 42,
+      },
+    };
+
+    const sanitized = maybeSummarizePayload(payload, true) as {
+      apiKey: string;
+      nested: {
+        accessToken: string;
+        message: { truncated: boolean; type: string };
+        promptTokenCount: number;
+      };
+    };
+
+    assert.strictEqual(sanitized.apiKey, '[redacted]');
+    assert.strictEqual(sanitized.nested.accessToken, '[redacted]');
+    assert.strictEqual(sanitized.nested.promptTokenCount, 42);
+    assert.deepStrictEqual(
+      {
+        truncated: sanitized.nested.message.truncated,
+        type: sanitized.nested.message.type,
+      },
+      { truncated: true, type: 'string' },
+    );
+    assert.doesNotMatch(JSON.stringify(sanitized), /secret-key|secret-token/);
+  });
+});
+
 describe('Logger forwarding', () => {
   it('forwards entries to all attached connected servers and detaches cleanly', async () => {
     const { logger } = createBufferedLogger();
@@ -167,6 +206,20 @@ describe('Logger forwarding', () => {
     assert.strictEqual(healthyServer.messages.length, 1);
     assert.strictEqual(failureWarnings.length, 1);
     assert.deepStrictEqual(failureWarnings[0]?.data, { count: 1 });
+  });
+
+  it('does not broadcast request-traced entries to attached servers', async () => {
+    const { logger, readEntries } = createBufferedLogger();
+    const server = createMockServer();
+    logger.attachServer(server.server);
+
+    logContext.run('trace-1', () => {
+      logger.info('executor', 'Execution started', { args: { message: 'private' } });
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.strictEqual(server.messages.length, 0);
+    assert.strictEqual(readEntries()[0]?.traceId, 'trace-1');
   });
 });
 

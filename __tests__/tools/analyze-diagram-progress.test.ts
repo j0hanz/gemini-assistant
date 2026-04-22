@@ -199,9 +199,9 @@ describe('analyze diagram progress', () => {
       assert.deepStrictEqual(
         uploadCalls.map((call) => ({ progress: call.progress, total: call.total })),
         [
-          { progress: 1, total: 4 },
-          { progress: 2, total: 4 },
-          { progress: 3, total: 4 },
+          { progress: 2, total: 100 },
+          { progress: 5, total: 100 },
+          { progress: 7, total: 100 },
         ],
       );
 
@@ -209,8 +209,8 @@ describe('analyze diagram progress', () => {
         (call) => call.message === 'Analyze Diagram: Generating mermaid diagram',
       );
       assert.deepStrictEqual(generatingCall, {
-        progress: 3,
-        total: 4,
+        progress: 7,
+        total: 100,
         message: 'Analyze Diagram: Generating mermaid diagram',
       });
 
@@ -265,7 +265,7 @@ describe('analyze diagram progress', () => {
       );
       assert.deepStrictEqual(generatingCall, {
         progress: 0,
-        total: 1,
+        total: 100,
         message: 'Analyze Diagram: Generating mermaid diagram',
       });
     } finally {
@@ -331,8 +331,8 @@ describe('analyze diagram progress', () => {
           message: call.message,
         })),
         [
-          { progress: 0, total: 3, message: 'Analyze: Uploading package.json' },
-          { progress: 1, total: 3, message: 'Analyze: Uploading tsconfig.json' },
+          { progress: 0, total: 100, message: 'Analyze: Uploading package.json' },
+          { progress: 3, total: 100, message: 'Analyze: Uploading tsconfig.json' },
         ],
       );
 
@@ -340,8 +340,8 @@ describe('analyze diagram progress', () => {
         (call) => call.message === 'Analyze: Analyzing content',
       );
       assert.deepStrictEqual(analyzingCall, {
-        progress: 2,
-        total: 3,
+        progress: 6,
+        total: 100,
         message: 'Analyze: Analyzing content',
       });
 

@@ -289,7 +289,7 @@ async function analyzeDiagramWork(
     }
 
     const totalSteps = uploadedCount > 0 ? uploadedCount + 1 : 1;
-    await progress.send(uploadedCount, totalSteps, `Generating ${args.diagramType} diagram`);
+    await progress.step(uploadedCount, totalSteps, `Generating ${args.diagramType} diagram`);
     await ctx.mcpReq.log('info', `Generating ${args.diagramType} diagram`);
 
     const prompt = buildDiagramGenerationPrompt({

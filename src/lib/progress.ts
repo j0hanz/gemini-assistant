@@ -15,11 +15,13 @@ export const PROGRESS_TOTAL = 100;
 export const PROGRESS_CAP = 95;
 
 const PROGRESS_STEP_FRACTION = 0.15;
+const PRE_STREAM_PROGRESS_CAP = 10;
 
 // ── Throttle State ────────────────────────────────────────────────────
 
 const lastEmitTime = new Map<string, number>();
 const lastTaskStatusTime = new Map<string, number>();
+let terminalProgressContexts = new WeakSet<ServerContext>();
 
 function sweepStaleEntries(): void {
   const cutoff = Date.now() - PROGRESS_ENTRY_TTL_MS;
@@ -38,6 +40,7 @@ progressSweepTimer.unref();
 export function resetProgressThrottle(): void {
   lastEmitTime.clear();
   lastTaskStatusTime.clear();
+  terminalProgressContexts = new WeakSet<ServerContext>();
 }
 
 // ── Internals ─────────────────────────────────────────────────────────
@@ -139,6 +142,25 @@ function markProgressEmission(
   lastEmitTime.set(buildThrottleKey(progressToken, message), now);
 }
 
+function markTerminalProgress(ctx: ServerContext, isTerminal: boolean): void {
+  if (isTerminal) {
+    terminalProgressContexts.add(ctx);
+  }
+}
+
+export function hasTerminalProgress(ctx: ServerContext): boolean {
+  return terminalProgressContexts.has(ctx);
+}
+
+function scaleLogicalStep(current: number, total: number): number {
+  if (total <= 0) {
+    return 0;
+  }
+
+  const fraction = Math.max(0, Math.min(current / total, 1));
+  return Math.floor(fraction * PRE_STREAM_PROGRESS_CAP);
+}
+
 function updateProgressStateAfterNotify(
   progressToken: string | number,
   taskId: string | undefined,
@@ -215,6 +237,7 @@ export async function sendProgress(
   }
 
   await bridgeProgressMessage(ctx, message, isTerminal);
+  markTerminalProgress(ctx, isTerminal);
 }
 
 export function advanceProgress(current: number): number {
@@ -270,7 +293,12 @@ export class ProgressReporter {
 
   /** Report a discrete step in a known-total sequence. */
   async step(current: number, total: number, message: string): Promise<void> {
-    await sendProgress(this.ctx, current, total, `${this.label}: ${message}`);
+    await sendProgress(
+      this.ctx,
+      scaleLogicalStep(current, total),
+      PROGRESS_TOTAL,
+      `${this.label}: ${message}`,
+    );
   }
 
   /** Report successful completion (progress = 100/100). */

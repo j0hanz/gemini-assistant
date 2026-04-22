@@ -245,6 +245,41 @@ describe('runToolAsTask', () => {
     assert.ok((firstContent as { text: string }).text.includes('boom'));
   });
 
+  it('marks task failed when storing a successful result fails', async () => {
+    const errors: string[] = [];
+    const statusUpdates: { message?: string; status: string; taskId: string }[] = [];
+    let storeAttempts = 0;
+    const store = makeMockStore({
+      storeTaskResult: async () => {
+        storeAttempts += 1;
+        throw new Error(`store failed ${storeAttempts}`);
+      },
+      updateTaskStatus: async (taskId, status, message) => {
+        statusUpdates.push({ taskId, status, ...(message ? { message } : {}) });
+      },
+    });
+    const task = { taskId: 'task-store-fail' } as Task;
+
+    runToolAsTask(
+      store,
+      task,
+      Promise.resolve({ content: [{ type: 'text', text: 'done' }] }),
+      (_taskId, err) => {
+        errors.push(err instanceof Error ? err.message : String(err));
+      },
+    );
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.deepStrictEqual(errors, ['store failed 1', 'store failed 2']);
+    assert.deepStrictEqual(statusUpdates, [
+      {
+        taskId: 'task-store-fail',
+        status: 'failed',
+        message: 'Failed to store task result: store failed 1',
+      },
+    ]);
+  });
+
   it('handles non-Error rejection values', async () => {
     const store = makeMockStore();
     const task = { taskId: 'task-str' } as Task;
@@ -346,9 +381,64 @@ describe('createToolTaskHandlers', () => {
     assert.match(entry.result.content[0]?.text ?? '', /sync explode/);
   });
 
+  it('createTask reports terminal progress for non-stream task work', async () => {
+    const store = makeMockStore();
+    const progressCalls: { progress: number; total?: number; message?: string }[] = [];
+    const ctx = makeMockContext({ taskStore: store });
+    (ctx.mcpReq as { _meta: { progressToken?: string } })._meta = {
+      progressToken: 'task-progress',
+    };
+    (ctx.mcpReq as { notify: (notification: unknown) => Promise<void> }).notify = async (
+      notification,
+    ) => {
+      const n = notification as {
+        params: { message?: string; progress: number; total?: number };
+      };
+      progressCalls.push({
+        progress: n.params.progress,
+        ...(n.params.total !== undefined ? { total: n.params.total } : {}),
+        ...(n.params.message ? { message: n.params.message } : {}),
+      });
+    };
+    const queue = new InMemoryTaskMessageQueue();
+
+    const handlers = createToolTaskHandlers(
+      'test-tool',
+      async () => ({
+        content: [{ type: 'text' as const, text: 'ok' }],
+      }),
+      queue,
+      'Test Tool',
+    );
+
+    await handlers.createTask({}, ctx);
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.deepStrictEqual(
+      progressCalls.filter((call) => call.progress === 100 && call.total === 100),
+      [{ progress: 100, total: 100, message: 'Test Tool: completed' }],
+    );
+  });
+
   it('createTask stores a failed result when work rejects after task creation', async () => {
     const store = makeMockStore();
+    const progressCalls: { progress: number; total?: number; message?: string }[] = [];
     const ctx = makeMockContext({ taskStore: store });
+    (ctx.mcpReq as { _meta: { progressToken?: string } })._meta = {
+      progressToken: 'task-progress',
+    };
+    (ctx.mcpReq as { notify: (notification: unknown) => Promise<void> }).notify = async (
+      notification,
+    ) => {
+      const n = notification as {
+        params: { message?: string; progress: number; total?: number };
+      };
+      progressCalls.push({
+        progress: n.params.progress,
+        ...(n.params.total !== undefined ? { total: n.params.total } : {}),
+        ...(n.params.message ? { message: n.params.message } : {}),
+      });
+    };
     const queue = new InMemoryTaskMessageQueue();
 
     const handlers = createToolTaskHandlers(
@@ -371,6 +461,10 @@ describe('createToolTaskHandlers', () => {
     assert.strictEqual(entry.status, 'failed');
     assert.strictEqual(entry.result.isError, true);
     assert.match(entry.result.content[0]?.text ?? '', /outputSchema mismatch/);
+    assert.deepStrictEqual(
+      progressCalls.filter((call) => call.progress === 100 && call.total === 100),
+      [{ progress: 100, total: 100, message: 'test-tool: failed — outputSchema mismatch' }],
+    );
   });
 
   it('createTask uses requested TTL', async () => {

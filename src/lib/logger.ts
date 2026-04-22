@@ -28,6 +28,11 @@ const MCP_LEVEL_MAP: Record<LogLevel, McpLogLevel> = {
 
 const MAX_SUMMARY_DEPTH = 2;
 const MAX_SUMMARY_KEYS = 20;
+const MAX_VERBOSE_DEPTH = 4;
+const MAX_VERBOSE_KEYS = 50;
+const MAX_VERBOSE_ARRAY_ITEMS = 50;
+const MAX_VERBOSE_STRING_LENGTH = 2_000;
+const SENSITIVE_KEY_PATTERN = /(?:api[_-]?key|authorization|cookie|credential|password|secret)/i;
 
 interface LogEntry {
   timestamp: string;
@@ -81,8 +86,73 @@ export function summarizeLogValue(value: unknown, depth = 0): unknown {
   return { type: typeof value };
 }
 
+function redactOrBoundVerboseValue(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') {
+    if (value.length <= MAX_VERBOSE_STRING_LENGTH) {
+      return value;
+    }
+
+    return {
+      type: 'string',
+      length: value.length,
+      truncated: true,
+      preview: value.slice(0, MAX_VERBOSE_STRING_LENGTH),
+    };
+  }
+
+  if (
+    value === null ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'undefined'
+  ) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, MAX_VERBOSE_ARRAY_ITEMS)
+      .map((item) => redactOrBoundVerboseValue(item, depth + 1));
+    return value.length > MAX_VERBOSE_ARRAY_ITEMS
+      ? {
+          type: 'array',
+          length: value.length,
+          items,
+          truncated: true,
+        }
+      : items;
+  }
+
+  if (typeof value === 'object') {
+    if (depth >= MAX_VERBOSE_DEPTH) {
+      return { type: 'truncated' };
+    }
+
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .slice(0, MAX_VERBOSE_KEYS)
+        .map(([key, nestedValue]) => [
+          key,
+          isSensitiveLogKey(key) ? '[redacted]' : redactOrBoundVerboseValue(nestedValue, depth + 1),
+        ]),
+    );
+  }
+
+  return { type: typeof value };
+}
+
+function isSensitiveLogKey(key: string): boolean {
+  if (SENSITIVE_KEY_PATTERN.test(key)) {
+    return true;
+  }
+
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return normalized.includes('token') && !normalized.includes('tokencount');
+}
+
 export function maybeSummarizePayload(value: unknown, verbosePayloads: boolean): unknown {
-  return verbosePayloads ? value : summarizeLogValue(value);
+  return verbosePayloads ? redactOrBoundVerboseValue(value) : summarizeLogValue(value);
 }
 
 function isNodeTestProcess(): boolean {
@@ -200,6 +270,7 @@ export class Logger {
 
   private broadcastToServers(level: LogLevel, context: string, entry: LogEntry): void {
     if (this.attachedServers.size === 0) return;
+    if (entry.traceId) return;
 
     const connectedServers: McpServer[] = [];
     for (const server of this.attachedServers) {

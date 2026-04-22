@@ -16,7 +16,8 @@ import {
 
 import { AppError } from './errors.js';
 import { logger, maybeSummarizePayload } from './logger.js';
-import { validateStructuredToolResult } from './response.js';
+import { hasTerminalProgress, reportCompletion, reportFailure } from './progress.js';
+import { extractTextContent, validateStructuredToolResult } from './response.js';
 import { executor } from './tool-executor.js';
 
 const DEFAULT_TTL = 300_000;
@@ -186,25 +187,40 @@ export function runToolAsTask(
   work: Promise<CallToolResult>,
   onStoreError?: (taskId: string, err: unknown) => void,
 ): void {
+  const storeFailedResult = async (err: unknown, prefix = ''): Promise<void> => {
+    const errorMessage = `${prefix}${err instanceof Error ? err.message : String(err)}`;
+    try {
+      await store.storeTaskResult(task.taskId, 'failed', {
+        content: [{ type: 'text' as const, text: errorMessage }],
+        isError: true,
+      });
+    } catch (storeErr) {
+      onStoreError?.(task.taskId, storeErr);
+      try {
+        await store.updateTaskStatus(task.taskId, 'failed', errorMessage);
+      } catch (statusErr) {
+        onStoreError?.(task.taskId, statusErr);
+      }
+    }
+  };
+
   work
     .then(async (result) => {
       if (await isTaskCancelled(store, task.taskId)) return;
 
       const status = result.isError ? 'failed' : 'completed';
-      await store.storeTaskResult(task.taskId, status, result);
+      try {
+        await store.storeTaskResult(task.taskId, status, result);
+      } catch (storeErr) {
+        onStoreError?.(task.taskId, storeErr);
+        if (await isTaskCancelled(store, task.taskId)) return;
+        await storeFailedResult(storeErr, 'Failed to store task result: ');
+      }
     })
     .catch(async (err: unknown) => {
       if (await isTaskCancelled(store, task.taskId)) return;
 
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      try {
-        await store.storeTaskResult(task.taskId, 'failed', {
-          content: [{ type: 'text' as const, text: errorMessage }],
-          isError: true,
-        });
-      } catch (storeErr) {
-        onStoreError?.(task.taskId, storeErr);
-      }
+      await storeFailedResult(err);
     });
 }
 
@@ -256,6 +272,24 @@ function wrapTaskSafeWork<TArgs>(toolName: string, work: TaskWork<TArgs>): TaskW
       return taskFailureResult(toolName, err);
     }
   };
+}
+
+async function ensureTerminalTaskProgress(
+  ctx: ServerContext,
+  toolLabel: string,
+  result: CallToolResult,
+): Promise<CallToolResult> {
+  if (hasTerminalProgress(ctx)) {
+    return result;
+  }
+
+  if (result.isError) {
+    await reportFailure(ctx, toolLabel, extractTextContent(result.content) || 'failed');
+    return result;
+  }
+
+  await reportCompletion(ctx, toolLabel, 'completed');
+  return result;
 }
 
 async function validateAndExecute<TResult extends CallToolResult | CreateTaskResult>(
@@ -379,6 +413,7 @@ export function createToolTaskHandlers<TArgs>(
   toolName: string,
   work: TaskWork<TArgs>,
   taskMessageQueue: TaskMessageQueue,
+  toolLabel = toolName,
 ): ToolTaskHandlers<TArgs> {
   return {
     createTask: async (args, ctx) => {
@@ -392,17 +427,28 @@ export function createToolTaskHandlers<TArgs>(
         },
       };
       try {
-        runToolAsTask(taskContext.store, task, work(args, taskExecutionContext), (taskId, err) => {
-          taskLog.error('Failed to store task error result', {
+        const taskWork = work(args, taskExecutionContext)
+          .then((result) => ensureTerminalTaskProgress(taskExecutionContext, toolLabel, result))
+          .catch(async (err: unknown) => {
+            if (!hasTerminalProgress(taskExecutionContext)) {
+              await reportFailure(taskExecutionContext, toolLabel, err);
+            }
+            throw err;
+          });
+        runToolAsTask(taskContext.store, task, taskWork, (taskId, err) => {
+          taskLog.error('Failed to store task result', {
             taskId,
             error: err instanceof Error ? err.message : String(err),
           });
           void ctx.mcpReq.log(
             'error',
-            `Failed to store error result for task ${taskId}: ${err instanceof Error ? err.message : String(err)}`,
+            `Failed to store result for task ${taskId}: ${err instanceof Error ? err.message : String(err)}`,
           );
         });
       } catch (err) {
+        if (!hasTerminalProgress(taskExecutionContext)) {
+          await reportFailure(taskExecutionContext, toolLabel, err);
+        }
         await materializeTaskFailure(toolName, taskContext.store, task, err, args);
       }
 
@@ -448,6 +494,7 @@ export function registerTaskTool<TArgs>(
       ),
     ),
     taskMessageQueue,
+    toolLabel,
   ) as TaskToolHandler;
 
   server.experimental.tasks.registerToolTask(

@@ -19,7 +19,7 @@ import { buildDiffReviewPrompt } from '../lib/model-prompts.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput, validateStructuredContent } from '../lib/response.js';
-import { READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher, validateUrls } from '../lib/validation.js';
 import {
@@ -725,11 +725,13 @@ export function buildAnalysisPrompt(
   skippedLargePaths: string[],
   omittedPaths: string[] = [],
   language?: string,
+  focus?: string,
 ): string {
   const parts = [
     '## Snapshot',
     `Files: ${String(stats.files)} | +${String(stats.additions)} -${String(stats.deletions)}`,
     ...(language ? [`Lang: ${language}`] : []),
+    ...(focus ? ['', 'Focus:', focus] : []),
     '',
     'Paths:',
     ...reviewedPaths.map((filePath) => `- ${filePath}`),
@@ -919,7 +921,7 @@ export async function buildLocalDiffSnapshot(
 }
 
 export async function analyzePrWork(
-  { thinkingLevel, language, dryRun, cacheName }: AnalyzePrInput,
+  { thinkingLevel, language, dryRun, cacheName, focus }: AnalyzePrInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const progress = new ProgressReporter(ctx, REVIEW_DIFF_TOOL_LABEL);
@@ -976,6 +978,7 @@ export async function analyzePrWork(
     snapshot.skippedLargePaths,
     budgetedDiff.omittedPaths,
     language,
+    focus,
   );
 
   const modelPrompt = buildDiffReviewPrompt({
@@ -1077,6 +1080,7 @@ async function reviewWork(
         cacheName: args.cacheName,
         language: args.language,
         thinkingLevel: args.thinkingLevel,
+        focus: args.focus,
       },
       ctx,
     );
@@ -1137,7 +1141,7 @@ export function registerReviewTool(server: McpServer, taskMessageQueue: TaskMess
       description: 'Review a local diff, compare two files, or diagnose a failing change.',
       inputSchema: ReviewInputSchema,
       outputSchema: ReviewOutputSchema,
-      annotations: READONLY_ANNOTATIONS,
+      annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
     taskMessageQueue,
     (args: ReviewInput, ctx: ServerContext) => reviewWork(compareWork, args, ctx),

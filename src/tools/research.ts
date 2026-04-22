@@ -26,7 +26,11 @@ import {
   validateStructuredContent,
 } from '../lib/response.js';
 import { type StreamResult } from '../lib/streaming.js';
-import { elicitTaskInput, READONLY_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import {
+  elicitTaskInput,
+  READONLY_NON_IDEMPOTENT_ANNOTATIONS,
+  registerTaskTool,
+} from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { validateUrls } from '../lib/validation.js';
 import {
@@ -429,7 +433,7 @@ export function registerResearchTool(server: McpServer, taskMessageQueue: TaskMe
       description: 'Quick grounded lookup or deeper multi-step research with an explicit mode.',
       inputSchema: ResearchInputSchema,
       outputSchema: ResearchOutputSchema,
-      annotations: READONLY_ANNOTATIONS,
+      annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
     taskMessageQueue,
     researchWork,

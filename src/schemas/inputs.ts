@@ -391,6 +391,7 @@ export const AnalyzePrInputSchema = z.strictObject({
   ),
   thinkingLevel: thinkingLevelField,
   language: optionalField(textField('Primary language hint.')),
+  focus: optionalField(textField('Optional review focus hint.')),
 });
 export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
 

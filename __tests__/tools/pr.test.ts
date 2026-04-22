@@ -452,6 +452,27 @@ describe('buildAnalysisPrompt', () => {
     assert.ok(prompt.includes('Omitted:'));
     assert.ok(prompt.includes('- src/omitted.ts'));
   });
+
+  it('omits Focus section when focus is not provided', () => {
+    const prompt = buildAnalysisPrompt('diff content', stats, reviewedPaths, [], [], []);
+    assert.ok(!prompt.includes('Focus:'));
+  });
+
+  it('includes Focus section when focus is provided', () => {
+    const prompt = buildAnalysisPrompt(
+      'diff content',
+      stats,
+      reviewedPaths,
+      [],
+      [],
+      [],
+      [],
+      undefined,
+      'security review',
+    );
+    assert.ok(prompt.includes('Focus:'));
+    assert.ok(prompt.includes('security review'));
+  });
 });
 
 describe('analyzePrWork cache prompt integration', () => {

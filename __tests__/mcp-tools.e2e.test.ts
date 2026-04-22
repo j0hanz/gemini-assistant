@@ -200,14 +200,14 @@ const EXPECTED_TOOL_CONTRACTS = {
     title: 'Memory',
   },
   research: {
-    annotations: READONLY_ANNOTATIONS,
+    annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     requiredInput: ['goal'],
     requiredOutput: ['status', 'mode', 'summary', 'sources'],
     taskSupport: 'optional',
     title: 'Research',
   },
   review: {
-    annotations: READONLY_ANNOTATIONS,
+    annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     requiredInput: [],
     requiredOutput: ['status', 'subjectKind', 'summary'],
     taskSupport: 'optional',

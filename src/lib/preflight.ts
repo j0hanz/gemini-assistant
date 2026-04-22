@@ -1,15 +1,14 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 
 import { AppError } from './errors.js';
+import type { BuiltInToolName } from './orchestration.js';
 
 export interface GeminiRequestPreflight {
   hasExistingSession?: boolean | undefined;
   jsonMode?: boolean | undefined;
   responseSchema?: unknown;
   sessionId?: string | undefined;
-  usesCodeExecution?: boolean | undefined;
-  usesGoogleSearch?: boolean | undefined;
-  usesUrlContext?: boolean | undefined;
+  activeCapabilities: Set<BuiltInToolName>;
 }
 
 export function validateGeminiRequest({
@@ -17,11 +16,12 @@ export function validateGeminiRequest({
   jsonMode,
   responseSchema,
   sessionId,
-  usesCodeExecution,
-  usesGoogleSearch,
-  usesUrlContext,
+  activeCapabilities,
 }: GeminiRequestPreflight): CallToolResult | undefined {
-  const usesBuiltInTool = !!usesGoogleSearch || !!usesUrlContext || !!usesCodeExecution;
+  const usesBuiltInTool =
+    activeCapabilities.has('googleSearch') ||
+    activeCapabilities.has('urlContext') ||
+    activeCapabilities.has('codeExecution');
 
   if ((jsonMode ?? responseSchema !== undefined) && usesBuiltInTool) {
     return new AppError(

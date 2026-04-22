@@ -213,6 +213,38 @@ describe('ask contract', () => {
     });
   });
 
+  it('resolves orchestration config with codeExecution and additionalTools', async () => {
+    const stub = withGeminiStreamStub(['ok']);
+    try {
+      const askWork = createAskWork(
+        createDeps({
+          runWithoutSession: askWithoutSession as any,
+        }),
+      );
+      await askWork(
+        {
+          message: 'Hello',
+          codeExecution: true,
+          additionalTools: [{ functionDeclarations: [{ name: 'test', parameters: {} }] }] as never,
+        },
+        createContext(),
+      );
+      assert.strictEqual(stub.calls.length, 1);
+      const callConfig = stub.calls[0]?.config as any;
+      const tools = callConfig?.tools as any[];
+      assert.ok(
+        tools?.some((t) => 'codeExecution' in t),
+        'codeExecution was not included',
+      );
+      assert.ok(
+        tools?.some((t) => 'functionDeclarations' in t),
+        'additionalTools were not included',
+      );
+    } finally {
+      stub.restore();
+    }
+  });
+
   it('auto-applies workspace cache metadata on single-turn calls', async () => {
     const originalEnabled = process.env.CACHE;
     const originalAllowedRoots = process.env.ROOTS;

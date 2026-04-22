@@ -60,9 +60,7 @@ interface OrchestrationConfig {
   toolConfig?: ToolConfig;
   toolProfile: string;
   tools?: ToolListUnion;
-  usesCodeExecution: boolean;
-  usesGoogleSearch: boolean;
-  usesUrlContext: boolean;
+  activeCapabilities: Set<BuiltInToolName>;
 }
 
 export function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationConfig {
@@ -70,11 +68,16 @@ export function buildOrchestrationConfig(request: OrchestrationRequest): Orchest
   const extraTools = cloneTools(request.additionalTools);
   const tools: ToolListUnion = [...builtInTools, ...extraTools];
 
+  const activeCapabilities = new Set<BuiltInToolName>();
+  for (const name of BUILT_IN_TOOL_NAMES) {
+    if (hasTool(tools, name)) {
+      activeCapabilities.add(name);
+    }
+  }
+
   const config: OrchestrationConfig = {
     toolProfile: buildToolProfile(tools),
-    usesCodeExecution: hasTool(tools, 'codeExecution'),
-    usesGoogleSearch: hasTool(tools, 'googleSearch'),
-    usesUrlContext: hasTool(tools, 'urlContext'),
+    activeCapabilities,
   };
 
   if (request.includeServerSideToolInvocations === true) {
@@ -117,16 +120,14 @@ export async function resolveOrchestration(
   const payload = {
     toolKey,
     toolProfile: config.toolProfile,
-    usesGoogleSearch: config.usesGoogleSearch,
-    usesUrlContext: config.usesUrlContext,
-    usesCodeExecution: config.usesCodeExecution,
+    activeCapabilities: [...config.activeCapabilities],
     urlCount,
   };
 
   await ctx.mcpReq.log('info', `orchestration resolved: ${toolKey} -> ${config.toolProfile}`);
   logger.child(toolKey).info('orchestration resolved', payload);
 
-  if (urlCount > 0 && !config.usesUrlContext) {
+  if (urlCount > 0 && !config.activeCapabilities.has('urlContext')) {
     await ctx.mcpReq.log(
       'warning',
       `orchestration: ${toolKey} received ${String(urlCount)} URL(s) but resolved profile '${config.toolProfile}' does not expose URL Context`,

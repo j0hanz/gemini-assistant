@@ -60,7 +60,7 @@ type StreamResponseBuilder<T extends Record<string, unknown>> = Parameters<
 >[4];
 type GenerationConfigFields = Pick<
   ResearchInput,
-  'maxOutputTokens' | 'safetySettings' | 'thinkingBudget'
+  'maxOutputTokens' | 'safetySettings' | 'thinkingBudget' | 'additionalTools'
 >;
 
 async function runToolStream<T extends Record<string, unknown>>(
@@ -344,6 +344,7 @@ async function searchWork(
     thinkingBudget,
     maxOutputTokens,
     safetySettings,
+    additionalTools,
   }: SearchInput & GenerationConfigFields,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -355,6 +356,9 @@ async function searchWork(
           : (['googleSearch'] as const),
       urls,
       includeServerSideToolInvocations: true,
+      ...(additionalTools
+        ? { additionalTools: additionalTools as import('@google/genai').ToolListUnion }
+        : {}),
     },
     ctx,
     'search',
@@ -455,6 +459,7 @@ async function agenticSearchWork(
     urls,
     maxOutputTokens,
     safetySettings,
+    additionalTools,
   }: Omit<AgenticSearchInput, 'thinkingLevel'> &
     GenerationConfigFields & {
       deliverable?: string | undefined;
@@ -495,6 +500,9 @@ async function agenticSearchWork(
           : (['googleSearch', 'codeExecution'] as const),
       urls,
       includeServerSideToolInvocations: true,
+      ...(additionalTools
+        ? { additionalTools: additionalTools as import('@google/genai').ToolListUnion }
+        : {}),
     },
     ctx,
     'agentic_search',
@@ -546,6 +554,7 @@ async function runQuickResearch(
       urls: args.urls,
       maxOutputTokens: args.maxOutputTokens,
       safetySettings: args.safetySettings,
+      additionalTools: args.additionalTools,
     },
     ctx,
   );
@@ -572,6 +581,7 @@ async function runDeepResearch(args: ResearchInput, ctx: ServerContext): Promise
       urls: args.urls,
       maxOutputTokens: args.maxOutputTokens,
       safetySettings: args.safetySettings,
+      additionalTools: args.additionalTools,
     },
     ctx,
   );

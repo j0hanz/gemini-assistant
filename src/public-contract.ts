@@ -126,6 +126,8 @@ export const DISCOVERY_ENTRIES = [
       'responseSchemaJson?',
       'temperature?',
       'seed?',
+      'codeExecution?',
+      'additionalTools?',
     ],
     returns:
       'A direct answer, optional structured data, usage/safety/citation metadata, and session resource links, including raw turn parts for replay orchestration when sessions are active.',
@@ -157,6 +159,7 @@ export const DISCOVERY_ENTRIES = [
       'thinkingBudget?',
       'maxOutputTokens?',
       'safetySettings?',
+      'additionalTools?',
     ],
     returns:
       'A grounded summary with Google Search sources, URL Context provenance, warnings, and tool-usage details from the multi-step research path.',

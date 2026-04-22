@@ -237,6 +237,49 @@ describe('research tool contracts', () => {
     }
   });
 
+  it('resolves orchestration config with additionalTools', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+    let observedRequest: any;
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async (req: any) => {
+      observedRequest = req;
+      return fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'ok' }] },
+              finishReason: 'STOP',
+            },
+          ],
+        },
+      ]);
+    };
+
+    try {
+      await research.createTask(
+        {
+          goal: 'test tools',
+          mode: 'quick',
+          additionalTools: [{ functionDeclarations: [{ name: 'test', parameters: {} }] }] as never,
+        },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+
+      const tools = observedRequest?.config?.tools as any[];
+      assert.ok(
+        tools?.some((t) => 'functionDeclarations' in t),
+        'additionalTools were not included',
+      );
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
   it('marks quick research ungrounded when no sources are surfaced', async () => {
     const { research } = getHandlers();
     const store = makeMockStore();

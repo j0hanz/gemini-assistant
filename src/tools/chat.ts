@@ -318,10 +318,14 @@ function buildChatOrchestrationRequest(args: AskArgs) {
   const builtInToolNames: BuiltInToolName[] = [];
   if (args.googleSearch) builtInToolNames.push('googleSearch');
   if ((urls?.length ?? 0) > 0) builtInToolNames.push('urlContext');
+  if (args.codeExecution) builtInToolNames.push('codeExecution');
   return {
     builtInToolNames,
     includeServerSideToolInvocations: true,
     ...(urls ? { urls } : {}),
+    ...(args.additionalTools
+      ? { additionalTools: args.additionalTools as import('@google/genai').ToolListUnion }
+      : {}),
   } as const;
 }
 
@@ -343,9 +347,7 @@ function validateAskRequest(
     jsonMode: responseSchema !== undefined,
     responseSchema,
     sessionId,
-    usesCodeExecution: orchestration.usesCodeExecution,
-    usesGoogleSearch: orchestration.usesGoogleSearch,
-    usesUrlContext: orchestration.usesUrlContext,
+    activeCapabilities: orchestration.activeCapabilities,
   });
   if (preflightResult) {
     return preflightResult;
@@ -379,7 +381,8 @@ async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
   if (resolved.error) {
     return { error: resolved.error } as const;
   }
-  const { functionCallingMode, toolProfile, tools, toolConfig, usesUrlContext } = resolved.config;
+  const { functionCallingMode, toolProfile, tools, toolConfig } = resolved.config;
+  const usesUrlContext = resolved.config.activeCapabilities.has('urlContext');
 
   // URL Context discovers target URLs from prompt text; keep URLs visible
   // whenever a URL-capable profile is active.

@@ -44,15 +44,6 @@ function subsets<T>(items: readonly T[]): T[][] {
   return out;
 }
 
-const CAPABILITY_BY_NAME: Record<
-  BuiltInToolName,
-  keyof ReturnType<typeof buildOrchestrationConfig>
-> = {
-  googleSearch: 'usesGoogleSearch',
-  urlContext: 'usesUrlContext',
-  codeExecution: 'usesCodeExecution',
-};
-
 describe('buildOrchestrationConfig', () => {
   for (const subset of subsets(BUILT_IN_TOOL_NAMES)) {
     const label = subset.length > 0 ? subset.join('+') : 'none';
@@ -61,8 +52,11 @@ describe('buildOrchestrationConfig', () => {
       const tools = result.tools ?? [];
       assert.strictEqual(tools.length, subset.length);
       for (const name of BUILT_IN_TOOL_NAMES) {
-        const key = CAPABILITY_BY_NAME[name];
-        assert.strictEqual(result[key], subset.includes(name), `${name} capability`);
+        assert.strictEqual(
+          result.activeCapabilities.has(name),
+          subset.includes(name),
+          `${name} capability`,
+        );
       }
       assert.strictEqual(
         result.toolProfile,
@@ -91,7 +85,7 @@ describe('buildOrchestrationConfig', () => {
     });
     const tools = result.tools ?? [];
     assert.strictEqual(tools.length, 2);
-    assert.strictEqual(result.usesGoogleSearch, true);
+    assert.strictEqual(result.activeCapabilities.has('googleSearch'), true);
     assert.ok(tools.some((tool) => 'functionDeclarations' in tool));
   });
 
@@ -176,7 +170,7 @@ describe('resolveOrchestration', () => {
       'chat',
     );
     assert.ok(resolved.config);
-    assert.strictEqual(resolved.config.usesUrlContext, false);
+    assert.strictEqual(resolved.config.activeCapabilities.has('urlContext'), false);
     const warn = calls.find((c) => c.level === 'warning' || c.level === 'warn');
     assert.ok(warn, 'expected warn log when urls provided without URL Context');
   });

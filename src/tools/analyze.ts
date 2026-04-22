@@ -208,7 +208,8 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
         'analyze_file',
       );
       if (resolved.error) return resolved.error;
-      const { tools, toolConfig, usesUrlContext } = resolved.config;
+      const { tools, toolConfig } = resolved.config;
+      const usesUrlContext = resolved.config.activeCapabilities.has('urlContext');
 
       return await executor.runStream(
         ctx,
@@ -312,7 +313,8 @@ async function analyzeMultiFileWork(
       'analyze',
     );
     if (resolved.error) return resolved.error;
-    const { tools, toolConfig, usesUrlContext } = resolved.config;
+    const { tools, toolConfig } = resolved.config;
+    const usesUrlContext = resolved.config.activeCapabilities.has('urlContext');
     if (urls && urls.length > 0 && !usesUrlContext) {
       contents.push({ text: `Context URLs:\n${urls.join('\n')}` });
     }

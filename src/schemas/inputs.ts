@@ -103,6 +103,14 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
     responseSchemaJson: responseSchemaJsonField(),
     temperature: temperatureField(),
     seed: withFieldMetadata(z.int().optional(), 'Fixed random seed for reproducible outputs.'),
+    codeExecution: withFieldMetadata(
+      z.boolean().optional(),
+      'Enable native Python code execution within the chat session. Useful for math, logic, or data processing.',
+    ),
+    additionalTools: withFieldMetadata(
+      z.unknown().array().optional(),
+      'Optional list of custom Gemini Tool declarations. The MCP server will return functionCalls for the client to execute.',
+    ),
   });
 }
 
@@ -129,6 +137,10 @@ export const ResearchInputBaseSchema = z.strictObject({
   thinkingLevel: thinkingLevelField,
   thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
+  additionalTools: withFieldMetadata(
+    z.unknown().array().optional(),
+    'Optional list of custom Gemini Tool declarations. The MCP server will return functionCalls for the client to execute.',
+  ),
 });
 export const ResearchInputSchema = ResearchInputBaseSchema.superRefine(validateFlatResearchInput);
 export type ResearchInput = z.infer<typeof ResearchInputSchema>;
@@ -271,6 +283,14 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
     ),
     temperature: temperatureField(),
     seed: withFieldMetadata(z.int().optional(), 'Fixed random seed for reproducible outputs.'),
+    codeExecution: withFieldMetadata(
+      z.boolean().optional(),
+      'Enable native Python code execution within the chat session. Useful for math, logic, or data processing.',
+    ),
+    additionalTools: withFieldMetadata(
+      z.unknown().array().optional(),
+      'Optional list of custom Gemini Tool declarations. The MCP server will return functionCalls for the client to execute.',
+    ),
     googleSearch: withFieldMetadata(
       z.boolean().optional(),
       'Enable Google Search grounding. Optional; additive. Combine with `urls` for URL Context.',

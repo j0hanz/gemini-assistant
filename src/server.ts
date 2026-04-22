@@ -23,6 +23,7 @@ import { createSessionStore, type SessionChangeEvent, type SessionStore } from '
 import { registerAnalyzeTool } from './tools/analyze.js';
 import { registerChatTool } from './tools/chat.js';
 import { registerMemoryTool } from './tools/memory.js';
+import { registerDeleteCacheTool } from './tools/memory.js';
 import { type CacheChangeEvent, subscribeCacheChange } from './tools/memory.js';
 import { registerResearchTool } from './tools/research.js';
 import { registerReviewTool } from './tools/review.js';
@@ -67,10 +68,13 @@ const SERVER_TOOL_REGISTRARS = [
       services.workspaceCacheManager,
     );
   },
+  (server, services) => {
+    registerDeleteCacheTool(server, services.taskMessageQueue);
+  },
 ] as const satisfies readonly ServerRegistrar[];
 
 const SERVER_DESCRIPTION =
-  'Gemini AI assistant with five job-first public tools: chat, research, analyze, review, and memory.';
+  'Gemini AI assistant with six job-first public tools: chat, research, analyze, review, memory, and delete_cache.';
 
 export const SERVER_INSTRUCTIONS =
   `Public tools: ${PUBLIC_TOOL_NAMES.join(', ')}. ` +
@@ -79,7 +83,8 @@ export const SERVER_INSTRUCTIONS =
   'research (explicit quick or deep grounded research), ' +
   'analyze (file, URL, small file-set analysis, or diagram generation), ' +
   'review (diff review, file comparison, or failure diagnosis), ' +
-  'memory (sessions, caches, and workspace memory inspection/mutation). ' +
+  'memory (read-only inspection and non-destructive mutation of sessions, caches, and workspace memory), ' +
+  'delete_cache (destructive removal of a Gemini cache with confirmation). ' +
   'Use discover://catalog and discover://workflows for the canonical public surface.';
 
 const STATIC_RESOURCE_URIS = new Set<string>(

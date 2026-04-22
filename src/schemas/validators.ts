@@ -198,7 +198,6 @@ export const MEMORY_ACTIONS = [
   'caches.get',
   'caches.create',
   'caches.update',
-  'caches.delete',
   'workspace.context',
   'workspace.cache',
 ] as const;

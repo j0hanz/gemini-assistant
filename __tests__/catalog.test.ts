@@ -13,6 +13,7 @@ import {
   AnalyzeInputSchema,
   ChatInputSchema,
   createMemoryInputSchema,
+  DeleteCacheInputSchema,
   ResearchInputSchema,
   ReviewInputSchema,
 } from '../src/schemas/inputs.js';
@@ -85,6 +86,7 @@ const toolSchemas = new Map<string, string[]>([
   ['analyze', schemaInputs(AnalyzeInputSchema)],
   ['review', schemaInputs(ReviewInputSchema)],
   ['memory', schemaInputs(createMemoryInputSchema(() => []))],
+  ['delete_cache', schemaInputs(DeleteCacheInputSchema)],
 ]);
 
 const promptSchemas = new Map(

@@ -1,4 +1,4 @@
-export type PublicJobName = 'chat' | 'research' | 'analyze' | 'review' | 'memory';
+export type PublicJobName = 'chat' | 'research' | 'analyze' | 'review' | 'memory' | 'delete_cache';
 export type PublicPromptName = 'discover' | 'research' | 'review' | 'memory';
 export type PublicWorkflowName =
   | 'start-here'
@@ -62,6 +62,7 @@ export const PUBLIC_TOOL_NAMES = [
   'analyze',
   'review',
   'memory',
+  'delete_cache',
 ] as const satisfies readonly PublicJobName[];
 
 export const PUBLIC_PROMPT_NAMES = [
@@ -122,6 +123,11 @@ export const JOB_METADATA = [
     title: 'Memory',
     summary: 'Inspect and manage sessions, caches, and workspace memory resources.',
     recommendedPrompt: 'memory',
+  },
+  {
+    name: 'delete_cache',
+    title: 'Delete Cache',
+    summary: 'Destructively delete a Gemini cache with confirmation.',
   },
 ] as const satisfies readonly JobMetadata[];
 
@@ -249,7 +255,7 @@ export const DISCOVERY_ENTRIES = [
     title: 'Memory',
     bestFor:
       'Inspecting or mutating server-managed sessions, Gemini caches, and workspace memory state.',
-    whenToUse: 'Use to list, inspect, create, update, or delete sessions and caches.',
+    whenToUse: 'Use to list, inspect, create, or update sessions and caches.',
     inputs: [
       'action',
       'sessionId?',
@@ -258,17 +264,36 @@ export const DISCOVERY_ENTRIES = [
       'systemInstruction?',
       'ttl?',
       'displayName?',
-      'confirm?',
     ],
     returns:
       'A memory operation result with summaries, inline data for the selected action, and related resource URIs.',
     limitations: [
       'Actions are explicit discriminated variants; generic target/input bags are not accepted.',
       'Workspace inspection actions are read-only mirrors of the corresponding memory resources.',
+      'Cache deletion is exposed via the dedicated `delete_cache` tool.',
     ],
     related: [
       { kind: 'prompt', name: 'memory' },
       { kind: 'resource', name: 'memory://sessions' },
+      { kind: 'resource', name: 'memory://caches' },
+      { kind: 'tool', name: 'delete_cache' },
+    ],
+  },
+  {
+    name: 'delete_cache',
+    kind: 'tool',
+    title: 'Delete Cache',
+    bestFor: 'Destructively removing a Gemini cache with confirmation.',
+    whenToUse: 'Use to delete an existing cache resource by name.',
+    inputs: ['cacheName', 'confirm?'],
+    returns:
+      'A deletion result with `deleted`, optional `confirmationRequired`, and a memory cache resource link.',
+    limitations: [
+      'Requires interactive confirmation or `confirm=true` for non-interactive clients.',
+      'Deletion is final; callers must re-create caches to restore access.',
+    ],
+    related: [
+      { kind: 'tool', name: 'memory' },
       { kind: 'resource', name: 'memory://caches' },
     ],
   },

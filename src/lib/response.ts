@@ -133,6 +133,24 @@ function hasSafeParse(outputSchema: unknown): outputSchema is z.ZodType {
   );
 }
 
+function buildStructuredValidationErrorResult(
+  toolName: string,
+  result: CallToolResult,
+  error: z.ZodError,
+): CallToolResult {
+  const diagnostic = `Internal ${toolName} output validation failed: structuredContent did not match outputSchema.\n${z.prettifyError(error)}`;
+  return {
+    content: [
+      ...result.content,
+      {
+        type: 'text',
+        text: diagnostic,
+      },
+    ],
+    isError: true,
+  };
+}
+
 export function safeValidateStructuredContent(
   toolName: string,
   outputSchema: unknown,
@@ -160,15 +178,7 @@ export function safeValidateStructuredContent(
     error: z.prettifyError(parsed.error),
   });
 
-  return {
-    content: [
-      {
-        type: 'text',
-        text: `Internal ${toolName} output validation failed.`,
-      },
-    ],
-    isError: true,
-  };
+  return buildStructuredValidationErrorResult(toolName, result, parsed.error);
 }
 
 export function validateStructuredToolResult(
@@ -188,16 +198,7 @@ export function validateStructuredToolResult(
     };
   }
 
-  return {
-    content: [
-      ...result.content,
-      {
-        type: 'text',
-        text: `Internal ${toolName} output validation failed: structuredContent did not match outputSchema.`,
-      },
-    ],
-    isError: true,
-  };
+  return buildStructuredValidationErrorResult(toolName, result, parsed.error);
 }
 
 function appendBulletListSection(

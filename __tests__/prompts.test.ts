@@ -56,7 +56,14 @@ describe('discover prompt', () => {
   });
 
   it('derives the public job options from the public job schema', () => {
-    assert.deepStrictEqual(PUBLIC_JOB_OPTIONS, ['chat', 'research', 'analyze', 'review', 'memory']);
+    assert.deepStrictEqual(PUBLIC_JOB_OPTIONS, [
+      'chat',
+      'research',
+      'analyze',
+      'review',
+      'memory',
+      'delete_cache',
+    ]);
   });
 
   it('gracefully degrades when a workflow entry is unavailable', () => {

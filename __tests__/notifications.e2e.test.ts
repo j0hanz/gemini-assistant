@@ -147,8 +147,8 @@ describe('public MCP resource notifications', () => {
       // delete — MUST emit list_changed
       offset = harness.client.getNotifications().length;
       await harness.client.request('tools/call', {
-        arguments: { action: 'caches.delete', cacheName, confirm: true },
-        name: 'memory',
+        arguments: { cacheName, confirm: true },
+        name: 'delete_cache',
       });
 
       await flushEventLoop(2);

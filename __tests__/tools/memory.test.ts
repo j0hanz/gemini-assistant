@@ -5,8 +5,9 @@ import { describe, it } from 'node:test';
 
 import { getAI } from '../../src/client.js';
 import type { MemoryInput } from '../../src/schemas/inputs.js';
+import { DeleteCacheInputSchema, MemoryInputSchema } from '../../src/schemas/inputs.js';
 import { MemoryOutputSchema } from '../../src/schemas/outputs.js';
-import { buildCreateCacheWork, memoryWork } from '../../src/tools/memory.js';
+import { buildCreateCacheWork, deleteCacheWork, memoryWork } from '../../src/tools/memory.js';
 
 function createContext(elicitInput?: (request: unknown) => Promise<unknown>): ServerContext {
   return {
@@ -37,6 +38,14 @@ describe('memoryWork', () => {
         ),
       /Unhandled action 'unknown\.action'/,
     );
+  });
+
+  it('caches.delete action is rejected by MemoryInputSchema', () => {
+    const result = MemoryInputSchema.safeParse({
+      action: 'caches.delete',
+      cacheName: 'cachedContents/abc',
+    });
+    assert.strictEqual(result.success, false);
   });
 
   it('caches.create surfaces a tool-level error when Gemini returns no cache name', async () => {
@@ -84,14 +93,8 @@ describe('memoryWork', () => {
     };
 
     try {
-      const result = await memoryWork(
-        {} as never,
-        emptyRootsFetcher,
-        passthroughCreateCacheWork,
-        {
-          action: 'caches.delete',
-          cacheName: 'cachedContents/mock-declined',
-        },
+      const result = await deleteCacheWork(
+        { cacheName: 'cachedContents/mock-declined' },
         createContext(async () => ({
           action: 'accept',
           content: { confirm: false },
@@ -176,14 +179,8 @@ describe('memoryWork', () => {
   });
 
   it('caches.delete unsupported-elicitation path produces schema-valid output', async () => {
-    const result = await memoryWork(
-      {} as never,
-      emptyRootsFetcher,
-      passthroughCreateCacheWork,
-      {
-        action: 'caches.delete',
-        cacheName: 'cachedContents/mock-unsupported',
-      },
+    const result = await deleteCacheWork(
+      { cacheName: 'cachedContents/mock-unsupported' },
       createContext(async () => {
         throw new Error('elicitation unsupported');
       }),
@@ -196,38 +193,35 @@ describe('memoryWork', () => {
     };
     assert.strictEqual(structured.deleted, false);
     assert.strictEqual(structured.confirmationRequired, true);
-    const parsed = MemoryOutputSchema.safeParse(result.structuredContent);
-    assert.strictEqual(parsed.success, true);
   });
 
-  it('caches.delete declined path validates against MemoryOutputSchema', async () => {
+  it('caches.delete happy path with confirm: true deletes the cache', async () => {
     const client = getAI();
     const originalDelete = client.caches.delete.bind(client.caches);
-    // @ts-expect-error test override — should never be reached on a declined flow
-    client.caches.delete = async () => {
-      throw new Error('caches.delete must not be called on a declined flow');
+    let deleted = false;
+    // @ts-expect-error test override — capture delete call
+    client.caches.delete = async ({ name }: { name: string }) => {
+      assert.strictEqual(name, 'cachedContents/mock-happy');
+      deleted = true;
+      return {};
     };
 
     try {
-      const result = await memoryWork(
-        {} as never,
-        emptyRootsFetcher,
-        passthroughCreateCacheWork,
-        {
-          action: 'caches.delete',
-          cacheName: 'cachedContents/mock-declined-parse',
-        },
-        createContext(async () => ({
-          action: 'accept',
-          content: { confirm: false },
-        })),
+      const result = await deleteCacheWork(
+        { cacheName: 'cachedContents/mock-happy', confirm: true },
+        createContext(),
       );
-
       assert.notStrictEqual(result.isError, true);
-      const parsed = MemoryOutputSchema.safeParse(result.structuredContent);
-      assert.strictEqual(parsed.success, true);
+      const structured = result.structuredContent as { deleted?: boolean };
+      assert.strictEqual(structured.deleted, true);
+      assert.strictEqual(deleted, true);
     } finally {
       client.caches.delete = originalDelete;
     }
+  });
+
+  it('DeleteCacheInputSchema rejects invalid cacheName', () => {
+    const result = DeleteCacheInputSchema.safeParse({ cacheName: '' });
+    assert.strictEqual(result.success, false);
   });
 });

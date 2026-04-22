@@ -195,11 +195,18 @@ const EXPECTED_TOOL_CONTRACTS = {
     title: 'Chat',
   },
   memory: {
-    annotations: DESTRUCTIVE_ANNOTATIONS,
+    annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     requiredInput: ['action'],
     requiredOutput: ['status', 'action', 'summary'],
     taskSupport: 'optional',
     title: 'Memory',
+  },
+  delete_cache: {
+    annotations: DESTRUCTIVE_ANNOTATIONS,
+    requiredInput: ['cacheName'],
+    requiredOutput: ['status', 'summary', 'cacheName'],
+    taskSupport: 'optional',
+    title: 'Delete Cache',
   },
   research: {
     annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
@@ -238,7 +245,7 @@ describe('MCP tool smoke coverage', () => {
 
       assert.deepStrictEqual(
         [...toolMap.keys()],
-        ['chat', 'research', 'analyze', 'review', 'memory'],
+        ['chat', 'research', 'analyze', 'review', 'memory', 'delete_cache'],
       );
 
       for (const [toolName, contract] of Object.entries(EXPECTED_TOOL_CONTRACTS)) {
@@ -346,7 +353,7 @@ describe('MCP tool smoke coverage', () => {
       assert.ok(memoryAction);
       assert.equal(memoryAction.description, 'Memory action selector.');
       assert.ok(Array.isArray((memorySchema as { oneOf?: unknown }).oneOf));
-      assert.match(toolMap.get('memory')?.description ?? '', /caches\.delete/i);
+      assert.match(toolMap.get('memory')?.description ?? '', /delete_cache/i);
       assert.equal(reviewSubjectKind.default, 'diff');
 
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);

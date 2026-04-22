@@ -329,7 +329,10 @@ describe('safeValidateStructuredContent', () => {
         explanation: 'wrong field',
       },
       {
-        content: [{ type: 'text', text: 'ok' }],
+        content: [
+          { type: 'text', text: 'ok' },
+          { type: 'text', text: 'link' },
+        ],
         structuredContent: {
           status: 'completed',
           explanation: 'wrong field',
@@ -338,9 +341,39 @@ describe('safeValidateStructuredContent', () => {
     );
 
     assert.strictEqual(result.isError, true);
-    assert.strictEqual(result.structuredContent, undefined);
-    assert.strictEqual(result.content.length, 1);
-    assert.match(result.content[0]?.text ?? '', /Internal test-tool output validation failed\./);
+    assert.ok(
+      !('structuredContent' in (result as Record<string, unknown>)),
+      'failed result must not contain a structuredContent key',
+    );
+    assert.strictEqual(result.content[0]?.text, 'ok');
+    assert.strictEqual(result.content[1]?.text, 'link');
+    assert.match(
+      result.content[2]?.text ?? '',
+      /Internal test-tool output validation failed: structuredContent did not match outputSchema\./,
+    );
+  });
+
+  it('produces the same failure shape as validateStructuredToolResult', () => {
+    const schema = z.strictObject({
+      status: z.literal('completed'),
+      summary: z.string(),
+    });
+    const originalContent = [
+      { type: 'text' as const, text: 'first' },
+      { type: 'text' as const, text: 'second' },
+    ];
+    const structured = { status: 'completed', explanation: 'bad' };
+
+    const viaSafe = safeValidateStructuredContent('test-tool', schema, structured, {
+      content: originalContent,
+      structuredContent: structured,
+    });
+    const viaToolResult = validateStructuredToolResult('test-tool', schema, {
+      content: originalContent,
+      structuredContent: structured,
+    });
+
+    assert.deepStrictEqual(viaSafe, viaToolResult);
   });
 });
 

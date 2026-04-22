@@ -85,13 +85,16 @@ export const ListCachesOutputSchema = z.strictObject({
   count: nonNegativeInt('Number of active caches'),
 });
 
-export const DeleteCacheOutputSchema = z.strictObject({
+export const DeleteCachePublicOutputSchema = z.strictObject({
+  ...publicBaseOutputFields,
+  summary: z.string().describe('High-level result summary'),
   cacheName: cacheName('Cache resource name'),
-  deleted: z.boolean().describe('Whether deletion was performed'),
+  deleted: z.boolean().optional().describe('Whether deletion was performed'),
   confirmationRequired: z
     .boolean()
     .optional()
     .describe('Whether client must rerun with confirm=true.'),
+  resourceUris: z.array(z.string()).optional(),
 });
 
 export const UpdateCacheOutputSchema = z.strictObject({
@@ -197,8 +200,6 @@ export const MemoryOutputSchema = z.strictObject({
   events: z.array(SessionEventSummarySchema).optional(),
   caches: z.array(CacheListEntrySchema).optional(),
   cache: CacheListEntrySchema.optional(),
-  deleted: z.boolean().optional(),
-  confirmationRequired: z.boolean().optional(),
   workspaceContext: z
     .strictObject({
       content: z.string(),

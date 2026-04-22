@@ -1,13 +1,14 @@
 # Gemini Assistant
 
 `gemini-assistant` is an MCP server that exposes a job-first public surface over Google Gemini.
-The public contract is five tools:
+The public contract is six tools:
 
 - `chat`
 - `research`
 - `analyze`
 - `review`
 - `memory`
+- `delete_cache`
 - `discover`
 
 ## Start Here
@@ -56,6 +57,7 @@ Workflow entries:
 - Analyze a local file, public URLs, a small file set, or generate a diagram: `analyze`
 - Review a diff, compare files, or diagnose a failure through `subjectKind="failure"`: `review`
 - Inspect or mutate sessions, caches, and workspace memory state: `memory`
+- Destructively delete a Gemini cache with confirmation: `delete_cache`
 
 ## Sessions And Caches
 

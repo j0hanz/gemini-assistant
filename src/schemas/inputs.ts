@@ -284,17 +284,6 @@ function createMemoryCacheUpdateSchema() {
   });
 }
 
-function createMemoryCacheDeleteSchema() {
-  return z.strictObject({
-    action: memoryActionField('caches.delete'),
-    cacheName: completableCacheName('Cache resource name'),
-    confirm: withFieldMetadata(
-      z.boolean().optional(),
-      'Confirmation override for non-interactive clients.',
-    ),
-  });
-}
-
 export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
   return z.discriminatedUnion('action', [
     createMemoryNoArgumentSchema(MEMORY_ACTIONS[0]),
@@ -305,9 +294,8 @@ export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter =
     createMemoryCacheGetSchema(MEMORY_ACTIONS[5]),
     createMemoryCacheCreateSchema(),
     createMemoryCacheUpdateSchema(),
-    createMemoryCacheDeleteSchema(),
+    createMemoryNoArgumentSchema(MEMORY_ACTIONS[8]),
     createMemoryNoArgumentSchema(MEMORY_ACTIONS[9]),
-    createMemoryNoArgumentSchema(MEMORY_ACTIONS[10]),
   ]);
 }
 

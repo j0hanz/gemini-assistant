@@ -17,7 +17,11 @@ import {
   createResourceLink,
   withRelatedTaskMeta,
 } from '../lib/response.js';
-import { DESTRUCTIVE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import {
+  DESTRUCTIVE_ANNOTATIONS,
+  READONLY_NON_IDEMPOTENT_ANNOTATIONS,
+  registerTaskTool,
+} from '../lib/task-utils.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from '../lib/validation.js';
 import {
   assembleWorkspaceContext,
@@ -28,10 +32,11 @@ import {
   type CreateCacheInput,
   createMemoryInputSchema,
   type DeleteCacheInput,
+  DeleteCacheInputSchema,
   type MemoryInput,
   type UpdateCacheInput,
 } from '../schemas/inputs.js';
-import { MemoryOutputSchema } from '../schemas/outputs.js';
+import { DeleteCachePublicOutputSchema, MemoryOutputSchema } from '../schemas/outputs.js';
 
 import { type CacheSummary, getAI, getCacheSummary, listCacheSummaries, MODEL } from '../client.js';
 import type { SessionStore } from '../sessions.js';
@@ -330,7 +335,7 @@ export function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
   };
 }
 
-async function deleteCacheWork(
+export async function deleteCacheWork(
   { cacheName, confirm }: DeleteCacheInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -647,34 +652,6 @@ async function handleCachesUpdate(
   };
 }
 
-async function handleCachesDelete(
-  base: Record<string, unknown>,
-  args: Extract<MemoryInput, { action: 'caches.delete' }>,
-  ctx: ServerContext,
-): Promise<CallToolResult> {
-  const result = await deleteCacheWork({ cacheName: args.cacheName, confirm: args.confirm }, ctx);
-  if (result.isError) return result;
-  const structured = result.structuredContent ?? {};
-  return {
-    ...result,
-    structuredContent: {
-      ...base,
-      action: args.action,
-      summary:
-        structured.deleted === true
-          ? `Deleted cache ${args.cacheName}.`
-          : structured.confirmationRequired === true
-            ? `Deletion for ${args.cacheName} requires confirmation.`
-            : `Did not delete cache ${args.cacheName}.`,
-      ...(typeof structured.deleted === 'boolean' ? { deleted: structured.deleted } : {}),
-      ...(typeof structured.confirmationRequired === 'boolean'
-        ? { confirmationRequired: structured.confirmationRequired }
-        : {}),
-      resourceUris: ['memory://caches'],
-    },
-  };
-}
-
 async function handleWorkspaceContext(
   rootsFetcher: RootsFetcher,
   base: Record<string, unknown>,
@@ -750,8 +727,6 @@ export async function memoryWork(
       return await handleCachesCreate(createCacheWork, base, args, ctx);
     case 'caches.update':
       return await handleCachesUpdate(base, args, ctx);
-    case 'caches.delete':
-      return await handleCachesDelete(base, args, ctx);
     case 'workspace.context':
       return await handleWorkspaceContext(rootsFetcher, base, args.action, taskId);
     case 'workspace.cache':
@@ -776,10 +751,10 @@ export function registerMemoryTool(
     {
       title: 'Memory',
       description:
-        'Inspect and manage sessions, caches, and workspace memory state. Only action=caches.delete is destructive.',
+        'Inspect and manage sessions, caches, and workspace memory state. Use the `delete_cache` tool to remove caches.',
       inputSchema: createMemoryInputSchema(sessionStore.completeSessionIds.bind(sessionStore)),
       outputSchema: MemoryOutputSchema,
-      annotations: DESTRUCTIVE_ANNOTATIONS,
+      annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
     taskMessageQueue,
     (args: MemoryInput, ctx: ServerContext) =>
@@ -791,5 +766,52 @@ export function registerMemoryTool(
         ctx,
         workspaceCacheManagerInstance,
       ),
+  );
+}
+
+export function registerDeleteCacheTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue,
+): void {
+  registerTaskTool(
+    server,
+    'delete_cache',
+    {
+      title: 'Delete Cache',
+      description:
+        'Delete a Gemini cache. Requires interactive confirmation or `confirm=true` for non-interactive clients.',
+      inputSchema: DeleteCacheInputSchema,
+      outputSchema: DeleteCachePublicOutputSchema,
+      annotations: DESTRUCTIVE_ANNOTATIONS,
+    },
+    taskMessageQueue,
+    async (args: DeleteCacheInput, ctx: ServerContext): Promise<CallToolResult> => {
+      const result = await deleteCacheWork(args, ctx);
+      if (result.isError) return result;
+      const base = buildBaseStructuredOutput(ctx.task?.id);
+      const structured = (result.structuredContent ?? {}) as {
+        deleted?: boolean;
+        confirmationRequired?: boolean;
+      };
+      const summary =
+        structured.deleted === true
+          ? `Deleted cache ${args.cacheName}.`
+          : structured.confirmationRequired === true
+            ? `Deletion for ${args.cacheName} requires confirmation.`
+            : `Did not delete cache ${args.cacheName}.`;
+      return {
+        ...result,
+        structuredContent: {
+          ...base,
+          summary,
+          cacheName: args.cacheName,
+          ...(typeof structured.deleted === 'boolean' ? { deleted: structured.deleted } : {}),
+          ...(typeof structured.confirmationRequired === 'boolean'
+            ? { confirmationRequired: structured.confirmationRequired }
+            : {}),
+          resourceUris: ['memory://caches'],
+        },
+      };
+    },
   );
 }

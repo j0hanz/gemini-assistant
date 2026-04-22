@@ -59,6 +59,7 @@ describe('discovery resources', () => {
       [
         'tool:analyze',
         'tool:chat',
+        'tool:delete_cache',
         'tool:memory',
         'tool:research',
         'tool:review',

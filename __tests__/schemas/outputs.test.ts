@@ -5,7 +5,7 @@ import {
   AnalyzeOutputSchema,
   ContextUsedSchema,
   CreateCacheOutputSchema,
-  DeleteCacheOutputSchema,
+  DeleteCachePublicOutputSchema,
   ListCachesOutputSchema,
   ResearchOutputSchema,
   ReviewOutputSchema,
@@ -212,9 +212,13 @@ describe('ListCachesOutputSchema', () => {
   });
 });
 
-describe('DeleteCacheOutputSchema', () => {
+describe('DeleteCachePublicOutputSchema', () => {
+  const base = { status: 'completed' as const, requestId: 'task-1' };
+
   it('accepts successful deletion', () => {
-    const result = DeleteCacheOutputSchema.safeParse({
+    const result = DeleteCachePublicOutputSchema.safeParse({
+      ...base,
+      summary: 'Deleted cache cachedContents/abc123.',
       cacheName: 'cachedContents/abc123',
       deleted: true,
     });
@@ -222,7 +226,9 @@ describe('DeleteCacheOutputSchema', () => {
   });
 
   it('accepts cancelled deletion', () => {
-    const result = DeleteCacheOutputSchema.safeParse({
+    const result = DeleteCachePublicOutputSchema.safeParse({
+      ...base,
+      summary: 'Did not delete cache cachedContents/abc123.',
       cacheName: 'cachedContents/abc123',
       deleted: false,
     });
@@ -230,26 +236,39 @@ describe('DeleteCacheOutputSchema', () => {
   });
 
   it('accepts confirmation-required deletion', () => {
-    const result = DeleteCacheOutputSchema.safeParse({
+    const result = DeleteCachePublicOutputSchema.safeParse({
+      ...base,
+      summary: 'Deletion for cachedContents/abc123 requires confirmation.',
       cacheName: 'cachedContents/abc123',
       deleted: false,
       confirmationRequired: true,
+      resourceUris: ['memory://caches'],
     });
     assert.ok(result.success);
   });
 
   it('rejects missing cacheName', () => {
-    const result = DeleteCacheOutputSchema.safeParse({ deleted: true });
+    const result = DeleteCachePublicOutputSchema.safeParse({
+      ...base,
+      summary: 'x',
+      deleted: true,
+    });
     assert.strictEqual(result.success, false);
   });
 
-  it('rejects missing deleted', () => {
-    const result = DeleteCacheOutputSchema.safeParse({ cacheName: 'cachedContents/abc123' });
+  it('rejects missing summary', () => {
+    const result = DeleteCachePublicOutputSchema.safeParse({
+      ...base,
+      cacheName: 'cachedContents/abc123',
+      deleted: true,
+    });
     assert.strictEqual(result.success, false);
   });
 
   it('rejects non-boolean confirmationRequired', () => {
-    const result = DeleteCacheOutputSchema.safeParse({
+    const result = DeleteCachePublicOutputSchema.safeParse({
+      ...base,
+      summary: 'x',
       cacheName: 'cachedContents/abc123',
       deleted: false,
       confirmationRequired: 'yes',

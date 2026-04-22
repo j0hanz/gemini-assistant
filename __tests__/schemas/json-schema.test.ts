@@ -107,7 +107,7 @@ describe('public input JSON Schema', () => {
     const memoryBranches = oneOfBranches(z.toJSONSchema(MemoryInputSchema));
 
     assert.strictEqual(reviewBranches.length, 3);
-    assert.strictEqual(memoryBranches.length, 11);
+    assert.strictEqual(memoryBranches.length, 10);
     assert.ok(
       reviewBranches.some((branch) =>
         ((branch as { required?: unknown }).required as unknown[] | undefined)?.includes(

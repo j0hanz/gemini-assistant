@@ -21,6 +21,8 @@ import {
   buildBaseStructuredOutput,
   collectGroundedSourceDetails,
   collectGroundedSources,
+  collectGroundingCitations,
+  collectSearchEntryPoint,
   collectUrlMetadata,
   formatCountLabel,
   safeValidateStructuredContent,
@@ -75,7 +77,9 @@ async function runToolStream<T extends Record<string, unknown>>(
 }
 
 function buildSourceReportMessage(sourceCount: number): string {
-  return sourceCount > 0 ? `${formatCountLabel(sourceCount, 'source')} found` : 'completed';
+  return sourceCount > 0
+    ? `${formatCountLabel(sourceCount, 'source')} found`
+    : 'completed with no grounded sources surfaced';
 }
 
 function formatSourceLabels(
@@ -123,7 +127,7 @@ async function enrichTopicWithSampling(topic: string, ctx: ServerContext): Promi
 
     await ctx.mcpReq.log('info', 'Sampling provided research angles');
     log.debug('Sampling provided research angles', { sampledTextLength: sampledText.length });
-    return `${topic}\n\nKeywords/angles:\n${sampledText}`;
+    return `${topic}\n\nPlanning notes (unverified leads; verify before relying on them):\n${sampledText}`;
   } catch (error) {
     await ctx.mcpReq.log('info', 'Sampling unavailable; continuing without extra angles');
     log.info('requestSampling encountered an issue', {
@@ -133,36 +137,53 @@ async function enrichTopicWithSampling(topic: string, ctx: ServerContext): Promi
   }
 }
 
-function buildAgenticSearchResult(streamResult: StreamResult, textContent: string) {
-  const sources = collectGroundedSources(streamResult.groundingMetadata);
-  const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
-  const contentAdditions: CallToolResult['content'] = [];
-
-  appendSources(contentAdditions, formatSourceLabels(sourceDetails));
-
-  return {
-    resultMod: (result: CallToolResult) => ({
-      content: [...result.content, ...contentAdditions],
-    }),
-    structuredContent: pickDefined({
-      report: textContent,
-      sources,
-      sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
-      toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
-    }),
-    reportMessage: buildSourceReportMessage(sources.length),
-  };
+function countOccurrences(values: readonly string[]): Record<string, number> {
+  return values.reduce<Record<string, number>>((acc, value) => {
+    acc[value] = (acc[value] ?? 0) + 1;
+    return acc;
+  }, {});
 }
 
-function buildSearchResult(streamResult: StreamResult, textContent: string) {
+function emitDeepResearchToolBudgetLogs(
+  ctx: ServerContext,
+  streamResult: StreamResult,
+  searchDepth: number,
+): void {
+  const toolsUsedOccurrences = countOccurrences(streamResult.toolsUsedOccurrences);
+  const payload = {
+    searchDepth,
+    toolsUsed: streamResult.toolsUsed,
+    toolsUsedOccurrences,
+  };
+
+  log.info('deep research tool budget observed', payload);
+  void ctx.mcpReq
+    .log('info', `deep research tool budget observed at depth ${String(searchDepth)}`)
+    .catch(() => undefined);
+
+  if (searchDepth >= 3 && !('codeExecution' in toolsUsedOccurrences)) {
+    log.warn('deep research did not invoke Code Execution', payload);
+    void ctx.mcpReq
+      .log('warning', 'deep research did not invoke Code Execution')
+      .catch(() => undefined);
+  }
+}
+
+function buildAgenticSearchResult(
+  streamResult: StreamResult,
+  textContent: string,
+  ctx: ServerContext,
+  searchDepth: number,
+) {
+  emitDeepResearchToolBudgetLogs(ctx, streamResult, searchDepth);
+
   const groundedSources = collectGroundedSources(streamResult.groundingMetadata);
   const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
   const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
+  const citations = collectGroundingCitations(streamResult.groundingMetadata);
+  const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
   const contentAdditions: CallToolResult['content'] = [];
 
-  // Fallback: when grounding metadata is empty but URL-context succeeded,
-  // surface the retrieved URLs as sources so the response is transparent
-  // about what was consumed.
   const urlFallbackSources =
     groundedSources.length === 0
       ? urlMetadata
@@ -179,10 +200,59 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
       content: [...result.content, ...contentAdditions],
     }),
     structuredContent: pickDefined({
+      report: textContent,
+      sources,
+      sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
+      urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
+      toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
+      grounded: sources.length > 0,
+      citations: citations.length > 0 ? citations : undefined,
+      searchEntryPoint,
+    }),
+    reportMessage: buildSourceReportMessage(sources.length),
+  };
+}
+
+function buildSearchResult(streamResult: StreamResult, textContent: string) {
+  const groundedSources = collectGroundedSources(streamResult.groundingMetadata);
+  const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
+  const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
+  const citations = collectGroundingCitations(streamResult.groundingMetadata);
+  const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
+  const contentAdditions: CallToolResult['content'] = [];
+
+  // Fallback: when grounding metadata is empty but URL-context succeeded,
+  // surface the retrieved URLs as sources so the response is transparent
+  // about what was consumed.
+  const urlFallbackSources =
+    groundedSources.length === 0
+      ? urlMetadata
+          .filter((entry) => entry.status === 'URL_RETRIEVAL_STATUS_SUCCESS')
+          .map((entry) => entry.url)
+      : [];
+  const sources = groundedSources.length > 0 ? groundedSources : urlFallbackSources;
+
+  appendSources(contentAdditions, formatSourceLabels(sourceDetails));
+  appendUrlStatus(contentAdditions, urlMetadata);
+  if (groundedSources.length === 0 && urlMetadata.length === 0) {
+    contentAdditions.push({
+      type: 'text',
+      text: 'No grounded sources were retrieved; the answer may be ungrounded.',
+    });
+  }
+
+  return {
+    resultMod: (result: CallToolResult) => ({
+      content: [...result.content, ...contentAdditions],
+    }),
+    structuredContent: pickDefined({
       answer: textContent,
       sources,
       sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
+      grounded: sources.length > 0,
+      citations: citations.length > 0 ? citations : undefined,
+      searchEntryPoint,
     }),
     reportMessage: buildSourceReportMessage(sources.length),
   };
@@ -192,6 +262,8 @@ function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) 
   const groundedSources = collectGroundedSources(streamResult.groundingMetadata);
   const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
   const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
+  const citations = collectGroundingCitations(streamResult.groundingMetadata);
+  const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
   const contentAdditions: CallToolResult['content'] = [];
 
   const urlFallbackSources =
@@ -214,6 +286,9 @@ function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) 
       sources: sources.length > 0 ? sources : undefined,
       sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
+      grounded: sources.length > 0,
+      citations: citations.length > 0 ? citations : undefined,
+      searchEntryPoint,
     }),
     reportMessage: `${formatCountLabel(urlMetadata.length, 'URL')} retrieved`,
   };
@@ -324,15 +399,22 @@ export async function analyzeUrlWork(
 
 async function agenticSearchWork(
   {
+    deliverable,
     topic,
     searchDepth,
     thinkingLevel,
+    urls,
     maxOutputTokens,
     safetySettings,
-  }: AgenticSearchInput & GenerationConfigFields,
+  }: Omit<AgenticSearchInput, 'thinkingLevel'> &
+    GenerationConfigFields & {
+      deliverable?: string | undefined;
+      thinkingLevel?: ResearchInput['thinkingLevel'] | undefined;
+      urls?: readonly string[] | undefined;
+    },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  if (searchDepth && searchDepth > 3) {
+  if (searchDepth >= 5 || (searchDepth >= 4 && !deliverable)) {
     try {
       const constraint = await elicitTaskInput(
         ctx,
@@ -350,12 +432,18 @@ async function agenticSearchWork(
 
   const enrichedTopic = await enrichTopicWithSampling(topic, ctx);
   const prompt = buildAgenticResearchPrompt({
+    deliverable,
     searchDepth,
     topic: enrichedTopic,
+    urls,
   });
 
   const resolved = await resolveOrchestration(
-    { toolProfile: 'search_code', includeServerSideToolInvocations: true },
+    {
+      toolProfile: (urls?.length ?? 0) > 0 ? 'search_url_code' : 'search_code',
+      urls,
+      includeServerSideToolInvocations: true,
+    },
     ctx,
     'agentic_search',
   );
@@ -368,7 +456,7 @@ async function agenticSearchWork(
     AGENTIC_SEARCH_TOOL_LABEL,
     'Starting deep research',
     'Agentic search requested',
-    { topic, searchDepth },
+    { topic, searchDepth, urlCount: urls?.length ?? 0 },
     () =>
       getAI().models.generateContentStream({
         model: MODEL,
@@ -385,7 +473,8 @@ async function agenticSearchWork(
           ctx.mcpReq.signal,
         ),
       }),
-    buildAgenticSearchResult,
+    (streamResult, textContent) =>
+      buildAgenticSearchResult(streamResult, textContent, ctx, searchDepth),
   );
 }
 
@@ -409,13 +498,23 @@ async function runQuickResearch(
 }
 
 async function runDeepResearch(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {
+  const searchDepth = args.searchDepth ?? 3;
+  const hasExplicitThinkingLevel = Object.prototype.hasOwnProperty.call(args, 'thinkingLevel');
+  const thinkingLevel = hasExplicitThinkingLevel
+    ? args.thinkingLevel
+    : searchDepth >= 4
+      ? 'HIGH'
+      : searchDepth >= 3
+        ? 'MEDIUM'
+        : undefined;
+
   return await agenticSearchWork(
     {
-      topic: args.deliverable
-        ? `${args.goal}\n\nRequested deliverable: ${args.deliverable}`
-        : args.goal,
-      searchDepth: args.searchDepth ?? 3,
-      thinkingLevel: args.thinkingLevel,
+      deliverable: args.deliverable,
+      topic: args.goal,
+      searchDepth,
+      ...(thinkingLevel ? { thinkingLevel } : {}),
+      urls: args.urls,
       maxOutputTokens: args.maxOutputTokens,
       safetySettings: args.safetySettings,
     },
@@ -450,6 +549,10 @@ function buildResearchStructuredContent(
     ...(structured.sourceDetails ? { sourceDetails: structured.sourceDetails } : {}),
     ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
     ...(structured.toolsUsed ? { toolsUsed: structured.toolsUsed } : {}),
+    ...(structured.grounded !== undefined ? { grounded: structured.grounded } : {}),
+    ...(structured.citations ? { citations: structured.citations } : {}),
+    ...(structured.searchEntryPoint ? { searchEntryPoint: structured.searchEntryPoint } : {}),
+    ...(structured.contextUsed ? { contextUsed: structured.contextUsed } : {}),
     ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
     ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
     ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),

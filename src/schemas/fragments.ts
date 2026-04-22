@@ -119,6 +119,27 @@ const sourceDetailFields = {
 
 export const SourceDetailSchema = z.strictObject(sourceDetailFields);
 
+const groundingCitationFields = {
+  text: z.string().describe('Grounded claim text supported by retrieved sources'),
+  startIndex: nonNegativeInt('Start byte index for the supported claim').optional(),
+  endIndex: nonNegativeInt('End byte index for the supported claim').optional(),
+  sourceUrls: publicHttpUrlArray({
+    description: 'Source URLs supporting this claim',
+    itemDescription: 'Public source URL supporting this claim',
+  }),
+};
+
+export const GroundingCitationSchema = z.strictObject(groundingCitationFields);
+
+const searchEntryPointFields = {
+  renderedContent: z
+    .string()
+    .optional()
+    .describe('Google Search rendered entry point content for display compliance'),
+};
+
+export const SearchEntryPointSchema = z.strictObject(searchEntryPointFields);
+
 export const diffStatsFields = {
   files: nonNegativeInt('Files changed'),
   additions: nonNegativeInt('Lines added'),

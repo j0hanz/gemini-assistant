@@ -284,5 +284,5 @@ export function validateFlatResearchInput(
     return;
   }
 
-  forbidFields(ctx, value, ['urls', 'systemInstruction'], 'mode', mode);
+  forbidFields(ctx, value, ['systemInstruction'], 'mode', mode);
 }

@@ -8,6 +8,8 @@ import { z } from 'zod/v4';
 
 import type {
   ContextUsed,
+  GroundingCitation,
+  SearchEntryPoint,
   SourceDetail,
   UrlMetadataEntry,
   UsageMetadata,
@@ -21,21 +23,24 @@ import { isPublicHttpUrl } from './validation.js';
 export function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlMetadataEntry[] {
   if (!urlMetadata) return [];
   const entries: UrlMetadataEntry[] = [];
+  const seen = new Set<string>();
   for (const meta of urlMetadata) {
-    if (meta.retrievedUrl) {
-      entries.push({
-        url: meta.retrievedUrl,
-        status: meta.urlRetrievalStatus ?? 'UNKNOWN',
-      });
+    const url = meta.retrievedUrl;
+    if (!url || seen.has(url) || !isPublicHttpUrl(url)) {
+      continue;
     }
+
+    seen.add(url);
+    entries.push({
+      url,
+      status: meta.urlRetrievalStatus ?? 'UNKNOWN',
+    });
   }
   return entries;
 }
 
 export function collectGroundedSources(groundingMetadata: GroundingMetadata | undefined): string[] {
-  return collectGroundedSourceDetails(groundingMetadata)
-    .map((source) => source.url)
-    .filter((url) => isPublicHttpUrl(url));
+  return collectGroundedSourceDetails(groundingMetadata).map((source) => source.url);
 }
 
 export function collectGroundedSourceDetails(
@@ -44,15 +49,61 @@ export function collectGroundedSourceDetails(
   if (!groundingMetadata?.groundingChunks) return [];
 
   const sources: SourceDetail[] = [];
+  const seen = new Set<string>();
   for (const chunk of groundingMetadata.groundingChunks) {
     const uri = chunk.web?.uri;
-    if (!uri) continue;
+    if (!uri || seen.has(uri) || !isPublicHttpUrl(uri)) continue;
 
+    seen.add(uri);
     const title = chunk.web?.title;
     sources.push(title ? { title, url: uri } : { url: uri });
   }
 
   return sources;
+}
+
+export function collectGroundingCitations(
+  groundingMetadata: GroundingMetadata | undefined,
+): GroundingCitation[] {
+  if (!groundingMetadata?.groundingSupports || !groundingMetadata.groundingChunks) {
+    return [];
+  }
+
+  const citations: GroundingCitation[] = [];
+  for (const support of groundingMetadata.groundingSupports) {
+    const text = support.segment?.text;
+    if (!text) continue;
+
+    const sourceUrls: string[] = [];
+    const seen = new Set<string>();
+    for (const index of support.groundingChunkIndices ?? []) {
+      const url = groundingMetadata.groundingChunks[index]?.web?.uri;
+      if (!url || seen.has(url) || !isPublicHttpUrl(url)) continue;
+
+      seen.add(url);
+      sourceUrls.push(url);
+    }
+
+    if (sourceUrls.length === 0) continue;
+
+    citations.push(
+      pickDefined({
+        text,
+        startIndex: support.segment?.startIndex,
+        endIndex: support.segment?.endIndex,
+        sourceUrls,
+      }),
+    );
+  }
+
+  return citations;
+}
+
+export function collectSearchEntryPoint(
+  groundingMetadata: GroundingMetadata | undefined,
+): SearchEntryPoint | undefined {
+  const renderedContent = groundingMetadata?.searchEntryPoint?.renderedContent;
+  return renderedContent ? { renderedContent } : undefined;
 }
 
 export function promptBlockedError(toolName: string, blockReason?: string): CallToolResult {

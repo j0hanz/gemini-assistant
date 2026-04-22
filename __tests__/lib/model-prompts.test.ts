@@ -17,8 +17,11 @@ describe('model-prompts', () => {
 
     assert.deepStrictEqual(first, second);
     assert.ok(first.systemInstruction);
-    assert.ok(first.systemInstruction.length < 140);
+    assert.ok(first.systemInstruction.includes('No grounded sources available'));
     assert.ok(first.promptText.includes('latest release'));
+    assert.ok(
+      first.promptText.includes('URLs (primary sources - cite before general search results):'),
+    );
     assert.ok(first.promptText.includes('https://example.com'));
   });
 
@@ -29,9 +32,9 @@ describe('model-prompts', () => {
       'cachedContents/workspace-1',
     );
 
-    assert.ok(prompt.systemInstruction?.includes('grounded search results only'));
+    assert.ok(prompt.systemInstruction?.includes('retrieved sources'));
     assert.ok(prompt.promptText.includes('latest release'));
-    assert.ok(!prompt.promptText.includes('Answer from grounded search results only'));
+    assert.ok(!prompt.promptText.includes('Answer strictly from retrieved sources'));
   });
 
   it('keeps file-analysis system instructions when cache mode has no cache text', () => {
@@ -161,9 +164,23 @@ describe('model-prompts', () => {
 
     assert.ok(prompt.systemInstruction?.includes('Research with Google Search and Code Execution'));
     assert.ok(prompt.promptText.includes('Topic: MCP adoption'));
-    assert.ok(
-      prompt.promptText.includes('Exhaustive: cover as many relevant aspects as possible.'),
-    );
+    assert.ok(prompt.promptText.includes('at least 4 sub-questions'));
+    assert.ok(prompt.promptText.includes('at least 8 independent searches'));
     assert.ok(!prompt.promptText.includes('Split the topic into sub-questions'));
+  });
+
+  it('builds agentic-research prompts with primary URLs and output shape', () => {
+    const prompt = buildAgenticResearchPrompt({
+      deliverable: 'a decision memo',
+      searchDepth: 3,
+      topic: 'MCP adoption',
+      urls: ['https://example.com/report'],
+    });
+
+    assert.ok(prompt.promptText.includes('URLs (primary sources):'));
+    assert.ok(prompt.promptText.includes('https://example.com/report'));
+    assert.ok(prompt.systemInstruction?.includes('OUTPUT SHAPE:'));
+    assert.ok(prompt.systemInstruction?.includes('a decision memo'));
+    assert.ok(prompt.systemInstruction?.includes('Treat supplied URLs as primary sources'));
   });
 });

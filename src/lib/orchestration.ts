@@ -12,6 +12,7 @@ export const TOOL_PROFILES = [
   'search_url',
   'code',
   'search_code',
+  'search_url_code',
   'url_code',
 ] as const;
 
@@ -60,6 +61,12 @@ const TOOL_PROFILE_CAPABILITIES: Record<ToolProfile, ToolProfileCapabilities> = 
     usesCodeExecution: true,
     usesGoogleSearch: true,
     usesUrlContext: false,
+  },
+  search_url_code: {
+    builtInTools: [{ googleSearch: {} }, { urlContext: {} }, { codeExecution: {} }],
+    usesCodeExecution: true,
+    usesGoogleSearch: true,
+    usesUrlContext: true,
   },
   url_code: {
     builtInTools: [{ urlContext: {} }, { codeExecution: {} }],

@@ -85,6 +85,20 @@ describe('orchestration', () => {
     assert.deepStrictEqual(result.tools, [{ googleSearch: {} }, { codeExecution: {} }]);
   });
 
+  it('builds search + url + code orchestration', () => {
+    const result = buildOrchestrationConfig({ toolProfile: 'search_url_code' });
+
+    assert.strictEqual(result.toolProfile, 'search_url_code');
+    assert.strictEqual(result.usesGoogleSearch, true);
+    assert.strictEqual(result.usesUrlContext, true);
+    assert.strictEqual(result.usesCodeExecution, true);
+    assert.deepStrictEqual(result.tools, [
+      { googleSearch: {} },
+      { urlContext: {} },
+      { codeExecution: {} },
+    ]);
+  });
+
   it('builds url + code orchestration for url_code profile', () => {
     const result = buildOrchestrationConfig({ toolProfile: 'url_code' });
 

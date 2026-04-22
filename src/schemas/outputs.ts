@@ -11,7 +11,9 @@ import {
 import {
   UsageMetadataSchema as BaseUsageMetadataSchema,
   diffStatsFields,
+  GroundingCitationSchema,
   publicBaseOutputFields,
+  SearchEntryPointSchema,
   SourceDetailSchema,
   UrlMetadataEntrySchema,
 } from './fragments.js';
@@ -42,6 +44,8 @@ export type ContextUsed = z.infer<typeof ContextUsedSchema>;
 
 export type UrlMetadataEntry = z.infer<typeof UrlMetadataEntrySchema>;
 export type SourceDetail = z.infer<typeof SourceDetailSchema>;
+export type GroundingCitation = z.infer<typeof GroundingCitationSchema>;
+export type SearchEntryPoint = z.infer<typeof SearchEntryPointSchema>;
 
 const AnalyzeSummaryOutputSchema = z.strictObject({
   ...publicBaseOutputFields,
@@ -104,6 +108,14 @@ export const ResearchOutputSchema = z.strictObject({
     .describe('Structured source entries for client consumption'),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
   toolsUsed: z.array(z.string()).optional().describe('Tools invoked during deep research'),
+  grounded: z.boolean().optional().describe('Whether grounded sources were surfaced'),
+  citations: z
+    .array(GroundingCitationSchema)
+    .optional()
+    .describe('Claim-level citations derived from Gemini grounding supports'),
+  searchEntryPoint: SearchEntryPointSchema.optional().describe(
+    'Google Search entry point content for display compliance',
+  ),
   contextUsed: ContextUsedSchema.optional(),
 });
 

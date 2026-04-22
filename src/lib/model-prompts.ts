@@ -62,13 +62,15 @@ export function buildGroundedAnswerPrompt(
   cacheName?: string,
 ): ResolvedTextPrompt {
   const promptText =
-    !urls || urls.length === 0 ? query : `${query}\n\nUse these URLs too:\n${urls.join('\n')}`;
+    !urls || urls.length === 0
+      ? query
+      : `${query}\n\nURLs (primary sources - cite before general search results):\n${urls.join('\n')}`;
 
   return resolveTextPrompt(
     {
       promptText,
       systemInstruction:
-        'TASK: Answer from grounded search results only.\nCONSTRAINTS: Keep it concise and grounded in the retrieved sources.',
+        'TASK: Answer strictly from retrieved sources.\nCONSTRAINTS: If no grounding sources are retrieved, respond exactly with "No grounded sources available." Do not answer from prior knowledge. Cite sources as [n] aligned with the returned source list.',
     },
     cacheName,
   );
@@ -258,27 +260,41 @@ export function buildDiagramGenerationPrompt(args: {
 export function buildAgenticResearchPrompt(args: {
   searchDepth: number;
   topic: string;
+  deliverable?: string | undefined;
+  urls?: readonly string[] | undefined;
   cacheName?: string | undefined;
 }): ResolvedTextPrompt {
-  const depthInstruction =
-    args.searchDepth <= 2
-      ? 'Focused: cover 2-3 key aspects.'
-      : args.searchDepth <= 3
-        ? 'Thorough: cover 4-5 key aspects.'
-        : 'Exhaustive: cover as many relevant aspects as possible.';
+  const subQuestionCount = Math.max(2, args.searchDepth);
+  const independentSearchCount = args.searchDepth * 2;
 
   return resolveTextPrompt(
     {
       promptText: joinNonEmpty([
+        args.urls && args.urls.length > 0
+          ? `URLs (primary sources):\n${args.urls.join('\n')}`
+          : undefined,
         `Topic: ${args.topic}`,
-        depthInstruction,
+        `Depth contract: answer at least ${subQuestionCount} sub-questions and run at least ${independentSearchCount} independent searches.`,
+        args.searchDepth >= 3
+          ? 'Code Execution contract: invoke Code Execution at least once for verification, calculations, comparisons, rankings, or tabular checks.'
+          : undefined,
         'Task: research the topic and produce a grounded report.',
       ]),
       systemInstruction: joinNonEmpty([
         'TASK: Research with Google Search and Code Execution, then write a grounded Markdown report.',
+        args.deliverable
+          ? `OUTPUT SHAPE: Final output must conform to: ${args.deliverable}. Do not fall back to a generic Markdown report.`
+          : undefined,
         'CONSTRAINTS:',
-        '- Split the topic into sub-questions and search multiple angles.',
-        '- Use Code Execution for calculations, comparisons, rankings, and tables when useful.',
+        `- Split the topic into at least ${subQuestionCount} sub-questions and search multiple angles.`,
+        `- Run at least ${independentSearchCount} independent searches.`,
+        args.searchDepth >= 3
+          ? '- Invoke Code Execution at least once and use it for calculations, comparisons, rankings, tables, or consistency checks.'
+          : '- Use Code Execution for calculations, comparisons, rankings, and tables when useful.',
+        args.urls && args.urls.length > 0
+          ? '- Treat supplied URLs as primary sources; cite them before general web results when they are relevant.'
+          : undefined,
+        '- Treat sampling/planning notes as unverified leads, never as evidence.',
         '- Include concrete numbers and dates when available.',
         '- Do not state unsupported claims.',
       ]),

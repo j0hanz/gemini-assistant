@@ -47,7 +47,10 @@ function makeMockStore(): RequestTaskStore & {
   };
 }
 
-function makeMockContext(store: RequestTaskStore): ServerContext {
+function makeMockContext(
+  store: RequestTaskStore,
+  options: { onElicitInput?: () => void } = {},
+): ServerContext {
   const logs: string[] = [];
   return {
     mcpReq: {
@@ -74,6 +77,10 @@ function makeMockContext(store: RequestTaskStore): ServerContext {
       ),
       notify: async () => undefined,
       requestSampling: async () => ({ content: [{ type: 'text', text: 'official docs' }] }),
+      elicitInput: async () => {
+        options.onElicitInput?.();
+        return { action: 'accept', content: { text: 'none' } };
+      },
     },
     task: {
       store,
@@ -105,7 +112,7 @@ function getHandlers() {
       goal: string;
       mode: 'deep' | 'quick';
       searchDepth?: number;
-      thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
+      thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH';
       urls?: string[];
     }>,
   };
@@ -168,6 +175,7 @@ describe('research tool contracts', () => {
       assert.deepStrictEqual((structured as Record<string, unknown>).sourceDetails, [
         { title: 'Example', url: 'https://example.com' },
       ]);
+      assert.strictEqual((structured as Record<string, unknown>).grounded, true);
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
     }
@@ -221,6 +229,228 @@ describe('research tool contracts', () => {
         { title: 'Docs', url: 'https://example.com/docs' },
       ]);
       assert.deepStrictEqual((structured as Record<string, unknown>).toolsUsed, ['googleSearch']);
+      assert.strictEqual((structured as Record<string, unknown>).grounded, true);
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
+  it('marks quick research ungrounded when no sources are surfaced', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'No grounded sources available.' }] },
+              finishReason: 'STOP',
+            },
+          ],
+        },
+      ]);
+
+    try {
+      await research.createTask({ goal: 'thin query', mode: 'quick' }, makeMockContext(store));
+      await flushTaskWork();
+
+      const result = store.stored[0]?.result;
+      const structured = result?.structuredContent;
+      assert.ok(structured && typeof structured === 'object');
+      assert.strictEqual((structured as Record<string, unknown>).grounded, false);
+      assert.deepStrictEqual((structured as Record<string, unknown>).sources, []);
+      assert.ok(
+        result?.content.some((entry) =>
+          entry.text?.includes('No grounded sources were retrieved; the answer may be ungrounded.'),
+        ),
+      );
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
+  it('uses search_url_code, primary URL prompts, output shape, and HIGH thinking for deep URLs', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+    const calls: Record<string, unknown>[] = [];
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async (request: Record<string, unknown>) => {
+      calls.push(request);
+      return fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'Deep research report' }] },
+              finishReason: 'STOP',
+              groundingMetadata: {
+                groundingChunks: [{ web: { title: 'Report', uri: 'https://example.com/report' } }],
+                groundingSupports: [
+                  {
+                    groundingChunkIndices: [0],
+                    segment: { text: 'Supported claim', startIndex: 0, endIndex: 15 },
+                  },
+                ],
+                searchEntryPoint: { renderedContent: '<div>search</div>' },
+              },
+              urlContextMetadata: {
+                urlMetadata: [
+                  {
+                    retrievedUrl: 'https://example.com/report',
+                    urlRetrievalStatus: 'URL_RETRIEVAL_STATUS_SUCCESS',
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ]);
+    };
+
+    try {
+      await research.createTask(
+        {
+          goal: 'compare approaches',
+          deliverable: 'return a decision memo',
+          mode: 'deep',
+          searchDepth: 4,
+          urls: ['https://example.com/report'],
+        },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+
+      const call = calls[0];
+      assert.ok(call);
+      assert.strictEqual(String(call.contents).includes('URLs (primary sources):'), true);
+      assert.strictEqual(String(call.contents).includes('Planning notes (unverified leads'), true);
+      const config = call.config as Record<string, unknown>;
+      assert.deepStrictEqual(config.tools, [
+        { googleSearch: {} },
+        { urlContext: {} },
+        { codeExecution: {} },
+      ]);
+      assert.strictEqual((config.thinkingConfig as Record<string, unknown>).thinkingLevel, 'HIGH');
+      assert.match(String(config.systemInstruction), /OUTPUT SHAPE:.*decision memo/);
+
+      const structured = store.stored[0]?.result.structuredContent as Record<string, unknown>;
+      assert.deepStrictEqual(structured.urlMetadata, [
+        { url: 'https://example.com/report', status: 'URL_RETRIEVAL_STATUS_SUCCESS' },
+      ]);
+      assert.deepStrictEqual(structured.citations, [
+        {
+          text: 'Supported claim',
+          startIndex: 0,
+          endIndex: 15,
+          sourceUrls: ['https://example.com/report'],
+        },
+      ]);
+      assert.deepStrictEqual(structured.searchEntryPoint, {
+        renderedContent: '<div>search</div>',
+      });
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
+  it('preserves explicit thinkingLevel for deep research', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+    const calls: Record<string, unknown>[] = [];
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async (request: Record<string, unknown>) => {
+      calls.push(request);
+      return fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'Deep research report' }] },
+              finishReason: 'STOP',
+            },
+          ],
+        },
+      ]);
+    };
+
+    try {
+      await research.createTask(
+        {
+          goal: 'compare approaches',
+          mode: 'deep',
+          searchDepth: 4,
+          thinkingLevel: 'LOW',
+          deliverable: 'short memo',
+        },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+
+      const config = calls[0]?.config as Record<string, unknown>;
+      assert.strictEqual((config.thinkingConfig as Record<string, unknown>).thinkingLevel, 'LOW');
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
+  it('only elicits extra constraints for deeper research budgets', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+    let elicitCount = 0;
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'Deep research report' }] },
+              finishReason: 'STOP',
+            },
+          ],
+        },
+      ]);
+
+    try {
+      await research.createTask(
+        { goal: 'default depth', mode: 'deep', searchDepth: 3 },
+        makeMockContext(store, { onElicitInput: () => elicitCount++ }),
+      );
+      await research.createTask(
+        {
+          goal: 'depth four with deliverable',
+          mode: 'deep',
+          searchDepth: 4,
+          deliverable: 'short memo',
+        },
+        makeMockContext(store, { onElicitInput: () => elicitCount++ }),
+      );
+      await research.createTask(
+        { goal: 'depth four', mode: 'deep', searchDepth: 4 },
+        makeMockContext(store, { onElicitInput: () => elicitCount++ }),
+      );
+      await research.createTask(
+        {
+          goal: 'depth five',
+          mode: 'deep',
+          searchDepth: 5,
+          deliverable: 'short memo',
+        },
+        makeMockContext(store, { onElicitInput: () => elicitCount++ }),
+      );
+      await flushTaskWork();
+
+      assert.strictEqual(elicitCount, 2);
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
     }

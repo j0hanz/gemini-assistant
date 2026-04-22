@@ -10,6 +10,9 @@ import {
   appendUrlStatus,
   collectGroundedSourceDetails,
   collectGroundedSources,
+  collectGroundingCitations,
+  collectSearchEntryPoint,
+  collectUrlMetadata,
   createResourceLink,
   extractTextOrError,
   formatCountLabel,
@@ -174,6 +177,18 @@ describe('collectGroundedSources', () => {
 
     assert.deepStrictEqual(sources, ['https://example.com']);
   });
+
+  it('dedupes grounded source URLs preserving order', () => {
+    const sources = collectGroundedSources({
+      groundingChunks: [
+        { web: { title: 'First', uri: 'https://example.com' } },
+        { web: { title: 'Duplicate', uri: 'https://example.com' } },
+        { web: { title: 'Second', uri: 'https://example.org' } },
+      ],
+    });
+
+    assert.deepStrictEqual(sources, ['https://example.com', 'https://example.org']);
+  });
 });
 
 describe('collectGroundedSourceDetails', () => {
@@ -189,6 +204,83 @@ describe('collectGroundedSourceDetails', () => {
       { title: 'Example', url: 'https://example.com' },
       { url: 'https://example.org' },
     ]);
+  });
+
+  it('dedupes and filters structured source details', () => {
+    const sources = collectGroundedSourceDetails({
+      groundingChunks: [
+        { web: { title: 'First', uri: 'https://example.com' } },
+        { web: { title: 'Duplicate', uri: 'https://example.com' } },
+        { web: { title: 'Local', uri: 'file:///etc/passwd' } },
+      ],
+    });
+
+    assert.deepStrictEqual(sources, [{ title: 'First', url: 'https://example.com' }]);
+  });
+});
+
+describe('collectUrlMetadata', () => {
+  it('dedupes and filters URL metadata', () => {
+    const metadata = collectUrlMetadata([
+      {
+        retrievedUrl: 'https://example.com',
+        urlRetrievalStatus: 'URL_RETRIEVAL_STATUS_SUCCESS',
+      },
+      {
+        retrievedUrl: 'https://example.com',
+        urlRetrievalStatus: 'URL_RETRIEVAL_STATUS_ERROR',
+      },
+      {
+        retrievedUrl: 'file:///etc/passwd',
+        urlRetrievalStatus: 'URL_RETRIEVAL_STATUS_SUCCESS',
+      },
+    ]);
+
+    assert.deepStrictEqual(metadata, [
+      { url: 'https://example.com', status: 'URL_RETRIEVAL_STATUS_SUCCESS' },
+    ]);
+  });
+});
+
+describe('collectGroundingCitations', () => {
+  it('maps grounding supports to public chunk URLs', () => {
+    const citations = collectGroundingCitations({
+      groundingChunks: [
+        { web: { uri: 'https://example.com/a' } },
+        { web: { uri: 'file:///etc/passwd' } },
+        { web: { uri: 'https://example.com/b' } },
+      ],
+      groundingSupports: [
+        {
+          groundingChunkIndices: [0, 1, 2],
+          segment: { text: 'Supported claim', startIndex: 0, endIndex: 15 },
+        },
+        {
+          groundingChunkIndices: [1],
+          segment: { text: 'Unsafe only' },
+        },
+      ],
+    });
+
+    assert.deepStrictEqual(citations, [
+      {
+        text: 'Supported claim',
+        startIndex: 0,
+        endIndex: 15,
+        sourceUrls: ['https://example.com/a', 'https://example.com/b'],
+      },
+    ]);
+  });
+});
+
+describe('collectSearchEntryPoint', () => {
+  it('returns rendered Google Search content when present', () => {
+    assert.deepStrictEqual(
+      collectSearchEntryPoint({
+        searchEntryPoint: { renderedContent: '<div>search</div>' },
+      }),
+      { renderedContent: '<div>search</div>' },
+    );
   });
 });
 

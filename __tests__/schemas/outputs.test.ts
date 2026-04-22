@@ -93,6 +93,37 @@ describe('ResearchOutputSchema', () => {
     });
     assert.ok(result.success);
   });
+
+  it('accepts grounding transparency fields and rejects unknown fields', () => {
+    const result = ResearchOutputSchema.safeParse({
+      status: 'completed',
+      mode: 'deep',
+      summary: 'Deep answer',
+      sources: ['https://example.com'],
+      grounded: true,
+      citations: [
+        {
+          text: 'Supported claim',
+          startIndex: 0,
+          endIndex: 15,
+          sourceUrls: ['https://example.com'],
+        },
+      ],
+      searchEntryPoint: {
+        renderedContent: '<div>search</div>',
+      },
+    });
+    assert.ok(result.success);
+
+    const unknown = ResearchOutputSchema.safeParse({
+      status: 'completed',
+      mode: 'deep',
+      summary: 'Deep answer',
+      sources: [],
+      extra: true,
+    });
+    assert.strictEqual(unknown.success, false);
+  });
 });
 
 describe('ReviewOutputSchema', () => {

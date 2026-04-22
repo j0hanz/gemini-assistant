@@ -436,11 +436,18 @@ describe('ResearchInputSchema', () => {
     assert.strictEqual(result.success, true);
   });
 
-  it('rejects quick-only fields in deep mode', () => {
-    const result = ResearchInputSchema.safeParse({
+  it('accepts URLs in deep mode and still rejects systemInstruction', () => {
+    const withUrls = ResearchInputSchema.safeParse({
       mode: 'deep',
       goal: 'test',
       urls: ['https://example.com'],
+    });
+    assert.strictEqual(withUrls.success, true);
+
+    const result = ResearchInputSchema.safeParse({
+      mode: 'deep',
+      goal: 'test',
+      systemInstruction: 'format as bullets',
     });
     assert.strictEqual(result.success, false);
   });

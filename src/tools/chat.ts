@@ -45,7 +45,13 @@ import {
 import { type GeminiResponseSchema } from '../schemas/json-schema.js';
 import { ChatOutputSchema, type ContextUsed, type UsageMetadata } from '../schemas/outputs.js';
 
-import { buildGenerateContentConfig, EXPOSE_THOUGHTS, getAI, MODEL } from '../client.js';
+import {
+  buildGenerateContentConfig,
+  DEFAULT_TEMPERATURE,
+  EXPOSE_THOUGHTS,
+  getAI,
+  MODEL,
+} from '../client.js';
 import { getWorkspaceCacheEnabled } from '../config.js';
 import {
   createSessionStore,
@@ -261,7 +267,10 @@ function hasCacheGenerationControlConflict(
   temperature: number | undefined,
   seed: number | undefined,
 ): boolean {
-  return !!cacheName && (temperature !== undefined || seed !== undefined);
+  return (
+    !!cacheName &&
+    ((temperature !== undefined && temperature !== DEFAULT_TEMPERATURE) || seed !== undefined)
+  );
 }
 
 function hasExistingSessionResponseSchemaConflict(
@@ -617,7 +626,7 @@ async function resolveWorkspaceCacheName(
   if (
     args.cacheName ||
     args.systemInstruction ||
-    args.temperature !== undefined ||
+    (args.temperature !== undefined && args.temperature !== DEFAULT_TEMPERATURE) ||
     args.seed !== undefined ||
     !getWorkspaceCacheEnabled()
   ) {

@@ -9,7 +9,6 @@ import {
   analyzeTargetKind,
   ASK_NON_URL_TOOL_PROFILES,
   ASK_URL_TOOL_PROFILES,
-  boundedFloat,
   completableCacheName,
   DIAGRAM_TYPES,
   enumField,
@@ -21,6 +20,7 @@ import {
   researchMode,
   reviewSubjectKind,
   sessionId,
+  temperatureField,
   textField,
   thinkingLevel,
   ttlSeconds,
@@ -91,9 +91,7 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
     ),
     thinkingLevel: thinkingLevelField,
     responseSchemaJson: responseSchemaJsonField(),
-    temperature: optionalField(
-      boundedFloat('Sampling temperature (0.0 to 2.0). Lower is more deterministic.', 0, 2),
-    ),
+    temperature: optionalField(temperatureField()),
     seed: withFieldMetadata(z.int().optional(), 'Fixed random seed for reproducible outputs.'),
   });
 }
@@ -282,9 +280,7 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
       GeminiResponseSchema.optional(),
       'JSON Schema for structured output.',
     ),
-    temperature: optionalField(
-      boundedFloat('Sampling temperature (0.0 to 2.0). Lower is more deterministic.', 0, 2),
-    ),
+    temperature: optionalField(temperatureField()),
     seed: withFieldMetadata(z.int().optional(), 'Fixed random seed for reproducible outputs.'),
     googleSearch: withFieldMetadata(
       z.boolean().optional(),

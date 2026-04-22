@@ -293,7 +293,7 @@ describe('MCP tool smoke coverage', () => {
       assert.ok(temperature);
       assert.equal(
         temperature.description,
-        'Sampling temperature (0.0 to 2.0). Lower is more deterministic.',
+        'Sampling temperature (0.0 to 2.0). Default: 1.0. Values < 1.0 cause reasoning loops.',
       );
 
       assert.ok(seed);

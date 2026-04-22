@@ -6,7 +6,12 @@ import { z } from 'zod/v4';
 
 import { isPublicHttpUrl } from '../lib/validation.js';
 
-import { completeCacheNames, DEFAULT_THINKING_LEVEL, THINKING_LEVELS } from '../client.js';
+import {
+  completeCacheNames,
+  DEFAULT_TEMPERATURE,
+  DEFAULT_THINKING_LEVEL,
+  THINKING_LEVELS,
+} from '../client.js';
 import { PUBLIC_TOOL_NAMES } from '../public-contract.js';
 
 const CACHE_NAME_PATTERN = /^cachedContents\/.+$/;
@@ -216,6 +221,12 @@ export function timestamp(description: string) {
 
 export function sessionId(description: string) {
   return textField(description, 256);
+}
+
+export function temperatureField(
+  description = 'Sampling temperature (0.0 to 2.0). Default: 1.0. Values < 1.0 cause reasoning loops.',
+) {
+  return withFieldMetadata(z.number().min(0).max(2).default(DEFAULT_TEMPERATURE), description);
 }
 
 export function thinkingLevel(

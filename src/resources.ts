@@ -256,17 +256,24 @@ interface ServerContextSnapshot {
   };
 }
 
-export function renderServerContextMarkdown(snapshot: ServerContextSnapshot): string {
-  const { workspace, sessions, config } = snapshot;
-  const displayedFiles = workspace.scannedFiles.slice(0, 10);
-  const hiddenFileCount = Math.max(workspace.scannedFiles.length - displayedFiles.length, 0);
+function formatCacheStatus(cacheStatus: ServerContextSnapshot['workspace']['cacheStatus']): string {
+  if (!cacheStatus.enabled) return 'disabled';
+  if (!cacheStatus.cacheName) return `enabled, no active cache, TTL ${cacheStatus.ttl}`;
+  return `active (\`${cacheStatus.cacheName}\`), ${cacheStatus.fresh ? 'fresh' : 'stale'}, TTL ${cacheStatus.ttl}`;
+}
+
+function formatScannedFiles(scannedFiles: string[]): string {
+  const displayedFiles = scannedFiles.slice(0, 10);
+  const hiddenFileCount = Math.max(scannedFiles.length - displayedFiles.length, 0);
   const scannedFileLabel = displayedFiles.length > 0 ? displayedFiles.join(', ') : 'none';
   const scannedFileSuffix = hiddenFileCount > 0 ? ` (+${String(hiddenFileCount)} more)` : '';
-  const cacheStatus = workspace.cacheStatus.enabled
-    ? workspace.cacheStatus.cacheName
-      ? `active (\`${workspace.cacheStatus.cacheName}\`), ${workspace.cacheStatus.fresh ? 'fresh' : 'stale'}, TTL ${workspace.cacheStatus.ttl}`
-      : `enabled, no active cache, TTL ${workspace.cacheStatus.ttl}`
-    : 'disabled';
+  return `${scannedFileLabel}${scannedFileSuffix}`;
+}
+
+export function renderServerContextMarkdown(snapshot: ServerContextSnapshot): string {
+  const { workspace, sessions, config } = snapshot;
+  const cacheStatus = formatCacheStatus(workspace.cacheStatus);
+  const scannedFilesStr = formatScannedFiles(workspace.scannedFiles);
 
   return [
     '# Server Context',
@@ -274,7 +281,7 @@ export function renderServerContextMarkdown(snapshot: ServerContextSnapshot): st
     '## Workspace',
     '',
     `- **Roots**: ${workspace.roots.join(', ') || 'none'}`,
-    `- **Scanned files**: ${scannedFileLabel}${scannedFileSuffix} (${String(workspace.scannedFiles.length)} files)`,
+    `- **Scanned files**: ${scannedFilesStr} (${String(workspace.scannedFiles.length)} files)`,
     `- **Estimated tokens**: ${String(workspace.estimatedTokens)}`,
     `- **Cache**: ${cacheStatus}`,
     '',

@@ -36,13 +36,6 @@ export const MUTABLE_ANNOTATIONS = {
   openWorldHint: true,
 } as const;
 
-export const DESTRUCTIVE_ANNOTATIONS = {
-  readOnlyHint: false,
-  destructiveHint: true,
-  idempotentHint: false,
-  openWorldHint: true,
-} as const;
-
 const TASK_EXECUTION = { taskSupport: 'optional' } as const;
 const taskLog = logger.child('task-utils');
 
@@ -354,6 +347,32 @@ function rethrowElicitation(error: unknown): void {
   }
 }
 
+function checkTaskSupportConstraints(
+  toolName: string,
+  taskSupport: string | undefined,
+  taskRequest: boolean,
+  taskHandler: boolean,
+): void {
+  if (taskRequest && !taskHandler) {
+    throw new ProtocolError(
+      ProtocolErrorCode.MethodNotFound,
+      `Tool ${toolName} does not support task augmentation`,
+    );
+  }
+  if ((taskSupport === 'required' || taskSupport === 'optional') && !taskHandler) {
+    throw new ProtocolError(
+      ProtocolErrorCode.InternalError,
+      `Tool ${toolName} has taskSupport '${taskSupport}' but was not registered with registerToolTask`,
+    );
+  }
+  if (taskSupport === 'required' && !taskRequest) {
+    throw new ProtocolError(
+      ProtocolErrorCode.MethodNotFound,
+      `Tool ${toolName} requires task augmentation (taskSupport: 'required')`,
+    );
+  }
+}
+
 export function installTaskSafeToolCallHandler(server: McpServer): void {
   const internalServer = server as unknown as InternalMcpServer;
   if (internalServer.__taskSafeToolCallHandlerInstalled) {
@@ -382,24 +401,8 @@ export function installTaskSafeToolCallHandler(server: McpServer): void {
       const taskRequest = !!request.params.task;
       const taskHandler = isTaskHandler(tool.handler);
 
-      if (taskRequest && !taskHandler) {
-        throw new ProtocolError(
-          ProtocolErrorCode.MethodNotFound,
-          `Tool ${request.params.name} does not support task augmentation`,
-        );
-      }
-      if ((taskSupport === 'required' || taskSupport === 'optional') && !taskHandler) {
-        throw new ProtocolError(
-          ProtocolErrorCode.InternalError,
-          `Tool ${request.params.name} has taskSupport '${taskSupport}' but was not registered with registerToolTask`,
-        );
-      }
-      if (taskSupport === 'required' && !taskRequest) {
-        throw new ProtocolError(
-          ProtocolErrorCode.MethodNotFound,
-          `Tool ${request.params.name} requires task augmentation (taskSupport: 'required')`,
-        );
-      }
+      checkTaskSupportConstraints(request.params.name, taskSupport, taskRequest, taskHandler);
+
       if (taskSupport === 'optional' && !taskRequest && taskHandler) {
         return await internalServer.handleAutomaticTaskPolling(tool, request, ctx);
       }

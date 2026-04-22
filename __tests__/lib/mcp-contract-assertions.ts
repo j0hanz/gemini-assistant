@@ -58,19 +58,6 @@ export function assertToolExecutionError(
   assert.match(text, expectedMessagePattern);
 }
 
-export function assertNoStructuredContentOnError(result: ToolCallResult): void {
-  assert.equal(result.isError, true, 'Expected isError:true result');
-  assert.ok(
-    Array.isArray(result.content) && result.content.length >= 1,
-    'Tool error result must include non-empty content[]',
-  );
-  assert.equal(
-    (result as { structuredContent?: unknown }).structuredContent,
-    undefined,
-    'Tool error result must not carry structuredContent',
-  );
-}
-
 export function assertAdvertisedOutputSchema(tool: ToolInfo, result: ToolCallResult): void {
   assert.notEqual(
     result.isError,

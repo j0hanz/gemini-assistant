@@ -353,6 +353,21 @@ function formatContextMarkdown(
   return sections.join('\n');
 }
 
+async function tryLoadContextFile(
+  contextFilePath: string | undefined,
+  validRoots: string[],
+): Promise<{ content?: string; path?: string }> {
+  if (
+    contextFilePath &&
+    isAbsolute(contextFilePath) &&
+    validRoots.some((root) => isPathWithinRoot(contextFilePath, root))
+  ) {
+    const content = await tryReadFile(contextFilePath);
+    if (content) return { content, path: contextFilePath };
+  }
+  return {};
+}
+
 export async function assembleWorkspaceContext(
   roots: string[],
   focusText?: string,
@@ -361,20 +376,15 @@ export async function assembleWorkspaceContext(
   const keywords = focusText ? extractKeywords(focusText) : [];
   const sources: string[] = [];
   let totalSize = 0;
-  let contextFileContent: string | undefined;
 
-  const contextFilePath = getWorkspaceContextFile();
-  const allowContextFile =
-    contextFilePath &&
-    isAbsolute(contextFilePath) &&
-    validRoots.some((root) => isPathWithinRoot(contextFilePath, root));
+  const { content: contextFileContent, path: loadedContextPath } = await tryLoadContextFile(
+    getWorkspaceContextFile(),
+    validRoots,
+  );
 
-  if (allowContextFile) {
-    contextFileContent = await tryReadFile(contextFilePath);
-    if (contextFileContent) {
-      totalSize += contextFileContent.length;
-      sources.push(contextFilePath);
-    }
+  if (contextFileContent && loadedContextPath) {
+    totalSize += contextFileContent.length;
+    sources.push(loadedContextPath);
   }
 
   const scannedFiles = new Map<string, string>();
@@ -428,6 +438,24 @@ export class WorkspaceCacheManagerImpl {
   private lastHashCheck: number | undefined;
   private generation = 0;
 
+  private async checkAndRefreshExistingCache(
+    rootsKey: string,
+    roots: string[],
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    if (this.lastHashCheck && Date.now() - this.lastHashCheck < HASH_CHECK_INTERVAL_MS) {
+      return this.cacheName;
+    }
+    const ctx = await assembleWorkspaceContext(roots);
+    const newHash = hashContent(ctx.content);
+    this.lastHashCheck = Date.now();
+    if (newHash === this.contentHash) {
+      return this.cacheName;
+    }
+    log.info('Workspace content changed, recreating cache');
+    return await this.refreshCache(ctx, rootsKey, signal);
+  }
+
   async getOrCreateCache(roots: string[], signal?: AbortSignal): Promise<string | undefined> {
     if (!getWorkspaceCacheEnabled()) return undefined;
 
@@ -436,23 +464,11 @@ export class WorkspaceCacheManagerImpl {
     if (this.cacheName && this.activeRootsKey !== rootsKey) {
       const previousCacheName = this.cacheName;
       this.invalidate();
-      if (previousCacheName) {
-        await this.deleteCacheBestEffort(previousCacheName, signal);
-      }
+      await this.deleteCacheBestEffort(previousCacheName, signal);
     }
 
     if (this.cacheName) {
-      if (this.lastHashCheck && Date.now() - this.lastHashCheck < HASH_CHECK_INTERVAL_MS) {
-        return this.cacheName;
-      }
-      const ctx = await assembleWorkspaceContext(roots);
-      const newHash = hashContent(ctx.content);
-      this.lastHashCheck = Date.now();
-      if (newHash === this.contentHash) {
-        return this.cacheName;
-      }
-      log.info('Workspace content changed, recreating cache');
-      return await this.refreshCache(ctx, rootsKey, signal);
+      return await this.checkAndRefreshExistingCache(rootsKey, roots, signal);
     }
 
     if (this.inflightCreation) {

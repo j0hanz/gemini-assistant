@@ -23,7 +23,7 @@ const functionCallEntryFields = {
   id: z.string().describe('Function call identifier when present').optional(),
 };
 
-export const FunctionCallEntrySchema = z.strictObject(functionCallEntryFields);
+const FunctionCallEntrySchema = z.strictObject(functionCallEntryFields);
 
 const ToolEventKindSchema = z.enum([
   'part',
@@ -58,7 +58,7 @@ const toolEventFields = {
     .describe('Part text when a signature-bearing part has no tool payload'),
 };
 
-export const ToolEventSchema = z.strictObject(toolEventFields);
+const ToolEventSchema = z.strictObject(toolEventFields);
 
 const streamMetadataOutputFields = {
   thoughts: z.string().describe('Internal model reasoning.').optional(),
@@ -110,13 +110,6 @@ export const diffStatsFields = {
   additions: nonNegativeInt('Lines added'),
   deletions: nonNegativeInt('Lines deleted'),
 };
-
-const sessionSummaryFields = {
-  id: z.string().describe('Server-managed session identifier'),
-  lastAccess: z.number().describe('Last access timestamp in epoch milliseconds'),
-};
-
-export const SessionSummarySchema = z.strictObject(sessionSummaryFields);
 
 export function createFilePairFields(firstDescription: string, secondDescription: string) {
   return {

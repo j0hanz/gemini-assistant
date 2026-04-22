@@ -10,6 +10,7 @@ import type { Chat } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
+import { pickDefined } from '../lib/object.js';
 import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from '../lib/resource-uris.js';
@@ -818,24 +819,22 @@ function assembleChatOutput(
   return safeValidateStructuredContent(
     'chat',
     ChatOutputSchema,
-    {
+    pickDefined({
       ...buildBaseStructuredOutput(taskId, warnings),
       answer,
-      ...(structured.data !== undefined ? { data: structured.data } : {}),
-      ...(sessionId
+      data: structured.data,
+      session: sessionId
         ? {
-            session: {
-              id: sessionId,
-              resources: sessionResources(sessionId),
-            },
+            id: sessionId,
+            resources: sessionResources(sessionId),
           }
-        : {}),
-      ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
-      ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
-      ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
-      ...(structured.usage ? { usage: structured.usage } : {}),
-      ...(structured.contextUsed ? { contextUsed: structured.contextUsed } : {}),
-    },
+        : undefined,
+      functionCalls: structured.functionCalls,
+      thoughts: structured.thoughts,
+      toolEvents: structured.toolEvents,
+      usage: structured.usage,
+      contextUsed: structured.contextUsed,
+    }),
     result,
   );
 }

@@ -155,10 +155,6 @@ export function workspacePathArray(options: WorkspacePathArrayOptions) {
   return withFieldMetadata(optional ? schema.optional() : schema, rest.description);
 }
 
-export function timestamp(description: string) {
-  return withFieldMetadata(z.iso.datetime(), description);
-}
-
 export function sessionId(description: string) {
   return textField(description, 256);
 }

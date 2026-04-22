@@ -39,12 +39,16 @@ export class ToolExecutor {
     return await logContext.run(traceId, async () => {
       const startTime = performance.now();
       const isStream = mode === 'stream';
+      const modeField = isStream ? 'stream' : undefined;
+      const argsField = isStream
+        ? undefined
+        : maybeSummarizePayload(args, this.scopedLogger.getVerbosePayloads());
+      const reportProgress = options.reportTerminalProgress !== false;
+
       this.scopedLogger.info('Execution started', {
         toolName,
-        mode: isStream ? 'stream' : undefined,
-        args: isStream
-          ? undefined
-          : maybeSummarizePayload(args, this.scopedLogger.getVerbosePayloads()),
+        mode: modeField,
+        args: argsField,
       });
 
       try {
@@ -53,12 +57,12 @@ export class ToolExecutor {
 
         this.scopedLogger.info('Execution completed', {
           toolName,
-          mode: isStream ? 'stream' : undefined,
+          mode: modeField,
           durationMs,
           result: maybeSummarizePayload(result, this.scopedLogger.getVerbosePayloads()),
         });
 
-        if (options.reportTerminalProgress !== false) {
+        if (reportProgress) {
           if (result.isError) {
             await reportFailure(ctx, toolLabel, extractTextContent(result.content));
           } else {
@@ -74,17 +78,17 @@ export class ToolExecutor {
 
         const durationMs = performance.now() - startTime;
         const appError = AppError.from(err, toolName);
+
         this.scopedLogger.error('Execution failed', {
           toolName,
-          mode: isStream ? 'stream' : undefined,
+          mode: modeField,
           durationMs,
           error: appError.message,
           stack: err instanceof Error ? err.stack : undefined,
-          args: isStream
-            ? undefined
-            : maybeSummarizePayload(args, this.scopedLogger.getVerbosePayloads()),
+          args: argsField,
         });
-        if (options.reportTerminalProgress !== false) {
+
+        if (reportProgress) {
           await reportFailure(ctx, toolLabel, appError.message);
         }
         return appError.toToolResult();

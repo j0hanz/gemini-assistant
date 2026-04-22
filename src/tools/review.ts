@@ -17,7 +17,8 @@ import { cleanupErrorLogger } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { buildDiffReviewPrompt } from '../lib/model-prompts.js';
-import { buildOrchestrationConfig } from '../lib/orchestration.js';
+import { pickDefined } from '../lib/object.js';
+import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput, safeValidateStructuredContent } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
@@ -293,15 +294,14 @@ async function diagnoseFailureWork(
     urls,
   });
 
+  const hasUrls = (urls?.length ?? 0) > 0;
+  let toolProfile: ToolProfile = 'none';
+  if (googleSearch && hasUrls) toolProfile = 'search_url';
+  else if (googleSearch) toolProfile = 'search';
+  else if (hasUrls) toolProfile = 'url';
+
   const orchestration = buildOrchestrationConfig({
-    toolProfile:
-      googleSearch && (urls?.length ?? 0) > 0
-        ? 'search_url'
-        : googleSearch
-          ? 'search'
-          : (urls?.length ?? 0) > 0
-            ? 'url'
-            : 'none',
+    toolProfile,
   });
 
   const progress = new ProgressReporter(ctx, 'Review Failure');
@@ -625,11 +625,29 @@ export function splitDiffUnits(diff: string): DiffUnit[] {
     });
 }
 
+function getExtension(basename: string): string {
+  return basename.includes('.') ? `.${basename.split('.').pop() ?? ''}` : '';
+}
+
+function hasHighRiskBasename(basename: string): boolean {
+  return HIGH_RISK_BASENAMES.some(
+    (needle) => basename === needle || basename.startsWith(needle) || basename.includes(needle),
+  );
+}
+
+function scorePathLocation(normalizedPath: string): number {
+  let score = 0;
+  if (normalizedPath.includes('.github/workflows/')) score += 25;
+  if (normalizedPath.includes('/build/') || normalizedPath.includes('/scripts/')) score += 15;
+  if (normalizedPath.includes('/src/')) score += 10;
+  return score;
+}
+
 export function scoreDiffUnitRisk(unit: DiffUnit): number {
   const normalizedPath = normalizePath(unit.path);
   const segments = splitPathSegments(unit.path);
   const basename = segments.at(-1) ?? normalizedPath;
-  const extension = basename.includes('.') ? `.${basename.split('.').pop() ?? ''}` : '';
+  const extension = getExtension(basename);
   const changeSize = unit.additions + unit.deletions;
   let score = 0;
 
@@ -638,16 +656,9 @@ export function scoreDiffUnitRisk(unit: DiffUnit): number {
   if (ASSET_FILE_EXTENSIONS.has(extension)) score -= 25;
   if (SOURCE_FILE_EXTENSIONS.has(extension)) score += 25;
   if (segments.some((segment) => HIGH_RISK_SEGMENTS.has(segment))) score += 30;
-  if (
-    HIGH_RISK_BASENAMES.some(
-      (needle) => basename === needle || basename.startsWith(needle) || basename.includes(needle),
-    )
-  ) {
-    score += 35;
-  }
-  if (normalizedPath.includes('.github/workflows/')) score += 25;
-  if (normalizedPath.includes('/build/') || normalizedPath.includes('/scripts/')) score += 15;
-  if (normalizedPath.includes('/src/')) score += 10;
+  if (hasHighRiskBasename(basename)) score += 35;
+
+  score += scorePathLocation(normalizedPath);
 
   return score * 1_000 + changeSize;
 }
@@ -1016,23 +1027,23 @@ function buildReviewStructuredContent(
   subjectKind: ReviewInput['subjectKind'],
   structured: Record<string, unknown>,
 ): z.infer<typeof ReviewOutputSchema> {
-  return {
+  return pickDefined({
     ...buildBaseStructuredOutput(taskId),
     subjectKind,
     summary: typeof structured.summary === 'string' ? structured.summary : '',
-    ...(structured.stats ? { stats: structured.stats } : {}),
-    ...(structured.reviewedPaths ? { reviewedPaths: structured.reviewedPaths } : {}),
-    ...(structured.includedUntracked ? { includedUntracked: structured.includedUntracked } : {}),
-    ...(structured.skippedBinaryPaths ? { skippedBinaryPaths: structured.skippedBinaryPaths } : {}),
-    ...(structured.skippedLargePaths ? { skippedLargePaths: structured.skippedLargePaths } : {}),
-    ...(structured.omittedPaths ? { omittedPaths: structured.omittedPaths } : {}),
-    ...(typeof structured.empty === 'boolean' ? { empty: structured.empty } : {}),
-    ...(typeof structured.truncated === 'boolean' ? { truncated: structured.truncated } : {}),
-    ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
-    ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
-    ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
-    ...(structured.usage ? { usage: structured.usage } : {}),
-  } as z.infer<typeof ReviewOutputSchema>;
+    stats: structured.stats,
+    reviewedPaths: structured.reviewedPaths,
+    includedUntracked: structured.includedUntracked,
+    skippedBinaryPaths: structured.skippedBinaryPaths,
+    skippedLargePaths: structured.skippedLargePaths,
+    omittedPaths: structured.omittedPaths,
+    empty: typeof structured.empty === 'boolean' ? structured.empty : undefined,
+    truncated: typeof structured.truncated === 'boolean' ? structured.truncated : undefined,
+    functionCalls: structured.functionCalls,
+    thoughts: structured.thoughts,
+    toolEvents: structured.toolEvents,
+    usage: structured.usage,
+  }) as unknown as z.infer<typeof ReviewOutputSchema>;
 }
 
 async function reviewWork(

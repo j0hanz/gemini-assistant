@@ -13,6 +13,7 @@ import { cleanupErrorLogger } from '../lib/errors.js';
 import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
+import { pickDefined } from '../lib/object.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput, safeValidateStructuredContent } from '../lib/response.js';
@@ -404,6 +405,20 @@ async function runAnalyzeTarget(
   );
 }
 
+function getDiagramString(diagram: unknown): string {
+  return typeof diagram === 'string' && diagram ? diagram : '';
+}
+
+function getExplanationString(explanation: unknown): string | undefined {
+  return typeof explanation === 'string' && explanation ? explanation : undefined;
+}
+
+function getAnalyzedPaths(args: AnalyzeInput): string[] | undefined {
+  if (args.targetKind === 'file') return [requireAnalyzeFilePath(args)];
+  if (args.targetKind === 'multi') return requireAnalyzeFilePaths(args);
+  return undefined;
+}
+
 function buildAnalyzeStructuredContent(
   args: AnalyzeInput,
   ctx: ServerContext,
@@ -411,42 +426,35 @@ function buildAnalyzeStructuredContent(
 ): z.infer<typeof AnalyzeOutputSchema> {
   const base = {
     ...buildBaseStructuredOutput(ctx.task?.id),
-    ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
-    ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
-    ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
-    ...(structured.usage ? { usage: structured.usage } : {}),
+    functionCalls: structured.functionCalls,
+    thoughts: structured.thoughts,
+    toolEvents: structured.toolEvents,
+    usage: structured.usage,
   };
 
   if (args.outputKind === 'diagram') {
     const diagramType = requireAnalyzeDiagramType(args);
 
-    return {
+    return pickDefined({
       ...base,
-      kind: 'diagram',
+      kind: 'diagram' as const,
       targetKind: args.targetKind,
       diagramType,
-      diagram:
-        typeof structured.diagram === 'string' && structured.diagram ? structured.diagram : '',
-      ...(typeof structured.explanation === 'string' && structured.explanation
-        ? { explanation: structured.explanation }
-        : {}),
-      ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
-      ...(args.targetKind === 'file'
-        ? { analyzedPaths: [requireAnalyzeFilePath(args)] }
-        : args.targetKind === 'multi'
-          ? { analyzedPaths: requireAnalyzeFilePaths(args) }
-          : {}),
-    } as z.infer<typeof AnalyzeOutputSchema>;
+      diagram: getDiagramString(structured.diagram),
+      explanation: getExplanationString(structured.explanation),
+      urlMetadata: structured.urlMetadata,
+      analyzedPaths: getAnalyzedPaths(args),
+    }) as unknown as z.infer<typeof AnalyzeOutputSchema>;
   }
 
-  return {
+  return pickDefined({
     ...base,
-    kind: 'summary',
+    kind: 'summary' as const,
     targetKind: args.targetKind,
     summary: typeof structured.summary === 'string' ? structured.summary : '',
-    ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
-    ...(args.targetKind === 'multi' ? { analyzedPaths: requireAnalyzeFilePaths(args) } : {}),
-  } as z.infer<typeof AnalyzeOutputSchema>;
+    urlMetadata: structured.urlMetadata,
+    analyzedPaths: args.targetKind === 'multi' ? requireAnalyzeFilePaths(args) : undefined,
+  }) as unknown as z.infer<typeof AnalyzeOutputSchema>;
 }
 
 export function registerAnalyzeTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {

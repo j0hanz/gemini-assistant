@@ -17,11 +17,9 @@ describe('model-prompts', () => {
 
     assert.deepStrictEqual(first, second);
     assert.ok(first.systemInstruction);
-    assert.ok(first.systemInstruction.includes('No grounded sources available'));
+    assert.ok(first.systemInstruction.includes('retrieved sources'));
     assert.ok(first.promptText.includes('latest release'));
-    assert.ok(
-      first.promptText.includes('URLs (primary sources - cite before general search results):'),
-    );
+    assert.ok(first.promptText.includes('Primary URLs:'));
     assert.ok(first.promptText.includes('https://example.com'));
   });
 
@@ -34,7 +32,6 @@ describe('model-prompts', () => {
 
     assert.ok(prompt.systemInstruction?.includes('retrieved sources'));
     assert.ok(prompt.promptText.includes('latest release'));
-    assert.ok(!prompt.promptText.includes('Answer strictly from retrieved sources'));
   });
 
   it('keeps file-analysis system instructions when cache mode has no cache text', () => {
@@ -44,7 +41,7 @@ describe('model-prompts', () => {
       kind: 'single',
     });
 
-    assert.ok(prompt.systemInstruction?.includes('provided file only'));
+    assert.ok(prompt.systemInstruction?.includes('attached file'));
     assert.strictEqual(prompt.promptText, 'Summarize the file');
   });
 
@@ -61,9 +58,9 @@ describe('model-prompts', () => {
       urls: ['https://example.com'],
     });
 
-    assert.ok(single.systemInstruction?.includes('provided file only'));
-    assert.ok(multi.systemInstruction?.includes('provided local files'));
-    assert.ok(url.systemInstruction?.includes('retrieved URL content only'));
+    assert.ok(single.systemInstruction?.includes('attached file'));
+    assert.ok(multi.systemInstruction?.includes('attached files'));
+    assert.ok(url.systemInstruction?.includes('listed URLs'));
     assert.deepStrictEqual(multi.promptParts, [
       { text: 'File: src/index.ts' },
       { text: 'Goal: Compare these files' },
@@ -80,7 +77,7 @@ describe('model-prompts', () => {
     assert.strictEqual(prompt.systemInstruction, undefined);
     assert.ok(
       prompt.promptText.startsWith(
-        'TASK: Review the diff for bugs, regressions, and behavior risk.\nOUTPUT: Findings, Fixes.\nCONSTRAINTS: Ignore formatting-only changes.',
+        'Review the diff for bugs and behavior risk. Ignore formatting-only changes.',
       ),
     );
     assert.ok(prompt.promptText.endsWith('## Snapshot\n\n```diff\n+ok\n```'));
@@ -97,7 +94,7 @@ describe('model-prompts', () => {
     assert.strictEqual(prompt.systemInstruction, undefined);
     assert.deepStrictEqual(prompt.promptParts, [
       {
-        text: 'TASK: Compare the provided files.\nOUTPUT: Summary, Differences, Impact.\nCONSTRAINTS: Cite symbols or short quotes.',
+        text: 'Compare the files. Output: Summary, Differences, Impact. Cite short quotes.',
       },
       { text: 'File A: src/a.ts' },
       { text: 'File B: src/b.ts' },
@@ -115,15 +112,10 @@ describe('model-prompts', () => {
     });
 
     assert.strictEqual(prompt.systemInstruction, undefined);
-    assert.ok(
-      prompt.promptText.startsWith(
-        'TASK: Diagnose the error.\nOUTPUT: Cause, Fix, Notes.\nCONSTRAINTS: Extract distinct error queries before searching.',
-      ),
-    );
+    assert.ok(prompt.promptText.startsWith('Diagnose the error. Output: Cause, Fix, Notes.'));
     assert.ok(prompt.promptText.includes('## Error'));
     assert.ok(prompt.promptText.includes('## Code'));
     assert.ok(prompt.promptText.includes('## URLs'));
-    assert.ok(!prompt.promptText.includes('TASK: Diagnose the provided error.'));
   });
 
   it('builds diagram prompts with one live task part and a short stable instruction', () => {
@@ -162,11 +154,9 @@ describe('model-prompts', () => {
       topic: 'MCP adoption',
     });
 
-    assert.ok(prompt.systemInstruction?.includes('Research with Google Search and Code Execution'));
+    assert.ok(prompt.systemInstruction?.includes('Research with Google Search'));
+    assert.ok(prompt.systemInstruction?.includes('Code Execution'));
     assert.ok(prompt.promptText.includes('Topic: MCP adoption'));
-    assert.ok(prompt.promptText.includes('at least 4 sub-questions'));
-    assert.ok(prompt.promptText.includes('at least 8 independent searches'));
-    assert.ok(!prompt.promptText.includes('Split the topic into sub-questions'));
   });
 
   it('builds agentic-research prompts with primary URLs and output shape', () => {
@@ -177,10 +167,9 @@ describe('model-prompts', () => {
       urls: ['https://example.com/report'],
     });
 
-    assert.ok(prompt.promptText.includes('URLs (primary sources):'));
+    assert.ok(prompt.promptText.includes('Primary URLs:'));
     assert.ok(prompt.promptText.includes('https://example.com/report'));
-    assert.ok(prompt.systemInstruction?.includes('OUTPUT SHAPE:'));
+    assert.ok(prompt.systemInstruction?.includes('Preferred shape:'));
     assert.ok(prompt.systemInstruction?.includes('a decision memo'));
-    assert.ok(prompt.systemInstruction?.includes('Treat supplied URLs as primary sources'));
   });
 });

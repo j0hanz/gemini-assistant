@@ -429,7 +429,7 @@ describe('research tool contracts', () => {
 
       const call = calls[0];
       assert.ok(call);
-      assert.strictEqual(String(call.contents).includes('URLs (primary sources):'), true);
+      assert.strictEqual(String(call.contents).includes('Primary URLs:'), true);
       assert.strictEqual(String(call.contents).includes('Planning notes (unverified leads'), true);
       const config = call.config as Record<string, unknown>;
       assert.deepStrictEqual(config.tools, [
@@ -438,7 +438,7 @@ describe('research tool contracts', () => {
         { codeExecution: {} },
       ]);
       assert.strictEqual((config.thinkingConfig as Record<string, unknown>).thinkingLevel, 'HIGH');
-      assert.match(String(config.systemInstruction), /OUTPUT SHAPE:.*decision memo/);
+      assert.match(String(config.systemInstruction), /Preferred shape:.*decision memo/);
 
       const structured = store.stored[0]?.result.structuredContent as Record<string, unknown>;
       assert.deepStrictEqual(structured.urlMetadata, [

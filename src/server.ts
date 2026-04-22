@@ -100,29 +100,14 @@ export function isKnownResourceUri(uri: string): boolean {
   );
 }
 
-export function sendResourceChangedForServer(
-  server: McpServer,
-  listUri: string | undefined,
-  detailUris: readonly string[] = [],
-): void {
+export function sendResourceChangedForServer(server: McpServer, listUri: string | undefined): void {
   if (!server.isConnected()) return;
-  if (listUri) {
-    if (!isKnownResourceUri(listUri)) {
-      log.warn(`Blocked resource notification with unregistered URI: ${listUri}`);
-      return;
-    }
-    server.sendResourceListChanged();
+  if (!listUri) return;
+  if (!isKnownResourceUri(listUri)) {
+    log.warn(`Blocked resource notification with unregistered URI: ${listUri}`);
+    return;
   }
-  // `notifications/resources/updated` requires the `resources.subscribe`
-  // capability (MCP spec); this server does not declare it and does not
-  // track subscriptions, so it never emits `resources/updated`. Clients
-  // rely on `notifications/resources/list_changed` + re-read. Detail URIs
-  // are still validated here for log-warning parity with the firewall.
-  for (const uri of detailUris) {
-    if (!isKnownResourceUri(uri)) {
-      log.warn(`Blocked resource notification with unregistered URI: ${uri}`);
-    }
-  }
+  server.sendResourceListChanged();
 }
 
 function registerServerTools(server: McpServer, services: ServerServices): void {
@@ -198,17 +183,13 @@ export function createServerInstance(): ServerInstance {
   );
   let closed = false;
   const detachLogger = logger.attachServer(server);
-  const unsubscribeSessionChange = sessionStore.subscribe(
-    ({ listChanged, detailUris, eventUris, transcriptUris }: SessionChangeEvent) => {
-      sendResourceChangedForServer(server, listChanged ? 'memory://sessions' : undefined, [
-        ...detailUris,
-        ...transcriptUris,
-        ...eventUris,
-      ]);
-    },
-  );
-  const unsubscribeCacheChange = subscribeCacheChange(({ detailUris }: CacheChangeEvent) => {
-    sendResourceChangedForServer(server, MEMORY_CACHES_URI, detailUris);
+  const unsubscribeSessionChange = sessionStore.subscribe(({ listChanged }: SessionChangeEvent) => {
+    sendResourceChangedForServer(server, listChanged ? 'memory://sessions' : undefined);
+  });
+  const unsubscribeCacheChange = subscribeCacheChange(({ listChanged }: CacheChangeEvent) => {
+    if (listChanged) {
+      sendResourceChangedForServer(server, MEMORY_CACHES_URI);
+    }
   });
 
   registerServerTools(server, { sessionStore, taskMessageQueue, workspaceCacheManager });

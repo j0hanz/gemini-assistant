@@ -161,14 +161,10 @@ describe('sessions', () => {
 
     it('does not notify when transcript entries are appended', () => {
       const store = createStore();
-      let detailUris: string[] = [];
-      let eventUris: string[] = [];
-      let transcriptUris: string[] = [];
+      let notifications = 0;
       store.setSession('sess-transcript-notify', mockChat('transcript-notify') as never);
-      store.subscribe((event) => {
-        detailUris = event.detailUris;
-        eventUris = event.eventUris;
-        transcriptUris = event.transcriptUris;
+      store.subscribe(() => {
+        notifications += 1;
       });
 
       store.appendSessionTranscript('sess-transcript-notify', {
@@ -177,9 +173,7 @@ describe('sessions', () => {
         timestamp: 3,
       });
 
-      assert.deepStrictEqual(detailUris, []);
-      assert.deepStrictEqual(eventUris, []);
-      assert.deepStrictEqual(transcriptUris, []);
+      assert.strictEqual(notifications, 0);
     });
   });
 
@@ -216,10 +210,10 @@ describe('sessions', () => {
 
     it('does not notify when session event entries are appended', () => {
       const store = createStore();
-      let eventUris: string[] = [];
+      let notifications = 0;
       store.setSession('sess-events-notify', mockChat('events-notify') as never);
-      store.subscribe((event) => {
-        eventUris = event.eventUris;
+      store.subscribe(() => {
+        notifications += 1;
       });
 
       store.appendSessionEvent('sess-events-notify', {
@@ -228,7 +222,7 @@ describe('sessions', () => {
         timestamp: 1,
       });
 
-      assert.deepStrictEqual(eventUris, []);
+      assert.strictEqual(notifications, 0);
     });
 
     it('retains only the most recent event entries when over the limit', () => {
@@ -363,22 +357,19 @@ describe('sessions', () => {
 
     it('emits listChanged=false on replaceSession and listChanged=true on setSession', () => {
       const store = createStore();
-      const events: { listChanged: boolean; detailUris: string[] }[] = [];
+      const events: { listChanged: boolean }[] = [];
       store.subscribe((event) => {
-        events.push({ listChanged: event.listChanged, detailUris: [...event.detailUris] });
+        events.push({ listChanged: event.listChanged });
       });
 
       store.setSession('sess-replace-notify', mockChat('initial') as never);
       store.replaceSession('sess-replace-notify', mockChat('replacement') as never);
 
       const setEvent = events.find((event) => event.listChanged);
-      const replaceEvent = events.find(
-        (event) =>
-          !event.listChanged && event.detailUris.includes('memory://sessions/sess-replace-notify'),
-      );
+      const replaceEvent = events.find((event) => !event.listChanged);
 
       assert.ok(setEvent, 'setSession must emit listChanged=true');
-      assert.ok(replaceEvent, 'replaceSession must emit listChanged=false with detail URIs');
+      assert.ok(replaceEvent, 'replaceSession must emit listChanged=false');
     });
 
     it('clears evicted state when a session ID is reused', () => {
@@ -457,39 +448,27 @@ describe('sessions', () => {
       assert.strictEqual(calls, 1);
     });
 
-    it('includes detail and transcript URIs on setSession', () => {
+    it('emits listChanged=true on setSession', () => {
       const store = createStore();
-      let detailUris: string[] = [];
-      let eventUris: string[] = [];
-      let transcriptUris: string[] = [];
+      let listChanged = false;
       store.subscribe((event) => {
-        detailUris = event.detailUris;
-        eventUris = event.eventUris;
-        transcriptUris = event.transcriptUris;
+        listChanged = event.listChanged;
       });
 
       store.setSession('sess-task-set', mockChat('task-set') as never);
-      assert.ok(detailUris.includes('memory://sessions/sess-task-set'));
-      assert.ok(eventUris.includes('memory://sessions/sess-task-set/events'));
-      assert.ok(transcriptUris.includes('memory://sessions/sess-task-set/transcript'));
+      assert.strictEqual(listChanged, true);
     });
 
-    it('does not emit detail or transcript URIs on getSession', () => {
+    it('does not notify on getSession', () => {
       const store = createStore();
-      let detailUris: string[] = [];
-      let eventUris: string[] = [];
-      let transcriptUris: string[] = [];
       store.setSession('sess-task-get', mockChat('task-get') as never);
-      store.subscribe((event) => {
-        detailUris = event.detailUris;
-        eventUris = event.eventUris;
-        transcriptUris = event.transcriptUris;
+      let calls = 0;
+      store.subscribe(() => {
+        calls += 1;
       });
 
       store.getSession('sess-task-get');
-      assert.deepStrictEqual(detailUris, []);
-      assert.deepStrictEqual(eventUris, []);
-      assert.deepStrictEqual(transcriptUris, []);
+      assert.strictEqual(calls, 0);
     });
 
     it('keeps actively written sessions alive until ttl expires from the latest write', () => {

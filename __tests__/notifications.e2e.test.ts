@@ -105,6 +105,60 @@ describe('public MCP resource notifications', () => {
     }
   });
 
+  it('emits list_changed on caches.create and caches.delete but not on caches.update (TTL only)', async () => {
+    const harness = await createHarness();
+
+    try {
+      // create — MUST emit list_changed
+      let offset = harness.client.getNotifications().length;
+      const created = (await harness.client.request('tools/call', {
+        arguments: {
+          action: 'caches.create',
+          systemInstruction: 'Cache this synthetic system instruction only.',
+        },
+        name: 'memory',
+      })) as { result: { structuredContent?: { cache?: { name?: string } } } };
+
+      await flushEventLoop(2);
+      const createNotifications = notificationSlice(harness.client.getNotifications(), offset);
+      assertListChanged(createNotifications);
+
+      const cacheName = created.result.structuredContent?.cache?.name;
+      assert.ok(cacheName, 'expected caches.create to return a cache name');
+
+      // update — MUST NOT emit list_changed (membership unchanged)
+      offset = harness.client.getNotifications().length;
+      await harness.client.request('tools/call', {
+        arguments: { action: 'caches.update', cacheName, ttl: '3600s' },
+        name: 'memory',
+      });
+
+      await flushEventLoop(2);
+      const updateNotifications = notificationSlice(harness.client.getNotifications(), offset);
+      const updateListChanged = updateNotifications.filter(
+        (notification) => notification.method === 'notifications/resources/list_changed',
+      );
+      assert.deepStrictEqual(
+        updateListChanged,
+        [],
+        'caches.update (TTL) must not emit list_changed',
+      );
+
+      // delete — MUST emit list_changed
+      offset = harness.client.getNotifications().length;
+      await harness.client.request('tools/call', {
+        arguments: { action: 'caches.delete', cacheName, confirm: true },
+        name: 'memory',
+      });
+
+      await flushEventLoop(2);
+      const deleteNotifications = notificationSlice(harness.client.getNotifications(), offset);
+      assertListChanged(deleteNotifications);
+    } finally {
+      await harness.close();
+    }
+  });
+
   it('emits workspace cache resource notifications after workspace-cache creation', async () => {
     const originalAllowedRoots = process.env.ROOTS;
     const originalWorkspaceCacheEnabled = process.env.CACHE;

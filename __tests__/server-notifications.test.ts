@@ -32,63 +32,60 @@ describe('server resource notifications', () => {
     assert.equal(isKnownResourceUri('discover://unknown'), false);
   });
 
-  it('drops unregistered resource notifications and logs a warning', async () => {
+  it('drops unregistered resource notifications and logs a warning', () => {
     const warnings: string[] = [];
     ScopedLogger.prototype.warn = function warn(message: string): void {
       warnings.push(message);
     };
 
-    const updatedUris: string[] = [];
     let listChangedCalls = 0;
     const server = {
       isConnected: () => true,
       sendResourceListChanged: () => {
         listChangedCalls += 1;
       },
-      server: {
-        sendResourceUpdated: async ({ uri }: { uri: string }) => {
-          updatedUris.push(uri);
-        },
-      },
     } as unknown as McpServer;
 
-    sendResourceChangedForServer(server, 'memory://unknown', ['memory://sessions/session-1']);
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    sendResourceChangedForServer(server, 'memory://unknown');
 
     assert.equal(listChangedCalls, 0);
-    assert.deepStrictEqual(updatedUris, []);
     assert.deepStrictEqual(warnings, [
       'Blocked resource notification with unregistered URI: memory://unknown',
     ]);
   });
 
-  it('emits list_changed and never updated for a known listUri', async () => {
-    const updatedUris: string[] = [];
+  it('emits list_changed for a known listUri', () => {
     let listChangedCalls = 0;
     const server = {
       isConnected: () => true,
       sendResourceListChanged: () => {
         listChangedCalls += 1;
       },
-      server: {
-        sendResourceUpdated: async ({ uri }: { uri: string }) => {
-          updatedUris.push(uri);
-        },
+    } as unknown as McpServer;
+
+    sendResourceChangedForServer(server, 'memory://sessions');
+
+    assert.equal(listChangedCalls, 1);
+  });
+
+  it('is a no-op when listUri is undefined', () => {
+    const warnings: string[] = [];
+    ScopedLogger.prototype.warn = function warn(message: string): void {
+      warnings.push(message);
+    };
+
+    let listChangedCalls = 0;
+    const server = {
+      isConnected: () => true,
+      sendResourceListChanged: () => {
+        listChangedCalls += 1;
       },
     } as unknown as McpServer;
 
-    sendResourceChangedForServer(server, 'memory://sessions', [
-      'memory://sessions/session-1',
-      'memory://sessions/session-1/transcript',
-    ]);
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    sendResourceChangedForServer(server, undefined);
 
-    assert.equal(listChangedCalls, 1);
-    assert.deepStrictEqual(
-      updatedUris,
-      [],
-      'resources/updated must never be emitted without resources.subscribe capability',
-    );
+    assert.equal(listChangedCalls, 0);
+    assert.deepStrictEqual(warnings, []);
   });
 
   it('fans out one cache change notification per connected server instance', async () => {

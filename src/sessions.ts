@@ -2,7 +2,6 @@ import type { Chat } from '@google/genai';
 
 import { AppError } from './lib/errors.js';
 import type { ToolProfile } from './lib/orchestration.js';
-import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from './lib/resource-uris.js';
 import type { FunctionCallEntry, ToolEvent } from './lib/streaming.js';
 import type { UsageMetadata } from './schemas/outputs.js';
 
@@ -11,18 +10,6 @@ import { getSessionLimits } from './config.js';
 const MAX_EVICTED_ENTRIES = 1000;
 const EVICTED_TRIM_TARGET = Math.floor(MAX_EVICTED_ENTRIES / 2);
 const EVICTION_SWEEP_INTERVAL_MS = 60_000;
-
-function buildSessionChangeEvent(
-  sessionIds: readonly string[],
-  listChanged: boolean,
-): SessionChangeEvent {
-  return {
-    listChanged,
-    detailUris: sessionIds.map((id) => sessionDetailUri(id)),
-    eventUris: sessionIds.map((id) => sessionEventsUri(id)),
-    transcriptUris: sessionIds.map((id) => sessionTranscriptUri(id)),
-  };
-}
 
 export interface TranscriptEntry {
   role: 'user' | 'assistant';
@@ -66,9 +53,6 @@ export interface SessionSummary {
 
 export interface SessionChangeEvent {
   listChanged: boolean;
-  detailUris: string[];
-  eventUris: string[];
-  transcriptUris: string[];
 }
 
 export interface SessionStoreOptions {
@@ -261,13 +245,12 @@ export class SessionStore {
     if (this.sessions.has(id)) {
       throw new AppError('sessions', `Session already exists: ${id}`);
     }
-    let evictedId: string | undefined;
     if (this.sessions.size >= this.maxSessions) {
-      evictedId = this.evictOldest();
+      this.evictOldest();
     }
     this.createSession(id, chat);
     this.startEvictionTimer();
-    this.notifyChange(evictedId ? [evictedId, id] : [id], true);
+    this.notifyChange(true);
   }
 
   replaceSession(id: string, chat: Chat): void {
@@ -280,15 +263,15 @@ export class SessionStore {
     entry.chat = chat;
     this.setSessionEntry(id, entry);
     this.startEvictionTimer();
-    // Replacement preserves collection membership (same id). Emit detail
-    // updates only; do NOT fire `notifications/resources/list_changed`.
-    this.notifyChange([id], false);
+    // Replacement preserves collection membership (same id).
+    // Do NOT fire `notifications/resources/list_changed`.
+    this.notifyChange(false);
   }
 
-  private notifyChange(sessionIds: string[] = [], listChanged = true): void {
+  private notifyChange(listChanged = true): void {
     if (this.subscribers.size === 0) return;
 
-    const event = buildSessionChangeEvent(sessionIds, listChanged);
+    const event: SessionChangeEvent = { listChanged };
 
     for (const subscriber of this.subscribers) {
       subscriber(event);
@@ -386,7 +369,7 @@ export class SessionStore {
     if (this.evictionTimer) return;
     this.evictionTimer = setInterval(() => {
       const evictedIds = this.evictExpiredSessions();
-      if (evictedIds.length > 0) this.notifyChange(evictedIds, true);
+      if (evictedIds.length > 0) this.notifyChange(true);
     }, this.sweepIntervalMs);
     this.evictionTimer.unref();
   }

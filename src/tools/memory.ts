@@ -44,7 +44,7 @@ const CREATE_CACHE_TOOL_LABEL = 'Create Cache';
 const log = logger.child('memory');
 
 export interface CacheChangeEvent {
-  detailUris: string[];
+  listChanged: boolean;
 }
 
 type CacheChangeSubscriber = (event: CacheChangeEvent) => void;
@@ -58,11 +58,9 @@ export function subscribeCacheChange(cb: CacheChangeSubscriber): () => void {
   };
 }
 
-function notifyCacheChange(cacheNames: string[] = []): void {
+function notifyCacheChange(listChanged: boolean): void {
   if (cacheChangeSubscribers.size === 0) return;
-  const event: CacheChangeEvent = {
-    detailUris: cacheNames.map((cacheName) => `memory://caches/${encodeURIComponent(cacheName)}`),
-  };
+  const event: CacheChangeEvent = { listChanged };
   for (const subscriber of cacheChangeSubscribers) {
     try {
       subscriber(event);
@@ -254,10 +252,6 @@ async function cleanupDuplicateCaches(
   }
 }
 
-function notifyCacheMutation(cacheName?: string): void {
-  notifyCacheChange(cacheName ? [cacheName] : []);
-}
-
 function buildCreateCacheResult(
   cache: {
     name?: string;
@@ -325,7 +319,7 @@ export function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
         totalSteps,
       );
       await cleanupDuplicateCaches(displayName, cache.name, ctx.mcpReq.signal);
-      notifyCacheMutation(cache.name);
+      notifyCacheChange(true);
 
       return buildCreateCacheResult(cache, displayName, ctx.task?.id);
     } catch (err) {
@@ -370,7 +364,7 @@ async function deleteCacheWork(
     name: cacheName,
     config: { abortSignal: ctx.mcpReq.signal },
   });
-  notifyCacheMutation(cacheName);
+  notifyCacheChange(true);
   await ctx.mcpReq.log('info', `Deleted cache: ${cacheName}`);
   return {
     content: [
@@ -389,7 +383,8 @@ async function updateCacheWork(
     name: cacheName,
     config: { ttl, abortSignal: ctx.mcpReq.signal },
   });
-  notifyCacheMutation(cacheName);
+  // TTL update does not change list membership; do not fire list_changed.
+  notifyCacheChange(false);
   await ctx.mcpReq.log('info', `Updated cache TTL: ${cacheName}`);
   return {
     content: [

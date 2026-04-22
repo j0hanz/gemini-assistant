@@ -183,6 +183,7 @@ export const DISCOVERY_ENTRIES = [
       'thinkingLevel?',
       'maxOutputTokens?',
       'safetySettings?',
+      'googleSearch?',
       'mediaResolution?',
     ],
     returns:
@@ -214,9 +215,9 @@ export const DISCOVERY_ENTRIES = [
       'filePathB?',
       'question?',
       'googleSearch?',
+      'urls?',
       'error?',
       'codeContext?',
-      'urls?',
     ],
     returns:
       'A review summary plus diff stats, comparison output, or failure guidance depending on the selected subjectKind.',

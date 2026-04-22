@@ -13,7 +13,7 @@ import {
   buildGroundedAnswerPrompt,
 } from '../lib/model-prompts.js';
 import { pickDefined } from '../lib/object.js';
-import { buildOrchestrationConfig } from '../lib/orchestration.js';
+import { resolveOrchestration } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import {
   appendSources,
@@ -32,7 +32,6 @@ import {
   registerTaskTool,
 } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
-import { validateUrls } from '../lib/validation.js';
 import {
   type AgenticSearchInput,
   type AnalyzeUrlInput,
@@ -190,9 +189,20 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
 }
 
 function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) {
+  const groundedSources = collectGroundedSources(streamResult.groundingMetadata);
+  const sourceDetails = collectGroundedSourceDetails(streamResult.groundingMetadata);
   const urlMetadata = collectUrlMetadata(streamResult.urlContextMetadata?.urlMetadata);
   const contentAdditions: CallToolResult['content'] = [];
 
+  const urlFallbackSources =
+    groundedSources.length === 0
+      ? urlMetadata
+          .filter((entry) => entry.status === 'URL_RETRIEVAL_STATUS_SUCCESS')
+          .map((entry) => entry.url)
+      : [];
+  const sources = groundedSources.length > 0 ? groundedSources : urlFallbackSources;
+
+  appendSources(contentAdditions, formatSourceLabels(sourceDetails));
   appendUrlStatus(contentAdditions, urlMetadata);
 
   return {
@@ -201,6 +211,8 @@ function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) 
     }),
     structuredContent: pickDefined({
       summary: textContent,
+      sources: sources.length > 0 ? sources : undefined,
+      sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
     }),
     reportMessage: `${formatCountLabel(urlMetadata.length, 'URL')} retrieved`,
@@ -218,14 +230,17 @@ async function searchWork(
   }: SearchInput & GenerationConfigFields,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const invalidUrlResult = validateUrls(urls);
-  if (invalidUrlResult) {
-    return invalidUrlResult;
-  }
-
-  const { functionCallingMode, toolConfig, tools } = buildOrchestrationConfig({
-    toolProfile: (urls?.length ?? 0) > 0 ? 'search_url' : 'search',
-  });
+  const resolved = await resolveOrchestration(
+    {
+      toolProfile: (urls?.length ?? 0) > 0 ? 'search_url' : 'search',
+      urls,
+      includeServerSideToolInvocations: true,
+    },
+    ctx,
+    'search',
+  );
+  if (resolved.error) return resolved.error;
+  const { tools, toolConfig } = resolved.config;
   const prompt = buildGroundedAnswerPrompt(query, urls);
 
   return runToolStream(
@@ -245,9 +260,8 @@ async function searchWork(
             thinkingLevel,
             maxOutputTokens,
             safetySettings,
-            functionCallingMode,
-            toolConfig,
             tools,
+            toolConfig,
           },
           ctx.mcpReq.signal,
         ),
@@ -267,10 +281,13 @@ export async function analyzeUrlWork(
   }: AnalyzeUrlInput & GenerationConfigFields,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const invalidUrlResult = validateUrls(urls);
-  if (invalidUrlResult) {
-    return invalidUrlResult;
-  }
+  const resolved = await resolveOrchestration(
+    { toolProfile: 'url', urls, includeServerSideToolInvocations: true },
+    ctx,
+    'analyze_url',
+  );
+  if (resolved.error) return resolved.error;
+  const { tools, toolConfig } = resolved.config;
 
   const prompt = buildFileAnalysisPrompt({
     goal: question,
@@ -295,7 +312,8 @@ export async function analyzeUrlWork(
             thinkingLevel,
             maxOutputTokens,
             safetySettings,
-            ...buildOrchestrationConfig({ toolProfile: 'url' }),
+            tools,
+            toolConfig,
           },
           ctx.mcpReq.signal,
         ),
@@ -336,6 +354,14 @@ async function agenticSearchWork(
     topic: enrichedTopic,
   });
 
+  const resolved = await resolveOrchestration(
+    { toolProfile: 'search_code', includeServerSideToolInvocations: true },
+    ctx,
+    'agentic_search',
+  );
+  if (resolved.error) return resolved.error;
+  const { tools, toolConfig } = resolved.config;
+
   return runToolStream(
     ctx,
     'research',
@@ -353,10 +379,8 @@ async function agenticSearchWork(
             thinkingLevel,
             maxOutputTokens,
             safetySettings,
-            ...buildOrchestrationConfig({
-              includeServerSideToolInvocations: true,
-              toolProfile: 'search_code',
-            }),
+            tools,
+            toolConfig,
           },
           ctx.mcpReq.signal,
         ),

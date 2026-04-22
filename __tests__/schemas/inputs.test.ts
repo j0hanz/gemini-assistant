@@ -759,7 +759,7 @@ describe('AnalyzeInputSchema', () => {
       goal: 'Summarize this file',
       targetKind: 'file',
       filePath: absolutePath('src', 'index.ts'),
-      urls: ['https://example.com'],
+      filePaths: [absolutePath('src', 'a.ts')],
       outputKind: 'summary',
     });
     assert.strictEqual(result.success, false);

@@ -248,7 +248,7 @@ export function validateFlatAnalyzeInput(
         value.filePath,
       );
     }
-    forbidFields(ctx, value, ['urls', 'filePaths'], 'targetKind', targetKind);
+    forbidFields(ctx, value, ['filePaths'], 'targetKind', targetKind);
   } else if (targetKind === 'url') {
     if (!value.urls) {
       addCustomIssue(ctx, 'urls is required when targetKind=url.', ['urls'], value.urls);
@@ -263,7 +263,7 @@ export function validateFlatAnalyzeInput(
         value.filePaths,
       );
     }
-    forbidFields(ctx, value, ['filePath', 'urls'], 'targetKind', targetKind);
+    forbidFields(ctx, value, ['filePath'], 'targetKind', targetKind);
   }
 
   if (outputKind === 'summary') {

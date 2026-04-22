@@ -75,6 +75,27 @@ The job-first surface is intentionally opinionated:
 - The public surface does not expose the legacy `discover` callable tool or the retired standalone `search`, `analyze_url`, `agentic_search`, `explain_error`, `diagram`, or `execute_code` tools.
 - The public surface does not expose Gemini File Search stores or Live API sessions.
 
+### Tool Capability Matrix
+
+Orchestration resolves one of seven server-side tool profiles per call. `googleSearch` and `urls` are additive flags — supplying both yields a combined profile.
+
+| Profile       | Google Search | URL Context | Code Execution |
+| ------------- | :-----------: | :---------: | :------------: |
+| `none`        |       -       |      -      |       -        |
+| `search`      |       ✓       |      -      |       -        |
+| `url`         |       -       |      ✓      |       -        |
+| `code`        |       -       |      -      |       ✓        |
+| `search_url`  |       ✓       |      ✓      |       -        |
+| `search_code` |       ✓       |      -      |       ✓        |
+| `url_code`    |       -       |      ✓      |       ✓        |
+
+| Tool       | `googleSearch?` | `urls?` | Notes                                                         |
+| ---------- | :-------------: | :-----: | ------------------------------------------------------------- |
+| `chat`     |        ✓        |    ✓    | URLs are retrieved via URL Context when active.               |
+| `research` |        ✓        |    ✓    | `mode="deep"` always enables Google Search.                   |
+| `analyze`  |        ✓        |    ✓    | Diagram + URL target auto-selects `url_code` when validating. |
+| `review`   |        ✓        |    ✓    | `urls` available on `comparison` and `failure` subjects.      |
+
 ## Notification Surface
 
 The server emits four MCP notification methods with narrow, contract-stable rules:

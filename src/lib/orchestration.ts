@@ -1,9 +1,9 @@
-import {
-  FunctionCallingConfigMode,
-  type FunctionDeclaration,
-  type ToolConfig,
-  type ToolListUnion,
-} from '@google/genai';
+import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
+
+import type { ToolConfig, ToolListUnion } from '@google/genai';
+
+import { logger } from './logger.js';
+import { validateUrls } from './validation.js';
 
 export const TOOL_PROFILES = [
   'none',
@@ -12,6 +12,7 @@ export const TOOL_PROFILES = [
   'search_url',
   'code',
   'search_code',
+  'url_code',
 ] as const;
 
 export type ToolProfile = (typeof TOOL_PROFILES)[number];
@@ -60,10 +61,15 @@ const TOOL_PROFILE_CAPABILITIES: Record<ToolProfile, ToolProfileCapabilities> = 
     usesGoogleSearch: true,
     usesUrlContext: false,
   },
+  url_code: {
+    builtInTools: [{ urlContext: {} }, { codeExecution: {} }],
+    usesCodeExecution: true,
+    usesGoogleSearch: false,
+    usesUrlContext: true,
+  },
 };
 
 interface OrchestrationRequest {
-  functionDeclarations?: FunctionDeclaration[] | undefined;
   googleSearch?: boolean | undefined;
   includeServerSideToolInvocations?: boolean | undefined;
   jsonMode?: boolean | undefined;
@@ -72,8 +78,6 @@ interface OrchestrationRequest {
 }
 
 interface OrchestrationConfig {
-  downgradedFromProfile?: ToolProfile;
-  functionCallingMode?: FunctionCallingConfigMode;
   toolConfig?: ToolConfig;
   toolProfile: ToolProfile;
   tools?: ToolListUnion;
@@ -105,47 +109,69 @@ export function normalizeToolProfile({
 }
 
 export function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationConfig {
-  const resolvedToolProfile = normalizeToolProfile(request);
-  const capabilities = TOOL_PROFILE_CAPABILITIES[resolvedToolProfile];
-  const toolProfile =
-    request.jsonMode === true && capabilities.builtInTools.length > 0
-      ? 'none'
-      : resolvedToolProfile;
-  const downgradedFromProfile =
-    toolProfile !== resolvedToolProfile ? resolvedToolProfile : undefined;
-  const activeCapabilities = TOOL_PROFILE_CAPABILITIES[toolProfile];
-  const builtInTools = activeCapabilities.builtInTools.map((tool) => ({ ...tool }));
-  const functionDeclarations = request.functionDeclarations?.slice();
+  const toolProfile = normalizeToolProfile(request);
+  const capabilities = TOOL_PROFILE_CAPABILITIES[toolProfile];
+  const builtInTools = capabilities.builtInTools.map((tool) => ({ ...tool }));
   const hasBuiltIn = builtInTools.length > 0;
-  const hasDeclarations = functionDeclarations !== undefined && functionDeclarations.length > 0;
-
-  const tools: ToolListUnion = [...builtInTools];
-  if (hasDeclarations) {
-    tools.push({ functionDeclarations });
-  }
 
   const config: OrchestrationConfig = {
-    ...(downgradedFromProfile ? { downgradedFromProfile } : {}),
     toolProfile,
-    usesCodeExecution: activeCapabilities.usesCodeExecution,
-    usesGoogleSearch: activeCapabilities.usesGoogleSearch,
-    usesUrlContext: activeCapabilities.usesUrlContext,
+    usesCodeExecution: capabilities.usesCodeExecution,
+    usesGoogleSearch: capabilities.usesGoogleSearch,
+    usesUrlContext: capabilities.usesUrlContext,
   };
 
-  if (hasBuiltIn && hasDeclarations) {
-    config.functionCallingMode = FunctionCallingConfigMode.VALIDATED;
-  }
-
-  const shouldExposeServerTools =
-    request.includeServerSideToolInvocations === true || (hasBuiltIn && hasDeclarations);
-
-  if (shouldExposeServerTools) {
+  if (request.includeServerSideToolInvocations === true) {
     config.toolConfig = { includeServerSideToolInvocations: true };
   }
 
-  if (tools.length > 0) {
-    config.tools = tools;
+  if (hasBuiltIn) {
+    config.tools = builtInTools;
   }
 
   return config;
+}
+
+export type ResolveOrchestrationResult =
+  | { config: OrchestrationConfig; error?: undefined }
+  | { config?: undefined; error: CallToolResult };
+
+/**
+ * Unified orchestration entry point for tool handlers: validates URLs,
+ * resolves the tool profile, and emits a single info log describing the
+ * resolution. Emits a warning if `urls` were supplied but the resolved
+ * profile has URL Context disabled.
+ */
+export async function resolveOrchestration(
+  request: OrchestrationRequest & { urls?: readonly string[] | undefined },
+  ctx: ServerContext,
+  toolKey: string,
+): Promise<ResolveOrchestrationResult> {
+  const urlError = validateUrls(request.urls);
+  if (urlError) {
+    return { error: urlError };
+  }
+
+  const config = buildOrchestrationConfig(request);
+  const urlCount = request.urls?.length ?? 0;
+  const payload = {
+    toolKey,
+    toolProfile: config.toolProfile,
+    usesGoogleSearch: config.usesGoogleSearch,
+    usesUrlContext: config.usesUrlContext,
+    usesCodeExecution: config.usesCodeExecution,
+    urlCount,
+  };
+
+  await ctx.mcpReq.log('info', `orchestration resolved: ${toolKey} -> ${config.toolProfile}`);
+  logger.child(toolKey).info('orchestration resolved', payload);
+
+  if (urlCount > 0 && !config.usesUrlContext) {
+    await ctx.mcpReq.log(
+      'warning',
+      `orchestration: ${toolKey} received ${String(urlCount)} URL(s) but resolved profile '${config.toolProfile}' does not expose URL Context`,
+    );
+  }
+
+  return { config };
 }

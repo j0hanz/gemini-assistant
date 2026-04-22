@@ -12,7 +12,11 @@ import type { Chat } from '@google/genai';
 import { AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { pickDefined } from '../lib/object.js';
-import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
+import {
+  buildOrchestrationConfig,
+  resolveOrchestration,
+  type ToolProfile,
+} from '../lib/orchestration.js';
 import { validateGeminiRequest } from '../lib/preflight.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from '../lib/resource-uris.js';
@@ -338,23 +342,34 @@ function buildAskPrompt(message: string, urls?: readonly string[]): string {
   return `${message}\n\nUse these URLs too:\n${urls.join('\n')}`;
 }
 
-function resolveAskTooling(args: AskArgs) {
+async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
   const askToolProfile = getAskToolProfile(args);
   const urls = getAskUrls(args);
-  const orchestration = buildOrchestrationConfig({
-    googleSearch: args.googleSearch,
-    jsonMode: args.responseSchema !== undefined,
-    toolProfile: askToolProfile,
-    urls,
-  });
-  const { toolProfile, ...toolConfig } = orchestration;
+  const resolved = await resolveOrchestration(
+    {
+      googleSearch: args.googleSearch,
+      toolProfile: askToolProfile,
+      urls,
+    },
+    ctx,
+    'chat',
+  );
+  if (resolved.error) {
+    return { error: resolved.error } as const;
+  }
+  const { toolProfile, tools, toolConfig, usesUrlContext } = resolved.config;
+
+  // Only inline URLs into the prompt when URL Context is OFF; otherwise
+  // Gemini retrieves them and the concatenation duplicates tokens.
+  const promptUrls = usesUrlContext ? undefined : urls;
 
   return {
-    prompt: buildAskPrompt(args.message, orchestration.usesUrlContext ? urls : undefined),
+    prompt: buildAskPrompt(args.message, promptUrls),
     toolProfile,
-    urls: orchestration.usesUrlContext ? [...(urls ?? [])] : undefined,
-    ...toolConfig,
-  };
+    urls: usesUrlContext ? [...(urls ?? [])] : undefined,
+    tools,
+    toolConfig,
+  } as const;
 }
 
 function buildRebuiltChatHistory(
@@ -453,13 +468,25 @@ export async function askWithoutSession(
   ctx: ServerContext,
   chat?: Chat,
 ): Promise<AskExecutionResult> {
-  const { prompt, toolConfig, toolProfile, tools, urls, functionCallingMode } =
-    resolveAskTooling(args);
+  const resolved = await resolveAskTooling(args, ctx);
+  if ('error' in resolved) {
+    return {
+      result: resolved.error,
+      streamResult: {
+        text: '',
+        thoughtText: '',
+        parts: [],
+        toolsUsed: [],
+        functionCalls: [],
+        toolEvents: [],
+        hadCandidate: false,
+      } satisfies StreamResult,
+      toolProfile: 'none',
+    };
+  }
+  const { prompt, toolConfig, toolProfile, tools, urls } = resolved;
   const jsonMode = !!args.responseSchema;
-  const config = buildGenerateContentConfig(
-    { ...args, functionCallingMode, toolConfig, tools },
-    ctx.mcpReq.signal,
-  );
+  const config = buildGenerateContentConfig({ ...args, toolConfig, tools }, ctx.mcpReq.signal);
   const maxRetries = !chat && jsonMode && !ctx.mcpReq.signal.aborted ? JSON_REPAIR_MAX_RETRIES : 0;
   let currentPrompt = prompt;
 
@@ -714,15 +741,29 @@ async function resolveWorkspaceCacheName(
   }
 }
 
+function buildAskToolingConfig(args: AskArgs) {
+  const askToolProfile = getAskToolProfile(args);
+  const urls = getAskUrls(args);
+  const orchestration = buildOrchestrationConfig({
+    googleSearch: args.googleSearch,
+    toolProfile: askToolProfile,
+    urls,
+  });
+  return {
+    tools: orchestration.tools,
+    toolConfig: orchestration.toolConfig,
+  };
+}
+
 function createDefaultAskDependencies(sessionStore: SessionStore): AskDependencies {
   return {
     appendSessionEvent: sessionStore.appendSessionEvent.bind(sessionStore),
     appendSessionTranscript: sessionStore.appendSessionTranscript.bind(sessionStore),
     createChat: (args) => {
-      const { functionCallingMode, toolConfig, tools } = resolveAskTooling(args);
+      const { toolConfig, tools } = buildAskToolingConfig(args);
       return getAI().chats.create({
         model: MODEL,
-        config: buildGenerateContentConfig({ ...args, functionCallingMode, toolConfig, tools }),
+        config: buildGenerateContentConfig({ ...args, toolConfig, tools }),
       });
     },
     getSession: sessionStore.getSession.bind(sessionStore),
@@ -735,10 +776,10 @@ function createDefaultAskDependencies(sessionStore: SessionStore): AskDependenci
         return undefined;
       }
 
-      const { functionCallingMode, toolConfig, tools } = resolveAskTooling(args);
+      const { toolConfig, tools } = buildAskToolingConfig(args);
       const chat = getAI().chats.create({
         model: MODEL,
-        config: buildGenerateContentConfig({ ...args, functionCallingMode, toolConfig, tools }),
+        config: buildGenerateContentConfig({ ...args, toolConfig, tools }),
         history: buildRebuiltChatHistory(transcript, 200_000),
       });
       sessionStore.setSession(sessionId, chat, Date.now());

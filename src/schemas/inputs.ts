@@ -163,6 +163,10 @@ export const AnalyzeInputBaseSchema = z.strictObject({
     .describe('Validate generated diagram syntax when outputKind=diagram.'),
   thinkingLevel: thinkingLevelField,
   ...generationConfigFields,
+  googleSearch: withFieldMetadata(
+    z.boolean().optional(),
+    'Enable Google Search grounding. Optional; additive. Extra tokens when enabled.',
+  ),
   mediaResolution: mediaResolution(
     'Resolution for image/video processing. Higher = more detail, more tokens.',
   ),
@@ -203,6 +207,12 @@ const ReviewComparisonInputSchema = z.strictObject({
     z.boolean().optional(),
     'Enable Google Search when subjectKind=comparison or subjectKind=failure.',
   ),
+  ...createUrlContextFields({
+    itemDescription: 'Public URL to include via URL Context',
+    description: 'Public URLs for additional context when subjectKind=comparison.',
+    max: 20,
+    optional: true,
+  }),
   ...reviewCommonShape,
 });
 
@@ -394,6 +404,12 @@ export const CompareFilesInputSchema = z.strictObject({
     z.boolean().optional(),
     'Enable Google Search for best practices or migration context.',
   ),
+  ...createUrlContextFields({
+    itemDescription: 'Public URL to include via URL Context',
+    description: 'Public URLs for additional context (max 20). Enables URL Context.',
+    max: 20,
+    optional: true,
+  }),
 });
 export type CompareFilesInput = z.infer<typeof CompareFilesInputSchema>;
 

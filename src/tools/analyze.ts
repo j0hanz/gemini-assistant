@@ -14,7 +14,7 @@ import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
 import { pickDefined } from '../lib/object.js';
-import { buildOrchestrationConfig } from '../lib/orchestration.js';
+import { resolveOrchestration, type ToolProfile } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput, safeValidateStructuredContent } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
@@ -150,9 +150,13 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
       mediaResolution,
       maxOutputTokens,
       safetySettings,
+      googleSearch,
+      urls,
     }: AnalyzeFileInput & {
       maxOutputTokens?: AnalyzeInput['maxOutputTokens'];
       safetySettings?: AnalyzeInput['safetySettings'];
+      googleSearch?: boolean | undefined;
+      urls?: readonly string[] | undefined;
     },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
@@ -168,6 +172,18 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
       await ctx.mcpReq.log('info', `Analyzing ${uploaded.displayPath} (${uploaded.mimeType})`);
       await progress.step(1, 3, 'Analyzing content');
 
+      const resolved = await resolveOrchestration(
+        {
+          googleSearch,
+          urls,
+          includeServerSideToolInvocations: googleSearch === true || (urls?.length ?? 0) > 0,
+        },
+        ctx,
+        'analyze_file',
+      );
+      if (resolved.error) return resolved.error;
+      const { tools, toolConfig, usesUrlContext } = resolved.config;
+
       return await executor.runStream(
         ctx,
         'analyze_file',
@@ -177,10 +193,18 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
             goal: question,
             kind: 'single',
           });
+          const urlContextPart =
+            urls && urls.length > 0 && !usesUrlContext
+              ? [{ text: `Context URLs:\n${urls.join('\n')}` }]
+              : [];
 
           return getAI().models.generateContentStream({
             model: MODEL,
-            contents: [createPartFromUri(uploaded.uri, uploaded.mimeType), { text: promptText }],
+            contents: [
+              createPartFromUri(uploaded.uri, uploaded.mimeType),
+              { text: promptText },
+              ...urlContextPart,
+            ],
             config: buildGenerateContentConfig(
               {
                 systemInstruction,
@@ -188,6 +212,8 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
                 mediaResolution,
                 maxOutputTokens,
                 safetySettings,
+                tools,
+                toolConfig,
               },
               ctx.mcpReq.signal,
             ),
@@ -208,15 +234,22 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
   };
 }
 
+interface AnalyzeMultiExtra {
+  googleSearch?: boolean | undefined;
+  maxOutputTokens?: AnalyzeInput['maxOutputTokens'];
+  safetySettings?: AnalyzeInput['safetySettings'];
+  urls?: readonly string[] | undefined;
+}
+
 async function analyzeMultiFileWork(
   rootsFetcher: RootsFetcher,
   filePaths: string[],
   goal: string,
   thinkingLevel: AnalyzeInput['thinkingLevel'],
   ctx: ServerContext,
-  maxOutputTokens?: AnalyzeInput['maxOutputTokens'],
-  safetySettings?: AnalyzeInput['safetySettings'],
+  extra: AnalyzeMultiExtra = {},
 ): Promise<CallToolResult> {
+  const { maxOutputTokens, safetySettings, googleSearch, urls } = extra;
   const uploadedNames: string[] = [];
   const progress = new ProgressReporter(ctx, ANALYZE_TOOL_LABEL);
   const totalSteps = filePaths.length + 1;
@@ -236,6 +269,21 @@ async function analyzeMultiFileWork(
     }
 
     await progress.step(filePaths.length, totalSteps, 'Analyzing content');
+
+    const resolved = await resolveOrchestration(
+      {
+        googleSearch,
+        urls,
+        includeServerSideToolInvocations: googleSearch === true || (urls?.length ?? 0) > 0,
+      },
+      ctx,
+      'analyze',
+    );
+    if (resolved.error) return resolved.error;
+    const { tools, toolConfig, usesUrlContext } = resolved.config;
+    if (urls && urls.length > 0 && !usesUrlContext) {
+      contents.push({ text: `Context URLs:\n${urls.join('\n')}` });
+    }
 
     return await executor.runStream(
       ctx,
@@ -257,6 +305,8 @@ async function analyzeMultiFileWork(
               thinkingLevel,
               maxOutputTokens,
               safetySettings,
+              tools,
+              toolConfig,
             },
             ctx.mcpReq.signal,
           ),
@@ -273,6 +323,15 @@ async function analyzeMultiFileWork(
   } finally {
     await deleteUploadedFiles(uploadedNames, cleanupErrorLogger(ctx));
   }
+}
+
+function pickDiagramProfile(args: AnalyzeDiagramInput): ToolProfile {
+  const isUrl = args.targetKind === 'url';
+  const wantsCode = args.validateSyntax === true;
+  if (isUrl && wantsCode) return 'url_code';
+  if (isUrl) return 'url';
+  if (wantsCode) return 'code';
+  return 'none';
 }
 
 async function analyzeDiagramWork(
@@ -312,6 +371,19 @@ async function analyzeDiagramWork(
     await progress.step(uploadedCount, totalSteps, `Generating ${args.diagramType} diagram`);
     await ctx.mcpReq.log('info', `Generating ${args.diagramType} diagram`);
 
+    const diagramProfile = pickDiagramProfile(args);
+    const resolved = await resolveOrchestration(
+      {
+        toolProfile: diagramProfile,
+        ...(args.targetKind === 'url' ? { urls: args.urls } : {}),
+        includeServerSideToolInvocations: diagramProfile !== 'none',
+      },
+      ctx,
+      'analyze_diagram',
+    );
+    if (resolved.error) return resolved.error;
+    const { tools, toolConfig } = resolved.config;
+
     const prompt = buildDiagramGenerationPrompt({
       attachedParts,
       description: args.goal,
@@ -333,10 +405,8 @@ async function analyzeDiagramWork(
               thinkingLevel: args.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
               maxOutputTokens: args.maxOutputTokens,
               safetySettings: args.safetySettings,
-              ...buildOrchestrationConfig({
-                toolProfile:
-                  args.targetKind === 'url' ? 'url' : args.validateSyntax ? 'code' : 'none',
-              }),
+              tools,
+              toolConfig,
             },
             ctx.mcpReq.signal,
           ),
@@ -402,6 +472,8 @@ async function runAnalyzeTarget(
         mediaResolution: args.mediaResolution,
         maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
+        googleSearch: args.googleSearch,
+        urls: args.urls,
       },
       ctx,
     );
@@ -426,8 +498,12 @@ async function runAnalyzeTarget(
     args.goal,
     args.thinkingLevel,
     ctx,
-    args.maxOutputTokens,
-    args.safetySettings,
+    {
+      maxOutputTokens: args.maxOutputTokens,
+      safetySettings: args.safetySettings,
+      googleSearch: args.googleSearch,
+      urls: args.urls,
+    },
   );
 }
 

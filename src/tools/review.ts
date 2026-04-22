@@ -19,12 +19,12 @@ import { logger, type ScopedLogger } from '../lib/logger.js';
 import { buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { buildDiffReviewPrompt } from '../lib/model-prompts.js';
 import { pickDefined } from '../lib/object.js';
-import { buildOrchestrationConfig, type ToolProfile } from '../lib/orchestration.js';
+import { resolveOrchestration } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput, safeValidateStructuredContent } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
-import { buildServerRootsFetcher, type RootsFetcher, validateUrls } from '../lib/validation.js';
+import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
 import {
   type AnalyzePrInput,
   type CompareFilesInput,
@@ -211,6 +211,7 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
       question,
       thinkingLevel,
       googleSearch,
+      urls,
       maxOutputTokens,
       safetySettings,
     }: CompareFilesInput & {
@@ -234,6 +235,18 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
 
       await ctx.mcpReq.log('info', `Comparing: ${fileA.displayPath} vs ${fileB.displayPath}`);
       await progress.step(2, 4, 'Analyzing differences');
+
+      const resolved = await resolveOrchestration(
+        {
+          googleSearch,
+          urls,
+          includeServerSideToolInvocations: googleSearch === true || (urls?.length ?? 0) > 0,
+        },
+        ctx,
+        'compare_files',
+      );
+      if (resolved.error) return resolved.error;
+      const { tools, toolConfig } = resolved.config;
 
       const prompt = buildDiffReviewPrompt({
         focus: question,
@@ -260,9 +273,8 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
                 thinkingLevel,
                 maxOutputTokens,
                 safetySettings,
-                ...buildOrchestrationConfig({
-                  toolProfile: googleSearch ? 'search' : 'none',
-                }),
+                tools,
+                toolConfig,
               },
               ctx.mcpReq.signal,
             ),
@@ -299,9 +311,6 @@ async function diagnoseFailureWork(
   const { urls, error, codeContext, language, googleSearch, maxOutputTokens, safetySettings } =
     subject;
 
-  const invalidUrlResult = validateUrls(urls);
-  if (invalidUrlResult) return invalidUrlResult;
-
   const prompt = buildErrorDiagnosisPrompt({
     codeContext: focus
       ? [codeContext, 'Review focus: ' + focus].filter(Boolean).join('\n\n')
@@ -311,15 +320,17 @@ async function diagnoseFailureWork(
     urls,
   });
 
-  const hasUrls = (urls?.length ?? 0) > 0;
-  let toolProfile: ToolProfile = 'none';
-  if (googleSearch && hasUrls) toolProfile = 'search_url';
-  else if (googleSearch) toolProfile = 'search';
-  else if (hasUrls) toolProfile = 'url';
-
-  const orchestration = buildOrchestrationConfig({
-    toolProfile,
-  });
+  const resolved = await resolveOrchestration(
+    {
+      googleSearch,
+      urls,
+      includeServerSideToolInvocations: googleSearch === true || (urls?.length ?? 0) > 0,
+    },
+    ctx,
+    'review_failure',
+  );
+  if (resolved.error) return resolved.error;
+  const { tools, toolConfig } = resolved.config;
 
   const progress = new ProgressReporter(ctx, 'Review Failure');
   await progress.send(0, undefined, 'Diagnosing');
@@ -339,7 +350,8 @@ async function diagnoseFailureWork(
             thinkingLevel,
             maxOutputTokens,
             safetySettings,
-            ...orchestration,
+            tools,
+            toolConfig,
           },
           ctx.mcpReq.signal,
         ),
@@ -1129,6 +1141,7 @@ async function reviewWork(
         question: args.question ?? args.focus,
         thinkingLevel: args.thinkingLevel,
         googleSearch: args.googleSearch,
+        urls: args.urls,
         maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
       },

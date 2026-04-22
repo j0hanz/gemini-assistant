@@ -5,7 +5,7 @@ import type {
   ToolConfig,
   ToolListUnion,
 } from '@google/genai';
-import { FunctionCallingConfigMode, GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 import type { SafetySettingInput } from './schemas/fragments.js';
 import type { GeminiResponseSchema } from './schemas/json-schema.js';
@@ -49,34 +49,12 @@ interface ConfigBuilderOptions {
   mediaResolution?: string | undefined;
   tools?: ToolListUnion | undefined;
   toolConfig?: ToolConfig | undefined;
-  functionCallingMode?: FunctionCallingConfigMode | undefined;
 }
 
 function buildThinkingConfig(thinkingLevel?: AskThinkingLevel) {
   return {
     ...(EXPOSE_THOUGHTS ? { includeThoughts: true } : {}),
     ...(thinkingLevel ? { thinkingLevel: THINKING_LEVEL_MAP[thinkingLevel] } : {}),
-  };
-}
-
-function buildMergedToolConfig(
-  toolConfig: ToolConfig | undefined,
-  functionCallingMode: FunctionCallingConfigMode | undefined,
-): ToolConfig | undefined {
-  if (!toolConfig && !functionCallingMode) {
-    return undefined;
-  }
-
-  return {
-    ...toolConfig,
-    ...(functionCallingMode
-      ? {
-          functionCallingConfig: {
-            ...toolConfig?.functionCallingConfig,
-            mode: functionCallingMode,
-          },
-        }
-      : {}),
   };
 }
 
@@ -132,10 +110,8 @@ export function buildGenerateContentConfig(
     mediaResolution,
     tools,
     toolConfig,
-    functionCallingMode,
   } = options;
   const isJson = jsonMode ?? responseSchema !== undefined;
-  const mergedToolConfig = buildMergedToolConfig(toolConfig, functionCallingMode);
   const resolvedSafetySettings = normalizeSafetySettings(safetySettings ?? getSafetySettings());
 
   return {
@@ -146,7 +122,7 @@ export function buildGenerateContentConfig(
     ...(seed !== undefined ? { seed } : {}),
     ...(mediaResolution ? { mediaResolution: mediaResolution as MediaResolution } : {}),
     ...(tools ? { tools } : {}),
-    ...(mergedToolConfig ? { toolConfig: mergedToolConfig } : {}),
+    ...(toolConfig ? { toolConfig } : {}),
     ...(signal ? { abortSignal: signal } : {}),
   };
 }

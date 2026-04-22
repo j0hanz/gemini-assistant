@@ -173,11 +173,17 @@ describe('research tool contracts', () => {
         'https://example.com',
       ]);
       assert.deepStrictEqual((structured as Record<string, unknown>).sourceDetails, [
-        { origin: 'googleSearch', title: 'Example', url: 'https://example.com' },
+        {
+          domain: 'example.com',
+          origin: 'googleSearch',
+          title: 'Example',
+          url: 'https://example.com',
+        },
       ]);
       assert.strictEqual((structured as Record<string, unknown>).urlContextSources, undefined);
       assert.strictEqual((structured as Record<string, unknown>).urlContextUsed, false);
-      assert.strictEqual((structured as Record<string, unknown>).grounded, true);
+      assert.strictEqual((structured as Record<string, unknown>).grounded, false);
+      assert.strictEqual((structured as Record<string, unknown>).status, 'partially_grounded');
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
     }
@@ -233,10 +239,16 @@ describe('research tool contracts', () => {
         'https://example.com/docs',
       ]);
       assert.deepStrictEqual((structured as Record<string, unknown>).sourceDetails, [
-        { origin: 'googleSearch', title: 'Docs', url: 'https://example.com/docs' },
+        {
+          domain: 'example.com',
+          origin: 'googleSearch',
+          title: 'Docs',
+          url: 'https://example.com/docs',
+        },
       ]);
       assert.deepStrictEqual((structured as Record<string, unknown>).toolsUsed, ['googleSearch']);
-      assert.strictEqual((structured as Record<string, unknown>).grounded, true);
+      assert.strictEqual((structured as Record<string, unknown>).grounded, false);
+      assert.strictEqual((structured as Record<string, unknown>).status, 'partially_grounded');
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
     }
@@ -363,10 +375,20 @@ describe('research tool contracts', () => {
       assert.deepStrictEqual(structured.sources, []);
       assert.deepStrictEqual(structured.urlContextSources, ['https://example.com/context']);
       assert.deepStrictEqual(structured.sourceDetails, [
-        { origin: 'urlContext', url: 'https://example.com/context' },
+        { domain: 'example.com', origin: 'urlContext', url: 'https://example.com/context' },
       ]);
-      assert.strictEqual(structured.grounded, true);
+      assert.strictEqual(structured.grounded, false);
       assert.strictEqual(structured.urlContextUsed, true);
+      assert.strictEqual(structured.status, 'partially_grounded');
+      assert.deepStrictEqual(structured.groundingSignals, {
+        retrievalPerformed: true,
+        urlContextUsed: true,
+        groundingSupportsCount: 0,
+        supportedFindingsCount: 0,
+        unsupportedFindingsCount: 0,
+        claimCoverage: 0,
+        confidence: 'low',
+      });
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
     }
@@ -445,18 +467,29 @@ describe('research tool contracts', () => {
       );
       await flushTaskWork();
 
-      const call = calls[0];
-      assert.ok(call);
-      assert.strictEqual(String(call.contents).includes('Primary URLs:'), true);
-      assert.strictEqual(String(call.contents).includes('Planning notes (unverified leads'), true);
-      const config = call.config as Record<string, unknown>;
-      assert.deepStrictEqual(config.tools, [
-        { googleSearch: {} },
-        { urlContext: {} },
-        { codeExecution: {} },
-      ]);
-      assert.strictEqual((config.thinkingConfig as Record<string, unknown>).thinkingLevel, 'HIGH');
-      assert.match(String(config.systemInstruction), /Preferred shape:.*decision memo/);
+      const planCall = calls[0];
+      const retrievalCall = calls.find((entry) => String(entry.contents).includes('Primary URLs:'));
+      const synthesisCall = calls.find((entry) =>
+        String(entry.contents).includes('Retrieved evidence summaries:'),
+      );
+      assert.ok(planCall);
+      assert.ok(retrievalCall);
+      assert.ok(synthesisCall);
+      assert.strictEqual(String(retrievalCall.contents).includes('<planning_leads'), true);
+      const retrievalConfig = retrievalCall.config as Record<string, unknown>;
+      assert.deepStrictEqual(retrievalConfig.tools, [{ googleSearch: {} }, { urlContext: {} }]);
+      assert.strictEqual(
+        (retrievalConfig.thinkingConfig as Record<string, unknown>).thinkingLevel,
+        'HIGH',
+      );
+      const synthesisConfig = synthesisCall.config as Record<string, unknown>;
+      assert.deepStrictEqual(synthesisConfig.tools, [{ codeExecution: {} }]);
+      assert.strictEqual(
+        (synthesisConfig.thinkingConfig as Record<string, unknown>).thinkingLevel,
+        'HIGH',
+      );
+      assert.match(String(synthesisConfig.systemInstruction), /Preferred shape:.*decision memo/);
+      assert.ok(calls.length >= 5);
 
       const structured = store.stored[0]?.result.structuredContent as Record<string, unknown>;
       assert.deepStrictEqual(structured.urlMetadata, [
@@ -465,7 +498,12 @@ describe('research tool contracts', () => {
       assert.deepStrictEqual(structured.sources, ['https://example.com/report']);
       assert.deepStrictEqual(structured.urlContextSources, ['https://example.com/report']);
       assert.deepStrictEqual(structured.sourceDetails, [
-        { origin: 'both', title: 'Report', url: 'https://example.com/report' },
+        {
+          domain: 'example.com',
+          origin: 'both',
+          title: 'Report',
+          url: 'https://example.com/report',
+        },
       ]);
       assert.strictEqual(structured.grounded, true);
       assert.strictEqual(structured.urlContextUsed, true);
@@ -477,10 +515,23 @@ describe('research tool contracts', () => {
           sourceUrls: ['https://example.com/report'],
         },
       ]);
+      assert.deepStrictEqual(structured.findings, [
+        {
+          claim: 'Supported claim',
+          supportingSourceUrls: ['https://example.com/report'],
+          supportText: 'Supported claim',
+          verificationStatus: 'supported',
+        },
+      ]);
+      assert.deepStrictEqual(structured.claimLinkedSources, ['https://example.com/report']);
+      assert.strictEqual(
+        (structured.groundingSignals as { confidence?: string }).confidence,
+        'medium',
+      );
       assert.deepStrictEqual(structured.searchEntryPoint, {
         renderedContent: '<div>search</div>',
       });
-      assert.deepStrictEqual(structured.computations, [
+      assert.deepStrictEqual((structured.computations as unknown[]).slice(0, 2), [
         {
           id: 'exec-1',
           code: 'print(2)',
@@ -490,10 +541,14 @@ describe('research tool contracts', () => {
         },
         { code: 'print(3)' },
       ]);
-      assert.deepStrictEqual(structured.warnings, [
-        'dropped 1 non-public grounding supports',
-        'dropped 1 non-public grounding chunks',
-      ]);
+      assert.ok(
+        (structured.warnings as string[]).includes('dropped 1 non-public grounding supports'),
+      );
+      assert.ok(
+        (structured.warnings as string[]).some((warning) =>
+          warning.includes('non-public grounding chunks'),
+        ),
+      );
       assert.ok(
         store.stored[0]?.result.content.some((entry) =>
           entry.text?.includes('```PYTHON\nprint(2)\n```'),
@@ -544,8 +599,52 @@ describe('research tool contracts', () => {
       );
       await flushTaskWork();
 
-      const config = calls[0]?.config as Record<string, unknown>;
+      const config = calls.find((entry) =>
+        String(entry.contents).includes('Retrieved evidence summaries:'),
+      )?.config as Record<string, unknown>;
       assert.strictEqual((config.thinkingConfig as Record<string, unknown>).thinkingLevel, 'LOW');
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
+  it('makes searchDepth change the number of Gemini stream calls', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+    const calls: Record<string, unknown>[] = [];
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async (request: Record<string, unknown>) => {
+      calls.push(request);
+      return fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'Research answer' }] },
+              finishReason: 'STOP',
+            },
+          ],
+        },
+      ]);
+    };
+
+    try {
+      await research.createTask(
+        { goal: 'single pass', mode: 'deep', searchDepth: 1 },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+      assert.strictEqual(calls.length, 1);
+
+      calls.length = 0;
+      await research.createTask(
+        { goal: 'multi pass', mode: 'deep', searchDepth: 3 },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+      assert.ok(calls.length >= 3);
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
     }

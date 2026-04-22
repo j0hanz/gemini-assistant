@@ -8,7 +8,9 @@ import { z } from 'zod/v4';
 
 import type {
   ContextUsed,
+  Finding,
   GroundingCitation,
+  GroundingSignals,
   SearchEntryPoint,
   SourceDetail,
   UrlMetadataEntry,
@@ -23,6 +25,14 @@ import { isPublicHttpUrl } from './validation.js';
 export interface CollectedItems<T> {
   items: T[];
   droppedNonPublic: number;
+}
+
+function domainFromPublicUrl(url: string): string | undefined {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return undefined;
+  }
 }
 
 export function collectUrlMetadataWithCounts(
@@ -90,8 +100,8 @@ export function collectGroundedSourceDetailsWithCounts(
 
     seen.add(uri);
     const title = chunk.web?.title;
-    const origin = urlContextUrls.has(uri) ? 'both' : 'googleSearch';
-    sources.push(title ? { origin, title, url: uri } : { origin, url: uri });
+    const origin = urlContextUrls.has(uri) ? ('both' as const) : ('googleSearch' as const);
+    sources.push(pickDefined({ domain: domainFromPublicUrl(uri), origin, title, url: uri }));
   }
 
   return { items: sources, droppedNonPublic };
@@ -129,6 +139,14 @@ export function mergeSourceDetails(
   }
 
   return [...merged.values()];
+}
+
+export function filterClaimLinkedSourceDetails(
+  sourceDetails: readonly SourceDetail[],
+  citations: readonly GroundingCitation[],
+): SourceDetail[] {
+  const linkedUrls = new Set(citations.flatMap((citation) => citation.sourceUrls));
+  return sourceDetails.filter((source) => linkedUrls.has(source.url));
 }
 
 export function collectGroundingCitations(groundingMetadata: GroundingMetadata | undefined): {
@@ -171,6 +189,64 @@ export function collectGroundingCitations(groundingMetadata: GroundingMetadata |
   }
 
   return { citations, droppedSupportCount };
+}
+
+export function deriveFindingsFromCitations(citations: readonly GroundingCitation[]): Finding[] {
+  const findings = new Map<string, Finding>();
+
+  for (const citation of citations) {
+    if (findings.has(citation.text)) continue;
+    findings.set(citation.text, {
+      claim: citation.text,
+      supportingSourceUrls: [...citation.sourceUrls],
+      supportText: citation.text,
+      verificationStatus: 'supported',
+    });
+  }
+
+  return [...findings.values()];
+}
+
+export function computeGroundingSignals(
+  _streamResult: unknown,
+  citations: readonly GroundingCitation[],
+  urlMetadata: readonly UrlMetadataEntry[],
+  sourceDetails: readonly SourceDetail[],
+): GroundingSignals {
+  const retrievalPerformed = sourceDetails.length > 0 || urlMetadata.length > 0;
+  const urlContextUsed = sourceDetails.some(
+    (source) => source.origin === 'urlContext' || source.origin === 'both',
+  );
+  const supportedFindingsCount = citations.length;
+  const unsupportedFindingsCount = 0;
+  const confidence =
+    citations.length >= 3
+      ? 'high'
+      : citations.length >= 1
+        ? 'medium'
+        : retrievalPerformed
+          ? 'low'
+          : 'none';
+
+  return {
+    retrievalPerformed,
+    urlContextUsed,
+    groundingSupportsCount: citations.length,
+    supportedFindingsCount,
+    unsupportedFindingsCount,
+    claimCoverage: supportedFindingsCount > 0 ? 1 : 0,
+    confidence,
+  };
+}
+
+export function deriveOverallStatus(
+  signals: GroundingSignals,
+): 'grounded' | 'partially_grounded' | 'ungrounded' {
+  if (signals.confidence === 'high') return 'grounded';
+  if (signals.confidence === 'medium' || signals.confidence === 'low') {
+    return 'partially_grounded';
+  }
+  return 'ungrounded';
 }
 
 export function collectSearchEntryPoint(

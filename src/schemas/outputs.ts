@@ -11,7 +11,9 @@ import {
 import {
   UsageMetadataSchema as BaseUsageMetadataSchema,
   diffStatsFields,
+  FindingSchema,
   GroundingCitationSchema,
+  GroundingSignalsSchema,
   publicBaseOutputFields,
   SearchEntryPointSchema,
   SourceDetailSchema,
@@ -45,7 +47,13 @@ export type ContextUsed = z.infer<typeof ContextUsedSchema>;
 export type UrlMetadataEntry = z.infer<typeof UrlMetadataEntrySchema>;
 export type SourceDetail = z.infer<typeof SourceDetailSchema>;
 export type GroundingCitation = z.infer<typeof GroundingCitationSchema>;
+export type Finding = z.infer<typeof FindingSchema>;
+export type GroundingSignals = z.infer<typeof GroundingSignalsSchema>;
 export type SearchEntryPoint = z.infer<typeof SearchEntryPointSchema>;
+
+const GroundingStatusSchema = z
+  .enum(['completed', 'grounded', 'partially_grounded', 'ungrounded'])
+  .describe('Grounding status; `completed` is accepted for legacy successful outputs');
 
 const ComputationSchema = z.strictObject({
   code: z.string().describe('Executable code emitted by Gemini Code Execution'),
@@ -57,9 +65,11 @@ const ComputationSchema = z.strictObject({
 
 const AnalyzeSummaryOutputSchema = z.strictObject({
   ...publicBaseOutputFields,
+  status: GroundingStatusSchema,
   kind: z.literal('summary').describe('Analyze output selector (`summary`)'),
   targetKind: z.enum(['file', 'url', 'multi']).describe('Analyze target discriminator'),
   summary: z.string().describe('Grounded analysis summary'),
+  groundingSignals: GroundingSignalsSchema.optional(),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
   analyzedPaths: z.array(z.string()).optional().describe('Local files included in the analysis'),
   contextUsed: ContextUsedSchema.optional(),
@@ -116,6 +126,7 @@ export const ChatOutputSchema = z.strictObject({
 
 export const ResearchOutputSchema = z.strictObject({
   ...publicBaseOutputFields,
+  status: GroundingStatusSchema,
   mode: enumField(RESEARCH_MODE_OPTIONS, 'Research mode that handled the request'),
   summary: z.string().describe('Grounded research summary'),
   sources: publicHttpUrlArray({
@@ -133,7 +144,17 @@ export const ResearchOutputSchema = z.strictObject({
   }),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
   toolsUsed: z.array(z.string()).optional().describe('Tools invoked during deep research'),
-  grounded: z.boolean().optional().describe('Whether grounded sources were surfaced'),
+  grounded: z
+    .boolean()
+    .optional()
+    .describe('Deprecated: whether claim-level grounding citations were surfaced'),
+  groundingSignals: GroundingSignalsSchema.optional(),
+  findings: z.array(FindingSchema).optional().describe('Claim-level findings with attribution'),
+  claimLinkedSources: publicHttpUrlArray({
+    optional: true,
+    description: 'Subset of sources cited by at least one finding',
+    itemDescription: 'Claim-linked source URL',
+  }),
   urlContextUsed: z.boolean().optional().describe('Whether URL Context retrieval succeeded'),
   citations: z
     .array(GroundingCitationSchema)

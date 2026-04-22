@@ -5,6 +5,13 @@ import type {
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
 
+import type {
+  GroundingChunk,
+  GroundingMetadata,
+  GroundingSupport,
+  UrlContextMetadata,
+} from '@google/genai';
+
 import { AppError } from '../lib/errors.js';
 import { logger, maybeSummarizePayload } from '../lib/logger.js';
 import {
@@ -24,11 +31,19 @@ import {
   collectGroundingCitations,
   collectSearchEntryPoint,
   collectUrlMetadataWithCounts,
+  computeGroundingSignals,
+  deriveFindingsFromCitations,
+  deriveOverallStatus,
+  filterClaimLinkedSourceDetails,
   formatCountLabel,
   mergeSourceDetails,
   safeValidateStructuredContent,
 } from '../lib/response.js';
-import { deriveComputationsFromToolEvents, type StreamResult } from '../lib/streaming.js';
+import {
+  deriveComputationsFromToolEvents,
+  executeToolStream,
+  type StreamResult,
+} from '../lib/streaming.js';
 import {
   elicitTaskInput,
   READONLY_NON_IDEMPOTENT_ANNOTATIONS,
@@ -50,6 +65,7 @@ import { getAI, MODEL } from '../client.js';
 const SEARCH_TOOL_LABEL = 'Web Search';
 const ANALYZE_URL_TOOL_LABEL = 'Analyze URL';
 const AGENTIC_SEARCH_TOOL_LABEL = 'Agentic Search';
+const MAX_DEEP_RESEARCH_TURNS = 6;
 const log = logger.child('research');
 
 type StreamGenerator = () => Promise<
@@ -104,8 +120,10 @@ function collectUrlContextSources(
 
 function buildUrlContextSourceDetails(
   urls: readonly string[],
-): { origin: 'urlContext'; url: string }[] {
-  return urls.map((url) => ({ origin: 'urlContext', url }));
+): { domain?: string; origin: 'urlContext'; url: string }[] {
+  return urls.map((url) =>
+    pickDefined({ domain: new URL(url).hostname, origin: 'urlContext' as const, url }),
+  );
 }
 
 function appendSearchEntryPointContent(
@@ -178,7 +196,7 @@ async function enrichTopicWithSampling(topic: string, ctx: ServerContext): Promi
 
     await ctx.mcpReq.log('info', 'Sampling provided research angles');
     log.debug('Sampling provided research angles', { sampledTextLength: sampledText.length });
-    return `${topic}\n\nPlanning notes (unverified leads; verify before relying on them):\n${sampledText}`;
+    return `${topic}\n\n<planning_leads priority="low" evidence="false">\n${sampledText}\n</planning_leads>\n<task>Research the topic above. Do not cite planning_leads as evidence.</task>`;
   } catch (error) {
     await ctx.mcpReq.log('info', 'Sampling unavailable; continuing without extra angles');
     log.info('requestSampling encountered an issue', {
@@ -199,6 +217,7 @@ function emitDeepResearchToolBudgetLogs(
   ctx: ServerContext,
   streamResult: StreamResult,
   searchDepth: number,
+  retrievalTurnsRan?: number,
 ): string[] {
   const toolsUsedOccurrences = countOccurrences(streamResult.toolsUsedOccurrences);
   const payload = {
@@ -212,16 +231,27 @@ function emitDeepResearchToolBudgetLogs(
     .log('info', `deep research tool budget observed at depth ${String(searchDepth)}`)
     .catch(() => undefined);
 
-  if (searchDepth >= 3 && !('codeExecution' in toolsUsedOccurrences)) {
+  const warnings: string[] = [];
+
+  if (searchDepth >= 3 && retrievalTurnsRan !== undefined && retrievalTurnsRan < searchDepth - 1) {
+    const warning = `deep research ran ${String(retrievalTurnsRan)} retrieval turn(s), fewer than requested budget ${String(searchDepth - 1)}`;
+    log.warn('deep research retrieval turn budget underused', { ...payload, retrievalTurnsRan });
+    void ctx.mcpReq
+      .log('warning', 'deep research retrieval turn budget underused')
+      .catch(() => undefined);
+    warnings.push(warning);
+  }
+
+  if (searchDepth >= 4 && !('codeExecution' in toolsUsedOccurrences)) {
     const warning = `deep research did not invoke Code Execution at depth ${String(searchDepth)}`;
     log.warn('deep research did not invoke Code Execution', payload);
     void ctx.mcpReq
       .log('warning', 'deep research did not invoke Code Execution')
       .catch(() => undefined);
-    return [warning];
+    warnings.push(warning);
   }
 
-  return [];
+  return warnings;
 }
 
 function buildAgenticSearchResult(
@@ -229,8 +259,15 @@ function buildAgenticSearchResult(
   textContent: string,
   ctx: ServerContext,
   searchDepth: number,
+  extraWarnings: readonly string[] = [],
+  retrievalTurnsRan?: number,
 ) {
-  const deepResearchWarnings = emitDeepResearchToolBudgetLogs(ctx, streamResult, searchDepth);
+  const deepResearchWarnings = emitDeepResearchToolBudgetLogs(
+    ctx,
+    streamResult,
+    searchDepth,
+    retrievalTurnsRan,
+  );
 
   const groundedSourcesResult = collectGroundedSourcesWithCounts(streamResult.groundingMetadata);
   const groundedSources = groundedSourcesResult.items;
@@ -251,6 +288,16 @@ function buildAgenticSearchResult(
     streamResult.groundingMetadata,
   );
   const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
+  const findings = deriveFindingsFromCitations(citations);
+  const claimLinkedSourceDetails = filterClaimLinkedSourceDetails(sourceDetails, citations);
+  const claimLinkedSources = claimLinkedSourceDetails.map((source) => source.url);
+  const groundingSignals = computeGroundingSignals(
+    streamResult,
+    citations,
+    urlMetadata,
+    sourceDetails,
+  );
+  const status = deriveOverallStatus(groundingSignals);
   const warnings = [
     ...buildDroppedSupportWarnings({
       droppedSupportCount,
@@ -258,6 +305,7 @@ function buildAgenticSearchResult(
       droppedUrlCount: urlMetadataResult.droppedNonPublic,
     }),
     ...deepResearchWarnings,
+    ...extraWarnings,
   ];
   const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
   const contentAdditions: CallToolResult['content'] = [];
@@ -277,7 +325,11 @@ function buildAgenticSearchResult(
       urlContextSources: urlContextSources.length > 0 ? urlContextSources : undefined,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
       toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
-      grounded: sourceDetails.length > 0 || citations.length > 0,
+      status,
+      grounded: citations.length > 0,
+      groundingSignals,
+      findings: findings.length > 0 ? findings : undefined,
+      claimLinkedSources: claimLinkedSources.length > 0 ? claimLinkedSources : undefined,
       urlContextUsed: urlContextSources.length > 0,
       citations: citations.length > 0 ? citations : undefined,
       searchEntryPoint,
@@ -308,6 +360,16 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
     streamResult.groundingMetadata,
   );
   const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
+  const findings = deriveFindingsFromCitations(citations);
+  const claimLinkedSourceDetails = filterClaimLinkedSourceDetails(sourceDetails, citations);
+  const claimLinkedSources = claimLinkedSourceDetails.map((source) => source.url);
+  const groundingSignals = computeGroundingSignals(
+    streamResult,
+    citations,
+    urlMetadata,
+    sourceDetails,
+  );
+  const status = deriveOverallStatus(groundingSignals);
   const warnings = buildDroppedSupportWarnings({
     droppedSupportCount,
     droppedChunkCount: groundedSourceDetailsResult.droppedNonPublic,
@@ -319,6 +381,12 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
   appendSources(contentAdditions, formatSourceLabels(sourceDetails));
   appendUrlStatus(contentAdditions, urlMetadata);
   appendSearchEntryPointContent(contentAdditions, searchEntryPoint?.renderedContent);
+  if (status === 'ungrounded') {
+    contentAdditions.unshift({
+      type: 'text',
+      text: '[status: ungrounded]',
+    });
+  }
   if (groundedSources.length === 0 && urlMetadata.length === 0) {
     contentAdditions.push({
       type: 'text',
@@ -336,7 +404,11 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
       sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
       urlContextSources: urlContextSources.length > 0 ? urlContextSources : undefined,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
-      grounded: sourceDetails.length > 0 || citations.length > 0,
+      status,
+      grounded: citations.length > 0,
+      groundingSignals,
+      findings: findings.length > 0 ? findings : undefined,
+      claimLinkedSources: claimLinkedSources.length > 0 ? claimLinkedSources : undefined,
       urlContextUsed: urlContextSources.length > 0,
       citations: citations.length > 0 ? citations : undefined,
       searchEntryPoint,
@@ -367,6 +439,13 @@ function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) 
     streamResult.groundingMetadata,
   );
   const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
+  const groundingSignals = computeGroundingSignals(
+    streamResult,
+    citations,
+    urlMetadata,
+    sourceDetails,
+  );
+  const status = deriveOverallStatus(groundingSignals);
   const warnings = buildDroppedSupportWarnings({
     droppedSupportCount,
     droppedChunkCount: groundedSourceDetailsResult.droppedNonPublic,
@@ -389,7 +468,9 @@ function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) 
       sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
       urlContextSources: urlContextSources.length > 0 ? urlContextSources : undefined,
       urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
-      grounded: false,
+      status,
+      grounded: citations.length > 0,
+      groundingSignals,
       urlContextUsed: urlContextSources.length > 0,
       citations: citations.length > 0 ? citations : undefined,
       searchEntryPoint,
@@ -397,6 +478,304 @@ function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) 
       warnings: warnings.length > 0 ? warnings : undefined,
     }),
     reportMessage: `${formatCountLabel(urlMetadata.length, 'URL')} retrieved`,
+  };
+}
+
+function parsePlannedSubQueries(
+  text: string,
+  fallbackTopic: string,
+  searchDepth: number,
+): string[] {
+  const maxQueries = Math.min(searchDepth, 5);
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    const candidates = Array.isArray(parsed)
+      ? parsed
+      : typeof parsed === 'object' && parsed !== null && 'queries' in parsed
+        ? (parsed as { queries?: unknown }).queries
+        : undefined;
+    if (Array.isArray(candidates)) {
+      const queries = candidates
+        .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+        .map((entry) => entry.trim())
+        .slice(0, maxQueries);
+      if (queries.length > 0) return queries;
+    }
+  } catch {
+    // Fall through to deterministic fallback queries.
+  }
+
+  return [
+    fallbackTopic,
+    `${fallbackTopic} evidence and sources`,
+    `${fallbackTopic} recent developments`,
+    `${fallbackTopic} comparisons and tradeoffs`,
+    `${fallbackTopic} open questions`,
+  ].slice(0, maxQueries);
+}
+
+function dedupeGroundingSupports(
+  groundingMetadata: GroundingMetadata | undefined,
+): GroundingMetadata | undefined {
+  if (!groundingMetadata?.groundingSupports || !groundingMetadata.groundingChunks) {
+    return groundingMetadata;
+  }
+
+  const seen = new Set<string>();
+  const groundingSupports = groundingMetadata.groundingSupports.filter((support) => {
+    const text = support.segment?.text ?? '';
+    const urls = (support.groundingChunkIndices ?? [])
+      .map((index) => groundingMetadata.groundingChunks?.[index]?.web?.uri)
+      .filter((url): url is string => typeof url === 'string')
+      .sort();
+    const key = `${text}\u0000${urls.join('\u0000')}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return { ...groundingMetadata, groundingSupports };
+}
+
+function mergeGroundingMetadata(results: readonly StreamResult[]): GroundingMetadata | undefined {
+  const groundingChunks: GroundingChunk[] = [];
+  const groundingSupports: GroundingSupport[] = [];
+  let searchEntryPoint: GroundingMetadata['searchEntryPoint'];
+
+  for (const result of results) {
+    const metadata = result.groundingMetadata;
+    if (!metadata) continue;
+    const offset = groundingChunks.length;
+    groundingChunks.push(...(metadata.groundingChunks ?? []));
+    for (const support of metadata.groundingSupports ?? []) {
+      groundingSupports.push({
+        ...support,
+        groundingChunkIndices: (support.groundingChunkIndices ?? []).map((index) => index + offset),
+      });
+    }
+    searchEntryPoint ??= metadata.searchEntryPoint;
+  }
+
+  if (groundingChunks.length === 0 && groundingSupports.length === 0 && !searchEntryPoint) {
+    return undefined;
+  }
+
+  return dedupeGroundingSupports(
+    pickDefined({
+      groundingChunks,
+      groundingSupports,
+      searchEntryPoint,
+    }),
+  );
+}
+
+function mergeUrlContextMetadata(results: readonly StreamResult[]): UrlContextMetadata | undefined {
+  const urlMetadata = results.flatMap((result) => result.urlContextMetadata?.urlMetadata ?? []);
+  return urlMetadata.length > 0 ? { urlMetadata } : undefined;
+}
+
+function aggregateStreamResults(
+  results: readonly StreamResult[],
+  text: string,
+  warnings: readonly string[],
+): StreamResult {
+  return pickDefined({
+    text,
+    textByWave: results.flatMap((result) => result.textByWave),
+    thoughtText: results.map((result) => result.thoughtText).join('\n'),
+    parts: results.flatMap((result) => result.parts),
+    toolsUsed: [...new Set(results.flatMap((result) => result.toolsUsed))],
+    toolsUsedOccurrences: results.flatMap((result) => result.toolsUsedOccurrences),
+    functionCalls: results.flatMap((result) => result.functionCalls),
+    toolEvents: results.flatMap((result) => result.toolEvents),
+    hadCandidate: results.some((result) => result.hadCandidate),
+    groundingMetadata: mergeGroundingMetadata(results),
+    urlContextMetadata: mergeUrlContextMetadata(results),
+    finishMessage: warnings.length > 0 ? warnings.join('\n') : undefined,
+  });
+}
+
+async function runDeepResearchTurn(
+  ctx: ServerContext,
+  label: string,
+  contents: string,
+  config: Parameters<typeof buildGenerateContentConfig>[0],
+): Promise<{ result: CallToolResult; streamResult: StreamResult }> {
+  return executeToolStream(ctx, 'research', label, () =>
+    getAI().models.generateContentStream({
+      model: MODEL,
+      contents,
+      config: buildGenerateContentConfig(config, ctx.mcpReq.signal),
+    }),
+  );
+}
+
+async function runDeepResearchPlan(
+  args: {
+    deliverable?: string | undefined;
+    topic: string;
+    searchDepth: number;
+    thinkingLevel?: ResearchInput['thinkingLevel'] | undefined;
+    thinkingBudget?: number | undefined;
+    urls?: readonly string[] | undefined;
+    maxOutputTokens?: number | undefined;
+    safetySettings?: ResearchInput['safetySettings'] | undefined;
+    additionalTools?: ResearchInput['additionalTools'] | undefined;
+  },
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const warnings: string[] = [];
+  const results: StreamResult[] = [];
+  const progress = new ProgressReporter(ctx, AGENTIC_SEARCH_TOOL_LABEL);
+  await progress.send(0, undefined, 'Planning deep research');
+  await ctx.mcpReq.log('info', 'Agentic search requested');
+  log.info('Agentic search requested', {
+    searchDepth: args.searchDepth,
+    urlCount: args.urls?.length ?? 0,
+  });
+
+  const planTurn = await runDeepResearchTurn(
+    ctx,
+    'Research plan',
+    `Return JSON only as {"queries":["..."]}. Produce ${String(Math.min(args.searchDepth, 5))} focused public web search queries for:\n${args.topic}`,
+    {
+      systemInstruction: 'Plan retrieval queries. Do not answer the research question.',
+      thinkingLevel: 'MEDIUM',
+      maxOutputTokens: 1024,
+      safetySettings: args.safetySettings,
+    },
+  );
+  if (planTurn.result.isError) return planTurn.result;
+  results.push(planTurn.streamResult);
+
+  const subQueries = parsePlannedSubQueries(
+    planTurn.streamResult.text,
+    args.topic,
+    args.searchDepth,
+  );
+  const maxRetrievalTurns = Math.min(
+    subQueries.length,
+    args.searchDepth,
+    MAX_DEEP_RESEARCH_TURNS - (args.searchDepth >= 4 ? 3 : 2),
+  );
+  if (maxRetrievalTurns < subQueries.length) {
+    warnings.push('deep research turn budget exceeded; returning partial retrieval coverage');
+  }
+
+  const resolvedRetrieval = await resolveOrchestration(
+    {
+      builtInToolNames:
+        (args.urls?.length ?? 0) > 0
+          ? (['googleSearch', 'urlContext'] as const)
+          : (['googleSearch'] as const),
+      urls: args.urls,
+      includeServerSideToolInvocations: true,
+      ...(args.additionalTools
+        ? { additionalTools: args.additionalTools as import('@google/genai').ToolListUnion }
+        : {}),
+    },
+    ctx,
+    'agentic_search',
+  );
+  if (resolvedRetrieval.error) return resolvedRetrieval.error;
+
+  for (const [index, query] of subQueries.slice(0, maxRetrievalTurns).entries()) {
+    if (ctx.mcpReq.signal.aborted) {
+      warnings.push('deep research aborted; returning partial aggregated result');
+      break;
+    }
+    await progress.send(
+      Math.min(80, 10 + index * 15),
+      undefined,
+      `Retrieving source set ${String(index + 1)}`,
+    );
+    const prompt = buildGroundedAnswerPrompt(query, args.urls);
+    const turn = await runDeepResearchTurn(
+      ctx,
+      `Research retrieval ${String(index + 1)}`,
+      prompt.promptText,
+      {
+        systemInstruction: prompt.systemInstruction,
+        thinkingLevel: args.thinkingLevel,
+        thinkingBudget: args.thinkingBudget,
+        maxOutputTokens: args.maxOutputTokens,
+        safetySettings: args.safetySettings,
+        tools: resolvedRetrieval.config.tools,
+        toolConfig: resolvedRetrieval.config.toolConfig,
+      },
+    );
+    if (turn.result.isError) return turn.result;
+    results.push(turn.streamResult);
+  }
+
+  const retrievalSummaries = results
+    .slice(1)
+    .map((result, index) => `## Retrieval ${String(index + 1)}\n${result.text}`)
+    .join('\n\n');
+  const resolvedSynthesis = await resolveOrchestration(
+    {
+      builtInToolNames: args.searchDepth >= 4 ? (['codeExecution'] as const) : undefined,
+      includeServerSideToolInvocations: true,
+    },
+    ctx,
+    'agentic_search',
+  );
+  if (resolvedSynthesis.error) return resolvedSynthesis.error;
+
+  const synthesisPrompt = buildAgenticResearchPrompt({
+    deliverable: args.deliverable,
+    searchDepth: args.searchDepth,
+    topic: `${args.topic}\n\nRetrieved evidence summaries:\n${retrievalSummaries}`,
+    urls: args.urls,
+  });
+  const synthesisTurn = await runDeepResearchTurn(
+    ctx,
+    'Research synthesis',
+    synthesisPrompt.promptText,
+    {
+      systemInstruction: synthesisPrompt.systemInstruction,
+      thinkingLevel: args.thinkingLevel,
+      thinkingBudget: args.thinkingBudget,
+      maxOutputTokens: args.maxOutputTokens,
+      safetySettings: args.safetySettings,
+      tools: resolvedSynthesis.config.tools,
+      toolConfig: resolvedSynthesis.config.toolConfig,
+    },
+  );
+  if (synthesisTurn.result.isError) return synthesisTurn.result;
+  results.push(synthesisTurn.streamResult);
+
+  if (args.searchDepth >= 4 && results.length < MAX_DEEP_RESEARCH_TURNS) {
+    const contradictionTurn = await runDeepResearchTurn(
+      ctx,
+      'Research contradiction check',
+      `Review this synthesis for source disagreements. Return only claims that are partially supported or disputed.\n\n${synthesisTurn.streamResult.text}`,
+      {
+        systemInstruction:
+          'Flag contradictions conservatively. Do not add new source claims without retrieved evidence.',
+        thinkingLevel: args.thinkingLevel,
+        maxOutputTokens: args.maxOutputTokens,
+        safetySettings: args.safetySettings,
+      },
+    );
+    if (contradictionTurn.result.isError) return contradictionTurn.result;
+    results.push(contradictionTurn.streamResult);
+  }
+
+  const aggregate = aggregateStreamResults(results, synthesisTurn.streamResult.text, warnings);
+  const built = buildAgenticSearchResult(
+    aggregate,
+    synthesisTurn.streamResult.text,
+    ctx,
+    args.searchDepth,
+    warnings,
+    maxRetrievalTurns,
+  );
+  const overlay = built.resultMod(synthesisTurn.result);
+  return {
+    ...synthesisTurn.result,
+    ...overlay,
+    structuredContent: built.structuredContent,
   };
 }
 
@@ -550,6 +929,24 @@ async function agenticSearchWork(
   }
 
   const enrichedTopic = await enrichTopicWithSampling(topic, ctx);
+
+  if (searchDepth >= 3) {
+    return runDeepResearchPlan(
+      {
+        deliverable,
+        topic: enrichedTopic,
+        searchDepth,
+        thinkingLevel,
+        thinkingBudget,
+        urls,
+        maxOutputTokens,
+        safetySettings,
+        additionalTools,
+      },
+      ctx,
+    );
+  }
+
   const prompt = buildAgenticResearchPrompt({
     deliverable,
     searchDepth,
@@ -678,6 +1075,7 @@ function buildResearchStructuredContent(
         ? structured.warnings.filter((warning): warning is string => typeof warning === 'string')
         : undefined,
     ),
+    ...(structured.status ? { status: structured.status } : {}),
     mode: args.mode,
     summary: extractResearchSummary(structured),
     sources: Array.isArray(structured.sources) ? structured.sources : [],
@@ -686,6 +1084,9 @@ function buildResearchStructuredContent(
     ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
     ...(structured.toolsUsed ? { toolsUsed: structured.toolsUsed } : {}),
     ...(structured.grounded !== undefined ? { grounded: structured.grounded } : {}),
+    ...(structured.groundingSignals ? { groundingSignals: structured.groundingSignals } : {}),
+    ...(structured.findings ? { findings: structured.findings } : {}),
+    ...(structured.claimLinkedSources ? { claimLinkedSources: structured.claimLinkedSources } : {}),
     ...(structured.urlContextUsed !== undefined
       ? { urlContextUsed: structured.urlContextUsed }
       : {}),

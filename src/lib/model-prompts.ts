@@ -68,7 +68,7 @@ export function buildGroundedAnswerPrompt(
     {
       promptText,
       systemInstruction:
-        'Answer using retrieved sources from this turn. Prefer referencing sources by their URL when directly supported by retrieved content. If no sources were retrieved, say so and label the answer as unverified.',
+        'Answer using retrieved sources from this turn. Prefer referencing sources by their URL when directly supported by retrieved content. If no sources were retrieved, say so and label the answer as unverified. Output order: 1) ## Findings - one bullet per claim formatted `- claim - [URL1, URL2]`; 2) ## Synthesis - prose derived only from Findings; 3) ## Open Questions - unverified leads.',
     },
     cacheName,
   );
@@ -120,7 +120,7 @@ export function buildFileAnalysisPrompt(args: {
           `Task: ${args.goal}`,
         ]),
         systemInstruction:
-          'Answer the goal using content retrieved from the listed URLs. Cite the URL each claim comes from. If a URL fails to retrieve, list it under "Unretrieved" and do not guess its contents.',
+          'Answer the goal using content retrieved from the listed URLs. Cite the URL each claim comes from. If a URL fails to retrieve, list it under "Unretrieved" and do not guess its contents. If no URL retrieved successfully, respond with exactly: "No URLs retrieved; cannot answer."',
       },
       args.cacheName,
     );
@@ -262,12 +262,12 @@ export function buildAgenticResearchPrompt(args: {
       systemInstruction: joinNonEmpty([
         'Research with Google Search, then write a grounded Markdown report.',
         deepMode
-          ? 'Search multiple angles and use Code Execution for arithmetic, ranking, or consistency checks.'
+          ? 'You MAY issue multiple searches and MAY use Code Execution when the deliverable requires arithmetic, ranking, or consistency checks. If you did not use a capability, do not imply that you did.'
           : undefined,
         args.deliverable
           ? `Preferred shape: ${args.deliverable}. If the evidence does not support it, use the best-supported structure and say why.`
           : undefined,
-        'Cite source URLs inline for retrieved claims. Treat planning notes as leads, not evidence. Flag unverified claims explicitly. Include dates for time-sensitive facts.',
+        'Cite source URLs inline for retrieved claims. Treat planning notes as leads, not evidence. Flag unverified claims explicitly. Include dates for time-sensitive facts. Output order: 1) ## Findings - one bullet per claim formatted `- claim - [URL1, URL2]`; 2) ## Synthesis - prose derived only from Findings; 3) ## Open Questions - unverified leads.',
       ]),
     },
     args.cacheName,

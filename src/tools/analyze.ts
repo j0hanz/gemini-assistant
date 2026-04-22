@@ -591,9 +591,11 @@ function buildAnalyzeStructuredContent(
 
   return pickDefined({
     ...base,
+    status: typeof structured.status === 'string' ? structured.status : base.status,
     kind: 'summary' as const,
     targetKind: args.targetKind,
     summary: typeof structured.summary === 'string' ? structured.summary : '',
+    groundingSignals: structured.groundingSignals,
     urlMetadata: structured.urlMetadata,
     analyzedPaths: args.targetKind === 'multi' ? requireAnalyzeFilePaths(args) : undefined,
   }) as unknown as z.infer<typeof AnalyzeOutputSchema>;

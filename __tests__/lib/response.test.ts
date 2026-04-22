@@ -13,8 +13,12 @@ import {
   collectGroundingCitations,
   collectSearchEntryPoint,
   collectUrlMetadata,
+  computeGroundingSignals,
   createResourceLink,
+  deriveFindingsFromCitations,
+  deriveOverallStatus,
   extractTextOrError,
+  filterClaimLinkedSourceDetails,
   formatCountLabel,
   mergeSourceDetails,
   safeValidateStructuredContent,
@@ -202,8 +206,13 @@ describe('collectGroundedSourceDetails', () => {
     });
 
     assert.deepStrictEqual(sources, [
-      { origin: 'googleSearch', title: 'Example', url: 'https://example.com' },
-      { origin: 'googleSearch', url: 'https://example.org' },
+      {
+        domain: 'example.com',
+        origin: 'googleSearch',
+        title: 'Example',
+        url: 'https://example.com',
+      },
+      { domain: 'example.org', origin: 'googleSearch', url: 'https://example.org' },
     ]);
   });
 
@@ -217,7 +226,12 @@ describe('collectGroundedSourceDetails', () => {
     });
 
     assert.deepStrictEqual(sources, [
-      { origin: 'googleSearch', title: 'First', url: 'https://example.com' },
+      {
+        domain: 'example.com',
+        origin: 'googleSearch',
+        title: 'First',
+        url: 'https://example.com',
+      },
     ]);
   });
 
@@ -230,7 +244,7 @@ describe('collectGroundedSourceDetails', () => {
     );
 
     assert.deepStrictEqual(sources, [
-      { origin: 'both', title: 'Both', url: 'https://example.com' },
+      { domain: 'example.com', origin: 'both', title: 'Both', url: 'https://example.com' },
     ]);
   });
 });
@@ -249,6 +263,107 @@ describe('mergeSourceDetails', () => {
       { origin: 'both', title: 'Grounded', url: 'https://example.com' },
       { origin: 'urlContext', url: 'https://example.org' },
     ]);
+  });
+});
+
+describe('grounding signal helpers', () => {
+  it('computes confidence from citations and retrieval metadata', () => {
+    assert.strictEqual(computeGroundingSignals({}, [], [], []).confidence, 'none');
+    assert.strictEqual(
+      computeGroundingSignals(
+        {},
+        [],
+        [{ url: 'https://example.com', status: 'URL_RETRIEVAL_STATUS_SUCCESS' }],
+        [{ origin: 'urlContext', url: 'https://example.com' }],
+      ).confidence,
+      'low',
+    );
+    assert.strictEqual(
+      computeGroundingSignals(
+        {},
+        [{ text: 'Claim', sourceUrls: ['https://example.com'] }],
+        [],
+        [{ origin: 'googleSearch', url: 'https://example.com' }],
+      ).confidence,
+      'medium',
+    );
+    assert.strictEqual(
+      computeGroundingSignals(
+        {},
+        [
+          { text: 'A', sourceUrls: ['https://example.com/a'] },
+          { text: 'B', sourceUrls: ['https://example.com/b'] },
+          { text: 'C', sourceUrls: ['https://example.com/c'] },
+        ],
+        [],
+        [],
+      ).confidence,
+      'high',
+    );
+  });
+
+  it('derives findings and claim-linked source details', () => {
+    const citations = [
+      { text: 'Claim', sourceUrls: ['https://example.com/a'] },
+      { text: 'Claim', sourceUrls: ['https://example.com/a'] },
+      { text: 'Other', sourceUrls: ['https://example.com/b'] },
+    ];
+
+    assert.deepStrictEqual(deriveFindingsFromCitations(citations), [
+      {
+        claim: 'Claim',
+        supportingSourceUrls: ['https://example.com/a'],
+        supportText: 'Claim',
+        verificationStatus: 'supported',
+      },
+      {
+        claim: 'Other',
+        supportingSourceUrls: ['https://example.com/b'],
+        supportText: 'Other',
+        verificationStatus: 'supported',
+      },
+    ]);
+    assert.deepStrictEqual(
+      filterClaimLinkedSourceDetails(
+        [
+          { url: 'https://example.com/a' },
+          { url: 'https://example.com/unused' },
+          { url: 'https://example.com/b' },
+        ],
+        citations,
+      ),
+      [{ url: 'https://example.com/a' }, { url: 'https://example.com/b' }],
+    );
+  });
+
+  it('derives overall status from grounding confidence', () => {
+    assert.strictEqual(
+      deriveOverallStatus({
+        retrievalPerformed: false,
+        urlContextUsed: false,
+        groundingSupportsCount: 0,
+        confidence: 'none',
+      }),
+      'ungrounded',
+    );
+    assert.strictEqual(
+      deriveOverallStatus({
+        retrievalPerformed: true,
+        urlContextUsed: true,
+        groundingSupportsCount: 0,
+        confidence: 'low',
+      }),
+      'partially_grounded',
+    );
+    assert.strictEqual(
+      deriveOverallStatus({
+        retrievalPerformed: true,
+        urlContextUsed: false,
+        groundingSupportsCount: 3,
+        confidence: 'high',
+      }),
+      'grounded',
+    );
   });
 });
 

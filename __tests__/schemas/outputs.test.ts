@@ -116,9 +116,28 @@ describe('ResearchOutputSchema', () => {
       urlContextUsed: true,
       urlContextSources: ['https://example.com/context'],
       sourceDetails: [
-        { origin: 'both', title: 'Example', url: 'https://example.com' },
-        { origin: 'urlContext', url: 'https://example.com/context' },
+        { domain: 'example.com', origin: 'both', title: 'Example', url: 'https://example.com' },
+        { domain: 'example.com', origin: 'urlContext', url: 'https://example.com/context' },
       ],
+      status: 'grounded',
+      groundingSignals: {
+        retrievalPerformed: true,
+        urlContextUsed: true,
+        groundingSupportsCount: 1,
+        supportedFindingsCount: 1,
+        unsupportedFindingsCount: 0,
+        claimCoverage: 1,
+        confidence: 'medium',
+      },
+      findings: [
+        {
+          claim: 'Supported claim',
+          supportingSourceUrls: ['https://example.com'],
+          supportText: 'Supported claim',
+          verificationStatus: 'supported',
+        },
+      ],
+      claimLinkedSources: ['https://example.com'],
       computations: [
         {
           id: 'exec-1',

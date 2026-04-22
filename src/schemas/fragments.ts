@@ -134,6 +134,7 @@ export const UrlMetadataEntrySchema = z.strictObject(urlMetadataEntryFields);
 
 const sourceDetailFields = {
   origin: z.enum(['googleSearch', 'urlContext', 'both']).optional().describe('Source provenance'),
+  domain: z.string().optional().describe('Source hostname derived from the URL'),
   title: z.string().describe('Source title when Gemini provides one').optional(),
   url: PublicHttpUrlSchema.describe('Source URL'),
 };
@@ -151,6 +152,31 @@ const groundingCitationFields = {
 };
 
 export const GroundingCitationSchema = z.strictObject(groundingCitationFields);
+
+export const FindingSchema = z.strictObject({
+  claim: z.string().describe('Claim text attributed to one or more sources'),
+  supportingSourceUrls: publicHttpUrlArray({
+    description: 'URLs supporting this claim',
+    itemDescription: 'Public source URL',
+  }),
+  supportText: z.string().optional().describe('Source-backed support text for this finding'),
+  verificationStatus: z
+    .enum(['supported', 'partial', 'unverified'])
+    .optional()
+    .describe('Claim verification status derived from available grounding evidence'),
+});
+
+export const GroundingSignalsSchema = z.strictObject({
+  retrievalPerformed: z.boolean().describe('Whether any source retrieval metadata was surfaced'),
+  urlContextUsed: z.boolean().describe('Whether URL Context retrieval succeeded'),
+  groundingSupportsCount: z.int().min(0).describe('Count of claim-level grounding supports'),
+  supportedFindingsCount: z.int().min(0).optional().describe('Supported finding count'),
+  unsupportedFindingsCount: z.int().min(0).optional().describe('Unsupported finding count'),
+  claimCoverage: z.number().min(0).max(1).optional().describe('Supported claim ratio'),
+  confidence: z
+    .enum(['high', 'medium', 'low', 'none'])
+    .describe('Grounding confidence derived from retrieval and citation coverage'),
+});
 
 const searchEntryPointFields = {
   renderedContent: z

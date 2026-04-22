@@ -162,7 +162,7 @@ export const DISCOVERY_ENTRIES = [
       'additionalTools?',
     ],
     returns:
-      'A grounded summary with Google Search sources, URL Context provenance, warnings, and tool-usage details from the multi-step research path.',
+      'A summary with grounding status, grounding signals, claim-linked findings, Google Search sources, URL Context provenance, warnings, and tool-usage details from the multi-step research path.',
     limitations: [
       'Mode defaults to quick; this contract does not accept legacy top-level query or topic fields.',
       'Grounding uses Google Search and optional URL Context, not persistent File Search indexes.',

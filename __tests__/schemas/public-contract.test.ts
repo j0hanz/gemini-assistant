@@ -89,11 +89,28 @@ describe('public contract schemas', () => {
     assert.ok(
       ResearchOutputSchema.safeParse({
         ...base,
+        status: 'partially_grounded',
         mode: 'quick',
         summary: 'x',
         sources: [],
         urlContextUsed: false,
-        sourceDetails: [{ origin: 'urlContext', url: 'https://example.com' }],
+        groundingSignals: {
+          retrievalPerformed: true,
+          urlContextUsed: true,
+          groundingSupportsCount: 0,
+          confidence: 'low',
+        },
+        findings: [
+          {
+            claim: 'x',
+            supportingSourceUrls: ['https://example.com'],
+            verificationStatus: 'supported',
+          },
+        ],
+        claimLinkedSources: ['https://example.com'],
+        sourceDetails: [
+          { domain: 'example.com', origin: 'urlContext', url: 'https://example.com' },
+        ],
         urlContextSources: ['https://example.com'],
       }).success,
       'research output should parse',

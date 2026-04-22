@@ -307,11 +307,7 @@ function toolEvent(
     [K in Exclude<keyof ToolEvent, 'kind'>]?: ToolEvent[K] | undefined;
   },
 ): ToolEvent {
-  const ev: Record<string, unknown> = { kind };
-  for (const [k, v] of Object.entries(fields)) {
-    if (v !== undefined) ev[k] = v;
-  }
-  return ev as unknown as ToolEvent;
+  return pickDefined({ kind, ...fields });
 }
 
 async function maybeReportBuiltInToolProgress(
@@ -686,6 +682,21 @@ function appendStreamPart(state: StreamProcessingState, part: Part): void {
   state.parts.push(part);
 }
 
+type PartHandler = (
+  ctx: ServerContext,
+  state: StreamProcessingState,
+  msg: ProgressMessageFormatter,
+  part: Part,
+) => Promise<boolean>;
+
+const PART_HANDLERS: readonly PartHandler[] = [
+  handleExecutableCodePart,
+  handleCodeExecutionResultPart,
+  handleToolProtocolPart,
+  handleFunctionProtocolPart,
+  handleThoughtOrSignaturePart,
+];
+
 async function handleStreamPart(
   ctx: ServerContext,
   state: StreamProcessingState,
@@ -694,44 +705,34 @@ async function handleStreamPart(
 ): Promise<void> {
   appendStreamPart(state, part);
 
-  if (await handleExecutableCodePart(ctx, state, msg, part)) {
-    return;
-  }
-
-  if (await handleCodeExecutionResultPart(ctx, state, msg, part)) {
-    return;
-  }
-
-  if (await handleToolProtocolPart(ctx, state, msg, part)) {
-    return;
-  }
-
-  if (await handleFunctionProtocolPart(ctx, state, msg, part)) {
-    return;
-  }
-
-  if (await handleThoughtOrSignaturePart(ctx, state, msg, part)) {
-    return;
+  for (const handler of PART_HANDLERS) {
+    if (await handler(ctx, state, msg, part)) return;
   }
 
   await handleTextPart(ctx, state, msg, part);
 }
 
 function toolsUsedOccurrences(toolEvents: ToolEvent[]): string[] {
-  return toolEvents.flatMap((event) => {
-    if (event.kind === 'function_call' || event.kind === 'function_response') {
-      return event.name ? [event.name] : [];
-    }
-    if (event.kind === 'executable_code' || event.kind === 'code_execution_result') {
-      return ['codeExecution'];
-    }
-    if (event.kind === 'tool_call' || event.kind === 'tool_response') {
-      const normalized = normalizeToolName(event.toolType);
-      return normalized ? [normalized] : [];
-    }
-    return [];
-  });
+  return toolEvents.flatMap((event) => TOOL_EVENT_NAME_EXTRACTORS[event.kind](event));
 }
+
+const TOOL_EVENT_NAME_EXTRACTORS: Record<ToolEvent['kind'], (e: ToolEvent) => string[]> = {
+  function_call: (e) => (e.name ? [e.name] : []),
+  function_response: (e) => (e.name ? [e.name] : []),
+  executable_code: () => ['codeExecution'],
+  code_execution_result: () => ['codeExecution'],
+  tool_call: (e) => {
+    const normalized = normalizeToolName(e.toolType);
+    return normalized ? [normalized] : [];
+  },
+  tool_response: (e) => {
+    const normalized = normalizeToolName(e.toolType);
+    return normalized ? [normalized] : [];
+  },
+  part: () => [],
+  thought: () => [],
+  model_text: () => [],
+};
 
 function finalizeStreamResult(state: StreamProcessingState): StreamResult {
   const derivedPromptBlockReason = state.promptBlockReason ?? state.promptFeedback?.blockReason;

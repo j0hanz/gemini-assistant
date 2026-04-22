@@ -12,43 +12,61 @@ export interface GeminiRequestPreflight {
   fileSearchStoreNames?: readonly string[] | undefined;
 }
 
-export function validateGeminiRequest({
-  hasExistingSession,
-  jsonMode,
-  responseSchema,
-  sessionId,
-  activeCapabilities,
-  fileSearchStoreNames,
-}: GeminiRequestPreflight): CallToolResult | undefined {
-  const usesBuiltInTool =
-    activeCapabilities.has('googleSearch') ||
-    activeCapabilities.has('urlContext') ||
-    activeCapabilities.has('codeExecution') ||
-    activeCapabilities.has('fileSearch');
+type PreflightCheck = (req: GeminiRequestPreflight) => CallToolResult | undefined;
 
-  if ((jsonMode ?? responseSchema !== undefined) && usesBuiltInTool) {
+function usesBuiltInTool(caps: ReadonlySet<ActiveCapability>): boolean {
+  return (
+    caps.has('googleSearch') ||
+    caps.has('urlContext') ||
+    caps.has('codeExecution') ||
+    caps.has('fileSearch')
+  );
+}
+
+const disallowSchemaWithBuiltIn: PreflightCheck = (req) => {
+  const schemaRequested = req.jsonMode ?? req.responseSchema !== undefined;
+  if (schemaRequested && usesBuiltInTool(req.activeCapabilities)) {
     return new AppError(
       'chat',
       'chat: responseSchema cannot be combined with built-in tools (googleSearch, urlContext, codeExecution, fileSearch)',
     ).toToolResult();
   }
+  return undefined;
+};
 
+const disallowEmptyFileSearchStore: PreflightCheck = (req) => {
   if (
-    activeCapabilities.has('fileSearch') &&
-    fileSearchStoreNames?.some((name) => name.trim().length === 0)
+    req.activeCapabilities.has('fileSearch') &&
+    req.fileSearchStoreNames?.some((name) => name.trim().length === 0)
   ) {
     return new AppError(
       'chat',
       'chat: fileSearchStoreNames cannot contain empty values',
     ).toToolResult();
   }
+  return undefined;
+};
 
-  if (responseSchema && sessionId && hasExistingSession) {
+const disallowSchemaInExistingSession: PreflightCheck = (req) => {
+  if (req.responseSchema && req.sessionId && req.hasExistingSession) {
     return new AppError(
       'chat',
       'chat: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
     ).toToolResult();
   }
+  return undefined;
+};
 
+const CHECKS: readonly PreflightCheck[] = [
+  disallowSchemaWithBuiltIn,
+  disallowEmptyFileSearchStore,
+  disallowSchemaInExistingSession,
+];
+
+export function validateGeminiRequest(req: GeminiRequestPreflight): CallToolResult | undefined {
+  for (const check of CHECKS) {
+    const result = check(req);
+    if (result) return result;
+  }
   return undefined;
 }

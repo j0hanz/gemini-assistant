@@ -78,6 +78,17 @@ interface UploadedFile {
   displayPath: string;
 }
 
+type UploadedHandle = Awaited<ReturnType<ReturnType<typeof getAI>['files']['upload']>>;
+
+function assertCompleteUploadedHandle(
+  uploaded: UploadedHandle,
+  displayPath: string,
+): asserts uploaded is UploadedHandle & { uri: string; mimeType: string; name: string } {
+  if (!uploaded.uri || !uploaded.mimeType || !uploaded.name) {
+    throw new Error(`File upload returned an incomplete file handle: ${displayPath}`);
+  }
+}
+
 export async function uploadFile(
   filePath: string,
   signal: AbortSignal,
@@ -87,8 +98,9 @@ export async function uploadFile(
 
   const fileStat = await stat(resolvedPath);
   if (fileStat.size > MAX_FILE_SIZE) {
+    const limitMb = MAX_FILE_SIZE / 1024 / 1024;
     throw new Error(
-      `File exceeds 20MB limit: ${displayPath} (${(fileStat.size / 1024 / 1024).toFixed(1)}MB)`,
+      `File exceeds ${limitMb}MB limit: ${displayPath} (${(fileStat.size / 1024 / 1024).toFixed(1)}MB)`,
     );
   }
 
@@ -99,9 +111,7 @@ export async function uploadFile(
     { signal },
   );
 
-  if (!uploaded.uri || !uploaded.mimeType || !uploaded.name) {
-    throw new Error(`File upload returned an incomplete file handle: ${displayPath}`);
-  }
+  assertCompleteUploadedHandle(uploaded, displayPath);
 
   return {
     name: uploaded.name,

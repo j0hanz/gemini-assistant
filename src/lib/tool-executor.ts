@@ -19,10 +19,6 @@ type StreamResponseBuilder<T extends Record<string, unknown>> = (
   reportMessage?: string;
 };
 
-interface ExecutionOptions {
-  reportTerminalProgress?: boolean;
-}
-
 export class ToolExecutor {
   constructor(private readonly scopedLogger: ScopedLogger) {}
 
@@ -33,7 +29,7 @@ export class ToolExecutor {
     mode: 'sync' | 'stream',
     args: unknown,
     work: () => Promise<{ result: CallToolResult; reportMessage?: string | undefined }>,
-    options: ExecutionOptions = {},
+    reportTerminalProgress: boolean,
   ): Promise<CallToolResult> {
     const traceId = randomUUID();
     return await logContext.run(traceId, async () => {
@@ -43,7 +39,6 @@ export class ToolExecutor {
       const argsField = isStream
         ? undefined
         : maybeSummarizePayload(args, this.scopedLogger.getVerbosePayloads());
-      const reportProgress = options.reportTerminalProgress !== false;
 
       this.scopedLogger.info('Execution started', {
         toolName,
@@ -62,7 +57,7 @@ export class ToolExecutor {
           result: maybeSummarizePayload(result, this.scopedLogger.getVerbosePayloads()),
         });
 
-        if (reportProgress) {
+        if (reportTerminalProgress) {
           if (result.isError) {
             await reportFailure(ctx, toolLabel, extractTextContent(result.content));
           } else {
@@ -88,7 +83,7 @@ export class ToolExecutor {
           args: argsField,
         });
 
-        if (reportProgress) {
+        if (reportTerminalProgress) {
           await reportFailure(ctx, toolLabel, appError.message);
         }
         return appError.toToolResult();
@@ -102,7 +97,27 @@ export class ToolExecutor {
     toolLabel: string,
     args: TArgs,
     work: (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
-    options?: ExecutionOptions,
+  ): Promise<CallToolResult> {
+    return this.runInternalSync(ctx, toolName, toolLabel, args, work, true);
+  }
+
+  async runSilent<TArgs>(
+    ctx: ServerContext,
+    toolName: string,
+    toolLabel: string,
+    args: TArgs,
+    work: (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
+  ): Promise<CallToolResult> {
+    return this.runInternalSync(ctx, toolName, toolLabel, args, work, false);
+  }
+
+  private async runInternalSync<TArgs>(
+    ctx: ServerContext,
+    toolName: string,
+    toolLabel: string,
+    args: TArgs,
+    work: (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
+    reportTerminalProgress: boolean,
   ): Promise<CallToolResult> {
     return this.executeWithTracing(
       ctx,
@@ -114,7 +129,7 @@ export class ToolExecutor {
         const result = await work(args, ctx);
         return { result };
       },
-      options,
+      reportTerminalProgress,
     );
   }
 
@@ -124,7 +139,6 @@ export class ToolExecutor {
     toolLabel: string,
     streamGenerator: () => Promise<AsyncGenerator<import('@google/genai').GenerateContentResponse>>,
     responseBuilder: StreamResponseBuilder<T> = () => ({}),
-    options?: ExecutionOptions,
   ): Promise<CallToolResult> {
     return this.executeWithTracing(
       ctx,
@@ -187,7 +201,7 @@ export class ToolExecutor {
 
         return { result: mergedResult, reportMessage: built.reportMessage };
       },
-      options,
+      true,
     );
   }
 }

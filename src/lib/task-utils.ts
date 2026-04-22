@@ -494,13 +494,12 @@ export function registerTaskTool<TArgs>(
       validateStructuredToolResult(
         name,
         config.outputSchema,
-        await executor.run(
+        await executor.runSilent(
           ctx,
           name,
           toolLabel,
           args,
           work as unknown as (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
-          { reportTerminalProgress: false },
         ),
       ),
     ),

@@ -19,28 +19,41 @@ const PRE_STREAM_PROGRESS_CAP = 10;
 
 // ── Throttle State ────────────────────────────────────────────────────
 
-const lastEmitTime = new Map<string, number>();
-const lastTaskStatusTime = new Map<string, number>();
-let terminalProgressContexts = new WeakSet<ServerContext>();
+class ProgressCoordinator {
+  readonly lastEmitTime = new Map<string, number>();
+  readonly lastTaskStatusTime = new Map<string, number>();
+  terminalProgressContexts = new WeakSet<ServerContext>();
+  private readonly sweepTimer: NodeJS.Timeout;
 
-function sweepStaleEntries(): void {
-  const cutoff = Date.now() - PROGRESS_ENTRY_TTL_MS;
-  for (const [key, ts] of lastEmitTime) {
-    if (ts < cutoff) lastEmitTime.delete(key);
+  constructor() {
+    this.sweepTimer = setInterval(() => {
+      this.sweep();
+    }, PROGRESS_SWEEP_INTERVAL_MS);
+    this.sweepTimer.unref();
   }
-  for (const [key, ts] of lastTaskStatusTime) {
-    if (ts < cutoff) lastTaskStatusTime.delete(key);
+
+  private sweep(): void {
+    const cutoff = Date.now() - PROGRESS_ENTRY_TTL_MS;
+    for (const [key, ts] of this.lastEmitTime) {
+      if (ts < cutoff) this.lastEmitTime.delete(key);
+    }
+    for (const [key, ts] of this.lastTaskStatusTime) {
+      if (ts < cutoff) this.lastTaskStatusTime.delete(key);
+    }
+  }
+
+  reset(): void {
+    this.lastEmitTime.clear();
+    this.lastTaskStatusTime.clear();
+    this.terminalProgressContexts = new WeakSet<ServerContext>();
   }
 }
 
-const progressSweepTimer = setInterval(sweepStaleEntries, PROGRESS_SWEEP_INTERVAL_MS);
-progressSweepTimer.unref();
+const coordinator = new ProgressCoordinator();
 
 /** Reset the progress throttle state. Intended for testing. */
 export function resetProgressThrottle(): void {
-  lastEmitTime.clear();
-  lastTaskStatusTime.clear();
-  terminalProgressContexts = new WeakSet<ServerContext>();
+  coordinator.reset();
 }
 
 // ── Internals ─────────────────────────────────────────────────────────
@@ -55,10 +68,10 @@ async function bridgeProgressToTask(
 
   const now = Date.now();
   if (!force) {
-    const lastUpdate = lastTaskStatusTime.get(task.id) ?? 0;
+    const lastUpdate = coordinator.lastTaskStatusTime.get(task.id) ?? 0;
     if (now - lastUpdate < TASK_STATUS_INTERVAL_MS) return;
   }
-  lastTaskStatusTime.set(task.id, now);
+  coordinator.lastTaskStatusTime.set(task.id, now);
 
   try {
     await task.store.updateTaskStatus(task.id, 'working', message);
@@ -90,7 +103,7 @@ function shouldThrottleProgress(
     return false;
   }
 
-  const lastEmit = lastEmitTime.get(buildThrottleKey(progressToken, message, progress));
+  const lastEmit = coordinator.lastEmitTime.get(buildThrottleKey(progressToken, message, progress));
   return lastEmit !== undefined && now - lastEmit < MIN_PROGRESS_INTERVAL_MS;
 }
 
@@ -128,14 +141,14 @@ async function isCancelledTaskContext(ctx: ServerContext): Promise<boolean> {
 }
 
 function clearProgressState(progressToken: string | number, taskId?: string): void {
-  for (const key of lastEmitTime.keys()) {
+  for (const key of coordinator.lastEmitTime.keys()) {
     if (key.startsWith(`${String(progressToken)}:`)) {
-      lastEmitTime.delete(key);
+      coordinator.lastEmitTime.delete(key);
     }
   }
 
   if (taskId) {
-    lastTaskStatusTime.delete(taskId);
+    coordinator.lastTaskStatusTime.delete(taskId);
   }
 }
 
@@ -145,17 +158,17 @@ function markProgressEmission(
   progress: number,
   now: number,
 ): void {
-  lastEmitTime.set(buildThrottleKey(progressToken, message, progress), now);
+  coordinator.lastEmitTime.set(buildThrottleKey(progressToken, message, progress), now);
 }
 
 function markTerminalProgress(ctx: ServerContext, isTerminal: boolean): void {
   if (isTerminal) {
-    terminalProgressContexts.add(ctx);
+    coordinator.terminalProgressContexts.add(ctx);
   }
 }
 
 export function hasTerminalProgress(ctx: ServerContext): boolean {
-  return terminalProgressContexts.has(ctx);
+  return coordinator.terminalProgressContexts.has(ctx);
 }
 
 function scaleLogicalStep(current: number, total: number): number {

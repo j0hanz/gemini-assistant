@@ -13,8 +13,12 @@ function hasHttpStatus(err: unknown): err is Error & { status: number } {
   return err instanceof Error && 'status' in err && typeof err.status === 'number';
 }
 
-function isAbortError(err: unknown): boolean {
-  return err instanceof Error && err.name === 'AbortError';
+export function isAbortError(err: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  return (
+    (err instanceof Error && err.name === 'AbortError') ||
+    (err instanceof DOMException && err.name === 'AbortError')
+  );
 }
 
 export class AppError extends Error {
@@ -53,8 +57,8 @@ export class AppError extends Error {
     if (err instanceof AppError) {
       return err.retryable;
     }
-
-    return hasHttpStatus(err) && RETRYABLE_STATUS_CODES.has(err.status);
+    const classified = classifyError(err);
+    return classified.kind === 'http' && RETRY_POLICY.retryableStatusCodes.has(classified.status);
   }
 
   static from(err: unknown, toolName: string): AppError {
@@ -62,15 +66,15 @@ export class AppError extends Error {
       return err;
     }
 
-    if (isAbortError(err)) {
-      return new CancelledError(toolName);
+    const classified = classifyError(err);
+    switch (classified.kind) {
+      case 'abort':
+        return new CancelledError(toolName);
+      case 'http':
+        return AppError.fromHttpError(toolName, err as Error & { status: number });
+      case 'other':
+        return new AppError(toolName, `${toolName} failed: ${AppError.formatMessage(err)}`);
     }
-
-    if (hasHttpStatus(err)) {
-      return AppError.fromHttpError(toolName, err);
-    }
-
-    return new AppError(toolName, `${toolName} failed: ${AppError.formatMessage(err)}`);
   }
 
   private static readonly HTTP_STATUS_MESSAGES: Record<number, string> = {
@@ -85,7 +89,7 @@ export class AppError extends Error {
 
   private static fromHttpError(toolName: string, cause: Error & { status: number }): AppError {
     const statusCode = cause.status;
-    const retryable = RETRYABLE_STATUS_CODES.has(statusCode);
+    const retryable = RETRY_POLICY.retryableStatusCodes.has(statusCode);
     const category: AppErrorCategory = retryable ? 'server' : 'client';
     const hint = AppError.HTTP_STATUS_MESSAGES[statusCode] ?? `HTTP ${statusCode}`;
     return new AppError(
@@ -211,11 +215,21 @@ export function cleanupErrorLogger(ctx: ServerContext): (reason: unknown) => voi
 
 // ── Retry ─────────────────────────────────────────────────────────────
 
-const RETRYABLE_STATUS_CODES = new Set([429, 500, 503, 504]);
-const DEFAULT_MAX_RETRIES = 2;
-const BASE_DELAY_MS = 1000;
-const MAX_DELAY_MS = 10_000;
-const JITTER_MS = 500;
+const RETRY_POLICY = {
+  maxRetries: 2,
+  baseDelayMs: 1000,
+  maxDelayMs: 10_000,
+  jitterMs: 500,
+  retryableStatusCodes: new Set([429, 500, 503, 504]),
+} as const;
+
+type ClassifiedError = { kind: 'http'; status: number } | { kind: 'abort' } | { kind: 'other' };
+
+function classifyError(err: unknown, signal?: AbortSignal): ClassifiedError {
+  if (isAbortError(err, signal)) return { kind: 'abort' };
+  if (hasHttpStatus(err)) return { kind: 'http', status: err.status };
+  return { kind: 'other' };
+}
 
 function extractRetryAfterMs(err: unknown): number | undefined {
   if (typeof err !== 'object' || err === null) return undefined;
@@ -227,8 +241,11 @@ function extractRetryAfterMs(err: unknown): number | undefined {
 }
 
 function computeDelay(attempt: number, retryAfterMs?: number): number {
-  const exponential = Math.min(Math.pow(2, attempt) * BASE_DELAY_MS, MAX_DELAY_MS);
-  const jitter = Math.random() * JITTER_MS;
+  const exponential = Math.min(
+    Math.pow(2, attempt) * RETRY_POLICY.baseDelayMs,
+    RETRY_POLICY.maxDelayMs,
+  );
+  const jitter = Math.random() * RETRY_POLICY.jitterMs;
   if (retryAfterMs !== undefined) {
     return Math.max(retryAfterMs, exponential) + jitter;
   }
@@ -259,7 +276,7 @@ export async function withRetry<T>(
     onRetry?: (attempt: number, maxRetries: number, delayMs: number) => void | Promise<void>;
   } = {},
 ): Promise<T> {
-  const { maxRetries = DEFAULT_MAX_RETRIES, signal, onRetry } = options;
+  const { maxRetries = RETRY_POLICY.maxRetries, signal, onRetry } = options;
 
   for (let attempt = 0; ; attempt++) {
     try {

@@ -12,7 +12,7 @@ import {
   getWorkspaceContextFile,
 } from '../config.js';
 import type { TranscriptEntry } from '../sessions.js';
-import { withRetry } from './errors.js';
+import { isAbortError, withRetry } from './errors.js';
 import { logger } from './logger.js';
 import { isPathWithinRoot, normalizePathForComparison } from './validation.js';
 
@@ -255,17 +255,6 @@ function normalizeRootsKey(roots: readonly string[]): string {
   }
 
   return key;
-}
-
-function isAbortError(err: unknown, signal?: AbortSignal): boolean {
-  if (signal?.aborted) {
-    return true;
-  }
-
-  return (
-    (err instanceof Error && err.name === 'AbortError') ||
-    (err instanceof DOMException && err.name === 'AbortError')
-  );
 }
 
 function hashContent(content: string): string {

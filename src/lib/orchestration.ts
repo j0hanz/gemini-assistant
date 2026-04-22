@@ -38,24 +38,18 @@ const BUILT_IN_TOOL_FACTORIES: Record<
   urlContext: () => ({ urlContext: {} }),
   codeExecution: () => ({ codeExecution: {} }),
   fileSearch: (spec) => {
-    if (spec.kind !== 'fileSearch') {
-      throw new AppError('orchestration', 'fileSearch requires a fileSearch tool spec');
-    }
+    // `spec.kind` is narrowed to 'fileSearch' by the Record key; no runtime guard needed.
+    const fileSearchSpec = spec as Extract<BuiltInToolSpec, { kind: 'fileSearch' }>;
     return {
       fileSearch: {
-        fileSearchStoreNames: [...spec.fileSearchStoreNames],
-        ...(spec.metadataFilter !== undefined ? { metadataFilter: spec.metadataFilter } : {}),
+        fileSearchStoreNames: [...fileSearchSpec.fileSearchStoreNames],
+        ...(fileSearchSpec.metadataFilter !== undefined
+          ? { metadataFilter: fileSearchSpec.metadataFilter }
+          : {}),
       },
     } as ToolListUnion[number];
   },
 };
-
-/**
- * @deprecated Preset-profile strings are no longer the orchestration input.
- * Retained as a string alias for one release; derived labels are produced by
- * {@link buildToolProfile}. Prefer `BuiltInToolName[]` for new code.
- */
-export type ToolProfile = string;
 
 function specsFromNames(names: readonly BuiltInToolName[]): BuiltInToolSpec[] {
   return names.map((name) => {

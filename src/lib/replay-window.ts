@@ -11,8 +11,14 @@ interface PairEndpoint {
   type: 'call' | 'response';
 }
 
+const entryBytesCache = new WeakMap<ContentEntry, number>();
+
 function entryBytes(entry: ContentEntry): number {
-  return JSON.stringify(entry.parts).length;
+  const cached = entryBytesCache.get(entry);
+  if (cached !== undefined) return cached;
+  const bytes = JSON.stringify(entry.parts).length;
+  entryBytesCache.set(entry, bytes);
+  return bytes;
 }
 
 function endpointDescriptor(kind: PairKind, value: string | undefined): string {
@@ -112,24 +118,22 @@ function windowBytes(contents: readonly ContentEntry[], start: number, end: numb
 }
 
 function extendStartForResponses(
-  contents: readonly ContentEntry[],
+  endpoints: readonly PairEndpoint[],
   start: number,
   end: number,
 ): number {
-  const endpoints = collectEndpoints(contents, end);
-  const selectedCalls = new Set(
-    endpoints
-      .filter((endpoint) => endpoint.type === 'call' && endpoint.entryIndex >= start)
-      .map((endpoint) => endpoint.key),
-  );
-  const callsByKey = new Map(
-    endpoints
-      .filter((endpoint) => endpoint.type === 'call')
-      .map((endpoint) => [endpoint.key, endpoint] as const),
-  );
+  const selectedCalls = new Set<string>();
+  const callsByKey = new Map<string, PairEndpoint>();
+  for (const endpoint of endpoints) {
+    if (endpoint.entryIndex >= end) continue;
+    if (endpoint.type !== 'call') continue;
+    callsByKey.set(endpoint.key, endpoint);
+    if (endpoint.entryIndex >= start) selectedCalls.add(endpoint.key);
+  }
 
   let extendedStart = start;
   for (const response of endpoints) {
+    if (response.entryIndex >= end) continue;
     if (response.entryIndex < start || selectedCalls.has(response.key)) continue;
     const call = callsByKey.get(response.key);
     if (call && call.entryIndex < extendedStart) {
@@ -142,6 +146,7 @@ function extendStartForResponses(
 
 function hasUnansweredCallInEntry(
   contents: readonly ContentEntry[],
+  endpoints: readonly PairEndpoint[],
   entryIndex: number,
   start: number,
   end: number,
@@ -149,15 +154,17 @@ function hasUnansweredCallInEntry(
   const entry = contents[entryIndex];
   if (entry?.role !== 'model') return false;
 
-  const endpoints = collectEndpoints(contents, end);
-  const laterResponses = new Set(
-    endpoints
-      .filter((endpoint) => endpoint.type === 'response' && endpoint.entryIndex > entryIndex)
-      .map((endpoint) => endpoint.key),
-  );
+  const laterResponses = new Set<string>();
+  for (const endpoint of endpoints) {
+    if (endpoint.entryIndex >= end) continue;
+    if (endpoint.type === 'response' && endpoint.entryIndex > entryIndex) {
+      laterResponses.add(endpoint.key);
+    }
+  }
 
   return endpoints.some(
     (endpoint) =>
+      endpoint.entryIndex < end &&
       endpoint.type === 'call' &&
       endpoint.entryIndex === entryIndex &&
       endpoint.entryIndex >= start &&
@@ -184,13 +191,15 @@ function enforceHardCeiling(
 export function selectReplayWindow(contents: ContentEntry[], maxBytes: number): ContentEntry[] {
   if (contents.length === 0) return [];
 
+  const endpoints = collectEndpoints(contents, contents.length);
+
   let end = contents.length;
   while (end > 0) {
     let start = initialWindowStart(contents, end, maxBytes);
-    start = extendStartForResponses(contents, start, end);
+    start = extendStartForResponses(endpoints, start, end);
     start = enforceHardCeiling(contents, start, end, maxBytes);
 
-    if (hasUnansweredCallInEntry(contents, end - 1, start, end)) {
+    if (hasUnansweredCallInEntry(contents, endpoints, end - 1, start, end)) {
       end -= 1;
       continue;
     }

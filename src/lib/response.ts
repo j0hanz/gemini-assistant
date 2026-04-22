@@ -27,6 +27,8 @@ export interface CollectedItems<T> {
   droppedNonPublic: number;
 }
 
+// ── URL Metadata ──────────────────────────────────────────────────────
+
 function domainFromPublicUrl(url: string): string | undefined {
   try {
     return new URL(url).hostname;
@@ -65,6 +67,8 @@ export function collectUrlMetadataWithCounts(
 export function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlMetadataEntry[] {
   return collectUrlMetadataWithCounts(urlMetadata).items;
 }
+
+// ── Grounding Sources ─────────────────────────────────────────────────
 
 export function collectGroundedSourcesWithCounts(
   groundingMetadata: GroundingMetadata | undefined,
@@ -148,6 +152,8 @@ export function filterClaimLinkedSourceDetails(
   const linkedUrls = new Set(citations.flatMap((citation) => citation.sourceUrls));
   return sourceDetails.filter((source) => linkedUrls.has(source.url));
 }
+
+// ── Grounding Citations & Signals ─────────────────────────────────────
 
 export function collectGroundingCitations(groundingMetadata: GroundingMetadata | undefined): {
   citations: GroundingCitation[];
@@ -270,6 +276,8 @@ interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
   finishMessage?: string | undefined;
   citationMetadata?: unknown;
 }
+
+// ── Structured Content ────────────────────────────────────────────────
 
 export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
   contextUsed,
@@ -415,6 +423,8 @@ export function validateStructuredToolResult(
     false,
   );
 }
+
+// ── Content Builders ──────────────────────────────────────────────────
 
 function appendBulletListSection(
   content: CallToolResult['content'],

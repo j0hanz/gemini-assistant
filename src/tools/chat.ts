@@ -877,123 +877,47 @@ function buildSessionEventResponse(
   askResult: AskExecutionResult,
   structured: AskStructuredContent | undefined,
 ): SessionEventEntry['response'] {
-  return {
+  const { streamResult } = askResult;
+  return pickDefined({
     text: extractTextContent(askResult.result.content),
-    ...pickDefined({
-      finishReason: askResult.streamResult.finishReason,
-      finishMessage: askResult.streamResult.finishMessage,
-      promptBlockReason: askResult.streamResult.promptBlockReason,
-    }),
-    ...buildSessionEventData(structured),
-    ...buildSessionEventFunctionCalls(structured),
-    ...buildSessionEventSchemaWarnings(structured),
-    ...buildSessionEventSafetyRatings(structured),
-    ...buildSessionEventCitationMetadata(structured),
-    ...buildSessionEventThoughts(structured),
-    ...buildSessionEventToolEvents(structured),
-    ...buildSessionEventUsage(structured),
-    ...buildSessionEventGroundingMetadata(askResult),
-    ...buildSessionEventUrlContextMetadata(askResult),
-    ...buildSessionEventPromptFeedback(askResult),
-    ...buildSessionEventAnomalies(askResult),
-  };
-}
-
-function buildSessionEventData(
-  structured: AskStructuredContent | undefined,
-): Partial<SessionEventEntry['response']> {
-  return structured?.data !== undefined ? { data: sanitizeSessionValue(structured.data) } : {};
-}
-
-function buildSessionEventFunctionCalls(
-  structured: AskStructuredContent | undefined,
-): Partial<SessionEventEntry['response']> {
-  return structured?.functionCalls
-    ? { functionCalls: sanitizeFunctionCalls(structured.functionCalls) }
-    : {};
-}
-
-function buildSessionEventSchemaWarnings(
-  structured: AskStructuredContent | undefined,
-): Partial<SessionEventEntry['response']> {
-  return structured?.schemaWarnings ? { schemaWarnings: structured.schemaWarnings } : {};
-}
-
-function buildSessionEventSafetyRatings(
-  structured: AskStructuredContent | undefined,
-): Partial<SessionEventEntry['response']> {
-  return structured?.safetyRatings !== undefined
-    ? { safetyRatings: sanitizeSessionValue(structured.safetyRatings, 'safetyRatings') }
-    : {};
-}
-
-function buildSessionEventCitationMetadata(
-  structured: AskStructuredContent | undefined,
-): Partial<SessionEventEntry['response']> {
-  return structured?.citationMetadata !== undefined
-    ? { citationMetadata: sanitizeSessionValue(structured.citationMetadata, 'citationMetadata') }
-    : {};
-}
-
-function buildSessionEventThoughts(
-  structured: AskStructuredContent | undefined,
-): Partial<SessionEventEntry['response']> {
-  return structured?.thoughts ? { thoughts: structured.thoughts } : {};
-}
-
-function buildSessionEventToolEvents(
-  structured: AskStructuredContent | undefined,
-): Partial<SessionEventEntry['response']> {
-  return structured?.toolEvents ? { toolEvents: sanitizeToolEvents(structured.toolEvents) } : {};
-}
-
-function buildSessionEventUsage(
-  structured: AskStructuredContent | undefined,
-): Partial<SessionEventEntry['response']> {
-  return structured?.usage ? { usage: structured.usage } : {};
-}
-
-function buildSessionEventGroundingMetadata(
-  askResult: AskExecutionResult,
-): Partial<SessionEventEntry['response']> {
-  const groundingMetadata = askResult.streamResult.groundingMetadata;
-  if (groundingMetadata === undefined) return {};
-  return {
-    groundingMetadata: sanitizeSessionValue(groundingMetadata, 'groundingMetadata') as NonNullable<
-      SessionEventEntry['response']['groundingMetadata']
-    >,
-  };
-}
-
-function buildSessionEventUrlContextMetadata(
-  askResult: AskExecutionResult,
-): Partial<SessionEventEntry['response']> {
-  const urlContextMetadata = askResult.streamResult.urlContextMetadata;
-  if (urlContextMetadata === undefined) return {};
-  return {
-    urlContextMetadata: sanitizeSessionValue(
-      urlContextMetadata,
-      'urlContextMetadata',
-    ) as NonNullable<SessionEventEntry['response']['urlContextMetadata']>,
-  };
-}
-
-function buildSessionEventPromptFeedback(
-  askResult: AskExecutionResult,
-): Partial<SessionEventEntry['response']> {
-  const promptFeedback = askResult.streamResult.promptFeedback;
-  if (promptFeedback === undefined) return {};
-  return {
-    promptFeedback: sanitizeSessionValue(promptFeedback, 'promptFeedback'),
-  };
-}
-
-function buildSessionEventAnomalies(
-  askResult: AskExecutionResult,
-): Partial<SessionEventEntry['response']> {
-  const anomalies = askResult.streamResult.anomalies;
-  if (anomalies === undefined) return {};
-  return { anomalies: { ...anomalies } };
+    finishReason: streamResult.finishReason,
+    finishMessage: streamResult.finishMessage,
+    promptBlockReason: streamResult.promptBlockReason,
+    data: structured?.data !== undefined ? sanitizeSessionValue(structured.data) : undefined,
+    functionCalls: structured?.functionCalls
+      ? sanitizeFunctionCalls(structured.functionCalls)
+      : undefined,
+    schemaWarnings: structured?.schemaWarnings,
+    safetyRatings:
+      structured?.safetyRatings !== undefined
+        ? sanitizeSessionValue(structured.safetyRatings, 'safetyRatings')
+        : undefined,
+    citationMetadata:
+      structured?.citationMetadata !== undefined
+        ? sanitizeSessionValue(structured.citationMetadata, 'citationMetadata')
+        : undefined,
+    thoughts: structured?.thoughts,
+    toolEvents: structured?.toolEvents ? sanitizeToolEvents(structured.toolEvents) : undefined,
+    usage: structured?.usage,
+    groundingMetadata:
+      streamResult.groundingMetadata !== undefined
+        ? (sanitizeSessionValue(streamResult.groundingMetadata, 'groundingMetadata') as NonNullable<
+            SessionEventEntry['response']['groundingMetadata']
+          >)
+        : undefined,
+    urlContextMetadata:
+      streamResult.urlContextMetadata !== undefined
+        ? (sanitizeSessionValue(
+            streamResult.urlContextMetadata,
+            'urlContextMetadata',
+          ) as NonNullable<SessionEventEntry['response']['urlContextMetadata']>)
+        : undefined,
+    promptFeedback:
+      streamResult.promptFeedback !== undefined
+        ? sanitizeSessionValue(streamResult.promptFeedback, 'promptFeedback')
+        : undefined,
+    anomalies: streamResult.anomalies !== undefined ? { ...streamResult.anomalies } : undefined,
+  });
 }
 
 async function resolveWorkspaceCacheName(

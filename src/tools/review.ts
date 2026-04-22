@@ -148,6 +148,47 @@ const NOISY_EXCLUDE_PATHSPECS = [
   ...NOISY_SUFFIXES.map((suffix) => `:!*${suffix}`),
 ];
 
+async function runReviewGeneration(
+  ctx: ServerContext,
+  toolKey: string,
+  label: string,
+  resolveParams: Parameters<typeof resolveOrchestration>[0],
+  promptParts: (string | import('@google/genai').Part)[],
+  systemInstruction: string | undefined,
+  configParams: {
+    thinkingLevel?: ReviewInput['thinkingLevel'] | undefined;
+    thinkingBudget?: number | undefined;
+    maxOutputTokens?: number | undefined;
+    safetySettings?: ReviewInput['safetySettings'] | undefined;
+  },
+  resultMod: NonNullable<Parameters<typeof executor.runStream>[4]>,
+): Promise<CallToolResult> {
+  const resolved = await resolveOrchestration(resolveParams, ctx, toolKey);
+  if (resolved.error) return resolved.error;
+  const { tools, toolConfig } = resolved.config;
+
+  return await executor.runStream(
+    ctx,
+    toolKey,
+    label,
+    () =>
+      getAI().models.generateContentStream({
+        model: MODEL,
+        contents: promptParts,
+        config: buildGenerateContentConfig(
+          {
+            systemInstruction,
+            ...configParams,
+            tools,
+            toolConfig,
+          },
+          ctx.mcpReq.signal,
+        ),
+      }),
+    resultMod,
+  );
+}
+
 interface DiffStats {
   files: number;
   additions: number;
@@ -238,21 +279,6 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
       await ctx.mcpReq.log('info', `Comparing: ${fileA.displayPath} vs ${fileB.displayPath}`);
       await progress.step(2, 4, 'Analyzing differences');
 
-      const resolved = await resolveOrchestration(
-        {
-          builtInToolNames: [
-            ...(googleSearch ? (['googleSearch'] as const) : []),
-            ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
-          ],
-          urls,
-          serverSideToolInvocations: 'always',
-        },
-        ctx,
-        'compare_files',
-      );
-      if (resolved.error) return resolved.error;
-      const { tools, toolConfig } = resolved.config;
-
       const prompt = buildDiffReviewPrompt({
         focus: question,
         mode: 'compare',
@@ -264,27 +290,21 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
         ],
       });
 
-      return await executor.runStream(
+      return await runReviewGeneration(
         ctx,
         'compare_files',
         COMPARE_FILE_TOOL_LABEL,
-        () =>
-          getAI().models.generateContentStream({
-            model: MODEL,
-            contents: prompt.promptParts,
-            config: buildGenerateContentConfig(
-              {
-                systemInstruction: prompt.systemInstruction,
-                thinkingLevel,
-                thinkingBudget,
-                maxOutputTokens,
-                safetySettings,
-                tools,
-                toolConfig,
-              },
-              ctx.mcpReq.signal,
-            ),
-          }),
+        {
+          builtInToolNames: [
+            ...(googleSearch ? (['googleSearch'] as const) : []),
+            ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
+          ],
+          urls,
+          serverSideToolInvocations: 'always',
+        },
+        prompt.promptParts,
+        prompt.systemInstruction,
+        { thinkingLevel, thinkingBudget, maxOutputTokens, safetySettings },
         (_streamResult, textContent: string) => ({
           structuredContent: {
             summary: textContent || '',
@@ -335,7 +355,14 @@ async function diagnoseFailureWork(
     urls,
   });
 
-  const resolved = await resolveOrchestration(
+  const progress = new ProgressReporter(ctx, 'Review Failure');
+  await progress.send(0, undefined, 'Diagnosing');
+  await ctx.mcpReq.log('info', `Review failure: ${error.length} chars`);
+
+  return await runReviewGeneration(
+    ctx,
+    'review_failure',
+    'Review Failure',
     {
       builtInToolNames: [
         ...(googleSearch ? (['googleSearch'] as const) : []),
@@ -344,37 +371,9 @@ async function diagnoseFailureWork(
       urls,
       serverSideToolInvocations: 'always',
     },
-    ctx,
-    'review_failure',
-  );
-  if (resolved.error) return resolved.error;
-  const { tools, toolConfig } = resolved.config;
-
-  const progress = new ProgressReporter(ctx, 'Review Failure');
-  await progress.send(0, undefined, 'Diagnosing');
-  await ctx.mcpReq.log('info', `Review failure: ${error.length} chars`);
-
-  return await executor.runStream(
-    ctx,
-    'review_failure',
-    'Review Failure',
-    () =>
-      getAI().models.generateContentStream({
-        model: MODEL,
-        contents: prompt.promptText,
-        config: buildGenerateContentConfig(
-          {
-            systemInstruction: prompt.systemInstruction,
-            thinkingLevel,
-            thinkingBudget,
-            maxOutputTokens,
-            safetySettings,
-            tools,
-            toolConfig,
-          },
-          ctx.mcpReq.signal,
-        ),
-      }),
+    [prompt.promptText],
+    prompt.systemInstruction,
+    { thinkingLevel, thinkingBudget, maxOutputTokens, safetySettings },
     (_streamResult, textContent: string) => ({
       structuredContent: {
         summary: textContent || '',
@@ -1078,25 +1077,17 @@ export async function analyzePrWork(
     promptText: prompt,
   });
 
-  return await executor.runStream(
+  return await runReviewGeneration(
     ctx,
     'analyze_pr',
     REVIEW_DIFF_TOOL_LABEL,
-    () =>
-      getAI().models.generateContentStream({
-        model: MODEL,
-        contents: modelPrompt.promptText,
-        config: buildGenerateContentConfig(
-          {
-            systemInstruction: modelPrompt.systemInstruction,
-            thinkingLevel,
-            thinkingBudget,
-            maxOutputTokens,
-            safetySettings,
-          },
-          ctx.mcpReq.signal,
-        ),
-      }),
+    {
+      builtInToolNames: [],
+      serverSideToolInvocations: 'always',
+    },
+    [modelPrompt.promptText],
+    modelPrompt.systemInstruction,
+    { thinkingLevel, thinkingBudget, maxOutputTokens, safetySettings },
     (_streamResult, textContent: string) => ({
       structuredContent: buildStructuredContent(
         snapshot,

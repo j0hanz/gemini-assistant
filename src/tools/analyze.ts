@@ -131,36 +131,83 @@ function collectDiagramSourceFiles(
   return [...(sourceFilePath ? [sourceFilePath] : []), ...(sourceFilePaths ?? [])];
 }
 
-async function uploadDiagramSourceFiles(
-  filesToUpload: string[],
+async function uploadFilesBatch(
+  filePaths: string[],
   ctx: ServerContext,
   rootsFetcher: RootsFetcher,
-  uploadedNames: string[],
-): Promise<{ parts: Part[]; uploadedCount: number }> {
-  const contentParts: Part[] = [];
-  const totalSteps = filesToUpload.length + 1;
-  const progress = new ProgressReporter(ctx, ANALYZE_DIAGRAM_TOOL_LABEL);
+  progress: ProgressReporter,
+  labelTemplate: (filePath: string, index: number, total: number) => string,
+  indexOffset = 1,
+): Promise<{ parts: Part[]; uploadedNames: string[]; uploadedCount: number }> {
+  const parts: Part[] = [];
+  const uploadedNames: string[] = [];
+  const totalSteps = filePaths.length + 1;
   let uploadedCount = 0;
 
-  for (let index = 0; index < filesToUpload.length; index++) {
+  for (let index = 0; index < filePaths.length; index++) {
     if (ctx.mcpReq.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-    const filePath = filesToUpload[index];
+    const filePath = filePaths[index];
     if (!filePath) continue;
+
+    await progress.step(
+      index + indexOffset,
+      totalSteps,
+      labelTemplate(filePath, index, filePaths.length),
+    );
 
     const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
     uploadedCount += 1;
     uploadedNames.push(uploaded.name);
-    contentParts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
-    contentParts.push({ text: `Source file: ${uploaded.displayPath}` });
-
-    await progress.step(
-      index + 1,
-      totalSteps,
-      `Uploaded ${filePath.split(/[\\/]/).pop() ?? filePath} (${String(index + 1)}/${String(filesToUpload.length)})`,
-    );
+    parts.push({ text: `File: ${uploaded.displayPath}` });
+    parts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
   }
 
-  return { parts: contentParts, uploadedCount };
+  return { parts, uploadedNames, uploadedCount };
+}
+
+async function runAnalyzeGeneration(
+  ctx: ServerContext,
+  toolKey: string,
+  label: string,
+  resolveParams: Parameters<typeof resolveOrchestration>[0],
+  buildPrompt: (activeCaps: Set<string>) => {
+    parts: Part[];
+    systemInstruction?: string | undefined;
+  },
+  configParams: {
+    thinkingLevel?: AnalyzeInput['thinkingLevel'] | undefined;
+    thinkingBudget?: number | undefined;
+    maxOutputTokens?: number | undefined;
+    safetySettings?: AnalyzeInput['safetySettings'] | undefined;
+    mediaResolution?: import('@google/genai').GenerateContentConfig['mediaResolution'] | undefined;
+  },
+  resultMod: NonNullable<Parameters<typeof executor.runStream>[4]>,
+): Promise<CallToolResult> {
+  const resolved = await resolveOrchestration(resolveParams, ctx, toolKey);
+  if (resolved.error) return resolved.error;
+
+  const { parts, systemInstruction } = buildPrompt(resolved.config.activeCapabilities);
+
+  return await executor.runStream(
+    ctx,
+    toolKey,
+    label,
+    () =>
+      getAI().models.generateContentStream({
+        model: MODEL,
+        contents: parts,
+        config: buildGenerateContentConfig(
+          {
+            systemInstruction,
+            ...configParams,
+            tools: resolved.config.tools,
+            toolConfig: resolved.config.toolConfig,
+          },
+          ctx.mcpReq.signal,
+        ),
+      }),
+    resultMod,
+  );
 }
 
 function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
@@ -195,7 +242,10 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
       await ctx.mcpReq.log('info', `Analyzing ${uploaded.displayPath} (${uploaded.mimeType})`);
       await progress.step(1, 3, 'Analyzing content');
 
-      const resolved = await resolveOrchestration(
+      return await runAnalyzeGeneration(
+        ctx,
+        'analyze_file',
+        ANALYZE_FILE_TOOL_LABEL,
         {
           builtInToolNames: [
             ...(googleSearch ? (['googleSearch'] as const) : []),
@@ -204,49 +254,25 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
           urls,
           serverSideToolInvocations: 'always',
         },
-        ctx,
-        'analyze_file',
-      );
-      if (resolved.error) return resolved.error;
-      const { tools, toolConfig } = resolved.config;
-      const usesUrlContext = resolved.config.activeCapabilities.has('urlContext');
-
-      return await executor.runStream(
-        ctx,
-        'analyze_file',
-        ANALYZE_FILE_TOOL_LABEL,
-        () => {
+        (activeCaps) => {
           const { promptText, systemInstruction } = buildFileAnalysisPrompt({
             goal: question,
             kind: 'single',
           });
           const urlContextPart =
-            urls && urls.length > 0 && !usesUrlContext
+            urls && urls.length > 0 && !activeCaps.has('urlContext')
               ? [{ text: `Context URLs:\n${urls.join('\n')}` }]
               : [];
-
-          return getAI().models.generateContentStream({
-            model: MODEL,
-            contents: [
+          return {
+            parts: [
               createPartFromUri(uploaded.uri, uploaded.mimeType),
               { text: promptText },
               ...urlContextPart,
             ],
-            config: buildGenerateContentConfig(
-              {
-                systemInstruction,
-                thinkingLevel,
-                thinkingBudget,
-                mediaResolution,
-                maxOutputTokens,
-                safetySettings,
-                tools,
-                toolConfig,
-              },
-              ctx.mcpReq.signal,
-            ),
-          });
+            systemInstruction,
+          };
         },
+        { thinkingLevel, thinkingBudget, mediaResolution, maxOutputTokens, safetySettings },
         (_streamResult, textContent: string) => ({
           structuredContent: {
             summary: textContent || '',
@@ -280,27 +306,26 @@ async function analyzeMultiFileWork(
 ): Promise<CallToolResult> {
   const { maxOutputTokens, safetySettings, googleSearch, urls } = extra;
   const { thinkingBudget } = extra;
-  const uploadedNames: string[] = [];
+  let uploadedNames: string[] = [];
   const progress = new ProgressReporter(ctx, ANALYZE_TOOL_LABEL);
-  const totalSteps = filePaths.length + 1;
 
   try {
-    const contents: ({ text: string } | ReturnType<typeof createPartFromUri>)[] = [];
-    for (const [index, filePath] of filePaths.entries()) {
-      await progress.step(
-        index,
-        totalSteps,
-        `Uploading ${filePath.split(/[\\/]/).pop() ?? filePath}`,
-      );
-      const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
-      uploadedNames.push(uploaded.name);
-      contents.push({ text: `File: ${uploaded.displayPath}` });
-      contents.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
-    }
+    const { parts: contents, uploadedNames: fileUploadedNames } = await uploadFilesBatch(
+      filePaths,
+      ctx,
+      rootsFetcher,
+      progress,
+      (filePath) => `Uploading ${filePath.split(/[\\/]/).pop() ?? filePath}`,
+      0, // indexOffset
+    );
+    uploadedNames = fileUploadedNames;
 
-    await progress.step(filePaths.length, totalSteps, 'Analyzing content');
+    await progress.step(filePaths.length, filePaths.length + 1, 'Analyzing content');
 
-    const resolved = await resolveOrchestration(
+    return await runAnalyzeGeneration(
+      ctx,
+      'analyze',
+      ANALYZE_TOOL_LABEL,
       {
         builtInToolNames: [
           ...(googleSearch ? (['googleSearch'] as const) : []),
@@ -309,44 +334,19 @@ async function analyzeMultiFileWork(
         urls,
         serverSideToolInvocations: 'always',
       },
-      ctx,
-      'analyze',
-    );
-    if (resolved.error) return resolved.error;
-    const { tools, toolConfig } = resolved.config;
-    const usesUrlContext = resolved.config.activeCapabilities.has('urlContext');
-    if (urls && urls.length > 0 && !usesUrlContext) {
-      contents.push({ text: `Context URLs:\n${urls.join('\n')}` });
-    }
-
-    return await executor.runStream(
-      ctx,
-      'analyze',
-      ANALYZE_TOOL_LABEL,
-      () => {
+      (activeCaps) => {
         const prompt = buildFileAnalysisPrompt({
           attachedParts: contents,
           goal,
           kind: 'multi',
         });
-
-        return getAI().models.generateContentStream({
-          model: MODEL,
-          contents: prompt.promptParts,
-          config: buildGenerateContentConfig(
-            {
-              systemInstruction: prompt.systemInstruction,
-              thinkingLevel,
-              thinkingBudget,
-              maxOutputTokens,
-              safetySettings,
-              tools,
-              toolConfig,
-            },
-            ctx.mcpReq.signal,
-          ),
-        });
+        const finalParts = [...prompt.promptParts];
+        if (urls && urls.length > 0 && !activeCaps.has('urlContext')) {
+          finalParts.push({ text: `Context URLs:\n${urls.join('\n')}` });
+        }
+        return { parts: finalParts, systemInstruction: prompt.systemInstruction };
       },
+      { thinkingLevel, thinkingBudget, maxOutputTokens, safetySettings },
       (_streamResult, textContent: string) => ({
         structuredContent: {
           summary: textContent || '',
@@ -372,7 +372,7 @@ async function analyzeDiagramWork(
   args: AnalyzeDiagramInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const uploadedNames: string[] = [];
+  let uploadedNames: string[] = [];
   const progress = new ProgressReporter(ctx, ANALYZE_DIAGRAM_TOOL_LABEL);
 
   try {
@@ -384,14 +384,18 @@ async function analyzeDiagramWork(
         args.targetKind === 'file' ? args.filePath : undefined,
         args.targetKind === 'multi' ? args.filePaths : undefined,
       );
-      const uploaded = await uploadDiagramSourceFiles(
+      const batchResult = await uploadFilesBatch(
         filesToUpload,
         ctx,
         rootsFetcher,
-        uploadedNames,
+        progress,
+        (filePath, index, total) =>
+          `Uploaded ${filePath.split(/[\\/]/).pop() ?? filePath} (${index + 1}/${total})`,
+        1, // indexOffset
       );
-      attachedParts = uploaded.parts;
-      uploadedCount = uploaded.uploadedCount;
+      attachedParts = batchResult.parts;
+      uploadedCount = batchResult.uploadedCount;
+      uploadedNames = batchResult.uploadedNames;
     } else {
       attachedParts = [
         {
@@ -405,46 +409,31 @@ async function analyzeDiagramWork(
     await ctx.mcpReq.log('info', `Generating ${args.diagramType} diagram`);
 
     const diagramBuiltInTools = pickDiagramBuiltInTools(args);
-    const resolved = await resolveOrchestration(
+
+    return await runAnalyzeGeneration(
+      ctx,
+      'analyze_diagram',
+      ANALYZE_DIAGRAM_TOOL_LABEL,
       {
         builtInToolNames: diagramBuiltInTools,
         ...(args.targetKind === 'url' ? { urls: args.urls } : {}),
         serverSideToolInvocations: diagramBuiltInTools.length > 0 ? 'always' : 'never',
       },
-      ctx,
-      'analyze_diagram',
-    );
-    if (resolved.error) return resolved.error;
-    const { tools, toolConfig } = resolved.config;
-
-    const prompt = buildDiagramGenerationPrompt({
-      attachedParts,
-      description: args.goal,
-      diagramType: args.diagramType,
-      validateSyntax: args.validateSyntax,
-    });
-
-    return await executor.runStream(
-      ctx,
-      'analyze_diagram',
-      ANALYZE_DIAGRAM_TOOL_LABEL,
-      () =>
-        getAI().models.generateContentStream({
-          model: MODEL,
-          contents: prompt.promptParts,
-          config: buildGenerateContentConfig(
-            {
-              systemInstruction: prompt.systemInstruction,
-              thinkingLevel: args.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
-              thinkingBudget: args.thinkingBudget,
-              maxOutputTokens: args.maxOutputTokens,
-              safetySettings: args.safetySettings,
-              tools,
-              toolConfig,
-            },
-            ctx.mcpReq.signal,
-          ),
-        }),
+      () => {
+        const prompt = buildDiagramGenerationPrompt({
+          attachedParts,
+          description: args.goal,
+          diagramType: args.diagramType,
+          validateSyntax: args.validateSyntax,
+        });
+        return { parts: prompt.promptParts, systemInstruction: prompt.systemInstruction };
+      },
+      {
+        thinkingLevel: args.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+        thinkingBudget: args.thinkingBudget,
+        maxOutputTokens: args.maxOutputTokens,
+        safetySettings: args.safetySettings,
+      },
       (_streamResult, textContent: string) => {
         const { diagram, explanation } = extractDiagram(textContent, args.diagramType, ctx);
         const diagramType = args.diagramType;

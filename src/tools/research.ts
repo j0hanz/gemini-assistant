@@ -275,6 +275,56 @@ function emitDeepResearchToolBudgetLogs(
   return warnings;
 }
 
+function computeResearchContext(streamResult: StreamResult) {
+  const groundedSourcesResult = collectGroundedSourcesWithCounts(streamResult.groundingMetadata);
+  const urlMetadataResult = collectUrlMetadataWithCounts(
+    streamResult.urlContextMetadata?.urlMetadata,
+  );
+  const urlContextSources = collectUrlContextSources(urlMetadataResult.items);
+  const groundedSourceDetailsResult = collectGroundedSourceDetailsWithCounts(
+    streamResult.groundingMetadata,
+    new Set(urlContextSources),
+  );
+  const sourceDetails = mergeSourceDetails(
+    groundedSourceDetailsResult.items,
+    buildUrlContextSourceDetails(urlContextSources),
+  );
+  const { citations, droppedSupportCount } = collectGroundingCitations(
+    streamResult.groundingMetadata,
+  );
+  const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
+  const findings = deriveFindingsFromCitations(citations);
+  const claimLinkedSourceDetails = filterClaimLinkedSourceDetails(sourceDetails, citations);
+  const groundingSignals = computeGroundingSignals(
+    streamResult,
+    citations,
+    urlMetadataResult.items,
+    sourceDetails,
+  );
+  const status = deriveOverallStatus(groundingSignals);
+  const warnings = buildDroppedSupportWarnings({
+    droppedSupportCount,
+    droppedChunkCount: groundedSourceDetailsResult.droppedNonPublic,
+    droppedUrlCount: urlMetadataResult.droppedNonPublic,
+  });
+  const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
+
+  return {
+    groundedSources: groundedSourcesResult.items,
+    urlMetadata: urlMetadataResult.items,
+    urlContextSources,
+    sourceDetails,
+    citations,
+    searchEntryPoint,
+    findings,
+    claimLinkedSources: claimLinkedSourceDetails.map((source) => source.url),
+    groundingSignals,
+    status,
+    warnings,
+    computations,
+  };
+}
+
 function buildAgenticSearchResult(
   streamResult: StreamResult,
   textContent: string,
@@ -290,50 +340,13 @@ function buildAgenticSearchResult(
     retrievalTurnsRan,
   );
 
-  const groundedSourcesResult = collectGroundedSourcesWithCounts(streamResult.groundingMetadata);
-  const groundedSources = groundedSourcesResult.items;
-  const urlMetadataResult = collectUrlMetadataWithCounts(
-    streamResult.urlContextMetadata?.urlMetadata,
-  );
-  const urlMetadata = urlMetadataResult.items;
-  const urlContextSources = collectUrlContextSources(urlMetadata);
-  const groundedSourceDetailsResult = collectGroundedSourceDetailsWithCounts(
-    streamResult.groundingMetadata,
-    new Set(urlContextSources),
-  );
-  const sourceDetails = mergeSourceDetails(
-    groundedSourceDetailsResult.items,
-    buildUrlContextSourceDetails(urlContextSources),
-  );
-  const { citations, droppedSupportCount } = collectGroundingCitations(
-    streamResult.groundingMetadata,
-  );
-  const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
-  const findings = deriveFindingsFromCitations(citations);
-  const claimLinkedSourceDetails = filterClaimLinkedSourceDetails(sourceDetails, citations);
-  const claimLinkedSources = claimLinkedSourceDetails.map((source) => source.url);
-  const groundingSignals = computeGroundingSignals(
-    streamResult,
-    citations,
-    urlMetadata,
-    sourceDetails,
-  );
-  const status = deriveOverallStatus(groundingSignals);
-  const warnings = [
-    ...buildDroppedSupportWarnings({
-      droppedSupportCount,
-      droppedChunkCount: groundedSourceDetailsResult.droppedNonPublic,
-      droppedUrlCount: urlMetadataResult.droppedNonPublic,
-    }),
-    ...deepResearchWarnings,
-    ...extraWarnings,
-  ];
-  const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
+  const context = computeResearchContext(streamResult);
+  const warnings = [...context.warnings, ...deepResearchWarnings, ...extraWarnings];
   const contentAdditions: CallToolResult['content'] = [];
 
-  appendSources(contentAdditions, formatSourceLabels(sourceDetails));
-  appendUrlStatus(contentAdditions, urlMetadata);
-  appendSearchEntryPointContent(contentAdditions, searchEntryPoint?.renderedContent);
+  appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
+  appendUrlStatus(contentAdditions, context.urlMetadata);
+  appendSearchEntryPointContent(contentAdditions, context.searchEntryPoint?.renderedContent);
 
   return {
     resultMod: (result: CallToolResult) => ({
@@ -341,74 +354,42 @@ function buildAgenticSearchResult(
     }),
     structuredContent: pickDefined({
       report: textContent,
-      sources: groundedSources,
-      sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
-      urlContextSources: urlContextSources.length > 0 ? urlContextSources : undefined,
-      urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
+      sources: context.groundedSources,
+      sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
+      urlContextSources:
+        context.urlContextSources.length > 0 ? context.urlContextSources : undefined,
+      urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
       toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
-      status,
-      grounded: citations.length > 0,
-      groundingSignals,
-      findings: findings.length > 0 ? findings : undefined,
-      claimLinkedSources: claimLinkedSources.length > 0 ? claimLinkedSources : undefined,
-      urlContextUsed: urlContextSources.length > 0,
-      citations: citations.length > 0 ? citations : undefined,
-      searchEntryPoint,
-      computations: computations.length > 0 ? computations : undefined,
+      status: context.status,
+      grounded: context.citations.length > 0,
+      groundingSignals: context.groundingSignals,
+      findings: context.findings.length > 0 ? context.findings : undefined,
+      claimLinkedSources:
+        context.claimLinkedSources.length > 0 ? context.claimLinkedSources : undefined,
+      urlContextUsed: context.urlContextSources.length > 0,
+      citations: context.citations.length > 0 ? context.citations : undefined,
+      searchEntryPoint: context.searchEntryPoint,
+      computations: context.computations.length > 0 ? context.computations : undefined,
       warnings: warnings.length > 0 ? warnings : undefined,
     }),
-    reportMessage: buildSourceReportMessage(groundedSources.length),
+    reportMessage: buildSourceReportMessage(context.groundedSources.length),
   };
 }
 
 function buildSearchResult(streamResult: StreamResult, textContent: string) {
-  const groundedSourcesResult = collectGroundedSourcesWithCounts(streamResult.groundingMetadata);
-  const groundedSources = groundedSourcesResult.items;
-  const urlMetadataResult = collectUrlMetadataWithCounts(
-    streamResult.urlContextMetadata?.urlMetadata,
-  );
-  const urlMetadata = urlMetadataResult.items;
-  const urlContextSources = collectUrlContextSources(urlMetadata);
-  const groundedSourceDetailsResult = collectGroundedSourceDetailsWithCounts(
-    streamResult.groundingMetadata,
-    new Set(urlContextSources),
-  );
-  const sourceDetails = mergeSourceDetails(
-    groundedSourceDetailsResult.items,
-    buildUrlContextSourceDetails(urlContextSources),
-  );
-  const { citations, droppedSupportCount } = collectGroundingCitations(
-    streamResult.groundingMetadata,
-  );
-  const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
-  const findings = deriveFindingsFromCitations(citations);
-  const claimLinkedSourceDetails = filterClaimLinkedSourceDetails(sourceDetails, citations);
-  const claimLinkedSources = claimLinkedSourceDetails.map((source) => source.url);
-  const groundingSignals = computeGroundingSignals(
-    streamResult,
-    citations,
-    urlMetadata,
-    sourceDetails,
-  );
-  const status = deriveOverallStatus(groundingSignals);
-  const warnings = buildDroppedSupportWarnings({
-    droppedSupportCount,
-    droppedChunkCount: groundedSourceDetailsResult.droppedNonPublic,
-    droppedUrlCount: urlMetadataResult.droppedNonPublic,
-  });
-  const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
+  const context = computeResearchContext(streamResult);
   const contentAdditions: CallToolResult['content'] = [];
 
-  appendSources(contentAdditions, formatSourceLabels(sourceDetails));
-  appendUrlStatus(contentAdditions, urlMetadata);
-  appendSearchEntryPointContent(contentAdditions, searchEntryPoint?.renderedContent);
-  if (status === 'ungrounded') {
+  appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
+  appendUrlStatus(contentAdditions, context.urlMetadata);
+  appendSearchEntryPointContent(contentAdditions, context.searchEntryPoint?.renderedContent);
+  if (context.status === 'ungrounded') {
     contentAdditions.unshift({
       type: 'text',
       text: '[status: ungrounded]',
     });
   }
-  if (groundedSources.length === 0 && urlMetadata.length === 0) {
+  if (context.groundedSources.length === 0 && context.urlMetadata.length === 0) {
     contentAdditions.push({
       type: 'text',
       text: 'No grounded sources were retrieved; the answer may be ungrounded.',
@@ -421,63 +402,34 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
     }),
     structuredContent: pickDefined({
       answer: textContent,
-      sources: groundedSources,
-      sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
-      urlContextSources: urlContextSources.length > 0 ? urlContextSources : undefined,
-      urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
-      status,
-      grounded: citations.length > 0,
-      groundingSignals,
-      findings: findings.length > 0 ? findings : undefined,
-      claimLinkedSources: claimLinkedSources.length > 0 ? claimLinkedSources : undefined,
-      urlContextUsed: urlContextSources.length > 0,
-      citations: citations.length > 0 ? citations : undefined,
-      searchEntryPoint,
-      computations: computations.length > 0 ? computations : undefined,
-      warnings: warnings.length > 0 ? warnings : undefined,
+      sources: context.groundedSources,
+      sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
+      urlContextSources:
+        context.urlContextSources.length > 0 ? context.urlContextSources : undefined,
+      urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
+      status: context.status,
+      grounded: context.citations.length > 0,
+      groundingSignals: context.groundingSignals,
+      findings: context.findings.length > 0 ? context.findings : undefined,
+      claimLinkedSources:
+        context.claimLinkedSources.length > 0 ? context.claimLinkedSources : undefined,
+      urlContextUsed: context.urlContextSources.length > 0,
+      citations: context.citations.length > 0 ? context.citations : undefined,
+      searchEntryPoint: context.searchEntryPoint,
+      computations: context.computations.length > 0 ? context.computations : undefined,
+      warnings: context.warnings.length > 0 ? context.warnings : undefined,
     }),
-    reportMessage: buildSourceReportMessage(groundedSources.length),
+    reportMessage: buildSourceReportMessage(context.groundedSources.length),
   };
 }
 
 function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) {
-  const groundedSourcesResult = collectGroundedSourcesWithCounts(streamResult.groundingMetadata);
-  const groundedSources = groundedSourcesResult.items;
-  const urlMetadataResult = collectUrlMetadataWithCounts(
-    streamResult.urlContextMetadata?.urlMetadata,
-  );
-  const urlMetadata = urlMetadataResult.items;
-  const urlContextSources = collectUrlContextSources(urlMetadata);
-  const groundedSourceDetailsResult = collectGroundedSourceDetailsWithCounts(
-    streamResult.groundingMetadata,
-    new Set(urlContextSources),
-  );
-  const sourceDetails = mergeSourceDetails(
-    groundedSourceDetailsResult.items,
-    buildUrlContextSourceDetails(urlContextSources),
-  );
-  const { citations, droppedSupportCount } = collectGroundingCitations(
-    streamResult.groundingMetadata,
-  );
-  const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
-  const groundingSignals = computeGroundingSignals(
-    streamResult,
-    citations,
-    urlMetadata,
-    sourceDetails,
-  );
-  const status = deriveOverallStatus(groundingSignals);
-  const warnings = buildDroppedSupportWarnings({
-    droppedSupportCount,
-    droppedChunkCount: groundedSourceDetailsResult.droppedNonPublic,
-    droppedUrlCount: urlMetadataResult.droppedNonPublic,
-  });
-  const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
+  const context = computeResearchContext(streamResult);
   const contentAdditions: CallToolResult['content'] = [];
 
-  appendSources(contentAdditions, formatSourceLabels(sourceDetails));
-  appendUrlStatus(contentAdditions, urlMetadata);
-  appendSearchEntryPointContent(contentAdditions, searchEntryPoint?.renderedContent);
+  appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
+  appendUrlStatus(contentAdditions, context.urlMetadata);
+  appendSearchEntryPointContent(contentAdditions, context.searchEntryPoint?.renderedContent);
 
   return {
     resultMod: (result: CallToolResult) => ({
@@ -485,20 +437,21 @@ function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) 
     }),
     structuredContent: pickDefined({
       summary: textContent,
-      sources: groundedSources.length > 0 ? groundedSources : undefined,
-      sourceDetails: sourceDetails.length > 0 ? sourceDetails : undefined,
-      urlContextSources: urlContextSources.length > 0 ? urlContextSources : undefined,
-      urlMetadata: urlMetadata.length > 0 ? urlMetadata : undefined,
-      status,
-      grounded: citations.length > 0,
-      groundingSignals,
-      urlContextUsed: urlContextSources.length > 0,
-      citations: citations.length > 0 ? citations : undefined,
-      searchEntryPoint,
-      computations: computations.length > 0 ? computations : undefined,
-      warnings: warnings.length > 0 ? warnings : undefined,
+      sources: context.groundedSources.length > 0 ? context.groundedSources : undefined,
+      sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
+      urlContextSources:
+        context.urlContextSources.length > 0 ? context.urlContextSources : undefined,
+      urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
+      status: context.status,
+      grounded: context.citations.length > 0,
+      groundingSignals: context.groundingSignals,
+      urlContextUsed: context.urlContextSources.length > 0,
+      citations: context.citations.length > 0 ? context.citations : undefined,
+      searchEntryPoint: context.searchEntryPoint,
+      computations: context.computations.length > 0 ? context.computations : undefined,
+      warnings: context.warnings.length > 0 ? context.warnings : undefined,
     }),
-    reportMessage: `${formatCountLabel(urlMetadata.length, 'URL')} retrieved`,
+    reportMessage: `${formatCountLabel(context.urlMetadata.length, 'URL')} retrieved`,
   };
 }
 

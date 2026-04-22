@@ -20,6 +20,7 @@ import {
   assembleWorkspaceContext,
   summarizeRootForDashboard,
   workspaceCacheManager,
+  type WorkspaceCacheManagerImpl,
 } from './lib/workspace-context.js';
 
 import {
@@ -37,7 +38,7 @@ import {
   getWorkspaceCacheEnabled,
   getWorkspaceCacheTtl,
 } from './config.js';
-import type { SessionStore } from './sessions.js';
+import type { SessionStore, SessionSummary } from './sessions.js';
 
 export { PUBLIC_RESOURCE_URIS } from './public-contract.js';
 
@@ -180,35 +181,38 @@ export function readWorkspaceContextResource(
 }
 
 function buildSessionResourceEntries(
-  sessionStore: SessionStore,
+  sessionEntries: readonly SessionSummary[],
   uriFor: SessionResourceUriBuilder,
   labelFor: (sessionId: string) => string,
 ): ResourceListEntry[] {
-  return sessionStore.listSessionEntries().map((session) => ({
+  return sessionEntries.map((session) => ({
     uri: uriFor(session.id),
     name: labelFor(session.id),
   }));
 }
 
 function sessionDetailResources(sessionStore: SessionStore): ResourceListEntry[] {
+  const entries = sessionStore.listSessionEntries();
   return buildSessionResourceEntries(
-    sessionStore,
+    entries,
     sessionDetailUri,
     (sessionId) => `Session ${sessionId}`,
   );
 }
 
 function sessionTranscriptResources(sessionStore: SessionStore): ResourceListEntry[] {
+  const entries = sessionStore.listSessionEntries();
   return buildSessionResourceEntries(
-    sessionStore,
+    entries,
     sessionTranscriptUri,
     (sessionId) => `Transcript ${sessionId}`,
   );
 }
 
 function sessionEventResources(sessionStore: SessionStore): ResourceListEntry[] {
+  const entries = sessionStore.listSessionEntries();
   return buildSessionResourceEntries(
-    sessionStore,
+    entries,
     sessionEventsUri,
     (sessionId) => `Events ${sessionId}`,
   );
@@ -333,10 +337,11 @@ export function renderServerContextMarkdown(snapshot: ServerContextSnapshot): st
 export async function buildServerContextSnapshot(
   rootsFetcher: RootsFetcher,
   sessionStore: SessionStore,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): Promise<ServerContextSnapshot> {
   const roots = await getAllowedRoots(rootsFetcher);
   const sessionLimits = getSessionLimits();
-  const cacheStatus = workspaceCacheManager.getCacheStatus();
+  const cacheStatus = workspaceCacheManagerInstance.getCacheStatus();
   const sessions = sessionStore.listSessionEntries();
   const rootSummaries = await Promise.all(
     roots.map(async (root) => await summarizeRootForDashboard(root)),
@@ -351,7 +356,7 @@ export async function buildServerContextSnapshot(
       cacheStatus: {
         enabled: getWorkspaceCacheEnabled(),
         cacheName: cacheStatus.cacheName ?? undefined,
-        fresh: cacheStatus.createdAt !== undefined,
+        fresh: isWorkspaceCacheFresh(cacheStatus.createdAt, cacheStatus.ttl),
         ttl: getWorkspaceCacheTtl(),
       },
     },
@@ -374,8 +379,13 @@ export async function readDiscoverContextResource(
   uri: URL | string = DISCOVER_CONTEXT_RESOURCE.uri,
   rootsFetcher: RootsFetcher,
   sessionStore: SessionStore,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): Promise<ReadResourceResult> {
-  const snapshot = await buildServerContextSnapshot(rootsFetcher, sessionStore);
+  const snapshot = await buildServerContextSnapshot(
+    rootsFetcher,
+    sessionStore,
+    workspaceCacheManagerInstance,
+  );
   return dualContentResource(toResourceUri(uri), snapshot, renderServerContextMarkdown(snapshot));
 }
 
@@ -597,6 +607,19 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
   );
 }
 
+function isWorkspaceCacheFresh(createdAt: number | undefined, ttl: string): boolean {
+  if (createdAt === undefined) {
+    return false;
+  }
+
+  const ttlSeconds = Number.parseInt(ttl, 10);
+  if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
+    return false;
+  }
+
+  return Date.now() - createdAt < ttlSeconds * 1000;
+}
+
 function registerCacheResources(server: McpServer): void {
   const log = logger.child('resources');
 
@@ -683,6 +706,7 @@ function registerContextResource(
   server: McpServer,
   sessionStore: SessionStore,
   rootsFetcher: RootsFetcher,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): void {
   server.registerResource(
     'discover-context',
@@ -699,11 +723,15 @@ function registerContextResource(
       },
     },
     async (uri): Promise<ReadResourceResult> =>
-      readDiscoverContextResource(uri, rootsFetcher, sessionStore),
+      readDiscoverContextResource(uri, rootsFetcher, sessionStore, workspaceCacheManagerInstance),
   );
 }
 
-function registerWorkspaceResources(server: McpServer, rootsFetcher: RootsFetcher): void {
+function registerWorkspaceResources(
+  server: McpServer,
+  rootsFetcher: RootsFetcher,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
+): void {
   const log = logger.child('resources');
 
   server.registerResource(
@@ -749,7 +777,8 @@ function registerWorkspaceResources(server: McpServer, rootsFetcher: RootsFetche
         priority: 0.5,
       },
     },
-    (uri): ReadResourceResult => jsonResource(uri.href, workspaceCacheManager.getCacheStatus()),
+    (uri): ReadResourceResult =>
+      jsonResource(uri.href, workspaceCacheManagerInstance.getCacheStatus()),
   );
 }
 
@@ -757,10 +786,11 @@ export function registerResources(
   server: McpServer,
   sessionStore: SessionStore,
   rootsFetcher: RootsFetcher = buildServerRootsFetcher(server),
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): void {
   registerSessionResources(server, sessionStore);
   registerCacheResources(server);
   registerDiscoveryResources(server);
-  registerContextResource(server, sessionStore, rootsFetcher);
-  registerWorkspaceResources(server, rootsFetcher);
+  registerContextResource(server, sessionStore, rootsFetcher, workspaceCacheManagerInstance);
+  registerWorkspaceResources(server, rootsFetcher, workspaceCacheManagerInstance);
 }

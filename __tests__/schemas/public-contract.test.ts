@@ -36,9 +36,48 @@ describe('public contract schemas', () => {
   it('keeps memory.action flat with per-action validation', () => {
     assert.strictEqual(MemoryInputSchema.safeParse({ action: 'sessions.get' }).success, false);
     assert.strictEqual(
+      MemoryInputSchema.safeParse({ action: 'sessions.get', sessionId: 'sess-1' }).success,
+      true,
+    );
+    assert.strictEqual(
       MemoryInputSchema.safeParse({ action: 'caches.get', cacheName: 'cachedContents/test' })
         .success,
       true,
+    );
+    assert.strictEqual(
+      MemoryInputSchema.safeParse({
+        action: 'caches.update',
+        cacheName: 'cachedContents/test',
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      MemoryInputSchema.safeParse({
+        action: 'caches.update',
+        cacheName: 'cachedContents/test',
+        ttl: '3600s',
+      }).success,
+      true,
+    );
+    assert.strictEqual(
+      MemoryInputSchema.safeParse({
+        action: 'caches.create',
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      MemoryInputSchema.safeParse({
+        action: 'caches.create',
+        filePaths: ['src/index.ts'],
+      }).success,
+      true,
+    );
+    assert.strictEqual(
+      MemoryInputSchema.safeParse({
+        action: 'workspace.cache',
+        cacheName: 'cachedContents/test',
+      }).success,
+      false,
     );
     assert.strictEqual(
       MemoryInputSchema.safeParse({ action: 'caches.list', cacheName: 'cachedContents/test' })

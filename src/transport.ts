@@ -11,6 +11,7 @@ import { WebStandardStreamableHTTPServerTransport as WebHttpTransport } from '@m
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 
+import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
 import {
   isAutoDerivedAllowedHosts,
@@ -91,6 +92,9 @@ interface ManagedRequestOptions<TTransport, TResult> {
   onError: (err: unknown) => TResult;
   onMissingPair: () => TResult;
   requestMethod: string;
+  getReservedStatefulSlots: () => number;
+  releaseStatefulSlot: () => void;
+  reserveStatefulSlot: () => void;
   sessionTtlMs: number;
   sessionId: string | undefined;
   statefulPairs: StatefulPairMap<TTransport>;
@@ -253,6 +257,14 @@ function getRequestSessionId(req: Request): string | undefined {
   return header?.trim() ? header : undefined;
 }
 
+function rejectDeleteWithoutSession(
+  method: string,
+  sessionId: string | undefined,
+  isStateless: boolean,
+): boolean {
+  return method === 'DELETE' && !sessionId && !isStateless;
+}
+
 async function createManagedPair<TTransport extends ServerTransport>(
   createServer: ServerFactory,
   Transport: TransportConstructor<TTransport>,
@@ -366,8 +378,9 @@ function oldestStatefulPairId<TTransport>(
 async function ensureStatefulPairCapacity<TTransport>(
   statefulPairs: StatefulPairMap<TTransport>,
   maxSessions: number,
+  getReservedStatefulSlots: () => number,
 ): Promise<void> {
-  while (statefulPairs.size >= maxSessions) {
+  while (statefulPairs.size + getReservedStatefulSlots() >= maxSessions) {
     const oldestId = oldestStatefulPairId(statefulPairs);
     if (!oldestId) return;
     await evictStatefulPair(statefulPairs, oldestId, 'capacity');
@@ -382,6 +395,9 @@ async function selectManagedPair<TTransport>(
   sessionTtlMs: number,
   createPair: (isStatelessTransport: boolean) => Promise<ManagedPair<TTransport>>,
   acquireStatefulCreationLock: () => Promise<() => void>,
+  reserveStatefulSlot: () => void,
+  releaseStatefulSlot: () => void,
+  getReservedStatefulSlots: () => number,
 ): Promise<PairSelection<TTransport>> {
   if (isStateless) {
     return { pair: await createPair(true), shouldClosePair: true };
@@ -396,17 +412,27 @@ async function selectManagedPair<TTransport>(
   }
 
   const releaseReservation = await acquireStatefulCreationLock();
+  reserveStatefulSlot();
+  let released = false;
+  const releaseReservationOnce = () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    releaseStatefulSlot();
+    releaseReservation();
+  };
 
   try {
     await evictExpiredStatefulPairs(statefulPairs, sessionTtlMs);
-    await ensureStatefulPairCapacity(statefulPairs, maxSessions);
+    await ensureStatefulPairCapacity(statefulPairs, maxSessions, getReservedStatefulSlots);
     return {
       pair: await createPair(false),
-      releaseReservation,
+      releaseReservation: releaseReservationOnce,
       shouldClosePair: true,
     };
   } catch (error) {
-    releaseReservation();
+    releaseReservationOnce();
     throw error;
   }
 }
@@ -449,6 +475,33 @@ async function closeStatefulPairs<TTransport>(
   statefulPairs.clear();
 }
 
+function startStatefulIdleSweep<TTransport>(
+  statefulPairs: StatefulPairMap<TTransport>,
+  sessionTtlMs: number,
+): () => void {
+  const sweepIntervalMs = Math.max(Math.floor(sessionTtlMs / 4), 60_000);
+  let running = false;
+  const timer = setInterval(() => {
+    if (running) {
+      return;
+    }
+
+    running = true;
+    void evictExpiredStatefulPairs(statefulPairs, sessionTtlMs)
+      .catch((err: unknown) => {
+        log.warn(`Idle sweep failed: ${AppError.formatMessage(err)}`);
+      })
+      .finally(() => {
+        running = false;
+      });
+  }, sweepIntervalMs);
+  timer.unref();
+
+  return () => {
+    clearInterval(timer);
+  };
+}
+
 async function handleManagedRequest<TTransport, TResult>({
   createPair,
   getSessionId,
@@ -458,6 +511,9 @@ async function handleManagedRequest<TTransport, TResult>({
   onError,
   onMissingPair,
   requestMethod,
+  getReservedStatefulSlots,
+  releaseStatefulSlot,
+  reserveStatefulSlot,
   sessionTtlMs,
   sessionId,
   statefulPairs,
@@ -476,6 +532,9 @@ async function handleManagedRequest<TTransport, TResult>({
       sessionTtlMs,
       createPair,
       acquireStatefulCreationLock,
+      reserveStatefulSlot,
+      releaseStatefulSlot,
+      getReservedStatefulSlots,
     ));
 
     if (!pair) {
@@ -492,6 +551,10 @@ async function handleManagedRequest<TTransport, TResult>({
       getSessionId,
       shouldClosePair,
     );
+    if (!shouldClosePair) {
+      releaseReservation?.();
+      releaseReservation = undefined;
+    }
     return result;
   } catch (err: unknown) {
     logRequestFailure('request failed', err, {
@@ -630,9 +693,22 @@ export async function startHttpTransport(
 
   const statefulPairs = new Map<string, ManagedPair<NodeStreamableHTTPServerTransport>>();
   const acquireStatefulCreationLock = createAsyncLock();
+  let reservedStatefulSlots = 0;
+  const getReservedStatefulSlots = () => reservedStatefulSlots;
+  const reserveStatefulSlot = () => {
+    reservedStatefulSlots += 1;
+  };
+  const releaseStatefulSlot = () => {
+    reservedStatefulSlots = Math.max(0, reservedStatefulSlots - 1);
+  };
+  const stopIdleSweep = startStatefulIdleSweep(statefulPairs, sessionTtlMs);
 
   app.all('/mcp', async (req, res) => {
     const sessionId = getNodeSessionId(req);
+    if (rejectDeleteWithoutSession(req.method, sessionId, isStateless)) {
+      nodeErrorResponse(res, 400, 'mcp-session-id header required for DELETE');
+      return;
+    }
     await handleManagedRequest({
       createPair: (isStatelessTransport) =>
         createNodePair(createServer, isStatelessTransport, createEventStore),
@@ -649,6 +725,9 @@ export async function startHttpTransport(
         nodeErrorResponse(res, 404, 'Session not found');
       },
       requestMethod: req.method,
+      getReservedStatefulSlots,
+      releaseStatefulSlot,
+      reserveStatefulSlot,
       sessionTtlMs,
       sessionId,
       statefulPairs,
@@ -680,7 +759,18 @@ export async function startHttpTransport(
   });
 
   const close = async () => {
+    stopIdleSweep();
     await closeStatefulPairs(statefulPairs);
+    try {
+      httpServer.closeIdleConnections();
+    } catch (err) {
+      log.warn(`close: httpServer.closeIdleConnections failed: ${AppError.formatMessage(err)}`);
+    }
+    try {
+      httpServer.closeAllConnections();
+    } catch (err) {
+      log.warn(`close: httpServer.closeAllConnections failed: ${AppError.formatMessage(err)}`);
+    }
     await new Promise<void>((resolve, reject) => {
       httpServer.close((err) => {
         if (err) reject(err);
@@ -709,6 +799,15 @@ export function startWebStandardTransport(
 
   const statefulPairs = new Map<string, ManagedPair<WebStandardStreamableHTTPServerTransport>>();
   const acquireStatefulCreationLock = createAsyncLock();
+  let reservedStatefulSlots = 0;
+  const getReservedStatefulSlots = () => reservedStatefulSlots;
+  const reserveStatefulSlot = () => {
+    reservedStatefulSlots += 1;
+  };
+  const releaseStatefulSlot = () => {
+    reservedStatefulSlots = Math.max(0, reservedStatefulSlots - 1);
+  };
+  const stopIdleSweep = startStatefulIdleSweep(statefulPairs, sessionTtlMs);
 
   const handler = async (req: Request): Promise<Response> => {
     if (allowedHosts && !validateHostHeader(req.headers.get('host'), allowedHosts)) {
@@ -725,6 +824,9 @@ export function startWebStandardTransport(
     }
 
     const sessionId = getRequestSessionId(req);
+    if (rejectDeleteWithoutSession(req.method, sessionId, isStateless)) {
+      return withCors(responseError(400, 'mcp-session-id header required for DELETE'), corsOrigin);
+    }
     const response = await handleManagedRequest({
       createPair: (isStatelessTransport) =>
         createWebPair(createServer, isStatelessTransport, createEventStore),
@@ -735,6 +837,9 @@ export function startWebStandardTransport(
       onError: () => responseError(500, 'Internal Server Error'),
       onMissingPair: () => responseError(404, 'Session not found'),
       requestMethod: req.method,
+      getReservedStatefulSlots,
+      releaseStatefulSlot,
+      reserveStatefulSlot,
       sessionTtlMs,
       sessionId,
       statefulPairs,
@@ -748,6 +853,7 @@ export function startWebStandardTransport(
   const runtimeClose = startDetectedRuntime(runtimes, handler, host, port);
 
   const close = async () => {
+    stopIdleSweep();
     await closeStatefulPairs(statefulPairs);
     await runtimeClose?.();
   };

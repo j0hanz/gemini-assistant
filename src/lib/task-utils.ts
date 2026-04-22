@@ -36,6 +36,13 @@ export const MUTABLE_ANNOTATIONS = {
   openWorldHint: true,
 } as const;
 
+export const DESTRUCTIVE_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: true,
+} as const;
+
 const TASK_EXECUTION = { taskSupport: 'optional' } as const;
 const taskLog = logger.child('task-utils');
 

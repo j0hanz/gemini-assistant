@@ -264,26 +264,66 @@ export function validateFlatResearchInput(
   forbidFields(ctx, value, ['urls', 'systemInstruction'], 'mode', value.mode);
 }
 
+export const MEMORY_ACTIONS = [
+  'sessions.list',
+  'sessions.get',
+  'sessions.transcript',
+  'sessions.events',
+  'caches.list',
+  'caches.get',
+  'caches.create',
+  'caches.update',
+  'caches.delete',
+  'workspace.context',
+  'workspace.cache',
+] as const;
+
+export type MemoryAction = (typeof MEMORY_ACTIONS)[number];
+
 interface FlatMemoryInput {
-  action:
-    | 'sessions.list'
-    | 'sessions.get'
-    | 'sessions.transcript'
-    | 'sessions.events'
-    | 'caches.list'
-    | 'caches.get'
-    | 'caches.create'
-    | 'caches.update'
-    | 'caches.delete'
-    | 'workspace.context'
-    | 'workspace.cache';
-  cacheName?: string | undefined;
-  confirm?: boolean | undefined;
-  displayName?: string | undefined;
-  filePaths?: string[] | undefined;
+  action: MemoryAction;
   sessionId?: string | undefined;
+  cacheName?: string | undefined;
+  filePaths?: string[] | undefined;
   systemInstruction?: string | undefined;
   ttl?: string | undefined;
+  displayName?: string | undefined;
+  confirm?: boolean | undefined;
+}
+
+const MEMORY_CACHE_CREATE_FIELDS = [
+  'filePaths',
+  'systemInstruction',
+  'ttl',
+  'displayName',
+] as const;
+const MEMORY_ALL_OPTIONAL_FIELDS = [
+  'sessionId',
+  'cacheName',
+  'filePaths',
+  'systemInstruction',
+  'ttl',
+  'displayName',
+  'confirm',
+] as const;
+
+function forbidMemoryFieldsExcept(
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+  value: FlatMemoryInput,
+  allowed: readonly string[],
+): void {
+  const disallowed = MEMORY_ALL_OPTIONAL_FIELDS.filter((field) => !allowed.includes(field));
+  forbidFields(ctx, value, disallowed, 'action', value.action);
+}
+
+function requireMemoryField(
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+  value: FlatMemoryInput,
+  field: 'sessionId' | 'cacheName' | 'ttl',
+): void {
+  if (value[field] === undefined) {
+    addCustomIssue(ctx, `${field} is required when action=${value.action}.`, [field], value[field]);
+  }
 }
 
 export function validateFlatMemoryInput(
@@ -294,104 +334,31 @@ export function validateFlatMemoryInput(
     case 'sessions.list':
     case 'caches.list':
     case 'workspace.context':
-    case 'workspace.cache': {
-      forbidFields(
-        ctx,
-        value,
-        [
-          'sessionId',
-          'cacheName',
-          'filePaths',
-          'systemInstruction',
-          'ttl',
-          'displayName',
-          'confirm',
-        ],
-        'action',
-        value.action,
-      );
+    case 'workspace.cache':
+      forbidMemoryFieldsExcept(ctx, value, []);
       return;
-    }
     case 'sessions.get':
     case 'sessions.transcript':
-    case 'sessions.events': {
-      if (!value.sessionId) {
-        addCustomIssue(
-          ctx,
-          `sessionId is required when action=${value.action}.`,
-          ['sessionId'],
-          value.sessionId,
-        );
-      }
-      forbidFields(
-        ctx,
-        value,
-        ['cacheName', 'filePaths', 'systemInstruction', 'ttl', 'displayName', 'confirm'],
-        'action',
-        value.action,
-      );
+    case 'sessions.events':
+      requireMemoryField(ctx, value, 'sessionId');
+      forbidMemoryFieldsExcept(ctx, value, ['sessionId']);
       return;
-    }
-    case 'caches.get': {
-      if (!value.cacheName) {
-        addCustomIssue(
-          ctx,
-          'cacheName is required when action=caches.get.',
-          ['cacheName'],
-          value.cacheName,
-        );
-      }
-      forbidFields(
-        ctx,
-        value,
-        ['sessionId', 'filePaths', 'systemInstruction', 'ttl', 'displayName', 'confirm'],
-        'action',
-        value.action,
-      );
+    case 'caches.get':
+      requireMemoryField(ctx, value, 'cacheName');
+      forbidMemoryFieldsExcept(ctx, value, ['cacheName']);
       return;
-    }
-    case 'caches.create': {
+    case 'caches.create':
+      forbidMemoryFieldsExcept(ctx, value, MEMORY_CACHE_CREATE_FIELDS);
       validateMeaningfulCacheCreateInput(value, ctx);
-      forbidFields(ctx, value, ['sessionId', 'cacheName', 'confirm'], 'action', value.action);
       return;
-    }
-    case 'caches.update': {
-      if (!value.cacheName) {
-        addCustomIssue(
-          ctx,
-          'cacheName is required when action=caches.update.',
-          ['cacheName'],
-          value.cacheName,
-        );
-      }
-      if (!value.ttl) {
-        addCustomIssue(ctx, 'ttl is required when action=caches.update.', ['ttl'], value.ttl);
-      }
-      forbidFields(
-        ctx,
-        value,
-        ['sessionId', 'filePaths', 'systemInstruction', 'displayName', 'confirm'],
-        'action',
-        value.action,
-      );
+    case 'caches.update':
+      requireMemoryField(ctx, value, 'cacheName');
+      requireMemoryField(ctx, value, 'ttl');
+      forbidMemoryFieldsExcept(ctx, value, ['cacheName', 'ttl']);
       return;
-    }
-    case 'caches.delete': {
-      if (!value.cacheName) {
-        addCustomIssue(
-          ctx,
-          'cacheName is required when action=caches.delete.',
-          ['cacheName'],
-          value.cacheName,
-        );
-      }
-      forbidFields(
-        ctx,
-        value,
-        ['sessionId', 'filePaths', 'systemInstruction', 'ttl', 'displayName'],
-        'action',
-        value.action,
-      );
-    }
+    case 'caches.delete':
+      requireMemoryField(ctx, value, 'cacheName');
+      forbidMemoryFieldsExcept(ctx, value, ['cacheName', 'confirm']);
+      return;
   }
 }

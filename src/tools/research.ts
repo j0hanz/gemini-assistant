@@ -23,7 +23,7 @@ import {
   collectGroundedSources,
   collectUrlMetadata,
   formatCountLabel,
-  validateStructuredContent,
+  safeValidateStructuredContent,
 } from '../lib/response.js';
 import { type StreamResult } from '../lib/streaming.js';
 import {
@@ -412,16 +412,12 @@ async function researchWork(args: ResearchInput, ctx: ServerContext): Promise<Ca
   }
 
   const structured = result.structuredContent ?? {};
-  const structuredContent = validateStructuredContent(
+  return safeValidateStructuredContent(
     'research',
     ResearchOutputSchema,
     buildResearchStructuredContent(args, ctx, structured),
+    result,
   );
-
-  return {
-    ...result,
-    structuredContent,
-  };
 }
 
 export function registerResearchTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {

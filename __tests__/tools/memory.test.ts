@@ -145,6 +145,36 @@ describe('memoryWork', () => {
     }
   });
 
+  it('caches.get maps structured not-found errors to a tool-level error', async () => {
+    const client = getAI();
+    const originalGet = client.caches.get.bind(client.caches);
+    // @ts-expect-error test override — simulate structured not-found response from SDK
+    client.caches.get = async () => {
+      const err = new Error('missing cache') as Error & { code?: string; status?: number };
+      err.code = 'NOT_FOUND';
+      err.status = 404;
+      throw err;
+    };
+
+    try {
+      const result = await memoryWork(
+        {} as never,
+        emptyRootsFetcher,
+        passthroughCreateCacheWork,
+        {
+          action: 'caches.get',
+          cacheName: 'cachedContents/missing',
+        },
+        createContext(),
+      );
+
+      assert.strictEqual(result.isError, true);
+      assert.match(result.content[0]?.text ?? '', /Cache 'cachedContents\/missing' not found\./);
+    } finally {
+      client.caches.get = originalGet;
+    }
+  });
+
   it('caches.delete unsupported-elicitation path produces schema-valid output', async () => {
     const result = await memoryWork(
       {} as never,

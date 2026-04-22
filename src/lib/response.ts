@@ -14,6 +14,7 @@ import type {
 } from '../schemas/outputs.js';
 
 import { finishReasonToError, SafetyError } from './errors.js';
+import { logger } from './logger.js';
 import { pickDefined } from './object.js';
 import { isPublicHttpUrl } from './validation.js';
 
@@ -121,17 +122,49 @@ export function validateStructuredContent<TSchema extends z.ZodType>(
   );
 }
 
-interface SafeParseSchema {
-  safeParse: (input: unknown) => { success: true; data: unknown } | { success: false };
-}
+const responseLog = logger.child('response');
 
-function hasSafeParse(outputSchema: unknown): outputSchema is SafeParseSchema {
+function hasSafeParse(outputSchema: unknown): outputSchema is z.ZodType {
   return (
     typeof outputSchema === 'object' &&
     outputSchema !== null &&
     'safeParse' in outputSchema &&
-    typeof outputSchema.safeParse === 'function'
+    typeof (outputSchema as { safeParse?: unknown }).safeParse === 'function'
   );
+}
+
+export function safeValidateStructuredContent(
+  toolName: string,
+  outputSchema: unknown,
+  structuredContent: unknown,
+  result: CallToolResult,
+): CallToolResult {
+  if (result.isError || result.structuredContent === undefined || !hasSafeParse(outputSchema)) {
+    return result;
+  }
+
+  const parsed = outputSchema.safeParse(structuredContent);
+  if (parsed.success) {
+    return {
+      ...result,
+      structuredContent: parsed.data as CallToolResult['structuredContent'],
+    };
+  }
+
+  responseLog.error('structuredContent validation failed', {
+    toolName,
+    error: z.prettifyError(parsed.error),
+  });
+
+  return {
+    content: [
+      {
+        type: 'text',
+        text: `Internal ${toolName} output validation failed.`,
+      },
+    ],
+    isError: true,
+  };
 }
 
 export function validateStructuredToolResult(

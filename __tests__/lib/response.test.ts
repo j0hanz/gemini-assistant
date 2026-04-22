@@ -13,6 +13,7 @@ import {
   createResourceLink,
   extractTextOrError,
   formatCountLabel,
+  safeValidateStructuredContent,
   validateStructuredContent,
   validateStructuredToolResult,
 } from '../../src/lib/response.js';
@@ -285,6 +286,61 @@ describe('validateStructuredContent', () => {
         ),
       /does not match outputSchema/,
     );
+  });
+});
+
+describe('safeValidateStructuredContent', () => {
+  it('returns parsed structured content when it matches the schema', () => {
+    const result = safeValidateStructuredContent(
+      'test-tool',
+      z.strictObject({
+        status: z.literal('completed'),
+        summary: z.string(),
+      }),
+      {
+        status: 'completed',
+        summary: 'ok',
+      },
+      {
+        content: [{ type: 'text', text: 'ok' }],
+        structuredContent: {
+          status: 'completed',
+          summary: 'ok',
+        },
+      },
+    );
+
+    assert.deepStrictEqual(result.structuredContent, {
+      status: 'completed',
+      summary: 'ok',
+    });
+    assert.strictEqual(result.isError, undefined);
+  });
+
+  it('returns a generic error when structured content does not match', () => {
+    const result = safeValidateStructuredContent(
+      'test-tool',
+      z.strictObject({
+        status: z.literal('completed'),
+        summary: z.string(),
+      }),
+      {
+        status: 'completed',
+        explanation: 'wrong field',
+      },
+      {
+        content: [{ type: 'text', text: 'ok' }],
+        structuredContent: {
+          status: 'completed',
+          explanation: 'wrong field',
+        },
+      },
+    );
+
+    assert.strictEqual(result.isError, true);
+    assert.strictEqual(result.structuredContent, undefined);
+    assert.strictEqual(result.content.length, 1);
+    assert.match(result.content[0]?.text ?? '', /Internal test-tool output validation failed\./);
   });
 });
 

@@ -13,9 +13,11 @@ import { logger } from './lib/logger.js';
 import { MEMORY_CACHES_URI } from './lib/resource-uris.js';
 import { installTaskSafeToolCallHandler } from './lib/task-utils.js';
 import { buildServerRootsFetcher } from './lib/validation.js';
+import { createWorkspaceCacheManager } from './lib/workspace-context.js';
 
 import { registerPrompts } from './prompts.js';
 import { PUBLIC_RESOURCE_URIS } from './public-contract.js';
+import { PUBLIC_TOOL_NAMES } from './public-contract.js';
 import { registerResources } from './resources.js';
 import { createSessionStore, type SessionChangeEvent, type SessionStore } from './sessions.js';
 import { registerAnalyzeTool } from './tools/analyze.js';
@@ -30,18 +32,23 @@ const { version } = JSON.parse(
   readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf-8'),
 ) as { version: string };
 
-const activeServers = new Set<McpServer>();
 const log = logger.child('server');
 interface ServerServices {
   sessionStore: SessionStore;
   taskMessageQueue: InMemoryTaskMessageQueue;
+  workspaceCacheManager: ReturnType<typeof createWorkspaceCacheManager>;
 }
 
 type ServerRegistrar = (server: McpServer, services: ServerServices) => void;
 
 const SERVER_TOOL_REGISTRARS = [
   (server, services) => {
-    registerChatTool(server, services.sessionStore, services.taskMessageQueue);
+    registerChatTool(
+      server,
+      services.sessionStore,
+      services.taskMessageQueue,
+      services.workspaceCacheManager,
+    );
   },
   (server, services) => {
     registerResearchTool(server, services.taskMessageQueue);
@@ -53,15 +60,20 @@ const SERVER_TOOL_REGISTRARS = [
     registerReviewTool(server, services.taskMessageQueue);
   },
   (server, services) => {
-    registerMemoryTool(server, services.sessionStore, services.taskMessageQueue);
+    registerMemoryTool(
+      server,
+      services.sessionStore,
+      services.taskMessageQueue,
+      services.workspaceCacheManager,
+    );
   },
 ] as const satisfies readonly ServerRegistrar[];
 
 const SERVER_DESCRIPTION =
   'Gemini AI assistant with five job-first public tools: chat, research, analyze, review, and memory.';
 
-const SERVER_INSTRUCTIONS =
-  'Public tools: ' +
+export const SERVER_INSTRUCTIONS =
+  `Public tools: ${PUBLIC_TOOL_NAMES.join(', ')}. ` +
   'chat (direct Gemini chat with optional in-memory sessions and cache memory; ' +
   'chat sessions are server-memory only, expire/evict over time, and require a stateful transport path), ' +
   'research (explicit quick or deep grounded research), ' +
@@ -113,22 +125,6 @@ export function sendResourceChangedForServer(
   }
 }
 
-function sendResourceChanged(
-  listUri: string | undefined,
-  detailUris: readonly string[] = [],
-): void {
-  for (const server of activeServers) {
-    sendResourceChangedForServer(server, listUri, detailUris);
-  }
-}
-
-function handleCacheChange({ detailUris }: CacheChangeEvent): void {
-  sendResourceChanged(MEMORY_CACHES_URI, detailUris);
-  // `discover://context` is a per-session aggregation and must not be
-  // broadcast across servers. The session-change subscriber (bound to the
-  // originating `server`) owns scoped updates to that URI.
-}
-
 function registerServerTools(server: McpServer, services: ServerServices): void {
   for (const register of SERVER_TOOL_REGISTRARS) {
     register(server, services);
@@ -138,6 +134,20 @@ function registerServerTools(server: McpServer, services: ServerServices): void 
 function runCloseStep(closeErrors: Error[], label: string, fn: () => void): void {
   try {
     fn();
+  } catch (err) {
+    const error = new Error(`close: ${label} failed: ${AppError.formatMessage(err)}`);
+    closeErrors.push(error);
+    log.warn(error.message, { stack: err instanceof Error ? err.stack : undefined });
+  }
+}
+
+async function runCloseStepAsync(
+  closeErrors: Error[],
+  label: string,
+  fn: () => Promise<void>,
+): Promise<void> {
+  try {
+    await fn();
   } catch (err) {
     const error = new Error(`close: ${label} failed: ${AppError.formatMessage(err)}`);
     closeErrors.push(error);
@@ -162,6 +172,7 @@ export function createServerInstance(): ServerInstance {
   const sessionStore = createSessionStore();
   const taskStore = new InMemoryTaskStore();
   const taskMessageQueue = new InMemoryTaskMessageQueue();
+  const workspaceCacheManager = createWorkspaceCacheManager();
   const server = new McpServer(
     {
       name: 'gemini-assistant',
@@ -172,6 +183,7 @@ export function createServerInstance(): ServerInstance {
     {
       capabilities: {
         logging: {},
+        completions: {},
         prompts: {},
         resources: { listChanged: true },
         tools: { listChanged: false },
@@ -195,16 +207,16 @@ export function createServerInstance(): ServerInstance {
       ]);
     },
   );
-  const unsubscribeCacheChange = subscribeCacheChange(handleCacheChange);
+  const unsubscribeCacheChange = subscribeCacheChange(({ detailUris }: CacheChangeEvent) => {
+    sendResourceChangedForServer(server, MEMORY_CACHES_URI, detailUris);
+  });
 
-  activeServers.add(server);
-
-  registerServerTools(server, { sessionStore, taskMessageQueue });
+  registerServerTools(server, { sessionStore, taskMessageQueue, workspaceCacheManager });
   installTaskSafeToolCallHandler(server);
 
   const rootsFetcher = buildServerRootsFetcher(server);
   registerPrompts(server);
-  registerResources(server, sessionStore, rootsFetcher);
+  registerResources(server, sessionStore, rootsFetcher, workspaceCacheManager);
 
   return {
     server,
@@ -214,11 +226,11 @@ export function createServerInstance(): ServerInstance {
       const closeErrors: Error[] = [];
       runCloseStep(closeErrors, 'unsubscribeSessionChange', unsubscribeSessionChange);
       runCloseStep(closeErrors, 'unsubscribeCacheChange', unsubscribeCacheChange);
+      await runCloseStepAsync(closeErrors, 'workspaceCacheManager.close', () =>
+        workspaceCacheManager.close(),
+      );
       runCloseStep(closeErrors, 'sessionStore.close', () => {
         sessionStore.close();
-      });
-      runCloseStep(closeErrors, 'activeServers.delete', () => {
-        activeServers.delete(server);
       });
       runCloseStep(closeErrors, 'detachLogger', detachLogger);
       runCloseStep(closeErrors, 'taskStore.cleanup', () => {

@@ -1,5 +1,6 @@
 import type { Chat } from '@google/genai';
 
+import { AppError } from './lib/errors.js';
 import type { ToolProfile } from './lib/orchestration.js';
 import { sessionDetailUri, sessionEventsUri, sessionTranscriptUri } from './lib/resource-uris.js';
 import type { FunctionCallEntry, ToolEvent } from './lib/streaming.js';
@@ -230,7 +231,6 @@ export class SessionStore {
     entries.push(cloneItem(item));
     this.trimSessionHistory(entries, maxEntries);
     this.touchSessionEntry(id, entry);
-    this.notifyChange([id], false);
     return true;
   }
 
@@ -259,7 +259,7 @@ export class SessionStore {
 
   setSession(id: string, chat: Chat): void {
     if (this.sessions.has(id)) {
-      throw new Error(`Session already exists: ${id}`);
+      throw new AppError('sessions', `Session already exists: ${id}`);
     }
     let evictedId: string | undefined;
     if (this.sessions.size >= this.maxSessions) {
@@ -271,7 +271,14 @@ export class SessionStore {
   }
 
   replaceSession(id: string, chat: Chat): void {
-    this.storeSession(id, chat);
+    const entry = this.sessions.get(id);
+    if (!entry) {
+      this.setSession(id, chat);
+      return;
+    }
+
+    entry.chat = chat;
+    this.setSessionEntry(id, entry);
     this.startEvictionTimer();
     // Replacement preserves collection membership (same id). Emit detail
     // updates only; do NOT fire `notifications/resources/list_changed`.

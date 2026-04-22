@@ -13,6 +13,7 @@ import {
 } from '../../src/lib/workspace-context.js';
 import {
   assembleWorkspaceContext,
+  createWorkspaceCacheManager,
   estimateTokens,
   MIN_CACHE_TOKENS,
   summarizeRootForDashboard,
@@ -723,6 +724,128 @@ describe('workspace-context', () => {
         if (process.platform !== 'win32') {
           await rm(caseVariantRoot, { recursive: true, force: true });
         }
+      }
+    });
+  });
+
+  describe('WorkspaceCacheManagerImpl instances', () => {
+    it('keeps cache state isolated across instances', async () => {
+      process.env.CACHE = 'true';
+      process.env.AUTO_SCAN = 'true';
+      process.env.API_KEY = 'test-key';
+
+      const managerA = createWorkspaceCacheManager();
+      const managerB = createWorkspaceCacheManager();
+      const rootA = await createWorkspaceFile(
+        `ws-cache-instance-a-${Date.now()}`,
+        'a'.repeat(130_000),
+      );
+      const rootB = await createWorkspaceFile(
+        `ws-cache-instance-b-${Date.now()}`,
+        'b'.repeat(130_000),
+      );
+      const ai = getAI();
+      const originalCreate = ai.caches.create.bind(ai.caches);
+      const createdNames = ['cachedContents/instance-a', 'cachedContents/instance-b'];
+
+      ai.caches.create = async () => ({
+        name: createdNames.shift() ?? 'cachedContents/fallback',
+      });
+
+      try {
+        assert.strictEqual(await managerA.getOrCreateCache([rootA]), 'cachedContents/instance-a');
+        assert.strictEqual(await managerB.getOrCreateCache([rootB]), 'cachedContents/instance-b');
+
+        managerA.invalidate();
+
+        assert.strictEqual(managerA.getCacheStatus().cacheName, undefined);
+        assert.strictEqual(managerB.getCacheStatus().cacheName, 'cachedContents/instance-b');
+      } finally {
+        ai.caches.create = originalCreate;
+        await managerA.close();
+        await managerB.close();
+        await rm(rootA, { recursive: true, force: true });
+        await rm(rootB, { recursive: true, force: true });
+      }
+    });
+
+    it('close waits for inflight creation and invalidates local state', async () => {
+      process.env.CACHE = 'true';
+      process.env.AUTO_SCAN = 'true';
+      process.env.API_KEY = 'test-key';
+
+      const manager = createWorkspaceCacheManager();
+      const root = await createWorkspaceFile(`ws-cache-close-${Date.now()}`, 'a'.repeat(130_000));
+      const ai = getAI();
+      const originalCreate = ai.caches.create.bind(ai.caches);
+      let resolveCreate: ((value: { name: string }) => void) | undefined;
+      let closeResolved = false;
+
+      ai.caches.create = async () =>
+        await new Promise<{ name: string }>((resolve) => {
+          resolveCreate = resolve;
+        });
+
+      try {
+        const creation = manager.getOrCreateCache([root]);
+        await waitFor(() => resolveCreate !== undefined);
+        const closing = manager.close().then(() => {
+          closeResolved = true;
+        });
+
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.strictEqual(closeResolved, false);
+
+        resolveCreate?.({ name: 'cachedContents/close-test' });
+        assert.strictEqual(await creation, 'cachedContents/close-test');
+        await closing;
+
+        assert.strictEqual(closeResolved, true);
+        assert.strictEqual(manager.getCacheStatus().cacheName, undefined);
+      } finally {
+        ai.caches.create = originalCreate;
+        await rm(root, { recursive: true, force: true });
+        await manager.close();
+      }
+    });
+
+    it('does not delete empty cache names when an in-flight creation is discarded', async () => {
+      process.env.CACHE = 'true';
+      process.env.AUTO_SCAN = 'true';
+      process.env.API_KEY = 'test-key';
+
+      const manager = createWorkspaceCacheManager();
+      const root = await createWorkspaceFile(
+        `ws-cache-empty-delete-${Date.now()}`,
+        'a'.repeat(130_000),
+      );
+      const ai = getAI();
+      const originalCreate = ai.caches.create.bind(ai.caches);
+      const originalDelete = ai.caches.delete.bind(ai.caches);
+      let resolveCreate: ((value: { name: string }) => void) | undefined;
+      const deletedNames: string[] = [];
+
+      ai.caches.create = async () =>
+        await new Promise<{ name: string }>((resolve) => {
+          resolveCreate = resolve;
+        });
+      ai.caches.delete = (async ({ name }: { name: string }) => {
+        deletedNames.push(name);
+      }) as typeof ai.caches.delete;
+
+      try {
+        const creation = manager.getOrCreateCache([root]);
+        await waitFor(() => resolveCreate !== undefined);
+        manager.invalidate();
+        resolveCreate?.({ name: '' });
+
+        assert.strictEqual(await creation, undefined);
+        assert.deepStrictEqual(deletedNames, []);
+      } finally {
+        ai.caches.create = originalCreate;
+        ai.caches.delete = originalDelete;
+        await manager.close();
+        await rm(root, { recursive: true, force: true });
       }
     });
   });

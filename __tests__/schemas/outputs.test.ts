@@ -3,7 +3,6 @@ import { describe, it } from 'node:test';
 
 import {
   AnalyzeOutputSchema,
-  AskOutputSchema,
   ContextUsedSchema,
   CreateCacheOutputSchema,
   DeleteCacheOutputSchema,
@@ -13,92 +12,6 @@ import {
   UpdateCacheOutputSchema,
   UsageMetadataSchema,
 } from '../../src/schemas/outputs.js';
-
-describe('AskOutputSchema', () => {
-  it('accepts a plain text answer', () => {
-    const result = AskOutputSchema.safeParse({ answer: 'Hello world' });
-    assert.ok(result.success);
-  });
-
-  it('accepts structured data alongside the answer', () => {
-    const result = AskOutputSchema.safeParse({
-      answer: '{"status":"ok"}',
-      data: { status: 'ok' },
-      usage: { totalTokenCount: 42 },
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects a missing answer field', () => {
-    const result = AskOutputSchema.safeParse({ data: { status: 'ok' } });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('accepts schemaWarnings array', () => {
-    const result = AskOutputSchema.safeParse({
-      answer: 'test',
-      schemaWarnings: ['Failed to parse JSON from model response'],
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts output without contextUsed', () => {
-    const result = AskOutputSchema.safeParse({
-      answer: 'test',
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts normalized tool events', () => {
-    const result = AskOutputSchema.safeParse({
-      answer: 'test',
-      toolEvents: [
-        {
-          kind: 'tool_call',
-          id: 'abc123',
-          toolType: 'GOOGLE_SEARCH_WEB',
-          thoughtSignature: 'sig-1',
-        },
-      ],
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts output without schemaWarnings', () => {
-    const result = AskOutputSchema.safeParse({ answer: 'test', data: { x: 1 } });
-    assert.ok(result.success);
-    if (result.success) {
-      assert.strictEqual(result.data.schemaWarnings, undefined);
-    }
-  });
-
-  it('rejects non-array schemaWarnings', () => {
-    const result = AskOutputSchema.safeParse({
-      answer: 'test',
-      schemaWarnings: 'not an array',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown fields on AskOutputSchema', () => {
-    const result = AskOutputSchema.safeParse({
-      answer: 'test',
-      workspaceCache: {
-        applied: true,
-        cacheName: 'x',
-      },
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown fields', () => {
-    const result = AskOutputSchema.safeParse({
-      answer: 'test',
-      extra: true,
-    });
-    assert.strictEqual(result.success, false);
-  });
-});
 
 describe('ContextUsedSchema', () => {
   it('accepts valid context used metadata', () => {
@@ -187,6 +100,13 @@ describe('ResearchOutputSchema', () => {
 });
 
 describe('ReviewOutputSchema', () => {
+  it('documents the corrected empty flag description', () => {
+    assert.strictEqual(
+      ReviewOutputSchema.shape.empty.description,
+      'Whether the local diff is empty (no changes)',
+    );
+  });
+
   it('accepts failure diagnosis output', () => {
     const result = ReviewOutputSchema.safeParse({
       status: 'completed',

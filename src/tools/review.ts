@@ -18,7 +18,7 @@ import { buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { buildDiffReviewPrompt } from '../lib/model-prompts.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
-import { buildBaseStructuredOutput, validateStructuredContent } from '../lib/response.js';
+import { buildBaseStructuredOutput, safeValidateStructuredContent } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher, validateUrls } from '../lib/validation.js';
@@ -1118,16 +1118,12 @@ async function reviewWork(
   }
 
   const structured = result.structuredContent ?? {};
-  const structuredContent = validateStructuredContent(
+  return safeValidateStructuredContent(
     'review',
     ReviewOutputSchema,
     buildReviewStructuredContent(ctx.task?.id, args.subjectKind, structured),
+    result,
   );
-
-  return {
-    ...result,
-    structuredContent,
-  };
 }
 
 export function registerReviewTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {

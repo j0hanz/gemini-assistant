@@ -134,7 +134,7 @@ describe('discovery resources', () => {
       contentHash: 'hash',
       estimatedTokens: 321,
       sources: [join(root, 'readme.md')],
-      createdAt: 1,
+      createdAt: Date.now(),
       ttl: '3600s',
     });
 
@@ -143,11 +143,35 @@ describe('discovery resources', () => {
 
       assert.deepStrictEqual(snapshot.workspace.scannedFiles, ['package.json', 'readme.md']);
       assert.strictEqual(snapshot.workspace.estimatedTokens, 321);
+      assert.strictEqual(snapshot.workspace.cacheStatus.fresh, true);
       assert.doesNotMatch(renderServerContextMarkdown(snapshot), /x{100}/);
     } finally {
       process.env.ROOTS = originalAllowedRoots;
       workspaceCacheManager.getCacheStatus = originalStatus;
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('marks cached workspace status stale once the TTL has expired', async () => {
+    const sessionStore = createStore();
+    const originalStatus = workspaceCacheManager.getCacheStatus.bind(workspaceCacheManager);
+
+    workspaceCacheManager.getCacheStatus = () => ({
+      enabled: true,
+      cacheName: 'cachedContents/workspace-stale',
+      contentHash: 'hash',
+      estimatedTokens: 321,
+      sources: [],
+      createdAt: Date.now() - 10_000,
+      ttl: '1s',
+    });
+
+    try {
+      const snapshot = await buildServerContextSnapshot(async () => [], sessionStore);
+
+      assert.strictEqual(snapshot.workspace.cacheStatus.fresh, false);
+    } finally {
+      workspaceCacheManager.getCacheStatus = originalStatus;
     }
   });
 

@@ -34,6 +34,7 @@ import {
 } from './fragments.js';
 import { GeminiResponseSchema } from './json-schema.js';
 import {
+  MEMORY_ACTIONS,
   validateExclusiveSourceFileFields,
   validateFlatAnalyzeInput,
   validateFlatMemoryInput,
@@ -208,27 +209,12 @@ export type ReviewInput = z.infer<typeof ReviewInputSchema>;
 export function createMemoryInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
   return z
     .strictObject({
-      action: enumField(
-        [
-          'sessions.list',
-          'sessions.get',
-          'sessions.transcript',
-          'sessions.events',
-          'caches.list',
-          'caches.get',
-          'caches.create',
-          'caches.update',
-          'caches.delete',
-          'workspace.context',
-          'workspace.cache',
-        ],
-        'Memory action selector.',
-      ),
+      action: withFieldMetadata(z.enum(MEMORY_ACTIONS), 'Memory action selector.'),
       sessionId: completable(
-        optionalField(sessionId('Session identifier to inspect')),
+        sessionId('Session identifier to inspect').optional(),
         completeSessionIds,
       ),
-      cacheName: completableCacheName('Cache resource name to inspect', true),
+      cacheName: completableCacheName('Cache resource name', true),
       filePaths: workspacePathArray({
         description: 'Files to include in the cache.',
         itemDescription: 'Workspace-relative or absolute path to a file to cache',

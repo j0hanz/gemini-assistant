@@ -18,7 +18,7 @@ import {
   buildSharedStructuredMetadata,
   createResourceLink,
   extractTextContent,
-  validateStructuredContent,
+  safeValidateStructuredContent,
   withRelatedTaskMeta,
 } from '../lib/response.js';
 import {
@@ -35,7 +35,7 @@ import {
   buildSessionSummary,
   emptyContextUsed,
 } from '../lib/workspace-context.js';
-import { workspaceCacheManager } from '../lib/workspace-context.js';
+import { workspaceCacheManager, type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import {
   type AskInput,
   type ChatInput,
@@ -622,6 +622,7 @@ function buildSessionEventUsage(
 async function resolveWorkspaceCacheName(
   args: AskArgs,
   signal?: AbortSignal,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): Promise<string | undefined> {
   if (
     args.cacheName ||
@@ -638,7 +639,7 @@ async function resolveWorkspaceCacheName(
     if (allowedRoots.length === 0) {
       return undefined;
     }
-    return await workspaceCacheManager.getOrCreateCache(allowedRoots, signal);
+    return await workspaceCacheManagerInstance.getOrCreateCache(allowedRoots, signal);
   } catch (err) {
     logger.child('workspace').warn(`Failed to resolve workspace cache: ${String(err)}`);
     return undefined;
@@ -742,6 +743,7 @@ async function prepareAskRequest(
   args: AskArgs,
   deps: AskDependencies,
   signal: AbortSignal,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): Promise<PreparedAskRequest | CallToolResult> {
   const validationError = validateAskRequest(args, deps);
   if (validationError) return validationError;
@@ -749,7 +751,7 @@ async function prepareAskRequest(
   const canUseWorkspaceCache =
     !args.sessionId || deps.getSessionEntry(args.sessionId) === undefined;
   const workspaceCacheName = canUseWorkspaceCache
-    ? await resolveWorkspaceCacheName(args, signal)
+    ? await resolveWorkspaceCacheName(args, signal, workspaceCacheManagerInstance)
     : undefined;
   const contextUsed = workspaceCacheName
     ? buildContextUsed(
@@ -771,9 +773,15 @@ function isPreparedRequest(
 
 export function createAskWork(
   deps: AskDependencies = createDefaultAskDependencies(createSessionStore()),
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ) {
   return async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
-    const prepared = await prepareAskRequest(args, deps, ctx.mcpReq.signal);
+    const prepared = await prepareAskRequest(
+      args,
+      deps,
+      ctx.mcpReq.signal,
+      workspaceCacheManagerInstance,
+    );
     if (!isPreparedRequest(prepared)) return prepared;
 
     const { effectiveArgs, contextUsed } = prepared;
@@ -843,29 +851,29 @@ function assembleChatOutput(
     ? structured.schemaWarnings.filter((value): value is string => typeof value === 'string')
     : undefined;
   const sessionId = extractSessionId(result, sessionIdHint);
-  const structuredContent = validateStructuredContent('chat', ChatOutputSchema, {
-    ...buildBaseStructuredOutput(taskId, warnings),
-    answer,
-    ...(structured.data !== undefined ? { data: structured.data } : {}),
-    ...(sessionId
-      ? {
-          session: {
-            id: sessionId,
-            resources: sessionResources(sessionId),
-          },
-        }
-      : {}),
-    ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
-    ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
-    ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
-    ...(structured.usage ? { usage: structured.usage } : {}),
-    ...(structured.contextUsed ? { contextUsed: structured.contextUsed } : {}),
-  });
-
-  return {
-    ...result,
-    structuredContent,
-  };
+  return safeValidateStructuredContent(
+    'chat',
+    ChatOutputSchema,
+    {
+      ...buildBaseStructuredOutput(taskId, warnings),
+      answer,
+      ...(structured.data !== undefined ? { data: structured.data } : {}),
+      ...(sessionId
+        ? {
+            session: {
+              id: sessionId,
+              resources: sessionResources(sessionId),
+            },
+          }
+        : {}),
+      ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
+      ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
+      ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
+      ...(structured.usage ? { usage: structured.usage } : {}),
+      ...(structured.contextUsed ? { contextUsed: structured.contextUsed } : {}),
+    },
+    result,
+  );
 }
 
 export async function chatWork(
@@ -897,8 +905,12 @@ export function registerChatTool(
   server: McpServer,
   sessionStore: SessionStore,
   taskMessageQueue: TaskMessageQueue,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): void {
-  const askWork = createAskWork(createDefaultAskDependencies(sessionStore));
+  const askWork = createAskWork(
+    createDefaultAskDependencies(sessionStore),
+    workspaceCacheManagerInstance,
+  );
 
   registerTaskTool(
     server,

@@ -14,7 +14,7 @@ import { buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
 import { buildOrchestrationConfig } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
-import { buildBaseStructuredOutput, validateStructuredContent } from '../lib/response.js';
+import { buildBaseStructuredOutput, safeValidateStructuredContent } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
@@ -357,16 +357,12 @@ async function analyzeWork(
   }
 
   const structured = result.structuredContent ?? {};
-  const structuredContent = validateStructuredContent(
+  return safeValidateStructuredContent(
     'analyze',
     AnalyzeOutputSchema,
     buildAnalyzeStructuredContent(args, ctx, structured),
+    result,
   );
-
-  return {
-    ...result,
-    structuredContent,
-  };
 }
 
 async function runAnalyzeTarget(

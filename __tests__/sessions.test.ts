@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
+import { AppError } from '../src/lib/errors.js';
 import {
   createSessionStore,
   type SessionStore,
@@ -158,7 +159,7 @@ describe('sessions', () => {
       ]);
     });
 
-    it('notifies when transcript entries are appended', () => {
+    it('does not notify when transcript entries are appended', () => {
       const store = createStore();
       let detailUris: string[] = [];
       let eventUris: string[] = [];
@@ -176,11 +177,9 @@ describe('sessions', () => {
         timestamp: 3,
       });
 
-      assert.deepStrictEqual(detailUris, ['memory://sessions/sess-transcript-notify']);
-      assert.deepStrictEqual(eventUris, ['memory://sessions/sess-transcript-notify/events']);
-      assert.deepStrictEqual(transcriptUris, [
-        'memory://sessions/sess-transcript-notify/transcript',
-      ]);
+      assert.deepStrictEqual(detailUris, []);
+      assert.deepStrictEqual(eventUris, []);
+      assert.deepStrictEqual(transcriptUris, []);
     });
   });
 
@@ -215,7 +214,7 @@ describe('sessions', () => {
       ]);
     });
 
-    it('notifies when session event entries are appended', () => {
+    it('does not notify when session event entries are appended', () => {
       const store = createStore();
       let eventUris: string[] = [];
       store.setSession('sess-events-notify', mockChat('events-notify') as never);
@@ -229,7 +228,7 @@ describe('sessions', () => {
         timestamp: 1,
       });
 
-      assert.deepStrictEqual(eventUris, ['memory://sessions/sess-events-notify/events']);
+      assert.deepStrictEqual(eventUris, []);
     });
 
     it('retains only the most recent event entries when over the limit', () => {
@@ -332,7 +331,9 @@ describe('sessions', () => {
 
       assert.throws(
         () => store.setSession('sess-overwrite', chat2 as never),
-        /Session already exists: sess-overwrite/,
+        (error) =>
+          error instanceof AppError &&
+          error.message.includes('Session already exists: sess-overwrite'),
       );
 
       assert.strictEqual(store.getSession('sess-overwrite'), chat1);
@@ -341,7 +342,7 @@ describe('sessions', () => {
       ]);
     });
 
-    it('replaceSession resets history for an existing ID', () => {
+    it('replaceSession preserves history for an existing ID', () => {
       const store = createStore();
       const chat1 = mockChat('first');
       const chat2 = mockChat('second');
@@ -355,7 +356,9 @@ describe('sessions', () => {
       store.replaceSession('sess-replace', chat2 as never);
 
       assert.strictEqual(store.getSession('sess-replace'), chat2);
-      assert.deepStrictEqual(store.listSessionTranscriptEntries('sess-replace'), []);
+      assert.deepStrictEqual(store.listSessionTranscriptEntries('sess-replace'), [
+        { role: 'user', text: 'Old turn', timestamp: 1 },
+      ]);
     });
 
     it('emits listChanged=false on replaceSession and listChanged=true on setSession', () => {

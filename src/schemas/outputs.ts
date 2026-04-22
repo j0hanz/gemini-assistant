@@ -20,7 +20,6 @@ import {
   publicBaseOutputFields,
   SessionSummarySchema,
   SourceDetailSchema,
-  streamMetadataOutputFields,
   ToolEventSchema,
   UrlMetadataEntrySchema,
 } from './fragments.js';
@@ -28,16 +27,6 @@ import {
 export const UsageMetadataSchema = BaseUsageMetadataSchema;
 
 export type UsageMetadata = z.infer<typeof UsageMetadataSchema>;
-
-export const AskOutputSchema = z.strictObject({
-  answer: z.string().describe('Generated response'),
-  data: z.unknown().describe('Parsed structured response when JSON mode is used').optional(),
-  schemaWarnings: z
-    .array(z.string())
-    .optional()
-    .describe('Warnings from structured output validation (parse failures, schema mismatches)'),
-  ...streamMetadataOutputFields,
-});
 
 const ContextSourceReportSchema = z.strictObject({
   kind: z
@@ -165,7 +154,7 @@ export const ReviewOutputSchema = z.strictObject({
   skippedBinaryPaths: z.array(z.string()).optional().describe('Skipped untracked binary files'),
   skippedLargePaths: z.array(z.string()).optional().describe('Skipped large untracked files'),
   omittedPaths: z.array(z.string()).optional().describe('Local diff paths omitted due to budget'),
-  empty: z.boolean().optional().describe('Whether there were any local changes to review'),
+  empty: z.boolean().optional().describe('Whether the local diff is empty (no changes)'),
   truncated: z.boolean().optional().describe('Whether the diff review was truncated'),
   contextUsed: ContextUsedSchema.optional(),
 });

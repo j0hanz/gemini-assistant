@@ -17,9 +17,13 @@ import {
   createResourceLink,
   withRelatedTaskMeta,
 } from '../lib/response.js';
-import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { DESTRUCTIVE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from '../lib/validation.js';
-import { assembleWorkspaceContext, workspaceCacheManager } from '../lib/workspace-context.js';
+import {
+  assembleWorkspaceContext,
+  workspaceCacheManager,
+  type WorkspaceCacheManagerImpl,
+} from '../lib/workspace-context.js';
 import {
   type CreateCacheInput,
   createMemoryInputSchema,
@@ -35,6 +39,7 @@ import type { SessionStore } from '../sessions.js';
 type CachePart = ReturnType<typeof createPartFromUri>;
 
 const CACHE_UPLOAD_CHUNK_SIZE = 3;
+const CACHE_OWNERSHIP_PREFIX = 'gemini-assistant/';
 const CREATE_CACHE_TOOL_LABEL = 'Create Cache';
 const log = logger.child('memory');
 
@@ -148,7 +153,9 @@ async function cleanupOldCaches(
     const stale = existing.filter(
       (cache): cache is CacheSummary & { name: string } =>
         typeof cache.name === 'string' &&
-        cache.displayName === displayName &&
+        typeof cache.displayName === 'string' &&
+        cache.displayName.startsWith(CACHE_OWNERSHIP_PREFIX) &&
+        cache.displayName.slice(CACHE_OWNERSHIP_PREFIX.length) === displayName &&
         cache.name !== keepName,
     );
     await Promise.allSettled(stale.map((cache) => getAI().caches.delete({ name: cache.name })));
@@ -195,7 +202,7 @@ function buildCreateCacheConfig(
   return {
     ...(parts.length > 0 ? { contents: [{ role: 'user' as const, parts }] } : {}),
     ...(systemInstruction ? { systemInstruction } : {}),
-    ...(displayName ? { displayName } : {}),
+    ...(displayName ? { displayName: `${CACHE_OWNERSHIP_PREFIX}${displayName}` } : {}),
     ttl: ttl ?? '3600s',
     abortSignal: signal,
   };
@@ -258,6 +265,7 @@ function buildCreateCacheResult(
     model?: string;
     expireTime?: string;
   },
+  publicDisplayName?: string,
   taskId?: string,
 ): CallToolResult {
   if (!cache.name) {
@@ -273,16 +281,16 @@ function buildCreateCacheResult(
         text:
           `**Cache Created**\n\n` +
           `- **Name:** ${shortName} (\`${cacheName}\`)\n` +
-          `- **Display Name:** ${cache.displayName ?? 'N/A'}\n` +
+          `- **Display Name:** ${publicDisplayName ?? cache.displayName ?? 'N/A'}\n` +
           `- **Model:** ${cache.model ?? 'N/A'}\n` +
           `- **Expires:** ${cache.expireTime ?? 'N/A'}`,
       },
-      cacheResourceLink(cacheName, cache.displayName ?? cacheName, taskId),
+      cacheResourceLink(cacheName, publicDisplayName ?? cache.displayName ?? cacheName, taskId),
       cacheListResourceLink(taskId),
     ],
     structuredContent: {
       name: cacheName,
-      ...(cache.displayName ? { displayName: cache.displayName } : {}),
+      ...(publicDisplayName ? { displayName: publicDisplayName } : {}),
       ...(cache.model ? { model: cache.model } : {}),
       ...(cache.expireTime ? { expireTime: cache.expireTime } : {}),
     },
@@ -319,7 +327,7 @@ export function buildCreateCacheWork(rootsFetcher: RootsFetcher) {
       await cleanupDuplicateCaches(displayName, cache.name, ctx.mcpReq.signal);
       notifyCacheMutation(cache.name);
 
-      return buildCreateCacheResult(cache, ctx.task?.id);
+      return buildCreateCacheResult(cache, displayName, ctx.task?.id);
     } catch (err) {
       throw normalizeCreateCacheError(err);
     } finally {
@@ -401,14 +409,6 @@ async function updateCacheWork(
   };
 }
 
-function sessionUris(sessionId: string): string[] {
-  return [
-    sessionDetailUri(sessionId),
-    sessionTranscriptUri(sessionId),
-    sessionEventsUri(sessionId),
-  ];
-}
-
 function handleSessionsList(
   sessionStore: SessionStore,
   base: Record<string, unknown>,
@@ -442,19 +442,22 @@ function handleSessionsGet(
   if (!session) {
     return new AppError('memory', `memory: Session '${sessionId}' not found.`).toToolResult();
   }
+  const sessionResources = [
+    ['Session', sessionDetailUri(sessionId)],
+    ['Transcript', sessionTranscriptUri(sessionId)],
+    ['Events', sessionEventsUri(sessionId)],
+  ] as const;
   return {
     content: [
       { type: 'text', text: `Session ${sessionId} is active.` },
-      ...sessionUris(sessionId).map((uri, index) =>
-        taskResourceLink(uri, ['Session', 'Transcript', 'Events'][index] ?? uri, taskId),
-      ),
+      ...sessionResources.map(([label, uri]) => taskResourceLink(uri, label, taskId)),
     ],
     structuredContent: {
       ...base,
       action,
       summary: `Session ${sessionId} is active.`,
       session,
-      resourceUris: sessionUris(sessionId),
+      resourceUris: sessionResources.map(([, uri]) => uri),
     },
   };
 }
@@ -544,8 +547,7 @@ async function handleCachesGet(
   try {
     cache = await getCacheSummary(cacheName, signal);
   } catch (err) {
-    const raw = err instanceof Error ? err.message : String(err);
-    if (/not found|404/i.test(raw)) {
+    if (isNotFoundCacheError(err)) {
       return new AppError('memory', `memory: Cache '${cacheName}' not found.`).toToolResult();
     }
     throw err;
@@ -565,12 +567,30 @@ async function handleCachesGet(
   };
 }
 
+function isNotFoundCacheError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') {
+    return false;
+  }
+
+  const record = err as Record<string, unknown>;
+  const status = record.status;
+  if (status === 404 || status === '404') {
+    return true;
+  }
+
+  const code = record.code;
+  if (code === 404 || code === '404' || code === 'NOT_FOUND') {
+    return true;
+  }
+
+  const raw = err instanceof Error ? err.message : AppError.formatMessage(err);
+  return /not found|404/i.test(raw);
+}
+
 async function handleCachesCreate(
   createCacheWork: ReturnType<typeof buildCreateCacheWork>,
   base: Record<string, unknown>,
-  args: MemoryInput & {
-    action: 'caches.create';
-  },
+  args: MemoryInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const createArgs =
@@ -610,11 +630,7 @@ async function handleCachesCreate(
 
 async function handleCachesUpdate(
   base: Record<string, unknown>,
-  args: MemoryInput & {
-    action: 'caches.update';
-    cacheName: string;
-    ttl: string;
-  },
+  args: MemoryInput & { cacheName: string; ttl: string },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const result = await updateCacheWork({ cacheName: args.cacheName, ttl: args.ttl }, ctx);
@@ -638,10 +654,7 @@ async function handleCachesUpdate(
 
 async function handleCachesDelete(
   base: Record<string, unknown>,
-  args: MemoryInput & {
-    action: 'caches.delete';
-    cacheName: string;
-  },
+  args: MemoryInput & { cacheName: string },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const result = await deleteCacheWork({ cacheName: args.cacheName, confirm: args.confirm }, ctx);
@@ -697,8 +710,9 @@ function handleWorkspaceCache(
   base: Record<string, unknown>,
   action: string,
   taskId?: string,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): CallToolResult {
-  const workspaceCache = workspaceCacheManager.getCacheStatus();
+  const workspaceCache = workspaceCacheManagerInstance.getCacheStatus();
   return {
     content: [
       { type: 'text', text: 'Workspace cache status loaded.' },
@@ -714,29 +728,15 @@ function handleWorkspaceCache(
   };
 }
 
-function isMemoryAction<TAction extends MemoryInput['action']>(
-  args: MemoryInput,
-  action: TAction,
-): args is MemoryInput & { action: TAction } {
-  return args.action === action;
-}
+function requireMemoryString(
+  value: string | undefined,
+  fieldLabel: string,
+): string | CallToolResult {
+  if (typeof value === 'string') {
+    return value;
+  }
 
-function hasSessionId(args: MemoryInput): args is MemoryInput & {
-  sessionId: string;
-} {
-  return typeof args.sessionId === 'string';
-}
-
-function hasCacheName(args: MemoryInput): args is MemoryInput & {
-  cacheName: string;
-} {
-  return typeof args.cacheName === 'string';
-}
-
-function hasTtl(args: MemoryInput): args is MemoryInput & {
-  ttl: string;
-} {
-  return typeof args.ttl === 'string';
+  return new AppError('memory', `memory: ${fieldLabel} is required.`).toToolResult();
 }
 
 export async function memoryWork(
@@ -745,44 +745,63 @@ export async function memoryWork(
   createCacheWork: ReturnType<typeof buildCreateCacheWork>,
   args: MemoryInput,
   ctx: ServerContext,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): Promise<CallToolResult> {
   const base = buildBaseStructuredOutput(ctx.task?.id);
   const taskId = ctx.task?.id;
-  let result: CallToolResult;
-
-  if (isMemoryAction(args, 'sessions.list')) {
-    result = handleSessionsList(sessionStore, base, args.action, taskId);
-  } else if (isMemoryAction(args, 'sessions.get') && hasSessionId(args)) {
-    result = handleSessionsGet(sessionStore, base, args.action, args.sessionId, taskId);
-  } else if (isMemoryAction(args, 'sessions.transcript') && hasSessionId(args)) {
-    result = handleSessionsTranscript(sessionStore, base, args.action, args.sessionId, taskId);
-  } else if (isMemoryAction(args, 'sessions.events') && hasSessionId(args)) {
-    result = handleSessionsEvents(sessionStore, base, args.action, args.sessionId, taskId);
-  } else if (isMemoryAction(args, 'caches.list')) {
-    result = await handleCachesList(base, args.action, taskId, ctx.mcpReq.signal);
-  } else if (isMemoryAction(args, 'caches.get') && hasCacheName(args)) {
-    result = await handleCachesGet(base, args.action, args.cacheName, taskId, ctx.mcpReq.signal);
-  } else if (isMemoryAction(args, 'caches.create')) {
-    result = await handleCachesCreate(createCacheWork, base, args, ctx);
-  } else if (isMemoryAction(args, 'caches.update') && hasCacheName(args) && hasTtl(args)) {
-    result = await handleCachesUpdate(base, args, ctx);
-  } else if (isMemoryAction(args, 'caches.delete') && hasCacheName(args)) {
-    result = await handleCachesDelete(base, args, ctx);
-  } else if (isMemoryAction(args, 'workspace.context')) {
-    result = await handleWorkspaceContext(rootsFetcher, base, args.action, taskId);
-  } else if (isMemoryAction(args, 'workspace.cache')) {
-    result = handleWorkspaceCache(base, args.action, taskId);
-  } else {
-    throw new Error(`memory: Unhandled action '${args.action}'. Enum validation failed upstream.`);
+  switch (args.action) {
+    case 'sessions.list':
+      return handleSessionsList(sessionStore, base, args.action, taskId);
+    case 'sessions.get': {
+      const sessionId = requireMemoryString(args.sessionId, 'Session ID');
+      if (typeof sessionId !== 'string') return sessionId;
+      return handleSessionsGet(sessionStore, base, args.action, sessionId, taskId);
+    }
+    case 'sessions.transcript': {
+      const sessionId = requireMemoryString(args.sessionId, 'Session ID');
+      if (typeof sessionId !== 'string') return sessionId;
+      return handleSessionsTranscript(sessionStore, base, args.action, sessionId, taskId);
+    }
+    case 'sessions.events': {
+      const sessionId = requireMemoryString(args.sessionId, 'Session ID');
+      if (typeof sessionId !== 'string') return sessionId;
+      return handleSessionsEvents(sessionStore, base, args.action, sessionId, taskId);
+    }
+    case 'caches.list':
+      return await handleCachesList(base, args.action, taskId, ctx.mcpReq.signal);
+    case 'caches.get': {
+      const cacheName = requireMemoryString(args.cacheName, 'Cache name');
+      if (typeof cacheName !== 'string') return cacheName;
+      return await handleCachesGet(base, args.action, cacheName, taskId, ctx.mcpReq.signal);
+    }
+    case 'caches.create':
+      return await handleCachesCreate(createCacheWork, base, args, ctx);
+    case 'caches.update': {
+      const cacheName = requireMemoryString(args.cacheName, 'Cache name');
+      if (typeof cacheName !== 'string') return cacheName;
+      const ttl = requireMemoryString(args.ttl, 'TTL');
+      if (typeof ttl !== 'string') return ttl;
+      return await handleCachesUpdate(base, { ...args, cacheName, ttl }, ctx);
+    }
+    case 'caches.delete': {
+      const cacheName = requireMemoryString(args.cacheName, 'Cache name');
+      if (typeof cacheName !== 'string') return cacheName;
+      return await handleCachesDelete(base, { ...args, cacheName }, ctx);
+    }
+    case 'workspace.context':
+      return await handleWorkspaceContext(rootsFetcher, base, args.action, taskId);
+    case 'workspace.cache':
+      return handleWorkspaceCache(base, args.action, taskId, workspaceCacheManagerInstance);
+    default:
+      throw new Error(`Unhandled action '${String((args as { action?: unknown }).action)}'`);
   }
-
-  return result;
 }
 
 export function registerMemoryTool(
   server: McpServer,
   sessionStore: SessionStore,
   taskMessageQueue: TaskMessageQueue,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): void {
   const rootsFetcher = buildServerRootsFetcher(server);
   const createCacheWork = buildCreateCacheWork(rootsFetcher);
@@ -796,10 +815,17 @@ export function registerMemoryTool(
         'Inspect and manage sessions, caches, and workspace memory state. Only action=caches.delete is destructive.',
       inputSchema: createMemoryInputSchema(sessionStore.completeSessionIds.bind(sessionStore)),
       outputSchema: MemoryOutputSchema,
-      annotations: MUTABLE_ANNOTATIONS,
+      annotations: DESTRUCTIVE_ANNOTATIONS,
     },
     taskMessageQueue,
     (args: MemoryInput, ctx: ServerContext) =>
-      memoryWork(sessionStore, rootsFetcher, createCacheWork, args, ctx),
+      memoryWork(
+        sessionStore,
+        rootsFetcher,
+        createCacheWork,
+        args,
+        ctx,
+        workspaceCacheManagerInstance,
+      ),
   );
 }

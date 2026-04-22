@@ -244,11 +244,17 @@ interface WorkspaceCacheStatus {
 }
 
 function normalizeRootsKey(roots: readonly string[]): string {
-  return [
+  const key = [
     ...new Set(roots.filter((root) => root && isAbsolute(root)).map(normalizePathForComparison)),
   ]
     .sort((a, b) => a.localeCompare(b))
     .join('\n');
+
+  if (key.length === 0 && roots.length > 0) {
+    log.warn('Workspace roots were filtered out while building the cache key');
+  }
+
+  return key;
 }
 
 function isAbortError(err: unknown, signal?: AbortSignal): boolean {
@@ -411,7 +417,7 @@ export async function assembleWorkspaceContext(
 
 // ── Cache Lifecycle Manager ───────────────────────────────────────────
 
-class WorkspaceCacheManagerImpl {
+export class WorkspaceCacheManagerImpl {
   private activeRootsKey: string | undefined;
   private cacheName: string | undefined;
   private contentHash: string | undefined;
@@ -461,6 +467,16 @@ class WorkspaceCacheManagerImpl {
       if (this.inflightCreation === creation) {
         this.inflightCreation = undefined;
       }
+    }
+  }
+
+  async close(): Promise<void> {
+    try {
+      if (this.inflightCreation) {
+        await this.inflightCreation.catch(() => undefined);
+      }
+    } finally {
+      this.invalidate();
     }
   }
 
@@ -572,7 +588,9 @@ class WorkspaceCacheManagerImpl {
 
       if (gen !== this.generation) {
         log.info('Cache creation completed but invalidated mid-flight, discarding');
-        await this.deleteCacheBestEffort(cache.name ?? '', signal);
+        if (cache.name) {
+          await this.deleteCacheBestEffort(cache.name, signal);
+        }
         return undefined;
       }
 
@@ -597,6 +615,10 @@ class WorkspaceCacheManagerImpl {
   }
 
   private async deleteCacheBestEffort(cacheName: string, signal?: AbortSignal): Promise<void> {
+    if (!cacheName) {
+      return;
+    }
+
     try {
       await getAI().caches.delete({
         name: cacheName,
@@ -608,4 +630,8 @@ class WorkspaceCacheManagerImpl {
   }
 }
 
-export const workspaceCacheManager = new WorkspaceCacheManagerImpl();
+export function createWorkspaceCacheManager(): WorkspaceCacheManagerImpl {
+  return new WorkspaceCacheManagerImpl();
+}
+
+export const workspaceCacheManager = createWorkspaceCacheManager();

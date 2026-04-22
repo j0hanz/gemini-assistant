@@ -11,6 +11,7 @@ import {
   PUBLIC_TOOL_NAMES,
   PUBLIC_WORKFLOW_NAMES,
 } from '../src/public-contract.js';
+import { SERVER_INSTRUCTIONS } from '../src/server.js';
 
 const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 
@@ -73,6 +74,15 @@ describe('contract surface invariants', () => {
     for (const resourceUri of PUBLIC_RESOURCE_URIS) {
       assert.match(readme, new RegExp(resourceUri.replace(/[{}]/g, '\\$&')));
     }
+  });
+
+  it('mentions every public tool and canonical discovery resource in SERVER_INSTRUCTIONS', () => {
+    for (const toolName of PUBLIC_TOOL_NAMES) {
+      assert.match(SERVER_INSTRUCTIONS, new RegExp(toolName));
+    }
+
+    assert.match(SERVER_INSTRUCTIONS, /discover:\/\/catalog/);
+    assert.match(SERVER_INSTRUCTIONS, /discover:\/\/workflows/);
   });
 
   it('does not advertise resources.subscribe in the initialize capability set', async () => {

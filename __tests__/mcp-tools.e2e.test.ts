@@ -167,6 +167,13 @@ const MUTABLE_ANNOTATIONS = {
   readOnlyHint: false,
 } as const;
 
+const DESTRUCTIVE_ANNOTATIONS = {
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: true,
+  readOnlyHint: false,
+} as const;
+
 const READONLY_NON_IDEMPOTENT_ANNOTATIONS = {
   ...READONLY_ANNOTATIONS,
   idempotentHint: false,
@@ -188,7 +195,7 @@ const EXPECTED_TOOL_CONTRACTS = {
     title: 'Chat',
   },
   memory: {
-    annotations: MUTABLE_ANNOTATIONS,
+    annotations: DESTRUCTIVE_ANNOTATIONS,
     requiredInput: ['action'],
     requiredOutput: ['status', 'action', 'summary'],
     taskSupport: 'optional',

@@ -106,17 +106,17 @@ describe('public MCP resource notifications', () => {
   });
 
   it('emits workspace cache resource notifications after workspace-cache creation', async () => {
-    const originalAllowedRoots = process.env.ALLOWED_FILE_ROOTS;
-    const originalWorkspaceCacheEnabled = process.env.WORKSPACE_CACHE_ENABLED;
-    const originalWorkspaceContextFile = process.env.WORKSPACE_CONTEXT_FILE;
+    const originalAllowedRoots = process.env.ROOTS;
+    const originalWorkspaceCacheEnabled = process.env.CACHE;
+    const originalWorkspaceContextFile = process.env.CONTEXT;
     const tempDir = await mkdtemp(join(process.cwd(), 'tmp-workspace-cache-'));
     const contextFile = join(tempDir, 'workspace-context.md');
 
     await writeFile(contextFile, '# Context\n\n' + 'token '.repeat(40_000), 'utf8');
 
-    process.env.ALLOWED_FILE_ROOTS = process.cwd();
-    process.env.WORKSPACE_CACHE_ENABLED = 'true';
-    process.env.WORKSPACE_CONTEXT_FILE = contextFile;
+    process.env.ROOTS = process.cwd();
+    process.env.CACHE = 'true';
+    process.env.CONTEXT = contextFile;
 
     const harness = await createHarness();
 
@@ -144,9 +144,9 @@ describe('public MCP resource notifications', () => {
         'Workspace URIs must not fan out as resources/updated without subscribe tracking',
       );
     } finally {
-      process.env.ALLOWED_FILE_ROOTS = originalAllowedRoots;
-      process.env.WORKSPACE_CACHE_ENABLED = originalWorkspaceCacheEnabled;
-      process.env.WORKSPACE_CONTEXT_FILE = originalWorkspaceContextFile;
+      process.env.ROOTS = originalAllowedRoots;
+      process.env.CACHE = originalWorkspaceCacheEnabled;
+      process.env.CONTEXT = originalWorkspaceContextFile;
       await harness.close();
       await rm(tempDir, { force: true, recursive: true });
     }

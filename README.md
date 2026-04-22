@@ -108,35 +108,38 @@ Minimal `.env` example:
 
 ```env
 API_KEY=your-gemini-api-key
-MCP_TRANSPORT=stdio
+TRANSPORT=stdio
 ```
 
 Useful optional variables:
 
-- `GEMINI_MODEL`: override the default model (`gemini-3-flash-preview`)
-- `GEMINI_EXPOSE_THOUGHTS`: expose Gemini thought text in outputs when set to `true`
-- `MCP_TRANSPORT`: `stdio`, `http`, or `web-standard`
-- `MCP_HTTP_PORT`: HTTP bind port, default `3000`
-- `MCP_HTTP_HOST`: HTTP bind host, default `127.0.0.1`
-- `MCP_STATELESS`: enable stateless streamable HTTP mode when set to `true`
-- `MCP_CORS_ORIGIN`: optional `Access-Control-Allow-Origin` for HTTP mode
-- `MCP_ALLOWED_HOSTS`: optional comma-separated explicit host allowlist for HTTP/web-standard mode
-- `ALLOWED_FILE_ROOTS`: optional comma-separated absolute roots allowed for file tools, `memory://workspace/context`, and automatic workspace caching
-- `SESSION_TTL_MS`: session idle TTL in milliseconds, default `1800000`
-- `MAX_SESSIONS`: max in-memory chat sessions before LRU eviction, default `50`
-- `WORKSPACE_CACHE_ENABLED`: enable automatic workspace context caching for `chat` calls when set to `true`, default `false`
-- `WORKSPACE_CONTEXT_FILE`: optional path to a custom context file to include in workspace context
-- `WORKSPACE_CACHE_TTL`: Gemini cache TTL for workspace context, default `3600s`
-- `WORKSPACE_AUTO_SCAN`: auto-scan workspace roots for known project files when set to `true` (default), set `false` to disable
-- `CONTEXT_BUDGET_TOKENS`: max token budget for request-aware context assembly, default `8192`
+Model:
 
-Host validation defaults:
+- `MODEL`: override the default model (`gemini-3-flash-preview`)
+- `THOUGHTS`: expose Gemini thought text in outputs when set to `true`
 
-- localhost binds accept `localhost`, `127.0.0.1`, and `[::1]`
-- broad binds such as `0.0.0.0` and `::` remain unrestricted unless `MCP_ALLOWED_HOSTS` is set
-- any other `MCP_HTTP_HOST` is treated as the default allowed Host header when `MCP_ALLOWED_HOSTS` is unset
+Workspace:
 
-If clients reach the server through a DNS alias, reverse proxy, or load balancer hostname that differs from `MCP_HTTP_HOST`, set `MCP_ALLOWED_HOSTS` to the externally visible hostnames or those requests will be rejected.
+- `ROOTS`: optional comma-separated absolute roots allowed for file tools, `memory://workspace/context`, and automatic workspace caching
+- `CONTEXT`: optional path to a custom context file to include in workspace context
+- `AUTO_SCAN`: auto-scan workspace roots for known project files, default `true`
+
+Workspace cache:
+
+- `CACHE`: enable automatic workspace context caching for `chat` calls when set to `true`, default `false`
+- `CACHE_TTL`: Gemini cache TTL for workspace context, default `3600s`
+
+Debug:
+
+- `LOG_PAYLOADS`: enable verbose payload logging when set to `true`
+
+Optional local transport:
+
+- `TRANSPORT`: `stdio`, `http`, or `web-standard`, default `stdio`
+- `HOST`: HTTP bind host, default `127.0.0.1`
+- `PORT`: HTTP bind port, default `3000`
+
+Booleans accept only the literal strings `true` or `false` when set. Old variable names (`GEMINI_MODEL`, `ALLOWED_FILE_ROOTS`, `WORKSPACE_*`, `MCP_TRANSPORT`, `MCP_HTTP_HOST`, `MCP_HTTP_PORT`, `LOG_VERBOSE_PAYLOADS`, etc.) are not supported and have no effect.
 
 ## Run
 
@@ -162,7 +165,7 @@ npm start
 HTTP transport:
 
 ```bash
-MCP_TRANSPORT=http npx tsx src/index.ts
+TRANSPORT=http npx tsx src/index.ts
 ```
 
 Web-standard transport:
@@ -183,7 +186,7 @@ Minimal stdio client configuration:
       "cwd": "/absolute/path/to/gemini-assistant",
       "env": {
         "API_KEY": "your-gemini-api-key",
-        "MCP_TRANSPORT": "stdio"
+        "TRANSPORT": "stdio"
       }
     }
   }

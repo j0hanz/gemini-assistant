@@ -297,10 +297,10 @@ describe('ask transcript capture', () => {
   });
 
   it('persists automatic workspace-cache metadata on new sessions', async () => {
-    const originalEnabled = process.env.WORKSPACE_CACHE_ENABLED;
+    const originalEnabled = process.env.CACHE;
     const originalGetOrCreateCache =
       workspaceCacheManager.getOrCreateCache.bind(workspaceCacheManager);
-    process.env.WORKSPACE_CACHE_ENABLED = 'true';
+    process.env.CACHE = 'true';
     workspaceCacheManager.getOrCreateCache = async () => 'cachedContents/workspace-1';
 
     try {
@@ -325,7 +325,7 @@ describe('ask transcript capture', () => {
       assert.strictEqual(response.text, 'Assistant answer');
       assert.strictEqual(response.workspaceCache, undefined);
     } finally {
-      process.env.WORKSPACE_CACHE_ENABLED = originalEnabled;
+      process.env.CACHE = originalEnabled;
       workspaceCacheManager.getOrCreateCache = originalGetOrCreateCache;
     }
   });

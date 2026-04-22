@@ -187,16 +187,16 @@ describe('ask contract', () => {
   });
 
   it('auto-applies workspace cache metadata on single-turn calls', async () => {
-    const originalEnabled = process.env.WORKSPACE_CACHE_ENABLED;
-    const originalAllowedRoots = process.env.ALLOWED_FILE_ROOTS;
+    const originalEnabled = process.env.CACHE;
+    const originalAllowedRoots = process.env.ROOTS;
     const originalGetOrCreateCache =
       workspaceCacheManager.getOrCreateCache.bind(workspaceCacheManager);
-    process.env.WORKSPACE_CACHE_ENABLED = 'true';
+    process.env.CACHE = 'true';
     const allowedRoot = await mkdtemp(join(tmpdir(), 'ask-workspace-cache-'));
 
     let observedCacheName: string | undefined;
     let observedRoots: string[] | undefined;
-    process.env.ALLOWED_FILE_ROOTS = allowedRoot;
+    process.env.ROOTS = allowedRoot;
     workspaceCacheManager.getOrCreateCache = async (roots) => {
       observedRoots = roots;
       return 'cachedContents/workspace-1';
@@ -235,18 +235,18 @@ describe('ask contract', () => {
       assert.strictEqual(contextUsed.workspaceCacheApplied, true);
       assert.ok(Array.isArray(contextUsed.sources));
     } finally {
-      process.env.WORKSPACE_CACHE_ENABLED = originalEnabled;
-      process.env.ALLOWED_FILE_ROOTS = originalAllowedRoots;
+      process.env.CACHE = originalEnabled;
+      process.env.ROOTS = originalAllowedRoots;
       workspaceCacheManager.getOrCreateCache = originalGetOrCreateCache;
       await rm(allowedRoot, { recursive: true, force: true });
     }
   });
 
   it('does not auto-apply workspace cache when resuming an existing session', async () => {
-    const originalEnabled = process.env.WORKSPACE_CACHE_ENABLED;
+    const originalEnabled = process.env.CACHE;
     const originalGetOrCreateCache =
       workspaceCacheManager.getOrCreateCache.bind(workspaceCacheManager);
-    process.env.WORKSPACE_CACHE_ENABLED = 'true';
+    process.env.CACHE = 'true';
 
     let workspaceCalls = 0;
     let observedCacheName: string | undefined;
@@ -291,7 +291,7 @@ describe('ask contract', () => {
       const contextUsed = structured.contextUsed as Record<string, unknown>;
       assert.strictEqual(contextUsed.workspaceCacheApplied, false);
     } finally {
-      process.env.WORKSPACE_CACHE_ENABLED = originalEnabled;
+      process.env.CACHE = originalEnabled;
       workspaceCacheManager.getOrCreateCache = originalGetOrCreateCache;
     }
   });

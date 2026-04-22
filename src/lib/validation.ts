@@ -5,7 +5,7 @@ import { isIP } from 'node:net';
 import { dirname, isAbsolute, normalize, parse, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { getAllowedFileRootsEnv, getAllowedHostsEnv } from '../config.js';
+import { getAllowedHostsEnv, getRootsEnv } from '../config.js';
 
 // ── Host Validation ───────────────────────────────────────────────────
 
@@ -31,9 +31,8 @@ export function parseAllowedHosts(): string[] | undefined {
 /**
  * Returns the allowed-host list for a given bind address.
  *
- * - Explicit `MCP_ALLOWED_HOSTS` always wins.
  * - Localhost binds auto-resolve to `['localhost','127.0.0.1','[::1]']`.
- * - Broad binds (`0.0.0.0`, `::`) without an explicit list return `undefined`
+ * - Broad binds (`0.0.0.0`, `::`) return `undefined`
  *   (caller should log a warning but must not block for backward compat).
  */
 export function resolveAllowedHosts(bindHost: string): string[] | undefined {
@@ -86,7 +85,7 @@ interface ResolvedWorkspacePath {
 }
 
 function getEnvRoots(): string[] {
-  const allowedFileRootsEnv = getAllowedFileRootsEnv();
+  const allowedFileRootsEnv = getRootsEnv();
   if (!allowedFileRootsEnv) {
     return [normalize(process.cwd())];
   }
@@ -362,7 +361,7 @@ export async function resolveWorkspacePath(
 
   if (!isUnderAllowedRoot) {
     throw new Error(
-      `Path '${filePath}' is outside allowed directories. Set ALLOWED_FILE_ROOTS to expand access.`,
+      `Path '${filePath}' is outside allowed directories. Set ROOTS to expand access.`,
     );
   }
 

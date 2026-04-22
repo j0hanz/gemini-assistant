@@ -1,15 +1,11 @@
 import assert from 'node:assert/strict';
-import { afterEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
   isAutoDerivedAllowedHosts,
   resolveAllowedHosts,
   validateHostHeader,
 } from '../src/lib/validation.js';
-
-afterEach(() => {
-  delete process.env.MCP_ALLOWED_HOSTS;
-});
 
 describe('transport host validation helpers', () => {
   it('resolves identical default host policies for localhost, broad, and specific binds', () => {
@@ -47,16 +43,5 @@ describe('transport host validation helpers', () => {
         assert.equal(validateHostHeader(testCase.rejectedHostHeader, allowedHosts), false);
       }
     }
-  });
-
-  it('lets explicit MCP_ALLOWED_HOSTS override auto-derived bind behavior', () => {
-    process.env.MCP_ALLOWED_HOSTS = 'example.com,[::1]';
-
-    const allowedHosts = resolveAllowedHosts('192.0.2.1');
-    assert.deepStrictEqual(allowedHosts, ['example.com', '[::1]']);
-    assert.equal(isAutoDerivedAllowedHosts('192.0.2.1'), false);
-    assert.equal(validateHostHeader('example.com:3000', allowedHosts), true);
-    assert.equal(validateHostHeader('[::1]:3000', allowedHosts), true);
-    assert.equal(validateHostHeader('192.0.2.1:3000', allowedHosts), false);
   });
 });

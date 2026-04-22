@@ -158,12 +158,12 @@ describe('in-memory MCP server e2e', () => {
     assert.match(text, /## Content/);
   });
 
-  it('does not fall back to cwd when workspace context is restricted by ALLOWED_FILE_ROOTS', async () => {
-    const originalAllowedRoots = process.env.ALLOWED_FILE_ROOTS;
-    const originalContextFile = process.env.WORKSPACE_CONTEXT_FILE;
+  it('does not fall back to cwd when workspace context is restricted by ROOTS', async () => {
+    const originalAllowedRoots = process.env.ROOTS;
+    const originalContextFile = process.env.CONTEXT;
     const restrictedRoot = await mkdtemp(join(tmpdir(), 'workspace-context-restricted-'));
-    process.env.ALLOWED_FILE_ROOTS = restrictedRoot;
-    process.env.WORKSPACE_CONTEXT_FILE = join(process.cwd(), 'package.json');
+    process.env.ROOTS = restrictedRoot;
+    process.env.CONTEXT = join(process.cwd(), 'package.json');
 
     const harness = await createServerHarness(createServerInstance, {
       capabilities: { roots: {} },
@@ -186,8 +186,8 @@ describe('in-memory MCP server e2e', () => {
       assert.match(text, /## Content\s+# Workspace Context/m);
       assert.doesNotMatch(text, /package\.json/);
     } finally {
-      process.env.ALLOWED_FILE_ROOTS = originalAllowedRoots;
-      process.env.WORKSPACE_CONTEXT_FILE = originalContextFile;
+      process.env.ROOTS = originalAllowedRoots;
+      process.env.CONTEXT = originalContextFile;
       await rm(restrictedRoot, { recursive: true, force: true });
     }
   });

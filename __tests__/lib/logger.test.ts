@@ -59,7 +59,7 @@ function createBufferedLogger(verbosePayloads = false) {
 }
 
 afterEach(() => {
-  delete process.env.LOG_VERBOSE_PAYLOADS;
+  delete process.env.LOG_PAYLOADS;
 });
 
 describe('Logger sink setup', () => {

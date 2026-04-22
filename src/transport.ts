@@ -128,7 +128,7 @@ function warnIfUnprotected(host: string, hasProtection: boolean): void {
   if (!hasProtection && (host === '0.0.0.0' || host === '::')) {
     log.warn(
       `SECURITY: bound to ${host} without DNS rebinding protection. ` +
-        'Set MCP_ALLOWED_HOSTS=hostname1,hostname2 to restrict accepted Host headers.',
+        'Bind to 127.0.0.1 (default) or set HOST to a specific hostname.',
     );
     return;
   }
@@ -136,8 +136,7 @@ function warnIfUnprotected(host: string, hasProtection: boolean): void {
   if (isAutoDerivedAllowedHosts(host)) {
     log.warn(
       `SECURITY: bound to ${host} with auto-derived Host header protection only. ` +
-        'Requests sent through DNS aliases, load balancers, or reverse proxies may be rejected. ' +
-        'Set MCP_ALLOWED_HOSTS=hostname1,hostname2 to allow those external hostnames explicitly.',
+        'Requests sent through DNS aliases, load balancers, or reverse proxies may be rejected.',
     );
   }
 }

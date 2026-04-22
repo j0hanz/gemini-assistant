@@ -16,34 +16,15 @@ import {
 
 // ── Host Validation ───────────────────────────────────────────────────
 
-const ALLOWED_HOSTS_ENV_KEY = 'MCP_ALLOWED_HOSTS';
-const ALLOWED_FILE_ROOTS_ENV_KEY = 'ALLOWED_FILE_ROOTS';
-const savedAllowedHostsEnv = process.env[ALLOWED_HOSTS_ENV_KEY];
-const savedAllowedFileRootsEnv = process.env[ALLOWED_FILE_ROOTS_ENV_KEY];
-
-function restoreAllowedHostsEnv(): void {
-  if (savedAllowedHostsEnv === undefined) {
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete process.env[ALLOWED_HOSTS_ENV_KEY];
-  } else {
-    process.env[ALLOWED_HOSTS_ENV_KEY] = savedAllowedHostsEnv;
-  }
-}
-
-function setAllowedHostsEnv(value: string | undefined): void {
-  if (value === undefined) {
-    restoreAllowedHostsEnv();
-  } else {
-    process.env[ALLOWED_HOSTS_ENV_KEY] = value;
-  }
-}
+const ROOTS_ENV_KEY = 'ROOTS';
+const savedAllowedFileRootsEnv = process.env[ROOTS_ENV_KEY];
 
 function restoreAllowedFileRootsEnv(): void {
   if (savedAllowedFileRootsEnv === undefined) {
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete process.env[ALLOWED_FILE_ROOTS_ENV_KEY];
+    delete process.env[ROOTS_ENV_KEY];
   } else {
-    process.env[ALLOWED_FILE_ROOTS_ENV_KEY] = savedAllowedFileRootsEnv;
+    process.env[ROOTS_ENV_KEY] = savedAllowedFileRootsEnv;
   }
 }
 
@@ -51,61 +32,17 @@ function setAllowedFileRootsEnv(value: string | undefined): void {
   if (value === undefined) {
     restoreAllowedFileRootsEnv();
   } else {
-    process.env[ALLOWED_FILE_ROOTS_ENV_KEY] = value;
+    process.env[ROOTS_ENV_KEY] = value;
   }
 }
 
 describe('parseAllowedHosts', () => {
-  afterEach(() => {
-    restoreAllowedHostsEnv();
-  });
-
-  it('returns undefined when env is not set', () => {
-    setAllowedHostsEnv(undefined);
+  it('returns undefined (allowed-hosts env surface is removed)', () => {
     assert.equal(parseAllowedHosts(), undefined);
-  });
-
-  it('returns undefined for empty string', () => {
-    setAllowedHostsEnv('');
-    assert.equal(parseAllowedHosts(), undefined);
-  });
-
-  it('returns undefined for whitespace-only string', () => {
-    setAllowedHostsEnv('  ,  , ');
-    assert.equal(parseAllowedHosts(), undefined);
-  });
-
-  it('parses comma-separated hostnames', () => {
-    setAllowedHostsEnv('localhost, myapp.local, [::1]');
-    assert.deepEqual(parseAllowedHosts(), ['localhost', 'myapp.local', '[::1]']);
-  });
-
-  it('trims whitespace from entries', () => {
-    setAllowedHostsEnv('  host1 , host2  ');
-    assert.deepEqual(parseAllowedHosts(), ['host1', 'host2']);
-  });
-
-  it('handles single hostname', () => {
-    setAllowedHostsEnv('myserver');
-    assert.deepEqual(parseAllowedHosts(), ['myserver']);
   });
 });
 
 describe('resolveAllowedHosts', () => {
-  afterEach(() => {
-    restoreAllowedHostsEnv();
-  });
-
-  it('returns explicit env hosts for localhost bind', () => {
-    setAllowedHostsEnv('custom.local');
-    assert.deepEqual(resolveAllowedHosts('127.0.0.1'), ['custom.local']);
-  });
-
-  it('returns explicit env hosts for broad bind', () => {
-    setAllowedHostsEnv('myapp.example.com');
-    assert.deepEqual(resolveAllowedHosts('0.0.0.0'), ['myapp.example.com']);
-  });
-
   it('auto-resolves localhost hosts for 127.0.0.1 bind', () => {
     assert.deepEqual(resolveAllowedHosts('127.0.0.1'), ['localhost', '127.0.0.1', '[::1]']);
   });
@@ -291,7 +228,7 @@ describe('resolveAndValidatePath', () => {
     assert.ok(result.endsWith('package.json'));
   });
 
-  it('does not let client roots expand beyond ALLOWED_FILE_ROOTS', async () => {
+  it('does not let client roots expand beyond ROOTS', async () => {
     const outsidePath =
       process.platform === 'win32' ? 'C:\\Windows\\System32\\cmd.exe' : '/etc/passwd';
 

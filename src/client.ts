@@ -13,7 +13,7 @@ import { logger } from './lib/logger.js';
 import { pickDefined } from './lib/response.js';
 import type { GeminiResponseSchema } from './schemas/json-schema.js';
 
-import { getExposeThoughts, getGeminiModel } from './config.js';
+import { getApiKey, getExposeThoughts, getGeminiModel } from './config.js';
 
 // ── Config Utilities ──────────────────────────────────────────────────
 
@@ -133,10 +133,7 @@ let _ai: GoogleGenAI | undefined;
 /** Lazily initialized Gemini client - throws only when first accessed. */
 export function getAI(): GoogleGenAI {
   if (!_ai) {
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) {
-      throw new Error('API_KEY environment variable is required');
-    }
+    const apiKey = getApiKey();
     _ai = new GoogleGenAI({ apiKey });
   }
   return _ai;

@@ -19,8 +19,6 @@ const DEFAULT_TRANSPORT_SESSION_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_TRANSPORT_SESSIONS = 100;
 const DEFAULT_MAX_TRANSCRIPT_ENTRIES = 200;
 const DEFAULT_MAX_EVENT_ENTRIES = 200;
-const MAX_SESSION_COUNT = 10_000;
-const MAX_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function parseBooleanEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
@@ -66,23 +64,31 @@ function parseNonEmptyStringEnv(name: string, fallback: string): string {
 }
 
 function parseTransportModeEnv(): TransportMode {
-  const raw = process.env.MCP_TRANSPORT ?? DEFAULT_TRANSPORT;
+  const raw = process.env.TRANSPORT ?? DEFAULT_TRANSPORT;
   if (raw === 'stdio' || raw === 'http' || raw === 'web-standard') {
     return raw;
   }
-  throw new Error('MCP_TRANSPORT must be one of: stdio, http, web-standard.');
+  throw new Error('TRANSPORT must be one of: stdio, http, web-standard.');
+}
+
+export function getApiKey(): string {
+  const raw = process.env.API_KEY;
+  if (raw === undefined || raw.trim() === '') {
+    throw new Error('API_KEY environment variable is required.');
+  }
+  return raw;
 }
 
 export function getGeminiModel(): string {
-  return process.env.GEMINI_MODEL ?? DEFAULT_MODEL;
+  return parseNonEmptyStringEnv('MODEL', DEFAULT_MODEL);
 }
 
 export function getExposeThoughts(): boolean {
-  return process.env.GEMINI_EXPOSE_THOUGHTS === 'true';
+  return parseBooleanEnv('THOUGHTS', false);
 }
 
 export function getVerbosePayloadLogging(): boolean {
-  return parseBooleanEnv('LOG_VERBOSE_PAYLOADS', false);
+  return parseBooleanEnv('LOG_PAYLOADS', false);
 }
 
 export function getTransportMode(): TransportMode {
@@ -90,38 +96,24 @@ export function getTransportMode(): TransportMode {
 }
 
 export function getTransportConfig(): TransportConfig {
-  const corsOrigin = process.env.MCP_CORS_ORIGIN ?? '';
-  const host = parseNonEmptyStringEnv('MCP_HTTP_HOST', DEFAULT_HTTP_HOST);
-  const isStateless = parseBooleanEnv('MCP_STATELESS', false);
-
-  if (corsOrigin === '*' && !isStateless) {
-    throw new Error(
-      'MCP_CORS_ORIGIN="*" requires MCP_STATELESS="true". Wildcard CORS is not allowed for stateful transports.',
-    );
-  }
+  const host = parseNonEmptyStringEnv('HOST', DEFAULT_HTTP_HOST);
 
   return {
-    corsOrigin,
+    corsOrigin: '',
     host,
-    isStateless,
-    maxSessions: parseIntEnv('MCP_MAX_TRANSPORT_SESSIONS', DEFAULT_MAX_TRANSPORT_SESSIONS, {
-      min: 1,
-      max: MAX_SESSION_COUNT,
-    }),
-    port: parseIntEnv('MCP_HTTP_PORT', DEFAULT_HTTP_PORT, { min: 1, max: 65_535 }),
-    sessionTtlMs: parseIntEnv('MCP_TRANSPORT_SESSION_TTL_MS', DEFAULT_TRANSPORT_SESSION_TTL_MS, {
-      min: 1,
-      max: MAX_SESSION_TTL_MS,
-    }),
+    isStateless: false,
+    maxSessions: DEFAULT_MAX_TRANSPORT_SESSIONS,
+    port: parseIntEnv('PORT', DEFAULT_HTTP_PORT, { min: 1, max: 65_535 }),
+    sessionTtlMs: DEFAULT_TRANSPORT_SESSION_TTL_MS,
   };
 }
 
 export function getAllowedHostsEnv(): string | undefined {
-  return process.env.MCP_ALLOWED_HOSTS;
+  return undefined;
 }
 
-export function getAllowedFileRootsEnv(): string | undefined {
-  return process.env.ALLOWED_FILE_ROOTS;
+export function getRootsEnv(): string | undefined {
+  return process.env.ROOTS;
 }
 
 export function getSessionLimits(): {
@@ -131,23 +123,10 @@ export function getSessionLimits(): {
   ttlMs: number;
 } {
   return {
-    maxEventEntries: parseIntEnv('MAX_SESSION_EVENT_ENTRIES', DEFAULT_MAX_EVENT_ENTRIES, {
-      min: 1,
-      max: 10_000,
-    }),
-    maxSessions: parseIntEnv('MAX_SESSIONS', DEFAULT_MAX_SESSIONS, {
-      min: 1,
-      max: MAX_SESSION_COUNT,
-    }),
-    maxTranscriptEntries: parseIntEnv(
-      'MAX_SESSION_TRANSCRIPT_ENTRIES',
-      DEFAULT_MAX_TRANSCRIPT_ENTRIES,
-      { min: 1, max: 10_000 },
-    ),
-    ttlMs: parseIntEnv('SESSION_TTL_MS', DEFAULT_SESSION_TTL_MS, {
-      min: 1,
-      max: MAX_SESSION_TTL_MS,
-    }),
+    maxEventEntries: DEFAULT_MAX_EVENT_ENTRIES,
+    maxSessions: DEFAULT_MAX_SESSIONS,
+    maxTranscriptEntries: DEFAULT_MAX_TRANSCRIPT_ENTRIES,
+    ttlMs: DEFAULT_SESSION_TTL_MS,
   };
 }
 
@@ -156,17 +135,17 @@ export function getSessionLimits(): {
 const DEFAULT_WORKSPACE_CACHE_TTL = '3600s';
 
 export function getWorkspaceCacheEnabled(): boolean {
-  return process.env.WORKSPACE_CACHE_ENABLED === 'true';
+  return parseBooleanEnv('CACHE', false);
 }
 
 export function getWorkspaceContextFile(): string | undefined {
-  return process.env.WORKSPACE_CONTEXT_FILE;
+  return process.env.CONTEXT;
 }
 
 export function getWorkspaceCacheTtl(): string {
-  return process.env.WORKSPACE_CACHE_TTL ?? DEFAULT_WORKSPACE_CACHE_TTL;
+  return process.env.CACHE_TTL ?? DEFAULT_WORKSPACE_CACHE_TTL;
 }
 
 export function getWorkspaceAutoScan(): boolean {
-  return process.env.WORKSPACE_AUTO_SCAN !== 'false';
+  return parseBooleanEnv('AUTO_SCAN', true);
 }

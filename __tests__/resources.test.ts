@@ -120,13 +120,13 @@ describe('discovery resources', () => {
 
   it('builds discover://context from lightweight filename scans and cached token metadata', async () => {
     const sessionStore = createStore();
-    const originalAllowedRoots = process.env.ALLOWED_FILE_ROOTS;
+    const originalAllowedRoots = process.env.ROOTS;
     const originalStatus = workspaceCacheManager.getCacheStatus.bind(workspaceCacheManager);
     const root = await mkdtemp(join(tmpdir(), 'discover-context-lightweight-'));
     await writeFile(join(root, 'readme.md'), 'x'.repeat(20_000), 'utf8');
     await writeFile(join(root, 'package.json'), '{"name":"demo"}', 'utf8');
     await writeFile(join(root, 'notes.txt'), 'ignore me', 'utf8');
-    process.env.ALLOWED_FILE_ROOTS = root;
+    process.env.ROOTS = root;
 
     workspaceCacheManager.getCacheStatus = () => ({
       enabled: true,
@@ -145,7 +145,7 @@ describe('discovery resources', () => {
       assert.strictEqual(snapshot.workspace.estimatedTokens, 321);
       assert.doesNotMatch(renderServerContextMarkdown(snapshot), /x{100}/);
     } finally {
-      process.env.ALLOWED_FILE_ROOTS = originalAllowedRoots;
+      process.env.ROOTS = originalAllowedRoots;
       workspaceCacheManager.getCacheStatus = originalStatus;
       await rm(root, { recursive: true, force: true });
     }

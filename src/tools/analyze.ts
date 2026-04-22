@@ -14,7 +14,7 @@ import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
 import { pickDefined } from '../lib/object.js';
-import { resolveOrchestration, type ToolProfile } from '../lib/orchestration.js';
+import { type BuiltInToolName, resolveOrchestration } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput, safeValidateStructuredContent } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
@@ -197,9 +197,12 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
 
       const resolved = await resolveOrchestration(
         {
-          googleSearch,
+          builtInToolNames: [
+            ...(googleSearch ? (['googleSearch'] as const) : []),
+            ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
+          ],
           urls,
-          includeServerSideToolInvocations: googleSearch === true || (urls?.length ?? 0) > 0,
+          includeServerSideToolInvocations: true,
         },
         ctx,
         'analyze_file',
@@ -298,9 +301,12 @@ async function analyzeMultiFileWork(
 
     const resolved = await resolveOrchestration(
       {
-        googleSearch,
+        builtInToolNames: [
+          ...(googleSearch ? (['googleSearch'] as const) : []),
+          ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
+        ],
         urls,
-        includeServerSideToolInvocations: googleSearch === true || (urls?.length ?? 0) > 0,
+        includeServerSideToolInvocations: true,
       },
       ctx,
       'analyze',
@@ -352,13 +358,11 @@ async function analyzeMultiFileWork(
   }
 }
 
-function pickDiagramProfile(args: AnalyzeDiagramInput): ToolProfile {
-  const isUrl = args.targetKind === 'url';
-  const wantsCode = args.validateSyntax === true;
-  if (isUrl && wantsCode) return 'url_code';
-  if (isUrl) return 'url';
-  if (wantsCode) return 'code';
-  return 'none';
+function pickDiagramBuiltInTools(args: AnalyzeDiagramInput): BuiltInToolName[] {
+  const names: BuiltInToolName[] = [];
+  if (args.targetKind === 'url') names.push('urlContext');
+  if (args.validateSyntax === true) names.push('codeExecution');
+  return names;
 }
 
 async function analyzeDiagramWork(
@@ -398,12 +402,12 @@ async function analyzeDiagramWork(
     await progress.step(uploadedCount, totalSteps, `Generating ${args.diagramType} diagram`);
     await ctx.mcpReq.log('info', `Generating ${args.diagramType} diagram`);
 
-    const diagramProfile = pickDiagramProfile(args);
+    const diagramBuiltInTools = pickDiagramBuiltInTools(args);
     const resolved = await resolveOrchestration(
       {
-        toolProfile: diagramProfile,
+        builtInToolNames: diagramBuiltInTools,
         ...(args.targetKind === 'url' ? { urls: args.urls } : {}),
-        includeServerSideToolInvocations: diagramProfile !== 'none',
+        includeServerSideToolInvocations: diagramBuiltInTools.length > 0,
       },
       ctx,
       'analyze_diagram',

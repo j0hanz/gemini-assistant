@@ -349,7 +349,10 @@ async function searchWork(
 ): Promise<CallToolResult> {
   const resolved = await resolveOrchestration(
     {
-      toolProfile: (urls?.length ?? 0) > 0 ? 'search_url' : 'search',
+      builtInToolNames:
+        (urls?.length ?? 0) > 0
+          ? (['googleSearch', 'urlContext'] as const)
+          : (['googleSearch'] as const),
       urls,
       includeServerSideToolInvocations: true,
     },
@@ -401,7 +404,7 @@ export async function analyzeUrlWork(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const resolved = await resolveOrchestration(
-    { toolProfile: 'url', urls, includeServerSideToolInvocations: true },
+    { builtInToolNames: ['urlContext'] as const, urls, includeServerSideToolInvocations: true },
     ctx,
     'analyze_url',
   );
@@ -486,7 +489,10 @@ async function agenticSearchWork(
 
   const resolved = await resolveOrchestration(
     {
-      toolProfile: (urls?.length ?? 0) > 0 ? 'search_url_code' : 'search_code',
+      builtInToolNames:
+        (urls?.length ?? 0) > 0
+          ? (['googleSearch', 'urlContext', 'codeExecution'] as const)
+          : (['googleSearch', 'codeExecution'] as const),
       urls,
       includeServerSideToolInvocations: true,
     },

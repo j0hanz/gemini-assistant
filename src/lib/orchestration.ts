@@ -1,139 +1,92 @@
 import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 
-import type { ToolConfig, ToolListUnion } from '@google/genai';
+import type { FunctionCallingConfigMode, ToolConfig, ToolListUnion } from '@google/genai';
 
 import { logger } from './logger.js';
 import { validateUrls } from './validation.js';
 
-export const TOOL_PROFILES = [
-  'none',
-  'search',
-  'url',
-  'search_url',
-  'code',
-  'search_code',
-  'search_url_code',
-  'url_code',
-] as const;
+export const BUILT_IN_TOOL_NAMES = ['googleSearch', 'urlContext', 'codeExecution'] as const;
+export type BuiltInToolName = (typeof BUILT_IN_TOOL_NAMES)[number];
 
-export type ToolProfile = (typeof TOOL_PROFILES)[number];
-
-interface ToolProfileCapabilities {
-  builtInTools: ToolListUnion;
-  usesCodeExecution: boolean;
-  usesGoogleSearch: boolean;
-  usesUrlContext: boolean;
-}
-
-const TOOL_PROFILE_CAPABILITIES: Record<ToolProfile, ToolProfileCapabilities> = {
-  none: {
-    builtInTools: [],
-    usesCodeExecution: false,
-    usesGoogleSearch: false,
-    usesUrlContext: false,
-  },
-  search: {
-    builtInTools: [{ googleSearch: {} }],
-    usesCodeExecution: false,
-    usesGoogleSearch: true,
-    usesUrlContext: false,
-  },
-  url: {
-    builtInTools: [{ urlContext: {} }],
-    usesCodeExecution: false,
-    usesGoogleSearch: false,
-    usesUrlContext: true,
-  },
-  search_url: {
-    builtInTools: [{ googleSearch: {} }, { urlContext: {} }],
-    usesCodeExecution: false,
-    usesGoogleSearch: true,
-    usesUrlContext: true,
-  },
-  code: {
-    builtInTools: [{ codeExecution: {} }],
-    usesCodeExecution: true,
-    usesGoogleSearch: false,
-    usesUrlContext: false,
-  },
-  search_code: {
-    builtInTools: [{ googleSearch: {} }, { codeExecution: {} }],
-    usesCodeExecution: true,
-    usesGoogleSearch: true,
-    usesUrlContext: false,
-  },
-  search_url_code: {
-    builtInTools: [{ googleSearch: {} }, { urlContext: {} }, { codeExecution: {} }],
-    usesCodeExecution: true,
-    usesGoogleSearch: true,
-    usesUrlContext: true,
-  },
-  url_code: {
-    builtInTools: [{ urlContext: {} }, { codeExecution: {} }],
-    usesCodeExecution: true,
-    usesGoogleSearch: false,
-    usesUrlContext: true,
-  },
+const BUILT_IN_TOOL_FACTORIES: Record<BuiltInToolName, () => ToolListUnion[number]> = {
+  googleSearch: () => ({ googleSearch: {} }),
+  urlContext: () => ({ urlContext: {} }),
+  codeExecution: () => ({ codeExecution: {} }),
 };
 
+/**
+ * @deprecated Preset-profile strings are no longer the orchestration input.
+ * Retained as a string alias for one release; derived labels are produced by
+ * {@link buildToolProfile}. Prefer `BuiltInToolName[]` for new code.
+ */
+export type ToolProfile = string;
+
+function buildBuiltInTools(names: readonly BuiltInToolName[] | undefined): ToolListUnion {
+  if (!names || names.length === 0) return [];
+  return names.map((name) => BUILT_IN_TOOL_FACTORIES[name]());
+}
+
+function cloneTools(tools: ToolListUnion | undefined): ToolListUnion {
+  if (!tools || tools.length === 0) return [];
+  return tools.map((tool) => ({ ...tool }));
+}
+
+function hasTool(tools: ToolListUnion, key: BuiltInToolName): boolean {
+  return tools.some((tool) => Object.prototype.hasOwnProperty.call(tool, key));
+}
+
+export function buildToolProfile(tools: ToolListUnion | undefined): string {
+  if (!tools || tools.length === 0) return 'none';
+  const keys = new Set<string>();
+  for (const tool of tools) {
+    for (const key of Object.keys(tool)) {
+      keys.add(key);
+    }
+  }
+  if (keys.size === 0) return 'none';
+  return [...keys].sort().join('+');
+}
+
 interface OrchestrationRequest {
-  googleSearch?: boolean | undefined;
+  builtInToolNames?: readonly BuiltInToolName[] | undefined;
+  additionalTools?: ToolListUnion | undefined;
+  functionCallingMode?: FunctionCallingConfigMode | undefined;
   includeServerSideToolInvocations?: boolean | undefined;
-  jsonMode?: boolean | undefined;
-  toolProfile?: ToolProfile | undefined;
   urls?: readonly string[] | undefined;
 }
 
 interface OrchestrationConfig {
+  functionCallingMode?: FunctionCallingConfigMode;
   toolConfig?: ToolConfig;
-  toolProfile: ToolProfile;
+  toolProfile: string;
   tools?: ToolListUnion;
   usesCodeExecution: boolean;
   usesGoogleSearch: boolean;
   usesUrlContext: boolean;
 }
 
-export function normalizeToolProfile({
-  googleSearch,
-  toolProfile,
-  urls,
-}: Pick<OrchestrationRequest, 'googleSearch' | 'toolProfile' | 'urls'>): ToolProfile {
-  if (toolProfile) {
-    return toolProfile;
-  }
-
-  const hasUrls = (urls?.length ?? 0) > 0;
-
-  if (googleSearch) {
-    return hasUrls ? 'search_url' : 'search';
-  }
-
-  if (hasUrls) {
-    return 'url';
-  }
-
-  return 'none';
-}
-
 export function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationConfig {
-  const toolProfile = normalizeToolProfile(request);
-  const capabilities = TOOL_PROFILE_CAPABILITIES[toolProfile];
-  const builtInTools = capabilities.builtInTools.map((tool) => ({ ...tool }));
-  const hasBuiltIn = builtInTools.length > 0;
+  const builtInTools = buildBuiltInTools(request.builtInToolNames);
+  const extraTools = cloneTools(request.additionalTools);
+  const tools: ToolListUnion = [...builtInTools, ...extraTools];
 
   const config: OrchestrationConfig = {
-    toolProfile,
-    usesCodeExecution: capabilities.usesCodeExecution,
-    usesGoogleSearch: capabilities.usesGoogleSearch,
-    usesUrlContext: capabilities.usesUrlContext,
+    toolProfile: buildToolProfile(tools),
+    usesCodeExecution: hasTool(tools, 'codeExecution'),
+    usesGoogleSearch: hasTool(tools, 'googleSearch'),
+    usesUrlContext: hasTool(tools, 'urlContext'),
   };
 
   if (request.includeServerSideToolInvocations === true) {
     config.toolConfig = { includeServerSideToolInvocations: true };
   }
 
-  if (hasBuiltIn) {
-    config.tools = builtInTools;
+  if (request.functionCallingMode !== undefined) {
+    config.functionCallingMode = request.functionCallingMode;
+  }
+
+  if (tools.length > 0) {
+    config.tools = tools;
   }
 
   return config;
@@ -145,9 +98,9 @@ export type ResolveOrchestrationResult =
 
 /**
  * Unified orchestration entry point for tool handlers: validates URLs,
- * resolves the tool profile, and emits a single info log describing the
+ * resolves the composed tool list, and emits a single info log describing the
  * resolution. Emits a warning if `urls` were supplied but the resolved
- * profile has URL Context disabled.
+ * configuration has URL Context disabled.
  */
 export async function resolveOrchestration(
   request: OrchestrationRequest & { urls?: readonly string[] | undefined },

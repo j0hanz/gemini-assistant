@@ -14,8 +14,8 @@ import { logger } from '../lib/logger.js';
 import { pickDefined } from '../lib/object.js';
 import {
   buildOrchestrationConfig,
+  type BuiltInToolName,
   resolveOrchestration,
-  type ToolProfile,
 } from '../lib/orchestration.js';
 import { validateGeminiRequest } from '../lib/preflight.js';
 import { ProgressReporter } from '../lib/progress.js';
@@ -122,7 +122,7 @@ interface AskExecutionResult {
   result: CallToolResult;
   sentMessage?: string;
   streamResult: StreamResult;
-  toolProfile: ToolProfile;
+  toolProfile: string;
   urls?: string[];
 }
 
@@ -309,12 +309,20 @@ function hasExpiredSession(
   return !!sessionId && deps.isEvicted(sessionId);
 }
 
-function getAskToolProfile(args: AskArgs): ToolProfile | undefined {
-  return 'toolProfile' in args ? args.toolProfile : undefined;
-}
-
 function getAskUrls(args: AskArgs): readonly string[] | undefined {
   return 'urls' in args ? args.urls : undefined;
+}
+
+function buildChatOrchestrationRequest(args: AskArgs) {
+  const urls = getAskUrls(args);
+  const builtInToolNames: BuiltInToolName[] = [];
+  if (args.googleSearch) builtInToolNames.push('googleSearch');
+  if ((urls?.length ?? 0) > 0) builtInToolNames.push('urlContext');
+  return {
+    builtInToolNames,
+    includeServerSideToolInvocations: true,
+    ...(urls ? { urls } : {}),
+  } as const;
 }
 
 function validateAskRequest(
@@ -329,17 +337,12 @@ function validateAskRequest(
   }
 
   const hasExistingSession = sessionId ? deps.getSessionEntry(sessionId) !== undefined : false;
-  const orchestration = buildOrchestrationConfig({
-    googleSearch: args.googleSearch,
-    toolProfile: getAskToolProfile(args),
-    urls,
-  });
+  const orchestration = buildOrchestrationConfig(buildChatOrchestrationRequest(args));
   const preflightResult = validateGeminiRequest({
     hasExistingSession,
     jsonMode: responseSchema !== undefined,
     responseSchema,
     sessionId,
-    toolProfile: orchestration.toolProfile,
     usesCodeExecution: orchestration.usesCodeExecution,
     usesGoogleSearch: orchestration.usesGoogleSearch,
     usesUrlContext: orchestration.usesUrlContext,
@@ -371,21 +374,12 @@ function buildAskPrompt(message: string, urls?: readonly string[]): string {
 }
 
 async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
-  const askToolProfile = getAskToolProfile(args);
   const urls = getAskUrls(args);
-  const resolved = await resolveOrchestration(
-    {
-      googleSearch: args.googleSearch,
-      toolProfile: askToolProfile,
-      urls,
-    },
-    ctx,
-    'chat',
-  );
+  const resolved = await resolveOrchestration(buildChatOrchestrationRequest(args), ctx, 'chat');
   if (resolved.error) {
     return { error: resolved.error } as const;
   }
-  const { toolProfile, tools, toolConfig, usesUrlContext } = resolved.config;
+  const { functionCallingMode, toolProfile, tools, toolConfig, usesUrlContext } = resolved.config;
 
   // URL Context discovers target URLs from prompt text; keep URLs visible
   // whenever a URL-capable profile is active.
@@ -397,6 +391,7 @@ async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
     urls: usesUrlContext ? [...(urls ?? [])] : undefined,
     tools,
     toolConfig,
+    functionCallingMode,
   } as const;
 }
 
@@ -433,7 +428,7 @@ function buildPerTurnConfig(config: ReturnType<typeof buildGenerateContentConfig
 async function runAskStream(
   ctx: ServerContext,
   streamGenerator: () => ReturnType<ReturnType<typeof getAI>['models']['generateContentStream']>,
-  toolProfile: ToolProfile,
+  toolProfile: string,
   urls: string[] | undefined,
   jsonMode = false,
   responseSchema?: GeminiResponseSchema,
@@ -546,9 +541,17 @@ export async function askWithoutSession(
       toolProfile: 'none',
     };
   }
-  const { prompt, toolConfig, toolProfile, tools, urls } = resolved;
+  const { prompt, toolConfig, toolProfile, tools, urls, functionCallingMode } = resolved;
   const jsonMode = !!args.responseSchema;
-  const config = buildGenerateContentConfig({ ...args, toolConfig, tools }, ctx.mcpReq.signal);
+  const config = buildGenerateContentConfig(
+    {
+      ...args,
+      toolConfig,
+      tools,
+      ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
+    },
+    ctx.mcpReq.signal,
+  );
   const perTurnConfig = buildPerTurnConfig(config);
   const maxRetries = jsonMode && !ctx.mcpReq.signal.aborted ? JSON_REPAIR_MAX_RETRIES : 0;
   let currentPrompt = prompt;
@@ -853,16 +856,11 @@ async function resolveWorkspaceCacheName(
 }
 
 function buildAskToolingConfig(args: AskArgs) {
-  const askToolProfile = getAskToolProfile(args);
-  const urls = getAskUrls(args);
-  const orchestration = buildOrchestrationConfig({
-    googleSearch: args.googleSearch,
-    toolProfile: askToolProfile,
-    urls,
-  });
+  const orchestration = buildOrchestrationConfig(buildChatOrchestrationRequest(args));
   return {
     tools: orchestration.tools,
     toolConfig: orchestration.toolConfig,
+    functionCallingMode: orchestration.functionCallingMode,
   };
 }
 
@@ -872,10 +870,15 @@ function createDefaultAskDependencies(sessionStore: SessionStore): AskDependenci
     appendSessionEvent: sessionStore.appendSessionEvent.bind(sessionStore),
     appendSessionTranscript: sessionStore.appendSessionTranscript.bind(sessionStore),
     createChat: (args) => {
-      const { toolConfig, tools } = buildAskToolingConfig(args);
+      const { toolConfig, tools, functionCallingMode } = buildAskToolingConfig(args);
       return getAI().chats.create({
         model: MODEL,
-        config: buildGenerateContentConfig({ ...args, toolConfig, tools }),
+        config: buildGenerateContentConfig({
+          ...args,
+          toolConfig,
+          tools,
+          ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
+        }),
       });
     },
     getSession: sessionStore.getSession.bind(sessionStore),
@@ -889,7 +892,7 @@ function createDefaultAskDependencies(sessionStore: SessionStore): AskDependenci
         return undefined;
       }
 
-      const { toolConfig, tools } = buildAskToolingConfig(args);
+      const { toolConfig, tools, functionCallingMode } = buildAskToolingConfig(args);
       const cacheName = sessionStore.getSessionEntry(sessionId)?.cacheName;
       const activeCacheName = workspaceCacheManager.getCacheStatus().cacheName;
       const rebuildArgs =
@@ -902,7 +905,12 @@ function createDefaultAskDependencies(sessionStore: SessionStore): AskDependenci
       }
       const chat = getAI().chats.create({
         model: MODEL,
-        config: buildGenerateContentConfig({ ...rebuildArgs, toolConfig, tools }),
+        config: buildGenerateContentConfig({
+          ...rebuildArgs,
+          toolConfig,
+          tools,
+          ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
+        }),
         history: buildRebuiltChatContents(contents, 200_000),
       });
       sessionStore.setSession(sessionId, chat, Date.now(), cacheName);

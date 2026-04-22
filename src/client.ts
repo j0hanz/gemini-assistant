@@ -1,4 +1,5 @@
 import type {
+  FunctionCallingConfigMode,
   GenerateContentConfig,
   SafetySetting,
   ToolConfig,
@@ -49,6 +50,23 @@ interface ConfigBuilderOptions {
   mediaResolution?: GenerateContentConfig['mediaResolution'] | undefined;
   tools?: ToolListUnion | undefined;
   toolConfig?: ToolConfig | undefined;
+  functionCallingMode?: FunctionCallingConfigMode | undefined;
+}
+
+export function buildMergedToolConfig(
+  toolConfig: ToolConfig | undefined,
+  functionCallingMode: FunctionCallingConfigMode | undefined,
+): ToolConfig | undefined {
+  if (functionCallingMode === undefined) {
+    return toolConfig;
+  }
+  return {
+    ...(toolConfig ?? {}),
+    functionCallingConfig: {
+      ...(toolConfig?.functionCallingConfig ?? {}),
+      mode: functionCallingMode,
+    },
+  };
 }
 
 function buildThinkingConfig(thinkingLevel?: AskThinkingLevel, thinkingBudget?: number) {
@@ -113,7 +131,9 @@ export function buildGenerateContentConfig(
     mediaResolution,
     tools,
     toolConfig,
+    functionCallingMode,
   } = options;
+  const mergedToolConfig = buildMergedToolConfig(toolConfig, functionCallingMode);
   const isJson = jsonMode ?? responseSchema !== undefined;
   const resolvedSafetySettings = normalizeSafetySettings(safetySettings ?? getSafetySettings());
 
@@ -132,7 +152,7 @@ export function buildGenerateContentConfig(
     ...(seed !== undefined ? { seed } : {}),
     ...(mediaResolution ? { mediaResolution } : {}),
     ...(tools ? { tools } : {}),
-    ...(toolConfig ? { toolConfig } : {}),
+    ...(mergedToolConfig ? { toolConfig: mergedToolConfig } : {}),
     ...(signal ? { abortSignal: signal } : {}),
   };
 }

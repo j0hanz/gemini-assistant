@@ -240,9 +240,12 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
 
       const resolved = await resolveOrchestration(
         {
-          googleSearch,
+          builtInToolNames: [
+            ...(googleSearch ? (['googleSearch'] as const) : []),
+            ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
+          ],
           urls,
-          includeServerSideToolInvocations: googleSearch === true || (urls?.length ?? 0) > 0,
+          includeServerSideToolInvocations: true,
         },
         ctx,
         'compare_files',
@@ -334,9 +337,12 @@ async function diagnoseFailureWork(
 
   const resolved = await resolveOrchestration(
     {
-      googleSearch,
+      builtInToolNames: [
+        ...(googleSearch ? (['googleSearch'] as const) : []),
+        ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
+      ],
       urls,
-      includeServerSideToolInvocations: googleSearch === true || (urls?.length ?? 0) > 0,
+      includeServerSideToolInvocations: true,
     },
     ctx,
     'review_failure',

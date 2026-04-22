@@ -11,8 +11,6 @@ import { PUBLIC_TOOL_NAMES } from '../public-contract.js';
 const WINDOWS_DRIVE_RELATIVE_PATH_PATTERN = /^[A-Za-z]:(?![\\/])/;
 const PUBLIC_HTTP_URL_ERROR = 'URL must be a valid public http:// or https:// URL';
 export const DIAGRAM_TYPES = ['mermaid', 'plantuml'] as const;
-export const ASK_URL_TOOL_PROFILES = ['url', 'search_url', 'url_code', 'search_url_code'] as const;
-export const ASK_NON_URL_TOOL_PROFILES = ['none', 'search', 'code', 'search_code'] as const;
 export const RESEARCH_MODE_OPTIONS = ['quick', 'deep'] as const;
 const ANALYZE_TARGET_KIND_OPTIONS = ['file', 'url', 'multi'] as const;
 const ANALYZE_OUTPUT_KIND_OPTIONS = ['summary', 'diagram'] as const;

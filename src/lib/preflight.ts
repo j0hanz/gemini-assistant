@@ -1,14 +1,12 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 
 import { AppError } from './errors.js';
-import type { ToolProfile } from './orchestration.js';
 
 export interface GeminiRequestPreflight {
   hasExistingSession?: boolean | undefined;
   jsonMode?: boolean | undefined;
   responseSchema?: unknown;
   sessionId?: string | undefined;
-  toolProfile?: ToolProfile | undefined;
   usesCodeExecution?: boolean | undefined;
   usesGoogleSearch?: boolean | undefined;
   usesUrlContext?: boolean | undefined;

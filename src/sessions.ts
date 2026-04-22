@@ -1,7 +1,6 @@
 import type { Chat, Part } from '@google/genai';
 
 import { AppError } from './lib/errors.js';
-import type { ToolProfile } from './lib/orchestration.js';
 import type { FunctionCallEntry, ToolEvent } from './lib/streaming.js';
 import type { UsageMetadata } from './schemas/outputs.js';
 
@@ -29,7 +28,7 @@ export interface SessionEventEntry {
   request: {
     message: string;
     sentMessage?: string;
-    toolProfile?: ToolProfile;
+    toolProfile?: string;
     urls?: string[];
   };
   response: {

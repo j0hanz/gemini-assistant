@@ -57,20 +57,19 @@ describe('AskInputSchema', () => {
     assert.ok(result.success);
   });
 
-  it('accepts the explicit non-url tool profile branch', () => {
-    const result = AskInputSchema.safeParse({ message: 'hello', toolProfile: 'search' });
+  it('accepts googleSearch without urls', () => {
+    const result = AskInputSchema.safeParse({ message: 'hello', googleSearch: true });
     assert.ok(result.success);
   });
 
-  it('accepts explicit none without urls', () => {
-    const result = AskInputSchema.safeParse({ message: 'hello', toolProfile: 'none' });
+  it('accepts bare message as the minimal branch', () => {
+    const result = AskInputSchema.safeParse({ message: 'hello' });
     assert.ok(result.success);
   });
 
-  it('accepts the explicit url-capable tool profile branch', () => {
+  it('accepts the url branch with urls', () => {
     const result = AskInputSchema.safeParse({
       message: 'analyze these pages',
-      toolProfile: 'search_url',
       urls: ['https://example.com/docs'],
     });
     assert.ok(result.success);
@@ -91,7 +90,6 @@ describe('AskInputSchema', () => {
       temperature: 0.2,
       seed: 42,
       googleSearch: true,
-      toolProfile: 'search_url',
       urls: ['https://example.com/docs'],
     });
     assert.ok(result.success);
@@ -105,24 +103,23 @@ describe('AskInputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
-  it('rejects urls without a url-capable tool profile', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'analyze these pages',
-      urls: ['https://example.com/docs'],
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects urls on non-url tool profiles', () => {
+  it('rejects toolProfile (no longer a supported field)', () => {
     const result = AskInputSchema.safeParse({
       message: 'analyze these pages',
       toolProfile: 'search',
-      urls: ['https://example.com/docs'],
     });
     assert.strictEqual(result.success, false);
   });
 
-  it('requires urls for url-capable tool profiles', () => {
+  it('rejects urls below the minimum length', () => {
+    const result = AskInputSchema.safeParse({
+      message: 'analyze these pages',
+      urls: [],
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects url arrays combined with unknown toolProfile', () => {
     const result = AskInputSchema.safeParse({
       message: 'analyze these pages',
       toolProfile: 'url',

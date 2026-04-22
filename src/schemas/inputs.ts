@@ -8,10 +8,7 @@ import { AppError } from '../lib/errors.js';
 import {
   analyzeOutputKind,
   analyzeTargetKind,
-  ASK_NON_URL_TOOL_PROFILES,
-  ASK_URL_TOOL_PROFILES,
   DIAGRAM_TYPES,
-  enumField,
   goalText,
   mediaResolution,
   optionalField,
@@ -276,7 +273,7 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
     seed: withFieldMetadata(z.int().optional(), 'Fixed random seed for reproducible outputs.'),
     googleSearch: withFieldMetadata(
       z.boolean().optional(),
-      'Legacy shortcut to enable Google Search (prefer toolProfile="search").',
+      'Enable Google Search grounding. Optional; additive. Combine with `urls` for URL Context.',
     ),
   };
 
@@ -286,20 +283,9 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
     }),
     z.strictObject({
       ...askCommonShape,
-      toolProfile: enumField(
-        ASK_NON_URL_TOOL_PROFILES,
-        'Built-in tool preset (`none`, `search`, `code`, or `search_code`).',
-      ),
-    }),
-    z.strictObject({
-      ...askCommonShape,
-      toolProfile: enumField(
-        ASK_URL_TOOL_PROFILES,
-        'Built-in tool preset (`url` or `search_url`).',
-      ),
       ...createUrlContextFields({
         itemDescription: 'Public URL to analyze with URL Context',
-        description: 'URLs for URL Context when using toolProfile=url or search_url (max 20).',
+        description: 'URLs for URL Context (max 20). Enables URL Context automatically.',
         min: 1,
         max: 20,
       }),

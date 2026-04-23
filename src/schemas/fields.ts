@@ -155,9 +155,7 @@ export function sessionId(description: string) {
   return textField(description, 256);
 }
 
-export function temperatureField(
-  description = 'Sampling temperature (0.0 to 2.0). Default: 1.0. Values < 1.0 cause reasoning loops.',
-) {
+export function temperatureField(description = 'Sampling temperature 0-2 (default 1).') {
   return withFieldMetadata(
     z.number().min(0).max(2).multipleOf(0.1).default(DEFAULT_TEMPERATURE),
     description,
@@ -165,7 +163,7 @@ export function temperatureField(
 }
 
 export function thinkingLevel(
-  description = 'Reasoning depth. Default: MEDIUM. MINIMAL is fastest; HIGH is deepest.',
+  description = 'Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH (default LOW).',
 ) {
   return withFieldMetadata(z.enum(THINKING_LEVELS).default(DEFAULT_THINKING_LEVEL), description);
 }

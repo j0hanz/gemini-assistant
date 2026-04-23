@@ -190,7 +190,7 @@ const EXPECTED_TOOL_CONTRACTS = {
   research: {
     annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     requiredInput: ['goal'],
-    requiredOutput: ['status', 'mode', 'summary', 'sources'],
+    requiredOutput: ['status', 'mode', 'summary'],
     taskSupport: 'optional',
     title: 'Research',
   },
@@ -236,12 +236,12 @@ describe('MCP tool smoke coverage', () => {
         assert.ok(thinkingLevel, `Expected ${toolName} to advertise thinkingLevel`);
         assert.equal(
           thinkingLevel.default,
-          'MEDIUM',
-          `Expected ${toolName}.thinkingLevel default to be MEDIUM`,
+          'LOW',
+          `Expected ${toolName}.thinkingLevel default to be LOW`,
         );
         assert.equal(
           thinkingLevel.description,
-          'Reasoning depth. Default: MEDIUM. MINIMAL is fastest; HIGH is deepest.',
+          'Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH (default LOW).',
           `Expected ${toolName}.thinkingLevel description to stay consistent`,
         );
       }
@@ -269,14 +269,11 @@ describe('MCP tool smoke coverage', () => {
       assert.ok(responseSchemaJson);
       assert.equal(
         responseSchemaJson.description,
-        'Optional JSON Schema (Draft 2020-12) for structured output. Only honored on single-turn or new-session turns; IGNORED when combined with an existing sessionId (the server rejects the call).',
+        'JSON Schema (2020-12) for structured output. Single-turn / new-session only.',
       );
 
       assert.ok(temperature);
-      assert.equal(
-        temperature.description,
-        'Sampling temperature (0.0 to 2.0). Default: 1.0. Values < 1.0 cause reasoning loops.',
-      );
+      assert.equal(temperature.description, 'Sampling temperature 0-2 (default 1).');
 
       assert.ok(seed);
       assert.equal(seed.description, 'Fixed random seed for reproducible outputs.');
@@ -371,7 +368,15 @@ describe('MCP tool smoke coverage', () => {
       expectSuccess(researchResult);
       assert.strictEqual(researchResult.structuredContent.mode, 'quick');
       assert.strictEqual(researchResult.structuredContent.summary, 'Search answer');
-      assert.deepStrictEqual(researchResult.structuredContent.sources, ['https://example.com']);
+      assert.deepStrictEqual(researchResult.structuredContent.sources, undefined);
+      assert.deepStrictEqual(researchResult.structuredContent.sourceDetails, [
+        {
+          domain: 'example.com',
+          origin: 'googleSearch',
+          title: 'Example',
+          url: 'https://example.com',
+        },
+      ]);
       const researchTool = toolMap.get('research');
       assert.ok(researchTool);
       assertAdvertisedOutputSchema(researchTool, researchResult);

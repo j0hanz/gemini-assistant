@@ -25,6 +25,7 @@ import { buildBaseStructuredOutput, safeValidateStructuredContent } from '../lib
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
+import { getWorkspaceCacheName } from '../lib/workspace-context.js';
 import {
   type AnalyzePrInput,
   type CompareFilesInput,
@@ -33,7 +34,7 @@ import {
 } from '../schemas/inputs.js';
 import { ReviewOutputSchema } from '../schemas/outputs.js';
 
-import { buildGenerateContentConfig, getAI, MODEL } from '../client.js';
+import { buildGenerateContentConfig, getAI, MODEL, type ToolCostProfileName } from '../client.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -160,6 +161,8 @@ async function runReviewGeneration(
     thinkingBudget?: number | undefined;
     maxOutputTokens?: number | undefined;
     safetySettings?: ReviewInput['safetySettings'] | undefined;
+    costProfile?: ToolCostProfileName | undefined;
+    cacheName?: string | undefined;
   },
   resultMod: NonNullable<Parameters<typeof executor.runStream>[4]>,
 ): Promise<CallToolResult> {
@@ -290,6 +293,7 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
         ],
       });
 
+      const cacheName = await getWorkspaceCacheName(ctx);
       return await runReviewGeneration(
         ctx,
         'compare_files',
@@ -304,7 +308,14 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
         },
         prompt.promptParts,
         prompt.systemInstruction,
-        { thinkingLevel, thinkingBudget, maxOutputTokens, safetySettings },
+        {
+          costProfile: 'review.comparison',
+          thinkingLevel,
+          thinkingBudget,
+          maxOutputTokens,
+          safetySettings,
+          cacheName,
+        },
         (_streamResult, textContent: string) => ({
           structuredContent: {
             summary: textContent || '',
@@ -359,6 +370,7 @@ async function diagnoseFailureWork(
   await progress.send(0, undefined, 'Diagnosing');
   await ctx.mcpReq.log('info', `Review failure: ${error.length} chars`);
 
+  const cacheName = await getWorkspaceCacheName(ctx);
   return await runReviewGeneration(
     ctx,
     'review_failure',
@@ -373,7 +385,14 @@ async function diagnoseFailureWork(
     },
     [prompt.promptText],
     prompt.systemInstruction,
-    { thinkingLevel, thinkingBudget, maxOutputTokens, safetySettings },
+    {
+      costProfile: 'review.failure',
+      thinkingLevel,
+      thinkingBudget,
+      maxOutputTokens,
+      safetySettings,
+      cacheName,
+    },
     (_streamResult, textContent: string) => ({
       structuredContent: {
         summary: textContent || '',
@@ -1077,6 +1096,7 @@ export async function analyzePrWork(
     promptText: prompt,
   });
 
+  const cacheName = await getWorkspaceCacheName(ctx);
   return await runReviewGeneration(
     ctx,
     'analyze_pr',
@@ -1087,7 +1107,14 @@ export async function analyzePrWork(
     },
     [modelPrompt.promptText],
     modelPrompt.systemInstruction,
-    { thinkingLevel, thinkingBudget, maxOutputTokens, safetySettings },
+    {
+      costProfile: 'review.diff',
+      thinkingLevel,
+      thinkingBudget,
+      maxOutputTokens,
+      safetySettings,
+      cacheName,
+    },
     (_streamResult, textContent: string) => ({
       structuredContent: buildStructuredContent(
         snapshot,

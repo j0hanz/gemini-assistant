@@ -19,11 +19,11 @@ const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_SESSIONS = 50;
 const DEFAULT_TRANSPORT_SESSION_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_TRANSPORT_SESSIONS = 100;
-const DEFAULT_MAX_TRANSCRIPT_ENTRIES = 200;
-const DEFAULT_MAX_EVENT_ENTRIES = 200;
-const DEFAULT_MAX_OUTPUT_TOKENS = 32_768;
-const DEFAULT_SESSION_REPLAY_MAX_BYTES = 200_000;
-const DEFAULT_SESSION_REPLAY_INLINE_DATA_MAX_BYTES = 64 * 1024;
+const DEFAULT_MAX_TRANSCRIPT_ENTRIES = 50;
+const DEFAULT_MAX_EVENT_ENTRIES = 50;
+const DEFAULT_MAX_OUTPUT_TOKENS = 4_096;
+const DEFAULT_SESSION_REPLAY_MAX_BYTES = 50_000;
+const DEFAULT_SESSION_REPLAY_INLINE_DATA_MAX_BYTES = 16 * 1024;
 
 const DEFAULT_SESSION_REDACTION_PATTERNS = [
   /api[_-]?key/i,
@@ -184,7 +184,7 @@ export function getSessionLimits(): {
 const DEFAULT_WORKSPACE_CACHE_TTL = '3600s';
 
 export function getWorkspaceCacheEnabled(): boolean {
-  return parseBooleanEnv('CACHE', false);
+  return parseBooleanEnv('CACHE', true);
 }
 
 export function getWorkspaceContextFile(): string | undefined {
@@ -196,7 +196,7 @@ export function getWorkspaceCacheTtl(): string {
 }
 
 export function getWorkspaceAutoScan(): boolean {
-  return parseBooleanEnv('AUTO_SCAN', true);
+  return parseBooleanEnv('AUTO_SCAN', false);
 }
 
 export function getMaxOutputTokens(): number {
@@ -204,6 +204,17 @@ export function getMaxOutputTokens(): number {
     min: 1,
     max: 1_048_576,
   });
+}
+
+export function getThinkingBudgetCap(): number {
+  return parseIntEnv('GEMINI_THINKING_BUDGET_CAP', 32_768, {
+    min: 0,
+    max: 1_048_576,
+  });
+}
+
+export function getSlimSessionEvents(): boolean {
+  return !parseBooleanEnv('SESSION_EVENTS_VERBOSE', false);
 }
 
 function parseRegexPattern(raw: string): RegExp {

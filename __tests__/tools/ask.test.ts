@@ -759,7 +759,10 @@ describe('ask contract', () => {
       200_000,
     );
 
-    assert.deepStrictEqual(history, [{ role: 'user', parts: [{ text: 'Call lookup' }] }]);
+    assert.deepStrictEqual(history, [
+      { role: 'user', parts: [{ text: 'Call lookup' }] },
+      { role: 'model', parts: [{ functionCall: { name: 'lookup', args: { q: 'x' } } }] },
+    ]);
   });
 
   it('drops nameless functionCall parts from rebuilt history so Gemini replay remains valid', () => {
@@ -930,7 +933,7 @@ describe('ask contract', () => {
     }
   });
 
-  it('passes thinkingBudget through to the Gemini config', async () => {
+  it('uses the chat profile thinking level instead of raw thinkingBudget', async () => {
     const stub = withGeminiStreamStub(['Assistant answer']);
     const originalCache = process.env.CACHE;
     process.env.CACHE = 'false';
@@ -948,7 +951,12 @@ describe('ask contract', () => {
       assert.strictEqual(
         (stub.calls[0]?.config as { thinkingConfig?: { thinkingBudget?: number } } | undefined)
           ?.thinkingConfig?.thinkingBudget,
-        128,
+        undefined,
+      );
+      assert.strictEqual(
+        (stub.calls[0]?.config as { thinkingConfig?: { thinkingLevel?: string } } | undefined)
+          ?.thinkingConfig?.thinkingLevel,
+        'LOW',
       );
     } finally {
       process.env.CACHE = originalCache;

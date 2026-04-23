@@ -7,7 +7,7 @@ import type {
 } from '@google/genai';
 import { GoogleGenAI, HarmBlockThreshold, ThinkingLevel } from '@google/genai';
 
-import type { SafetySettingInput } from './schemas/fragments.js';
+import { logger } from './lib/logger.js';
 import type { GeminiResponseSchema } from './schemas/json-schema.js';
 
 import {
@@ -16,15 +16,33 @@ import {
   getGeminiModel,
   getMaxOutputTokens,
   getSafetySettings,
+  getThinkingBudgetCap,
 } from './config.js';
 
 // ── Config Utilities ──────────────────────────────────────────────────
 
 export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
-export const DEFAULT_THINKING_LEVEL = 'MEDIUM' as const;
+export const DEFAULT_THINKING_LEVEL = 'LOW' as const;
 export const DEFAULT_TEMPERATURE = 1.0;
-type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
+export type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
 export const EXPOSE_THOUGHTS = getExposeThoughts();
+
+export const DEFAULT_TOOL_COST_PROFILES = {
+  chat: { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
+  'research.quick': { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
+  'research.deep.plan': { thinkingLevel: 'MINIMAL', maxOutputTokens: 1_024 },
+  'research.deep.retrieval': { thinkingLevel: 'LOW', maxOutputTokens: 2_048 },
+  'research.deep.synthesis': { thinkingLevel: 'MEDIUM', maxOutputTokens: 8_192 },
+  'research.deep.contradiction': { thinkingLevel: 'LOW', maxOutputTokens: 1_024 },
+  'analyze.summary': { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
+  'analyze.diagram': { thinkingLevel: 'MEDIUM', maxOutputTokens: 8_192 },
+  'review.diff': { thinkingLevel: 'LOW', maxOutputTokens: 6_144 },
+  'review.comparison': { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
+  'review.failure': { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
+  'chat.jsonRepair': { thinkingLevel: 'MINIMAL', maxOutputTokens: 2_048 },
+} as const satisfies Record<string, { thinkingLevel: AskThinkingLevel; maxOutputTokens: number }>;
+
+export type ToolCostProfileName = keyof typeof DEFAULT_TOOL_COST_PROFILES;
 
 const THINKING_LEVEL_MAP: Record<AskThinkingLevel, ThinkingLevel> = {
   MINIMAL: ThinkingLevel.MINIMAL,
@@ -37,6 +55,7 @@ export const DEFAULT_SYSTEM_INSTRUCTION =
   'Be direct, accurate, and concise. Use Markdown when useful.';
 
 interface ConfigBuilderOptions {
+  costProfile?: string | undefined;
   systemInstruction?: string | undefined;
   thinkingLevel?: AskThinkingLevel | undefined;
   thinkingBudget?: number | undefined;
@@ -44,7 +63,7 @@ interface ConfigBuilderOptions {
   responseSchema?: GeminiResponseSchema | undefined;
   jsonMode?: boolean | undefined;
   maxOutputTokens?: number | undefined;
-  safetySettings?: SafetySettingInput[] | undefined;
+  safetySettings?: unknown[] | undefined;
   temperature?: number | undefined;
   seed?: number | undefined;
   mediaResolution?: GenerateContentConfig['mediaResolution'] | undefined;
@@ -52,6 +71,8 @@ interface ConfigBuilderOptions {
   toolConfig?: ToolConfig | undefined;
   functionCallingMode?: FunctionCallingConfigMode | undefined;
 }
+
+const clientLog = logger.child('client');
 
 export function buildMergedToolConfig(
   toolConfig: ToolConfig | undefined,
@@ -70,26 +91,52 @@ export function buildMergedToolConfig(
 }
 
 function buildThinkingConfig(thinkingLevel?: AskThinkingLevel, thinkingBudget?: number) {
+  const budgetCap = getThinkingBudgetCap();
+  const resolvedThinkingBudget =
+    thinkingBudget !== undefined && thinkingBudget > budgetCap ? budgetCap : thinkingBudget;
+  if (thinkingBudget !== undefined && resolvedThinkingBudget !== thinkingBudget) {
+    clientLog.warn('Clamped Gemini thinkingBudget to configured cap', {
+      requestedThinkingBudget: thinkingBudget,
+      thinkingBudgetCap: budgetCap,
+    });
+  }
+
   return {
     ...(EXPOSE_THOUGHTS ? { includeThoughts: true } : {}),
     // Gemini 3 precedence: thinkingLevel wins over thinkingBudget; see .github/google-genai-api.md §7.
     ...(thinkingLevel ? { thinkingLevel: THINKING_LEVEL_MAP[thinkingLevel] } : {}),
-    ...(thinkingLevel === undefined && thinkingBudget !== undefined ? { thinkingBudget } : {}),
+    ...(thinkingLevel === undefined && resolvedThinkingBudget !== undefined
+      ? { thinkingBudget: resolvedThinkingBudget }
+      : {}),
   };
 }
 
 function normalizeSafetySettings(
-  safetySettings: readonly SafetySettingInput[] | readonly SafetySetting[] | undefined,
+  safetySettings: readonly unknown[] | readonly SafetySetting[] | undefined,
 ): SafetySetting[] | undefined {
   if (!safetySettings) {
     return undefined;
   }
 
-  return safetySettings.map((setting) => ({
-    ...(setting.category !== undefined ? { category: setting.category } : {}),
-    ...(setting.method !== undefined ? { method: setting.method } : {}),
-    threshold: setting.threshold ?? HarmBlockThreshold.BLOCK_ONLY_HIGH,
-  })) as SafetySetting[];
+  return safetySettings.map((setting) => {
+    const candidate: Partial<SafetySetting> =
+      typeof setting === 'object' && setting !== null ? setting : {};
+    return {
+      ...(candidate.category !== undefined ? { category: candidate.category } : {}),
+      ...(candidate.method !== undefined ? { method: candidate.method } : {}),
+      threshold: candidate.threshold ?? HarmBlockThreshold.BLOCK_ONLY_HIGH,
+    };
+  });
+}
+
+function resolveCostProfile(costProfile: string | undefined) {
+  if (costProfile === undefined) {
+    return undefined;
+  }
+  if (costProfile in DEFAULT_TOOL_COST_PROFILES) {
+    return DEFAULT_TOOL_COST_PROFILES[costProfile as ToolCostProfileName];
+  }
+  throw new Error(`Unknown Gemini cost profile: ${costProfile}`);
 }
 
 function buildResponseConfig(
@@ -119,6 +166,7 @@ export function buildGenerateContentConfig(
   signal?: AbortSignal,
 ): GenerateContentConfig {
   const {
+    costProfile,
     systemInstruction,
     thinkingLevel,
     thinkingBudget,
@@ -134,6 +182,10 @@ export function buildGenerateContentConfig(
     toolConfig,
     functionCallingMode,
   } = options;
+  const profile = resolveCostProfile(costProfile);
+  const resolvedThinkingLevel = thinkingLevel ?? profile?.thinkingLevel;
+  const resolvedMaxOutputTokens =
+    maxOutputTokens ?? profile?.maxOutputTokens ?? getMaxOutputTokens();
   const mergedToolConfig = buildMergedToolConfig(toolConfig, functionCallingMode);
   const isJson = jsonMode ?? responseSchema !== undefined;
   const resolvedSafetySettings = normalizeSafetySettings(safetySettings ?? getSafetySettings());
@@ -144,10 +196,10 @@ export function buildGenerateContentConfig(
       systemInstruction,
       isJson,
       responseSchema,
-      thinkingLevel,
+      resolvedThinkingLevel,
       thinkingBudget,
     ),
-    maxOutputTokens: maxOutputTokens ?? getMaxOutputTokens(),
+    maxOutputTokens: resolvedMaxOutputTokens,
     ...(resolvedSafetySettings ? { safetySettings: resolvedSafetySettings } : {}),
     ...(temperature !== undefined ? { temperature } : {}),
     ...(seed !== undefined ? { seed } : {}),

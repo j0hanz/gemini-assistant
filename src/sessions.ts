@@ -15,7 +15,7 @@ import { logger } from './lib/logger.js';
 import type { FunctionCallEntry, StreamAnomalies, ToolEvent } from './lib/streaming.js';
 import type { UsageMetadata } from './schemas/outputs.js';
 
-import { getSessionLimits } from './config.js';
+import { getSessionLimits, getSlimSessionEvents } from './config.js';
 
 const MAX_EVICTED_ENTRIES = 1000;
 const EVICTED_TRIM_TARGET = Math.floor(MAX_EVICTED_ENTRIES / 2);
@@ -119,6 +119,8 @@ function cloneValue<T>(value: T): T {
 }
 
 function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
+  const slim = getSlimSessionEvents();
+
   return {
     ...item,
     request: {
@@ -126,17 +128,23 @@ function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
       ...(item.request.urls ? { urls: [...item.request.urls] } : {}),
     },
     response: {
-      ...item.response,
+      text: item.response.text,
+      ...(item.response.finishReason !== undefined
+        ? { finishReason: item.response.finishReason }
+        : {}),
+      ...(item.response.promptBlockReason !== undefined
+        ? { promptBlockReason: item.response.promptBlockReason }
+        : {}),
       ...(item.response.data !== undefined ? { data: cloneValue(item.response.data) } : {}),
       ...(item.response.functionCalls
         ? {
             functionCalls: item.response.functionCalls.map((functionCall) => ({ ...functionCall })),
           }
         : {}),
-      ...(item.response.citationMetadata !== undefined
+      ...(!slim && item.response.citationMetadata !== undefined
         ? { citationMetadata: cloneValue(item.response.citationMetadata) }
         : {}),
-      ...(item.response.safetyRatings !== undefined
+      ...(!slim && item.response.safetyRatings !== undefined
         ? { safetyRatings: cloneValue(item.response.safetyRatings) }
         : {}),
       ...(item.response.finishMessage !== undefined
@@ -145,18 +153,18 @@ function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
       ...(item.response.schemaWarnings
         ? { schemaWarnings: [...item.response.schemaWarnings] }
         : {}),
-      ...(item.response.thoughts ? { thoughts: item.response.thoughts } : {}),
-      ...(item.response.toolEvents
+      ...(!slim && item.response.thoughts ? { thoughts: item.response.thoughts } : {}),
+      ...(!slim && item.response.toolEvents
         ? { toolEvents: item.response.toolEvents.map((toolEvent) => ({ ...toolEvent })) }
         : {}),
       ...(item.response.usage ? { usage: { ...item.response.usage } } : {}),
-      ...(item.response.groundingMetadata !== undefined
+      ...(!slim && item.response.groundingMetadata !== undefined
         ? { groundingMetadata: cloneValue(item.response.groundingMetadata) }
         : {}),
-      ...(item.response.urlContextMetadata !== undefined
+      ...(!slim && item.response.urlContextMetadata !== undefined
         ? { urlContextMetadata: cloneValue(item.response.urlContextMetadata) }
         : {}),
-      ...(item.response.promptFeedback !== undefined
+      ...(!slim && item.response.promptFeedback !== undefined
         ? { promptFeedback: cloneValue(item.response.promptFeedback) }
         : {}),
       ...(item.response.anomalies !== undefined
@@ -181,6 +189,9 @@ export function sanitizeHistoryParts(parts: Part[]): Part[] {
   return parts.filter((part) => {
     if (part.thought === true) return false;
     if (part.functionCall && !part.functionCall.name) return false;
+    if (part.toolResponse || part.toolCall || part.codeExecutionResult || part.executableCode) {
+      return false;
+    }
     if (part.inlineData?.data && part.inlineData.data.length > inlineDataMaxBytes) {
       // Replay history must not retain large raw media blobs; callers should
       // use fileData for durable replayable media references instead.

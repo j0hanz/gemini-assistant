@@ -51,4 +51,39 @@ describe('client config', () => {
     assert.strictEqual(config.thinkingConfig?.thinkingLevel, undefined);
     assert.strictEqual(config.thinkingConfig?.thinkingBudget, 64);
   });
+
+  it('fills missing values from cost profiles', () => {
+    const config = buildGenerateContentConfig({ costProfile: 'review.diff' });
+
+    assert.strictEqual(config.thinkingConfig?.thinkingLevel, ThinkingLevel.LOW);
+    assert.strictEqual(config.maxOutputTokens, 6_144);
+  });
+
+  it('lets explicit args override cost profiles', () => {
+    const config = buildGenerateContentConfig({
+      costProfile: 'review.diff',
+      thinkingLevel: 'HIGH',
+      maxOutputTokens: 123,
+    });
+
+    assert.strictEqual(config.thinkingConfig?.thinkingLevel, ThinkingLevel.HIGH);
+    assert.strictEqual(config.maxOutputTokens, 123);
+  });
+
+  it('throws for unknown cost profiles at runtime', () => {
+    assert.throws(
+      () => buildGenerateContentConfig({ costProfile: 'missing.profile' }),
+      /Unknown Gemini cost profile/,
+    );
+  });
+
+  it('clamps thinkingBudget to GEMINI_THINKING_BUDGET_CAP', () => {
+    process.env.GEMINI_THINKING_BUDGET_CAP = '32';
+    try {
+      const config = buildGenerateContentConfig({ thinkingBudget: 64 });
+      assert.strictEqual(config.thinkingConfig?.thinkingBudget, 32);
+    } finally {
+      delete process.env.GEMINI_THINKING_BUDGET_CAP;
+    }
+  });
 });

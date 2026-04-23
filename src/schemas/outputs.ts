@@ -132,6 +132,7 @@ export const ResearchOutputSchema = z.strictObject({
   sources: publicHttpUrlArray({
     description: 'Grounded source URLs',
     itemDescription: 'Grounded source URL',
+    optional: true,
   }),
   sourceDetails: z
     .array(SourceDetailSchema)
@@ -160,9 +161,7 @@ export const ResearchOutputSchema = z.strictObject({
     .array(GroundingCitationSchema)
     .optional()
     .describe('Claim-level citations derived from Gemini grounding supports'),
-  searchEntryPoint: SearchEntryPointSchema.optional().describe(
-    'Google Search entry point content for display compliance',
-  ),
+  searchEntryPoint: SearchEntryPointSchema.optional().describe('Deprecated; render from content.'),
   computations: z
     .array(ComputationSchema)
     .optional()

@@ -8,6 +8,7 @@ import { z } from 'zod/v4';
 import {
   appendSources,
   appendUrlStatus,
+  buildSharedStructuredMetadata,
   collectGroundedSourceDetails,
   collectGroundedSources,
   collectGroundingCitations,
@@ -193,6 +194,39 @@ describe('collectGroundedSources', () => {
     });
 
     assert.deepStrictEqual(sources, ['https://example.com', 'https://example.org']);
+  });
+});
+
+describe('buildSharedStructuredMetadata', () => {
+  it('omits empty envelope fields and trivial finish messages', () => {
+    assert.deepStrictEqual(
+      buildSharedStructuredMetadata({
+        functionCalls: [],
+        thoughtText: '',
+        toolEvents: [],
+        safetyRatings: [],
+        citationMetadata: {},
+        finishMessage: 'STOP',
+      }),
+      {},
+    );
+  });
+
+  it('retains populated envelope fields', () => {
+    assert.deepStrictEqual(
+      buildSharedStructuredMetadata({
+        toolEvents: [{ kind: 'tool_call' }],
+        safetyRatings: [{ category: 'x' }],
+        citationMetadata: { citations: [{ startIndex: 0 }] },
+        finishMessage: 'max tokens',
+      }),
+      {
+        toolEvents: [{ kind: 'tool_call' }],
+        safetyRatings: [{ category: 'x' }],
+        citationMetadata: { citations: [{ startIndex: 0 }] },
+        finishMessage: 'max tokens',
+      },
+    );
   });
 });
 

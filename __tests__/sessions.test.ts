@@ -41,6 +41,7 @@ function createStore(options?: SessionStoreOptions): SessionStore {
 }
 
 afterEach(() => {
+  delete process.env.SESSION_EVENTS_VERBOSE;
   for (const store of stores.splice(0)) {
     store.close();
   }
@@ -48,7 +49,7 @@ afterEach(() => {
 
 describe('sessions', () => {
   describe('sanitizeHistoryParts', () => {
-    it('drops thought parts while preserving non-thought signature parts', () => {
+    it('drops thought and verbose tool parts while preserving replay-safe parts', () => {
       const parts = [
         { text: 'summary', thought: true },
         { text: '', thoughtSignature: 'sig-empty' },
@@ -64,9 +65,6 @@ describe('sessions', () => {
         { text: '', thoughtSignature: 'sig-empty' },
         { text: 'visible', thoughtSignature: 'sig-text' },
         { functionCall: { name: 'lookup', args: { q: 'x' } }, thoughtSignature: 'sig-fn' },
-        { toolCall: { toolType: 'URL_CONTEXT' }, thoughtSignature: 'sig-tool' },
-        { executableCode: { code: 'print(1)' }, thoughtSignature: 'sig-code' },
-        { codeExecutionResult: { output: '1' }, thoughtSignature: 'sig-result' },
         { text: 'plain' },
       ]);
     });
@@ -431,7 +429,6 @@ describe('sessions', () => {
         response: {
           text: 'Hi',
           functionCalls: [{ name: 'lookupWeather', id: 'call-1', args: { city: 'Stockholm' } }],
-          toolEvents: [{ kind: 'tool_call', id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
         },
         timestamp: 1,
       });
@@ -446,7 +443,6 @@ describe('sessions', () => {
           response: {
             text: 'Hi',
             functionCalls: [{ name: 'lookupWeather', id: 'call-1', args: { city: 'Stockholm' } }],
-            toolEvents: [{ kind: 'tool_call', id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
           },
           timestamp: 1,
         },
@@ -497,6 +493,7 @@ describe('sessions', () => {
     });
 
     it('preserves replay provenance fields (finishReason, groundingMetadata, urlContextMetadata, promptFeedback, anomalies) through clone round-trip', () => {
+      process.env.SESSION_EVENTS_VERBOSE = 'true';
       const store = createStore();
       store.setSession('sess-provenance', mockChat('provenance') as never);
 
@@ -553,6 +550,40 @@ describe('sessions', () => {
       const contents = store.listSessionContentEntries('sess-provenance');
       assert.strictEqual(contents?.[0]?.finishReason, FinishReason.STOP);
       assert.strictEqual(contents?.[0]?.finishMessage, 'done');
+    });
+
+    it('strips verbose event payloads by default while keeping compact fields', () => {
+      const store = createStore();
+      store.setSession('sess-slim-events', mockChat('slim-events') as never);
+
+      store.appendSessionEvent('sess-slim-events', {
+        request: { message: 'prompt' },
+        response: {
+          text: 'ok',
+          functionCalls: [{ name: 'lookup', id: 'call-1', args: { q: 'x' } }],
+          toolEvents: [{ kind: 'tool_call', id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
+          thoughts: 'private',
+          safetyRatings: [{ category: 'x' }],
+          citationMetadata: { citations: [] },
+          groundingMetadata: { webSearchQueries: ['q'] },
+          urlContextMetadata: { urlMetadata: [] },
+          promptFeedback: { blockReason: 'SAFETY' },
+          usage: { totalTokenCount: 10 },
+        },
+        timestamp: 1,
+      });
+
+      assert.deepStrictEqual(store.listSessionEventEntries('sess-slim-events'), [
+        {
+          request: { message: 'prompt' },
+          response: {
+            text: 'ok',
+            functionCalls: [{ name: 'lookup', id: 'call-1', args: { q: 'x' } }],
+            usage: { totalTokenCount: 10 },
+          },
+          timestamp: 1,
+        },
+      ]);
     });
   });
 

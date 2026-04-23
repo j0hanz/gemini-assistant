@@ -235,7 +235,7 @@ export function buildAskStructuredContent(
   contextUsed?: ContextUsed,
 ): AskStructuredContent {
   const parsedData = jsonMode ? tryParseJsonResponse(text) : undefined;
-  const answer = parsedData === undefined ? text : JSON.stringify(parsedData, null, 2);
+  const answer = parsedData === undefined ? text : '';
   const usage = extractUsage(streamResult.usageMetadata);
   const warnings = buildAskWarnings(parsedData, jsonMode, responseSchema);
   const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
@@ -462,7 +462,7 @@ async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
 
 export function buildRebuiltChatContents(contents: ContentEntry[], maxBytes: number): Content[] {
   return selectReplayWindow(contents, maxBytes)
-    .map((entry) => ({
+    .kept.map((entry) => ({
       role: entry.role,
       parts: sanitizeHistoryParts(structuredClone(entry.parts)),
     }))
@@ -645,14 +645,29 @@ export async function askWithoutSession(
   const { prompt, toolConfig, toolProfile, tools, urls, functionCallingMode } = resolved;
   const jsonMode = !!args.responseSchema;
   const config = buildGenerateContentConfig(
-    buildAskGenerationOptions(args, toolConfig, tools, functionCallingMode),
+    {
+      ...buildAskGenerationOptions(args, toolConfig, tools, functionCallingMode),
+      costProfile: 'chat',
+    },
     ctx.mcpReq.signal,
   );
-  const perTurnConfig = buildPerTurnConfig(config);
   const maxRetries = jsonMode && !ctx.mcpReq.signal.aborted ? JSON_REPAIR_MAX_RETRIES : 0;
   let currentPrompt = prompt;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const attemptConfig =
+      attempt === 0
+        ? config
+        : buildGenerateContentConfig(
+            {
+              ...buildAskGenerationOptions(args, toolConfig, tools, functionCallingMode),
+              costProfile: 'chat.jsonRepair',
+              thinkingLevel: 'MINIMAL',
+              maxOutputTokens: 2_048,
+            },
+            ctx.mcpReq.signal,
+          );
+    const perTurnConfig = buildPerTurnConfig(attemptConfig);
     const askResult = await runAskStream(
       ctx,
       () =>
@@ -664,7 +679,7 @@ export async function askWithoutSession(
           : getAI().models.generateContentStream({
               model: MODEL,
               contents: currentPrompt,
-              config,
+              config: attemptConfig,
             }),
       toolProfile,
       urls,
@@ -962,9 +977,10 @@ export function createDefaultAskDependencies(sessionStore: SessionStore): AskDep
     appendSessionTranscript: sessionStore.appendSessionTranscript.bind(sessionStore),
     createChat: (args) => {
       const { toolConfig, tools, functionCallingMode } = buildAskToolingConfig(args);
-      const config = buildGenerateContentConfig(
-        buildAskGenerationOptions(args, toolConfig, tools, functionCallingMode),
-      );
+      const config = buildGenerateContentConfig({
+        ...buildAskGenerationOptions(args, toolConfig, tools, functionCallingMode),
+        costProfile: 'chat',
+      });
       const chat = getAI().chats.create({
         model: MODEL,
         config,
@@ -1006,9 +1022,10 @@ export function createDefaultAskDependencies(sessionStore: SessionStore): AskDep
           )
         : (() => {
             const { toolConfig, tools, functionCallingMode } = buildAskToolingConfig(args);
-            return buildGenerateContentConfig(
-              buildAskGenerationOptions(rebuildArgs, toolConfig, tools, functionCallingMode),
-            );
+            return buildGenerateContentConfig({
+              ...buildAskGenerationOptions(rebuildArgs, toolConfig, tools, functionCallingMode),
+              costProfile: 'chat',
+            });
           })();
       const chat = getAI().chats.create({
         model: contract?.model ?? MODEL,

@@ -277,6 +277,16 @@ interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
   citationMetadata?: unknown;
 }
 
+function isEmptyStructuredValue(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  return typeof value === 'object' && Object.keys(value).length === 0;
+}
+
+function isTrivialFinishMessage(finishMessage: string | undefined): boolean {
+  return finishMessage === undefined || finishMessage === '' || finishMessage === 'STOP';
+}
+
 // ── Structured Content ────────────────────────────────────────────────
 
 export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
@@ -306,9 +316,9 @@ export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
     thoughts: includeThoughts && thoughtText ? thoughtText : undefined,
     toolEvents: toolEvents && toolEvents.length > 0 ? [...toolEvents] : undefined,
     usage,
-    safetyRatings,
-    finishMessage,
-    citationMetadata,
+    safetyRatings: isEmptyStructuredValue(safetyRatings) ? undefined : safetyRatings,
+    finishMessage: isTrivialFinishMessage(finishMessage) ? undefined : finishMessage,
+    citationMetadata: isEmptyStructuredValue(citationMetadata) ? undefined : citationMetadata,
   });
 }
 

@@ -170,9 +170,7 @@ describe('research tool contracts', () => {
       assert.ok(structured && typeof structured === 'object');
       assert.strictEqual((structured as Record<string, unknown>).mode, 'quick');
       assert.strictEqual((structured as Record<string, unknown>).summary, 'Quick research answer');
-      assert.deepStrictEqual((structured as Record<string, unknown>).sources, [
-        'https://example.com',
-      ]);
+      assert.strictEqual((structured as Record<string, unknown>).sources, undefined);
       assert.deepStrictEqual((structured as Record<string, unknown>).sourceDetails, [
         {
           domain: 'example.com',
@@ -236,9 +234,7 @@ describe('research tool contracts', () => {
       assert.ok(structured && typeof structured === 'object');
       assert.strictEqual((structured as Record<string, unknown>).mode, 'deep');
       assert.strictEqual((structured as Record<string, unknown>).summary, 'Deep research report');
-      assert.deepStrictEqual((structured as Record<string, unknown>).sources, [
-        'https://example.com/docs',
-      ]);
+      assert.strictEqual((structured as Record<string, unknown>).sources, undefined);
       assert.deepStrictEqual((structured as Record<string, unknown>).sourceDetails, [
         {
           domain: 'example.com',
@@ -418,8 +414,8 @@ describe('research tool contracts', () => {
       await flushTaskWork();
 
       const structured = store.stored[0]?.result.structuredContent as Record<string, unknown>;
-      assert.deepStrictEqual(structured.sources, []);
-      assert.deepStrictEqual(structured.urlContextSources, ['https://example.com/context']);
+      assert.strictEqual(structured.sources, undefined);
+      assert.strictEqual(structured.urlContextSources, undefined);
       assert.deepStrictEqual(structured.sourceDetails, [
         { domain: 'example.com', origin: 'urlContext', url: 'https://example.com/context' },
       ]);
@@ -440,7 +436,7 @@ describe('research tool contracts', () => {
     }
   });
 
-  it('uses search_url_code, primary URL prompts, output shape, and HIGH thinking for deep URLs', async () => {
+  it('uses search_url_code, primary URL prompts, output shape, and cost profiles for deep URLs', async () => {
     const { research } = getHandlers();
     const store = makeMockStore();
     const client = getAI();
@@ -526,23 +522,23 @@ describe('research tool contracts', () => {
       assert.deepStrictEqual(retrievalConfig.tools, [{ googleSearch: {} }, { urlContext: {} }]);
       assert.strictEqual(
         (retrievalConfig.thinkingConfig as Record<string, unknown>).thinkingLevel,
-        'HIGH',
+        'LOW',
       );
       const synthesisConfig = synthesisCall.config as Record<string, unknown>;
       assert.deepStrictEqual(synthesisConfig.tools, [{ codeExecution: {} }]);
       assert.strictEqual(
         (synthesisConfig.thinkingConfig as Record<string, unknown>).thinkingLevel,
-        'HIGH',
+        'MEDIUM',
       );
       assert.match(String(synthesisConfig.systemInstruction), /Preferred shape:.*decision memo/);
-      assert.ok(calls.length >= 5);
+      assert.ok(calls.length >= 4);
 
       const structured = store.stored[0]?.result.structuredContent as Record<string, unknown>;
       assert.deepStrictEqual(structured.urlMetadata, [
         { url: 'https://example.com/report', status: 'URL_RETRIEVAL_STATUS_SUCCESS' },
       ]);
-      assert.deepStrictEqual(structured.sources, ['https://example.com/report']);
-      assert.deepStrictEqual(structured.urlContextSources, ['https://example.com/report']);
+      assert.strictEqual(structured.sources, undefined);
+      assert.strictEqual(structured.urlContextSources, undefined);
       assert.deepStrictEqual(structured.sourceDetails, [
         {
           domain: 'example.com',
@@ -574,9 +570,7 @@ describe('research tool contracts', () => {
         (structured.groundingSignals as { confidence?: string }).confidence,
         'medium',
       );
-      assert.deepStrictEqual(structured.searchEntryPoint, {
-        renderedContent: '<div>search</div>',
-      });
+      assert.strictEqual(structured.searchEntryPoint, undefined);
       assert.deepStrictEqual((structured.computations as unknown[]).slice(0, 2), [
         {
           id: 'exec-1',

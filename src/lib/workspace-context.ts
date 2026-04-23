@@ -1,3 +1,5 @@
+import type { ServerContext } from '@modelcontextprotocol/server';
+
 import { createHash } from 'node:crypto';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
@@ -14,7 +16,7 @@ import {
 import type { TranscriptEntry } from '../sessions.js';
 import { isAbortError, withRetry } from './errors.js';
 import { logger } from './logger.js';
-import { isPathWithinRoot, normalizePathForComparison } from './validation.js';
+import { getAllowedRoots, isPathWithinRoot, normalizePathForComparison } from './validation.js';
 
 const TOKENS_PER_CHAR = 4;
 
@@ -197,9 +199,9 @@ export function emptyContextUsed(): ContextUsed {
 
 // ── Constants ─────────────────────────────────────────────────────────
 
-export const MIN_CACHE_TOKENS = 32_000;
+export const MIN_CACHE_TOKENS = 4_000;
 const MAX_SCAN_FILE_SIZE = 512 * 1024;
-const MAX_TOTAL_CONTEXT_SIZE = 2 * 1024 * 1024;
+const MAX_TOTAL_CONTEXT_SIZE = 256 * 1024;
 const WORKSPACE_CACHE_DISPLAY = 'gemini-assistant-workspace';
 const HASH_CHECK_INTERVAL_MS = 30_000;
 const log = logger.child('workspace');
@@ -644,3 +646,20 @@ export function createWorkspaceCacheManager(): WorkspaceCacheManagerImpl {
 }
 
 export const workspaceCacheManager = createWorkspaceCacheManager();
+
+export async function getWorkspaceCacheName(ctx: ServerContext): Promise<string | undefined> {
+  if (!getWorkspaceCacheEnabled()) {
+    return undefined;
+  }
+
+  try {
+    const allowedRoots = await getAllowedRoots();
+    if (allowedRoots.length === 0) {
+      return undefined;
+    }
+    return await workspaceCacheManager.getOrCreateCache(allowedRoots, ctx.mcpReq.signal);
+  } catch (err) {
+    log.warn(`Failed to resolve workspace cache: ${String(err)}`);
+    return undefined;
+  }
+}

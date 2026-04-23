@@ -162,7 +162,7 @@ describe('ChatInputSchema', () => {
     const result = ChatInputSchema.safeParse({ goal: 'help me debug this' });
     assert.ok(result.success);
     if (result.success) {
-      assert.strictEqual(result.data.thinkingLevel, 'MEDIUM');
+      assert.strictEqual(result.data.thinkingLevel, 'LOW');
     }
   });
 
@@ -280,15 +280,15 @@ describe('ChatInputSchema', () => {
     assert.strictEqual(ChatInputSchema.shape.goal.description, 'User goal or requested outcome');
     assert.strictEqual(
       ChatInputSchema.shape.thinkingLevel.description,
-      'Reasoning depth. Default: MEDIUM. MINIMAL is fastest; HIGH is deepest.',
+      'Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH (default LOW).',
     );
     assert.strictEqual(
       ChatInputSchema.shape.responseSchemaJson.description,
-      'Optional JSON Schema (Draft 2020-12) for structured output. Only honored on single-turn or new-session turns; IGNORED when combined with an existing sessionId (the server rejects the call).',
+      'JSON Schema (2020-12) for structured output. Single-turn / new-session only.',
     );
     assert.strictEqual(
       ChatInputSchema.shape.temperature.description,
-      'Sampling temperature (0.0 to 2.0). Default: 1.0. Values < 1.0 cause reasoning loops.',
+      'Sampling temperature 0-2 (default 1).',
     );
     assert.strictEqual(
       ChatInputSchema.shape.seed.description,
@@ -486,7 +486,7 @@ describe('ResearchInputSchema', () => {
     assert.ok(result.success);
     if (result.success) {
       assert.strictEqual(result.data.mode, 'quick');
-      assert.strictEqual(result.data.thinkingLevel, 'MEDIUM');
+      assert.strictEqual(result.data.thinkingLevel, 'LOW');
     }
   });
 
@@ -497,7 +497,7 @@ describe('ResearchInputSchema', () => {
     });
     assert.ok(result.success);
     if (result.success) {
-      assert.strictEqual(result.data.searchDepth, 3);
+      assert.strictEqual(result.data.searchDepth, 2);
     }
   });
 
@@ -556,11 +556,11 @@ describe('AgenticSearchInputSchema', () => {
     assert.ok(result.success);
   });
 
-  it('defaults searchDepth to 3', () => {
+  it('defaults searchDepth to 2', () => {
     const result = AgenticSearchInputSchema.safeParse({ topic: 'test' });
     assert.ok(result.success);
     if (result.success) {
-      assert.strictEqual(result.data.searchDepth, 3);
+      assert.strictEqual(result.data.searchDepth, 2);
     }
   });
 
@@ -687,7 +687,7 @@ describe('AnalyzeFileInputSchema', () => {
 });
 
 describe('shared thinkingLevel defaults', () => {
-  it('defaults analyze input to MEDIUM', () => {
+  it('defaults analyze input to LOW', () => {
     const result = AnalyzeInputSchema.safeParse({
       goal: 'Summarize the architecture',
       targetKind: 'file',
@@ -696,17 +696,17 @@ describe('shared thinkingLevel defaults', () => {
     });
     assert.ok(result.success);
     if (result.success) {
-      assert.strictEqual(result.data.thinkingLevel, 'MEDIUM');
+      assert.strictEqual(result.data.thinkingLevel, 'LOW');
     }
   });
 
-  it('defaults review input to MEDIUM', () => {
+  it('defaults review input to LOW', () => {
     const result = ReviewInputSchema.safeParse({
       subjectKind: 'diff',
     });
     assert.ok(result.success);
     if (result.success) {
-      assert.strictEqual(result.data.thinkingLevel, 'MEDIUM');
+      assert.strictEqual(result.data.thinkingLevel, 'LOW');
     }
   });
 
@@ -717,8 +717,8 @@ describe('shared thinkingLevel defaults', () => {
 
     assert.strictEqual(analyzeThinking.description, chatThinking.description);
     assert.strictEqual(reviewThinking.description, chatThinking.description);
-    assert.strictEqual(analyzeThinking.safeParse(undefined).data, 'MEDIUM');
-    assert.strictEqual(reviewThinking.safeParse(undefined).data, 'MEDIUM');
+    assert.strictEqual(analyzeThinking.safeParse(undefined).data, 'LOW');
+    assert.strictEqual(reviewThinking.safeParse(undefined).data, 'LOW');
   });
 });
 

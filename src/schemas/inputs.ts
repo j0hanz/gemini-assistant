@@ -82,7 +82,7 @@ function validateResponseSchemaJson(payload: ParsePayload<string>): void {
 function responseSchemaJsonField() {
   return withFieldMetadata(
     z.string().trim().min(1).check(validateResponseSchemaJson).optional(),
-    'Optional JSON Schema (Draft 2020-12) for structured output. Only honored on single-turn or new-session turns; IGNORED when combined with an existing sessionId (the server rejects the call).',
+    'JSON Schema (2020-12) for structured output. Single-turn / new-session only.',
   );
 }
 
@@ -143,8 +143,8 @@ export const ResearchInputBaseSchema = z.strictObject({
   ),
   deliverable: optionalField(textField('Requested output form (brief, report, checklist, etc.).')),
   searchDepth: withFieldMetadata(
-    z.int().min(1).max(5).default(3).optional(),
-    'How many search-and-synthesis passes to perform. Use higher values for broader or more thorough deep research.',
+    z.int().min(1).max(5).default(2).optional(),
+    'Search depth, default 2; deep research only when `mode=deep` is explicit.',
   ),
   thinkingLevel: thinkingLevelField,
   thinkingBudget: thinkingBudgetField,
@@ -377,8 +377,8 @@ export type SearchInput = z.infer<typeof SearchInputSchema>;
 export const AgenticSearchInputSchema = z.strictObject({
   topic: requiredText('Topic or question for deep multi-step research'),
   searchDepth: withFieldMetadata(
-    z.int().min(1).max(5).optional().default(3),
-    'How many search iterations to perform during deep research. Use higher values for more exhaustive investigation.',
+    z.int().min(1).max(5).optional().default(2),
+    'Search depth, default 2; deep research only when `mode=deep` is explicit.',
   ),
   thinkingLevel: thinkingLevelField,
   thinkingBudget: thinkingBudgetField,

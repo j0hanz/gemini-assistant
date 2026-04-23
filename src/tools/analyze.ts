@@ -20,10 +20,11 @@ import { buildBaseStructuredOutput, safeValidateStructuredContent } from '../lib
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
+import { getWorkspaceCacheName } from '../lib/workspace-context.js';
 import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 
-import { buildGenerateContentConfig, DEFAULT_THINKING_LEVEL, getAI, MODEL } from '../client.js';
+import { buildGenerateContentConfig, getAI, MODEL, type ToolCostProfileName } from '../client.js';
 import { analyzeUrlWork } from './research.js';
 
 const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
@@ -180,6 +181,8 @@ async function runAnalyzeGeneration(
     maxOutputTokens?: number | undefined;
     safetySettings?: AnalyzeInput['safetySettings'] | undefined;
     mediaResolution?: import('@google/genai').GenerateContentConfig['mediaResolution'] | undefined;
+    costProfile?: ToolCostProfileName | undefined;
+    cacheName?: string | undefined;
   },
   resultMod: NonNullable<Parameters<typeof executor.runStream>[4]>,
 ): Promise<CallToolResult> {
@@ -242,6 +245,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
       await ctx.mcpReq.log('info', `Analyzing ${uploaded.displayPath} (${uploaded.mimeType})`);
       await progress.step(1, 3, 'Analyzing content');
 
+      const cacheName = await getWorkspaceCacheName(ctx);
       return await runAnalyzeGeneration(
         ctx,
         'analyze_file',
@@ -272,7 +276,15 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
             systemInstruction,
           };
         },
-        { thinkingLevel, thinkingBudget, mediaResolution, maxOutputTokens, safetySettings },
+        {
+          costProfile: 'analyze.summary',
+          thinkingLevel,
+          thinkingBudget,
+          mediaResolution,
+          maxOutputTokens,
+          safetySettings,
+          cacheName,
+        },
         (_streamResult, textContent: string) => ({
           structuredContent: {
             summary: textContent || '',
@@ -322,6 +334,7 @@ async function analyzeMultiFileWork(
 
     await progress.step(filePaths.length, filePaths.length + 1, 'Analyzing content');
 
+    const cacheName = await getWorkspaceCacheName(ctx);
     return await runAnalyzeGeneration(
       ctx,
       'analyze',
@@ -346,7 +359,14 @@ async function analyzeMultiFileWork(
         }
         return { parts: finalParts, systemInstruction: prompt.systemInstruction };
       },
-      { thinkingLevel, thinkingBudget, maxOutputTokens, safetySettings },
+      {
+        costProfile: 'analyze.summary',
+        thinkingLevel,
+        thinkingBudget,
+        maxOutputTokens,
+        safetySettings,
+        cacheName,
+      },
       (_streamResult, textContent: string) => ({
         structuredContent: {
           summary: textContent || '',
@@ -410,6 +430,7 @@ async function analyzeDiagramWork(
 
     const diagramBuiltInTools = pickDiagramBuiltInTools(args);
 
+    const cacheName = await getWorkspaceCacheName(ctx);
     return await runAnalyzeGeneration(
       ctx,
       'analyze_diagram',
@@ -429,10 +450,12 @@ async function analyzeDiagramWork(
         return { parts: prompt.promptParts, systemInstruction: prompt.systemInstruction };
       },
       {
-        thinkingLevel: args.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+        costProfile: 'analyze.diagram',
+        thinkingLevel: args.thinkingLevel,
         thinkingBudget: args.thinkingBudget,
         maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
+        cacheName,
       },
       (_streamResult, textContent: string) => {
         const { diagram, explanation } = extractDiagram(textContent, args.diagramType, ctx);

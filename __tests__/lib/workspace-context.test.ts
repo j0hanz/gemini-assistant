@@ -181,8 +181,8 @@ describe('workspace-context', () => {
   });
 
   describe('MIN_CACHE_TOKENS', () => {
-    it('is 32000', () => {
-      assert.strictEqual(MIN_CACHE_TOKENS, 32_000);
+    it('is 4000', () => {
+      assert.strictEqual(MIN_CACHE_TOKENS, 4_000);
     });
   });
 

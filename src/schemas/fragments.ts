@@ -38,6 +38,10 @@ export const SafetySettingInputSchema = z.strictObject({
   method: z.enum(HARM_BLOCK_METHOD_VALUES).optional().describe('Optional blocking method'),
   threshold: z.enum(HARM_BLOCK_THRESHOLD_VALUES).describe('Safety blocking threshold'),
 });
+export const SafetySettingPassthroughSchema = z
+  .array(z.unknown())
+  .optional()
+  .describe('Gemini SafetySetting[]');
 
 export type SafetySettingInput = z.infer<typeof SafetySettingInputSchema>;
 
@@ -234,10 +238,7 @@ export function createGenerationConfigFields() {
       .min(1)
       .max(1_048_576)
       .optional()
-      .describe('Maximum number of output tokens to request from Gemini.'),
-    safetySettings: z
-      .array(SafetySettingInputSchema)
-      .optional()
-      .describe('Gemini safety settings override for this call.'),
+      .describe('Maximum Gemini output tokens.'),
+    safetySettings: SafetySettingPassthroughSchema,
   };
 }

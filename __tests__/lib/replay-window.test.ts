@@ -16,10 +16,10 @@ describe('selectReplayWindow', () => {
       entry('user', [{ text: 'newest' }], 3),
     ];
 
-    assert.deepStrictEqual(selectReplayWindow(contents, 20), [contents[2]]);
+    assert.deepStrictEqual(selectReplayWindow(contents, 20), { kept: [contents[2]], dropped: 2 });
   });
 
-  it('extends backwards when a functionResponse would otherwise lose its call', () => {
+  it('uses a strict sliding window without pair extension', () => {
     const contents = [
       entry('model', [{ functionCall: { id: 'call-1', name: 'lookup', args: { q: 'x' } } }], 1),
       entry(
@@ -29,19 +29,22 @@ describe('selectReplayWindow', () => {
       ),
     ];
 
-    assert.deepStrictEqual(selectReplayWindow(contents, 90), contents);
+    assert.deepStrictEqual(selectReplayWindow(contents, 90), { kept: [contents[1]], dropped: 1 });
   });
 
-  it('trims a trailing model turn with an unanswered functionCall', () => {
+  it('keeps trailing model turns when they fit the strict window', () => {
     const contents = [
       entry('user', [{ text: 'call lookup' }], 1),
       entry('model', [{ functionCall: { name: 'lookup', args: { q: 'x' } } }], 2),
     ];
 
-    assert.deepStrictEqual(selectReplayWindow(contents, 200_000), [contents[0]]);
+    assert.deepStrictEqual(selectReplayWindow(contents, 200_000), {
+      kept: contents,
+      dropped: 0,
+    });
   });
 
-  it('keeps built-in toolCall/toolResponse pairs together', () => {
+  it('drops oversized built-in tool pairs instead of extending the window', () => {
     const contents = [
       entry('model', [{ toolCall: { id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' } }], 1),
       entry(
@@ -51,6 +54,21 @@ describe('selectReplayWindow', () => {
       ),
     ];
 
-    assert.deepStrictEqual(selectReplayWindow(contents, 90), contents);
+    assert.deepStrictEqual(selectReplayWindow(contents, 90), { kept: [contents[1]], dropped: 1 });
+  });
+
+  it('drops older entries completely when the strict window is exceeded', () => {
+    const contents = [
+      entry('user', [{ text: 'old' }], 1),
+      entry('model', [{ text: 'newer' }], 2),
+      entry('user', [{ text: 'newest' }], 3),
+    ];
+
+    const newestOnlyBytes = JSON.stringify(contents[2]?.parts).length;
+
+    assert.deepStrictEqual(selectReplayWindow(contents, newestOnlyBytes), {
+      kept: [contents[2]],
+      dropped: 2,
+    });
   });
 });

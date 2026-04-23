@@ -93,7 +93,7 @@ describe('public input JSON Schema', () => {
     );
     assert.strictEqual(
       jsonSchemaProperty(z.toJSONSchema(ResearchInputSchema), 'searchDepth')?.default,
-      3,
+      2,
     );
     assert.strictEqual(
       jsonSchemaProperty(z.toJSONSchema(AnalyzeInputSchema), 'diagramType')?.default,

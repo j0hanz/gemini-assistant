@@ -54,6 +54,7 @@ import {
   registerTaskTool,
 } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
+import { getWorkspaceCacheName } from '../lib/workspace-context.js';
 import {
   type AgenticSearchInput,
   type AnalyzeUrlInput,
@@ -69,7 +70,7 @@ import { getAI, MODEL } from '../client.js';
 const SEARCH_TOOL_LABEL = 'Web Search';
 const ANALYZE_URL_TOOL_LABEL = 'Analyze URL';
 const AGENTIC_SEARCH_TOOL_LABEL = 'Agentic Search';
-const MAX_DEEP_RESEARCH_TURNS = 6;
+const MAX_DEEP_RESEARCH_TURNS = 4;
 const log = logger.child('research');
 
 type StreamGenerator = () => Promise<
@@ -194,9 +195,20 @@ function extractSampledText(content: unknown): string {
     : '';
 }
 
-async function enrichTopicWithSampling(topic: string, ctx: ServerContext): Promise<string> {
+async function enrichTopicWithSampling(
+  topic: string,
+  searchDepth: number,
+  ctx: ServerContext,
+): Promise<string> {
+  type RequestSampling = NonNullable<typeof ctx.mcpReq.requestSampling>;
+  const requestSampling = ctx.mcpReq.requestSampling as RequestSampling | undefined;
+  if (searchDepth < 3 || typeof requestSampling !== 'function') {
+    log.debug('Sampling skipped for shallow research or unavailable requestSampling');
+    return topic;
+  }
+
   try {
-    const samplingRes = await ctx.mcpReq.requestSampling({
+    const samplingRes = await requestSampling({
       messages: [
         {
           role: 'user',
@@ -217,10 +229,10 @@ async function enrichTopicWithSampling(topic: string, ctx: ServerContext): Promi
 
     await ctx.mcpReq.log('info', 'Sampling provided research angles');
     log.debug('Sampling provided research angles', { sampledTextLength: sampledText.length });
-    return `${topic}\n\n<planning_leads priority="low" evidence="false">\n${sampledText}\n</planning_leads>\n<task>Research the topic above. Do not cite planning_leads as evidence.</task>`;
+    return `${topic}\n\n<planning_leads priority="low" evidence="false">\n${sampledText.slice(0, 200)}\n</planning_leads>\n<task>Research the topic above. Do not cite planning_leads as evidence.</task>`;
   } catch (error) {
-    await ctx.mcpReq.log('info', 'Sampling unavailable; continuing without extra angles');
-    log.info('requestSampling encountered an issue', {
+    await ctx.mcpReq.log('debug', 'Sampling unavailable; continuing without extra angles');
+    log.debug('requestSampling encountered an issue', {
       error: AppError.formatMessage(error),
     });
     return topic;
@@ -354,10 +366,14 @@ function buildAgenticSearchResult(
     }),
     structuredContent: pickDefined({
       report: textContent,
-      sources: context.groundedSources,
+      sources: context.sourceDetails.length > 0 ? undefined : context.groundedSources,
       sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
       urlContextSources:
-        context.urlContextSources.length > 0 ? context.urlContextSources : undefined,
+        context.sourceDetails.length > 0
+          ? undefined
+          : context.urlContextSources.length > 0
+            ? context.urlContextSources
+            : undefined,
       urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
       toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
       status: context.status,
@@ -368,7 +384,6 @@ function buildAgenticSearchResult(
         context.claimLinkedSources.length > 0 ? context.claimLinkedSources : undefined,
       urlContextUsed: context.urlContextSources.length > 0,
       citations: context.citations.length > 0 ? context.citations : undefined,
-      searchEntryPoint: context.searchEntryPoint,
       computations: context.computations.length > 0 ? context.computations : undefined,
       warnings: warnings.length > 0 ? warnings : undefined,
     }),
@@ -402,10 +417,14 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
     }),
     structuredContent: pickDefined({
       answer: textContent,
-      sources: context.groundedSources,
+      sources: context.sourceDetails.length > 0 ? undefined : context.groundedSources,
       sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
       urlContextSources:
-        context.urlContextSources.length > 0 ? context.urlContextSources : undefined,
+        context.sourceDetails.length > 0
+          ? undefined
+          : context.urlContextSources.length > 0
+            ? context.urlContextSources
+            : undefined,
       urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
       status: context.status,
       grounded: context.citations.length > 0,
@@ -415,12 +434,18 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
         context.claimLinkedSources.length > 0 ? context.claimLinkedSources : undefined,
       urlContextUsed: context.urlContextSources.length > 0,
       citations: context.citations.length > 0 ? context.citations : undefined,
-      searchEntryPoint: context.searchEntryPoint,
       computations: context.computations.length > 0 ? context.computations : undefined,
       warnings: context.warnings.length > 0 ? context.warnings : undefined,
     }),
     reportMessage: buildSourceReportMessage(context.groundedSources.length),
   };
+}
+
+export function summarizeRetrieval(text: string, maxChars = 1_500): string {
+  const findingsIndex = text.indexOf('## Findings');
+  const candidate = findingsIndex >= 0 ? text.slice(findingsIndex) : text;
+  const trimmed = candidate.trim();
+  return trimmed.length <= maxChars ? trimmed : `${trimmed.slice(0, maxChars).trimEnd()}...`;
 }
 
 function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) {
@@ -615,8 +640,7 @@ async function runDeepResearchPlan(
     `Return JSON only as {"queries":["..."]}. Produce ${String(Math.min(args.searchDepth, 5))} focused public web search queries for:\n${args.topic}`,
     {
       systemInstruction: 'Plan retrieval queries. Do not answer the research question.',
-      thinkingLevel: 'MEDIUM',
-      maxOutputTokens: 1024,
+      costProfile: 'research.deep.plan',
       safetySettings: args.safetySettings,
     },
   );
@@ -673,9 +697,8 @@ async function runDeepResearchPlan(
       prompt.promptText,
       {
         systemInstruction: prompt.systemInstruction,
-        thinkingLevel: args.thinkingLevel,
+        costProfile: 'research.deep.retrieval',
         thinkingBudget: args.thinkingBudget,
-        maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
         tools: resolvedRetrieval.config.tools,
         toolConfig: resolvedRetrieval.config.toolConfig,
@@ -687,7 +710,7 @@ async function runDeepResearchPlan(
 
   const retrievalSummaries = results
     .slice(1)
-    .map((result, index) => `## Retrieval ${String(index + 1)}\n${result.text}`)
+    .map((result, index) => `## Retrieval ${String(index + 1)}\n${summarizeRetrieval(result.text)}`)
     .join('\n\n');
   const resolvedSynthesis = await resolveOrchestration(
     {
@@ -701,6 +724,7 @@ async function runDeepResearchPlan(
     'agentic_search',
   );
   if (resolvedSynthesis.error) return resolvedSynthesis.error;
+  const cacheName = await getWorkspaceCacheName(ctx);
 
   const synthesisPrompt = buildAgenticResearchPrompt({
     deliverable: args.deliverable,
@@ -714,10 +738,12 @@ async function runDeepResearchPlan(
     synthesisPrompt.promptText,
     {
       systemInstruction: synthesisPrompt.systemInstruction,
+      costProfile: 'research.deep.synthesis',
       thinkingLevel: args.thinkingLevel,
       thinkingBudget: args.thinkingBudget,
       maxOutputTokens: args.maxOutputTokens,
       safetySettings: args.safetySettings,
+      cacheName,
       tools: resolvedSynthesis.config.tools,
       toolConfig: resolvedSynthesis.config.toolConfig,
     },
@@ -725,16 +751,17 @@ async function runDeepResearchPlan(
   if (synthesisTurn.result.isError) return synthesisTurn.result;
   results.push(synthesisTurn.streamResult);
 
-  if (args.searchDepth >= 4 && results.length < MAX_DEEP_RESEARCH_TURNS) {
+  if (args.searchDepth >= 3 && results.length < MAX_DEEP_RESEARCH_TURNS) {
     const contradictionTurn = await runDeepResearchTurn(
       ctx,
       'Research contradiction check',
-      `Review this synthesis for source disagreements. Return only claims that are partially supported or disputed.\n\n${synthesisTurn.streamResult.text}`,
+      `Review this synthesis for source disagreements. Return only claims that are partially supported or disputed.\n\n${summarizeRetrieval(synthesisTurn.streamResult.text)}`,
       {
         systemInstruction:
           'Flag contradictions conservatively. Do not add new source claims without retrieved evidence.',
-        thinkingLevel: args.thinkingLevel,
-        maxOutputTokens: args.maxOutputTokens,
+        costProfile: 'research.deep.contradiction',
+        thinkingLevel: 'LOW',
+        maxOutputTokens: 1_024,
         safetySettings: args.safetySettings,
       },
     );
@@ -808,6 +835,7 @@ async function searchWork(
         config: buildGenerateContentConfig(
           {
             systemInstruction: systemInstruction ?? prompt.systemInstruction,
+            costProfile: 'research.quick',
             thinkingLevel,
             thinkingBudget,
             maxOutputTokens,
@@ -867,6 +895,7 @@ export async function analyzeUrlWork(
         config: buildGenerateContentConfig(
           {
             systemInstruction: systemInstruction ?? prompt.systemInstruction,
+            costProfile: 'analyze.summary',
             thinkingLevel,
             thinkingBudget,
             maxOutputTokens,
@@ -917,7 +946,7 @@ async function agenticSearchWork(
     }
   }
 
-  const enrichedTopic = await enrichTopicWithSampling(topic, ctx);
+  const enrichedTopic = await enrichTopicWithSampling(topic, searchDepth, ctx);
 
   if (searchDepth >= 3) {
     return runDeepResearchPlan(
@@ -978,6 +1007,7 @@ async function agenticSearchWork(
         config: buildGenerateContentConfig(
           {
             systemInstruction: prompt.systemInstruction,
+            costProfile: 'research.quick',
             thinkingLevel,
             thinkingBudget,
             maxOutputTokens,
@@ -1016,15 +1046,9 @@ async function runQuickResearch(
 }
 
 async function runDeepResearch(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {
-  const searchDepth = args.searchDepth ?? 3;
+  const searchDepth = args.searchDepth ?? 2;
   const hasExplicitThinkingLevel = Object.prototype.hasOwnProperty.call(args, 'thinkingLevel');
-  const thinkingLevel = hasExplicitThinkingLevel
-    ? args.thinkingLevel
-    : searchDepth >= 4
-      ? 'HIGH'
-      : searchDepth >= 3
-        ? 'MEDIUM'
-        : undefined;
+  const thinkingLevel = hasExplicitThinkingLevel ? args.thinkingLevel : undefined;
 
   return await agenticSearchWork(
     {
@@ -1072,7 +1096,7 @@ function buildResearchStructuredContent(
     ...(structured.status ? { status: structured.status } : {}),
     mode: args.mode,
     summary: extractResearchSummary(structured),
-    sources: Array.isArray(structured.sources) ? structured.sources : [],
+    ...(Array.isArray(structured.sources) ? { sources: structured.sources } : {}),
     ...(structured.sourceDetails ? { sourceDetails: structured.sourceDetails } : {}),
     ...(structured.urlContextSources ? { urlContextSources: structured.urlContextSources } : {}),
     ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),

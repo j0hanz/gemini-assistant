@@ -7,6 +7,8 @@ import {
   getMaxOutputTokens,
   getSafetySettings,
   getSessionLimits,
+  getSlimSessionEvents,
+  getThinkingBudgetCap,
   getTransportConfig,
   getTransportMode,
   getVerbosePayloadLogging,
@@ -35,10 +37,12 @@ const NEW_VARS = [
   'CACHE',
   'CACHE_TTL',
   'GEMINI_MAX_OUTPUT_TOKENS',
+  'GEMINI_THINKING_BUDGET_CAP',
   'GEMINI_SAFETY_SETTINGS',
   'GEMINI_SESSION_REDACT_KEYS',
   'SESSION_REPLAY_INLINE_DATA_MAX_BYTES',
   'SESSION_REPLAY_MAX_BYTES',
+  'SESSION_EVENTS_VERBOSE',
 ] as const;
 
 const OLD_VARS = [
@@ -164,11 +168,11 @@ describe('config parsing', () => {
 
   it('returns default session limits', () => {
     assert.deepStrictEqual(getSessionLimits(), {
-      maxEventEntries: 200,
+      maxEventEntries: 50,
       maxSessions: 50,
-      maxTranscriptEntries: 200,
-      replayInlineDataMaxBytes: 64 * 1024,
-      replayMaxBytes: 200_000,
+      maxTranscriptEntries: 50,
+      replayInlineDataMaxBytes: 16 * 1024,
+      replayMaxBytes: 50_000,
       ttlMs: 30 * 60 * 1000,
     });
   });
@@ -205,8 +209,8 @@ describe('config parsing', () => {
     assert.strictEqual(getExposeThoughts(), true);
   });
 
-  it('defaults CACHE to false', () => {
-    assert.strictEqual(getWorkspaceCacheEnabled(), false);
+  it('defaults CACHE to true', () => {
+    assert.strictEqual(getWorkspaceCacheEnabled(), true);
   });
 
   it('honours CACHE=true', () => {
@@ -214,8 +218,8 @@ describe('config parsing', () => {
     assert.strictEqual(getWorkspaceCacheEnabled(), true);
   });
 
-  it('defaults AUTO_SCAN to true', () => {
-    assert.strictEqual(getWorkspaceAutoScan(), true);
+  it('defaults AUTO_SCAN to false', () => {
+    assert.strictEqual(getWorkspaceAutoScan(), false);
   });
 
   it('honours AUTO_SCAN=false', () => {
@@ -227,8 +231,26 @@ describe('config parsing', () => {
     assert.strictEqual(getWorkspaceCacheTtl(), '3600s');
   });
 
-  it('defaults GEMINI_MAX_OUTPUT_TOKENS to 32768', () => {
-    assert.strictEqual(getMaxOutputTokens(), 32_768);
+  it('defaults GEMINI_MAX_OUTPUT_TOKENS to 4096', () => {
+    assert.strictEqual(getMaxOutputTokens(), 4_096);
+  });
+
+  it('defaults GEMINI_THINKING_BUDGET_CAP to 32768', () => {
+    assert.strictEqual(getThinkingBudgetCap(), 32_768);
+  });
+
+  it('returns configured GEMINI_THINKING_BUDGET_CAP when set', () => {
+    process.env.GEMINI_THINKING_BUDGET_CAP = '2048';
+    assert.strictEqual(getThinkingBudgetCap(), 2_048);
+  });
+
+  it('defaults to slim session events', () => {
+    assert.strictEqual(getSlimSessionEvents(), true);
+  });
+
+  it('disables slim session events when SESSION_EVENTS_VERBOSE=true', () => {
+    process.env.SESSION_EVENTS_VERBOSE = 'true';
+    assert.strictEqual(getSlimSessionEvents(), false);
   });
 
   it('returns configured GEMINI_MAX_OUTPUT_TOKENS when set', () => {
@@ -277,8 +299,8 @@ describe('config parsing', () => {
     process.env.WORKSPACE_CACHE_TTL = '9999s';
 
     assert.strictEqual(getGeminiModel(), 'gemini-3-flash-preview');
-    assert.strictEqual(getWorkspaceCacheEnabled(), false);
-    assert.strictEqual(getWorkspaceAutoScan(), true);
+    assert.strictEqual(getWorkspaceCacheEnabled(), true);
+    assert.strictEqual(getWorkspaceAutoScan(), false);
     assert.strictEqual(getTransportMode(), 'stdio');
     assert.strictEqual(getVerbosePayloadLogging(), false);
     assert.strictEqual(getExposeThoughts(), false);

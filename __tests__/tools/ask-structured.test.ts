@@ -25,12 +25,12 @@ describe('ask structured output shaping', () => {
     );
 
     assert.deepStrictEqual(result.structuredContent, {
-      answer: '{\n  "status": "ok",\n  "count": 2\n}',
+      answer: '',
       data: { status: 'ok', count: 2 },
       usage: { totalTokenCount: 42 },
     });
     assert.strictEqual(result.content[0]?.type, 'text');
-    assert.strictEqual(result.content[0]?.text, '{\n  "status": "ok",\n  "count": 2\n}');
+    assert.strictEqual(result.content[0]?.text, '');
   });
 
   it('parses fenced JSON output', () => {
@@ -46,7 +46,7 @@ describe('ask structured output shaping', () => {
     );
 
     assert.deepStrictEqual(structured, {
-      answer: '{\n  "status": "ok",\n  "count": 2\n}',
+      answer: '',
       data: { status: 'ok', count: 2 },
     });
   });

@@ -405,7 +405,7 @@ describe('session events resource', () => {
     assert.match(result.contents[1]?.text ?? '', /# Session Events `sess-resource-events`/);
     assert.match(result.contents[1]?.text ?? '', /- Message: Hello/);
     assert.match(result.contents[1]?.text ?? '', /### Response/);
-    assert.match(result.contents[1]?.text ?? '', /- tool_call \(GOOGLE_SEARCH_WEB\)/);
+    assert.doesNotMatch(result.contents[1]?.text ?? '', /- tool_call \(GOOGLE_SEARCH_WEB\)/);
   });
 
   it('reads event entries for a session ID whose resource URI must be encoded', () => {

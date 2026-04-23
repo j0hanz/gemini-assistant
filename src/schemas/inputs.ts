@@ -212,6 +212,10 @@ const ReviewDiffInputSchema = z.strictObject({
   subjectKind: reviewSubjectKindLiteral('diff'),
   dryRun: withFieldMetadata(z.boolean().optional(), 'Skip model review for subjectKind=diff.'),
   language: optionalField(textField('Primary language hint for diff or failure review.')),
+  docFilesToCheck: withFieldMetadata(
+    z.array(z.string()).optional(),
+    'List of overarching documentation files to check for drift against the diff. Defaults to checking README.md and AGENTS.md.',
+  ),
   ...reviewCommonShape,
 });
 
@@ -417,6 +421,10 @@ export const AnalyzePrInputSchema = z.strictObject({
   thinkingBudget: thinkingBudgetField,
   language: optionalField(textField('Primary language hint.')),
   focus: optionalField(textField('Optional review focus hint.')),
+  docFilesToCheck: withFieldMetadata(
+    z.array(z.string()).optional(),
+    'List of overarching documentation files to check for drift against the diff. Defaults to checking README.md and AGENTS.md.',
+  ),
 });
 export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
 

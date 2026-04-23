@@ -163,6 +163,12 @@ export const AnalyzeOutputSchema = z.discriminatedUnion('kind', [
   AnalyzeDiagramOutputSchema,
 ]);
 
+const DocumentationDriftSchema = z.strictObject({
+  file: z.string().describe('The path of the documentation file.'),
+  driftDescription: z.string().describe('Why the diff makes the current docs outdated/misleading.'),
+  suggestedUpdate: z.string().describe('Brief suggestion of what needs to be changed in the doc.'),
+});
+
 export const ReviewOutputSchema = z.strictObject({
   ...publicBaseOutputFields,
   subjectKind: enumField(REVIEW_SUBJECT_OPTIONS, 'Review subject discriminator'),
@@ -178,5 +184,9 @@ export const ReviewOutputSchema = z.strictObject({
   omittedPaths: z.array(z.string()).optional().describe('Local diff paths omitted due to budget'),
   empty: z.boolean().optional().describe('Whether the local diff is empty (no changes)'),
   truncated: z.boolean().optional().describe('Whether the diff review was truncated'),
+  documentationDrift: z
+    .array(DocumentationDriftSchema)
+    .optional()
+    .describe('Factual documentation drifts caused by the diff. Omitted if no drift is detected.'),
   contextUsed: ContextUsedSchema.optional(),
 });

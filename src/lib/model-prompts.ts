@@ -157,6 +157,7 @@ export function buildDiffReviewPrompt(args: {
   cacheName?: string | undefined;
   mode: 'review';
   promptText: string;
+  docContexts?: { filename: string; content: string }[];
 }): ResolvedTextPrompt;
 export function buildDiffReviewPrompt(args: {
   cacheName?: string | undefined;
@@ -164,6 +165,7 @@ export function buildDiffReviewPrompt(args: {
   promptText?: string;
   promptParts?: readonly Part[];
   focus?: string | undefined;
+  docContexts?: { filename: string; content: string }[];
 }): ResolvedTextPrompt | ResolvedPartPrompt {
   if (args.mode === 'compare') {
     return resolvePartPrompt(
@@ -182,12 +184,25 @@ export function buildDiffReviewPrompt(args: {
     );
   }
 
+  const hasDocs = args.docContexts && args.docContexts.length > 0;
+  const docInstruction = hasDocs
+    ? ' Cross-reference the diff against the documentation context. If the diff makes the docs factually incorrect or misleading, emit a `documentationDrift` array inside a JSON block at the end of your response (```json\\n{ "documentationDrift": [...] }\\n```). CRITICAL: If docs are still accurate, omit the `documentationDrift` JSON completely. Do not emit an empty array.'
+    : '';
+
+  const docContent = hasDocs
+    ? '\n\n<documentation_context>\n' +
+      (args.docContexts ?? [])
+        .map((doc) => `File: ${doc.filename}\n\`\`\`\n${doc.content}\n\`\`\``)
+        .join('\n\n') +
+      '\n</documentation_context>'
+    : '';
+
   return resolveTextPrompt(
     {
       cacheText: 'Review the diff for bugs and behavior risk. Ignore formatting-only changes.',
-      promptText: args.promptText ?? '',
+      promptText: (args.promptText ?? '') + docContent,
       systemInstruction: buildOutputInstruction(
-        'Review the unified diff for bugs, regressions, and behavior risk. Ignore formatting-only changes. Cite file paths and hunk context. Do not invent line numbers. If the diff looks clean, say so briefly.',
+        `Review the unified diff for bugs, regressions, and behavior risk. Ignore formatting-only changes. Cite file paths and hunk context. Do not invent line numbers. If the diff looks clean, say so briefly.${docInstruction}`,
         ['Output:', '## Findings', '## Fixes'],
       ),
     },

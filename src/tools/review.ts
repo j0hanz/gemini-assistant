@@ -36,6 +36,28 @@ import { ReviewOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, getAI, MODEL, type ToolCostProfileName } from '../client.js';
 
+const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
+
+function tryParseJsonResponse(text: string): unknown {
+  const candidates = [text.trim()];
+  const fencedMatch = JSON_CODE_BLOCK_PATTERN.exec(text)?.[1]?.trim();
+  if (fencedMatch && fencedMatch !== candidates[0]) {
+    candidates.push(fencedMatch);
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+
+    try {
+      return JSON.parse(candidate) as unknown;
+    } catch {
+      // Ignore invalid JSON candidates and fall back to raw text output.
+    }
+  }
+
+  return undefined;
+}
+
 const execFileAsync = promisify(execFile);
 
 const COMPARE_FILE_TOOL_LABEL = 'Compare Files';
@@ -224,6 +246,7 @@ type AnalyzePrStructuredContent = Record<string, unknown> & {
   omittedPaths?: string[];
   empty: boolean;
   truncated?: boolean;
+  documentationDrift?: { file: string; driftDescription: string; suggestedUpdate: string }[];
 };
 
 interface DiffUnit {
@@ -890,6 +913,7 @@ function buildStructuredContent(
   reviewedPaths: string[],
   omittedPaths: string[] = [],
   truncated?: boolean,
+  documentationDrift?: { file: string; driftDescription: string; suggestedUpdate: string }[],
 ): AnalyzePrStructuredContent {
   return {
     summary,
@@ -901,6 +925,7 @@ function buildStructuredContent(
     ...(omittedPaths.length > 0 ? { omittedPaths } : {}),
     empty: snapshot.empty,
     ...(truncated ? { truncated } : {}),
+    ...(documentationDrift && documentationDrift.length > 0 ? { documentationDrift } : {}),
   };
 }
 
@@ -1015,6 +1040,22 @@ export async function resolveReviewWorkingDirectory(
   return selectedRoot;
 }
 
+async function readDocFiles(
+  workingDirectory: string,
+  paths: string[],
+): Promise<{ filename: string; content: string }[]> {
+  const results: { filename: string; content: string }[] = [];
+  for (const p of paths) {
+    try {
+      const content = await readFile(join(workingDirectory, p), 'utf-8');
+      results.push({ filename: p, content });
+    } catch {
+      // ignore missing files silently
+    }
+  }
+  return results;
+}
+
 export async function analyzePrWork(
   {
     thinkingLevel,
@@ -1024,6 +1065,7 @@ export async function analyzePrWork(
     maxOutputTokens,
     thinkingBudget,
     safetySettings,
+    docFilesToCheck,
   }: AnalyzePrInput & {
     maxOutputTokens?: ReviewInput['maxOutputTokens'];
     thinkingBudget?: ReviewInput['thinkingBudget'];
@@ -1037,8 +1079,9 @@ export async function analyzePrWork(
   const log = logger.child('review');
 
   let snapshot: LocalDiffSnapshot;
+  let workingDirectory: string;
   try {
-    const workingDirectory = await resolveReviewWorkingDirectory(rootsFetcher, log);
+    workingDirectory = await resolveReviewWorkingDirectory(rootsFetcher, log);
     snapshot = await buildLocalDiffSnapshot(workingDirectory, ctx.mcpReq.signal);
   } catch (err) {
     return buildAnalyzePrErrorResult(err);
@@ -1079,6 +1122,9 @@ export async function analyzePrWork(
   await progress.step(2, 3, 'Analyzing generated diff');
   await logSnapshotStats(ctx, snapshot, budgetedDiff.truncated);
 
+  const docPathsToCheck = docFilesToCheck ?? ['README.md', 'AGENTS.md'];
+  const docContexts = await readDocFiles(workingDirectory, docPathsToCheck);
+
   const prompt = buildAnalysisPrompt(
     budgetedDiff.diff,
     snapshot.stats,
@@ -1094,6 +1140,7 @@ export async function analyzePrWork(
   const modelPrompt = buildDiffReviewPrompt({
     mode: 'review',
     promptText: prompt,
+    docContexts,
   });
 
   const cacheName = await getWorkspaceCacheName(ctx);
@@ -1115,16 +1162,37 @@ export async function analyzePrWork(
       safetySettings,
       cacheName,
     },
-    (_streamResult, textContent: string) => ({
-      structuredContent: buildStructuredContent(
-        snapshot,
-        textContent || '',
-        budgetedDiff.reviewedPaths,
-        budgetedDiff.omittedPaths,
-        budgetedDiff.truncated,
-      ),
-      reportMessage: `${String(snapshot.stats.files)} files reviewed (+${String(snapshot.stats.additions)}, -${String(snapshot.stats.deletions)})`,
-    }),
+    (_streamResult, textContent: string) => {
+      let finalSummary = textContent || '';
+      let documentationDrift:
+        | { file: string; driftDescription: string; suggestedUpdate: string }[]
+        | undefined;
+
+      const parsedData = tryParseJsonResponse(finalSummary) as
+        | { documentationDrift?: unknown }
+        | undefined;
+      if (parsedData?.documentationDrift && Array.isArray(parsedData.documentationDrift)) {
+        documentationDrift = parsedData.documentationDrift as NonNullable<
+          typeof documentationDrift
+        >;
+        finalSummary = `⚠️ **Documentation Drift Detected**\n\nThe following documentation files may need updates based on this diff:\n${documentationDrift.map((d) => `- **${d.file}**: ${d.driftDescription} (Suggestion: ${d.suggestedUpdate})`).join('\n')}\n\n---\n\n${finalSummary}`;
+      }
+
+      return {
+        resultMod: (_result: CallToolResult) => ({
+          content: [{ type: 'text', text: finalSummary }],
+        }),
+        structuredContent: buildStructuredContent(
+          snapshot,
+          finalSummary,
+          budgetedDiff.reviewedPaths,
+          budgetedDiff.omittedPaths,
+          budgetedDiff.truncated,
+          documentationDrift,
+        ),
+        reportMessage: `${String(snapshot.stats.files)} files reviewed (+${String(snapshot.stats.additions)}, -${String(snapshot.stats.deletions)})`,
+      };
+    },
   );
 }
 
@@ -1145,6 +1213,7 @@ function buildReviewStructuredContent(
     omittedPaths: structured.omittedPaths,
     empty: typeof structured.empty === 'boolean' ? structured.empty : undefined,
     truncated: typeof structured.truncated === 'boolean' ? structured.truncated : undefined,
+    documentationDrift: structured.documentationDrift,
     functionCalls: structured.functionCalls,
     safetyRatings: structured.safetyRatings,
     finishMessage: structured.finishMessage,
@@ -1173,6 +1242,7 @@ async function reviewWork(
         focus: args.focus,
         maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
+        docFilesToCheck: args.docFilesToCheck,
       },
       ctx,
       rootsFetcher,

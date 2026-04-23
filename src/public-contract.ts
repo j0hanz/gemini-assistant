@@ -219,6 +219,7 @@ export const DISCOVERY_ENTRIES = [
       'subjectKind?',
       'dryRun?',
       'language?',
+      'docFilesToCheck?',
       'focus?',
       'thinkingLevel?',
       'thinkingBudget?',

@@ -249,6 +249,50 @@ export const FunctionsSpecSchema = z.strictObject({
 });
 export type FunctionsSpecInput = z.infer<typeof FunctionsSpecSchema>;
 
+/**
+ * Tolerant wrapper around `FileSearchSpecSchema.optional()` that treats a
+ * wrapper object carrying an empty `fileSearchStoreNames` array as "unset",
+ * i.e. equivalent to omitting the `fileSearch` field. This makes the surface
+ * friendlier to clients that emit placeholder objects for optional wrappers.
+ */
+export const OptionalFileSearchSpecSchema = z
+  .preprocess((value) => {
+    if (
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      'fileSearchStoreNames' in value
+    ) {
+      const names = (value as { fileSearchStoreNames?: unknown }).fileSearchStoreNames;
+      if (Array.isArray(names) && names.length === 0) {
+        return undefined;
+      }
+    }
+    return value;
+  }, FileSearchSpecSchema.optional())
+  .optional();
+
+/**
+ * Tolerant wrapper around `FunctionsSpecSchema.optional()` that treats a
+ * wrapper object carrying an empty `declarations` array as "unset".
+ */
+export const OptionalFunctionsSpecSchema = z
+  .preprocess((value) => {
+    if (
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      'declarations' in value
+    ) {
+      const declarations = (value as { declarations?: unknown }).declarations;
+      if (Array.isArray(declarations) && declarations.length === 0) {
+        return undefined;
+      }
+    }
+    return value;
+  }, FunctionsSpecSchema.optional())
+  .optional();
+
 export const ServerSideToolInvocationsSchema = withFieldMetadata(
   z.enum(SERVER_SIDE_TOOL_INVOCATIONS_OPTIONS).default('auto'),
   'Server-side Gemini tool trace policy. `auto` (default): enabled only when built-in tools AND function declarations are both active. `always`: forces traces regardless of tool mix. `never`: omits traces.',

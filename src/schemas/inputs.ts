@@ -9,10 +9,10 @@ import {
   analyzeOutputKind,
   analyzeTargetKind,
   DIAGRAM_TYPES,
-  FileSearchSpecSchema,
-  FunctionsSpecSchema,
   goalText,
   mediaResolution,
+  OptionalFileSearchSpecSchema,
+  OptionalFunctionsSpecSchema,
   optionalField,
   requiredText,
   researchMode,
@@ -111,11 +111,11 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
       'Enable native Python code execution within the chat session. Useful for math, logic, or data processing.',
     ),
     fileSearch: withFieldMetadata(
-      FileSearchSpecSchema.optional(),
+      OptionalFileSearchSpecSchema,
       'Enable Gemini File Search over named stores for retrieval-augmented chat.',
     ),
     functions: withFieldMetadata(
-      FunctionsSpecSchema.optional(),
+      OptionalFunctionsSpecSchema,
       'Typed Gemini function declarations. The MCP client owns function execution and returns function responses through the session.',
     ),
     serverSideToolInvocations: ServerSideToolInvocationsSchema,
@@ -146,7 +146,7 @@ export const ResearchInputBaseSchema = z.strictObject({
   thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
   fileSearch: withFieldMetadata(
-    FileSearchSpecSchema.optional(),
+    OptionalFileSearchSpecSchema,
     'Enable Gemini File Search over named stores alongside research retrieval.',
   ),
 });
@@ -296,11 +296,11 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
       'Enable native Python code execution within the chat session. Useful for math, logic, or data processing.',
     ),
     fileSearch: withFieldMetadata(
-      FileSearchSpecSchema.optional(),
+      OptionalFileSearchSpecSchema,
       'Enable Gemini File Search over named stores for retrieval-augmented chat.',
     ),
     functions: withFieldMetadata(
-      FunctionsSpecSchema.optional(),
+      OptionalFunctionsSpecSchema,
       'Typed Gemini function declarations. The MCP client owns function execution and returns function responses through the session.',
     ),
     serverSideToolInvocations: ServerSideToolInvocationsSchema,
@@ -356,7 +356,7 @@ export const SearchInputSchema = z.strictObject({
   thinkingLevel: thinkingLevelField,
   thinkingBudget: thinkingBudgetField,
   fileSearch: withFieldMetadata(
-    FileSearchSpecSchema.optional(),
+    OptionalFileSearchSpecSchema,
     'Enable Gemini File Search over named stores alongside web search.',
   ),
 });
@@ -371,7 +371,7 @@ export const AgenticSearchInputSchema = z.strictObject({
   thinkingLevel: thinkingLevelField,
   thinkingBudget: thinkingBudgetField,
   fileSearch: withFieldMetadata(
-    FileSearchSpecSchema.optional(),
+    OptionalFileSearchSpecSchema,
     'Enable Gemini File Search over named stores alongside agentic research.',
   ),
 });
@@ -402,7 +402,7 @@ export const AnalyzeUrlInputSchema = z.strictObject({
   thinkingLevel: thinkingLevelField,
   thinkingBudget: thinkingBudgetField,
   fileSearch: withFieldMetadata(
-    FileSearchSpecSchema.optional(),
+    OptionalFileSearchSpecSchema,
     'Enable Gemini File Search over named stores alongside URL analysis.',
   ),
 });

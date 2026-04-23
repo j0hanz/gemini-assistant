@@ -316,12 +316,16 @@ describe('ChatInputSchema', () => {
   });
 
   it('rejects invalid fileSearch, functions, and serverSideToolInvocations values', () => {
+    // Empty arrays are tolerated: the wrapper object is treated as "unset"
+    // so clients that emit placeholder wrappers don't get validation errors.
+    const emptyFileSearch = ChatInputSchema.safeParse({
+      goal: 'empty stores',
+      fileSearch: { fileSearchStoreNames: [] },
+    });
+    assert.strictEqual(emptyFileSearch.success, true);
     assert.strictEqual(
-      ChatInputSchema.safeParse({
-        goal: 'bad stores',
-        fileSearch: { fileSearchStoreNames: [] },
-      }).success,
-      false,
+      (emptyFileSearch as { data: { fileSearch?: unknown } }).data.fileSearch,
+      undefined,
     );
     assert.strictEqual(
       ChatInputSchema.safeParse({
@@ -372,6 +376,18 @@ describe('ChatInputSchema', () => {
       }).success,
       false,
     );
+  });
+
+  it('treats empty fileSearch.fileSearchStoreNames and functions.declarations as unset', () => {
+    const result = ChatInputSchema.safeParse({
+      goal: 'placeholder wrappers',
+      fileSearch: { fileSearchStoreNames: [] },
+      functions: { declarations: [] },
+      serverSideToolInvocations: 'auto',
+    });
+    assert.ok(result.success);
+    assert.strictEqual(result.data.fileSearch, undefined);
+    assert.strictEqual(result.data.functions, undefined);
   });
 });
 

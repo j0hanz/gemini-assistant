@@ -215,7 +215,6 @@ export function capRawParts(parts: Part[]): Part[] {
 export function buildReplayHistoryParts(parts: Part[]): Part[] {
   const inlineDataMaxBytes = getSessionLimits().replayInlineDataMaxBytes;
   return parts.filter((part) => {
-    if (part.thought === true) return false;
     if (part.functionCall && !part.functionCall.name) return false;
     if (part.inlineData?.data && part.inlineData.data.length > inlineDataMaxBytes) {
       // Replay history must not retain large raw media blobs; callers should

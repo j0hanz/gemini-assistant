@@ -167,11 +167,11 @@ Workspace:
 
 - `ROOTS`: optional comma-separated absolute roots allowed for file tools, `workspace://context`, and automatic workspace caching
 - `CONTEXT`: optional path to a custom context file to include in workspace context
-- `AUTO_SCAN`: auto-scan workspace roots for known project files, default `true`
+- `AUTO_SCAN`: auto-scan workspace roots for known project files, default `false`
 
 Workspace cache:
 
-- `CACHE`: enable automatic workspace context caching for `chat` calls when set to `true`, default `false`
+- `CACHE`: enable automatic workspace context caching for `chat` calls when set to `true`, default `true`
 - `CACHE_TTL`: Gemini cache TTL for workspace context, default `3600s`
 
 Debug:

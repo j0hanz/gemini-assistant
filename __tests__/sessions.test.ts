@@ -50,7 +50,7 @@ afterEach(() => {
 
 describe('sessions', () => {
   describe('buildReplayHistoryParts', () => {
-    it('drops thought parts while preserving Gemini replay parts', () => {
+    it('preserves thought parts along with Gemini replay parts', () => {
       const parts = [
         { text: 'summary', thought: true },
         { text: '', thoughtSignature: 'sig-empty' },
@@ -63,6 +63,7 @@ describe('sessions', () => {
       ];
 
       assert.deepStrictEqual(buildReplayHistoryParts(parts as never), [
+        { text: 'summary', thought: true },
         { text: '', thoughtSignature: 'sig-empty' },
         { text: 'visible', thoughtSignature: 'sig-text' },
         { functionCall: { name: 'lookup', args: { q: 'x' } }, thoughtSignature: 'sig-fn' },
@@ -84,11 +85,12 @@ describe('sessions', () => {
 
       assert.deepStrictEqual(buildReplayHistoryParts(persisted), [
         { text: 'old answer' },
+        { text: 'old thought', thought: true },
         { functionCall: { name: 'lookup' }, thoughtSignature: 'sig-old' },
       ]);
     });
 
-    it('keeps signed text parts in rebuilt chat contents and drops thought parts', () => {
+    it('keeps thought parts and signed text parts in rebuilt chat contents', () => {
       const rebuilt = buildRebuiltChatContents(
         [
           {
@@ -106,7 +108,10 @@ describe('sessions', () => {
       assert.deepStrictEqual(rebuilt, [
         {
           role: 'model',
-          parts: [{ text: 'visible', thoughtSignature: 'sig-visible' }],
+          parts: [
+            { text: 'private', thought: true, thoughtSignature: 'sig-thought' },
+            { text: 'visible', thoughtSignature: 'sig-visible' },
+          ],
         },
       ]);
     });

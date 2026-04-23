@@ -612,11 +612,9 @@ async function handleThoughtOrSignaturePart(
     return false;
   }
 
-  appendToolEvent(state, {
-    kind: 'part',
-    ...(partText !== undefined ? { text: partText } : {}),
-    thoughtSignature: part.thoughtSignature,
-  });
+  // Empty-text parts that carry only a thoughtSignature add no value to
+  // downstream tool consumers. Thought signatures needed for session replay
+  // are persisted separately via `rawParts`.
   return true;
 }
 

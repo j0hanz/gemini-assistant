@@ -19,7 +19,6 @@ import {
   deriveFindingsFromCitations,
   deriveOverallStatus,
   extractTextOrError,
-  filterClaimLinkedSourceDetails,
   formatCountLabel,
   mergeSourceDetails,
   safeValidateStructuredContent,
@@ -336,7 +335,7 @@ describe('grounding signal helpers', () => {
     );
   });
 
-  it('derives findings and claim-linked source details', () => {
+  it('derives findings from citations', () => {
     const citations = [
       { text: 'Claim', sourceUrls: ['https://example.com/a'] },
       { text: 'Claim', sourceUrls: ['https://example.com/a'] },
@@ -347,27 +346,14 @@ describe('grounding signal helpers', () => {
       {
         claim: 'Claim',
         supportingSourceUrls: ['https://example.com/a'],
-        supportText: 'Claim',
         verificationStatus: 'supported',
       },
       {
         claim: 'Other',
         supportingSourceUrls: ['https://example.com/b'],
-        supportText: 'Other',
         verificationStatus: 'supported',
       },
     ]);
-    assert.deepStrictEqual(
-      filterClaimLinkedSourceDetails(
-        [
-          { url: 'https://example.com/a' },
-          { url: 'https://example.com/unused' },
-          { url: 'https://example.com/b' },
-        ],
-        citations,
-      ),
-      [{ url: 'https://example.com/a' }, { url: 'https://example.com/b' }],
-    );
   });
 
   it('derives overall status from grounding confidence', () => {

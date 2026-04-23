@@ -38,7 +38,6 @@ import {
   computeGroundingSignals,
   deriveFindingsFromCitations,
   deriveOverallStatus,
-  filterClaimLinkedSourceDetails,
   formatCountLabel,
   mergeSourceDetails,
   safeValidateStructuredContent,
@@ -306,7 +305,6 @@ function computeResearchContext(streamResult: StreamResult) {
   );
   const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
   const findings = deriveFindingsFromCitations(citations);
-  const claimLinkedSourceDetails = filterClaimLinkedSourceDetails(sourceDetails, citations);
   const groundingSignals = computeGroundingSignals(
     streamResult,
     citations,
@@ -329,7 +327,6 @@ function computeResearchContext(streamResult: StreamResult) {
     citations,
     searchEntryPoint,
     findings,
-    claimLinkedSources: claimLinkedSourceDetails.map((source) => source.url),
     groundingSignals,
     status,
     warnings,
@@ -377,12 +374,8 @@ function buildAgenticSearchResult(
       urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
       toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
       status: context.status,
-      grounded: context.citations.length > 0,
       groundingSignals: context.groundingSignals,
       findings: context.findings.length > 0 ? context.findings : undefined,
-      claimLinkedSources:
-        context.claimLinkedSources.length > 0 ? context.claimLinkedSources : undefined,
-      urlContextUsed: context.urlContextSources.length > 0,
       citations: context.citations.length > 0 ? context.citations : undefined,
       computations: context.computations.length > 0 ? context.computations : undefined,
       warnings: warnings.length > 0 ? warnings : undefined,
@@ -427,12 +420,8 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
             : undefined,
       urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
       status: context.status,
-      grounded: context.citations.length > 0,
       groundingSignals: context.groundingSignals,
       findings: context.findings.length > 0 ? context.findings : undefined,
-      claimLinkedSources:
-        context.claimLinkedSources.length > 0 ? context.claimLinkedSources : undefined,
-      urlContextUsed: context.urlContextSources.length > 0,
       citations: context.citations.length > 0 ? context.citations : undefined,
       computations: context.computations.length > 0 ? context.computations : undefined,
       warnings: context.warnings.length > 0 ? context.warnings : undefined,
@@ -468,11 +457,8 @@ function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) 
         context.urlContextSources.length > 0 ? context.urlContextSources : undefined,
       urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
       status: context.status,
-      grounded: context.citations.length > 0,
       groundingSignals: context.groundingSignals,
-      urlContextUsed: context.urlContextSources.length > 0,
       citations: context.citations.length > 0 ? context.citations : undefined,
-      searchEntryPoint: context.searchEntryPoint,
       computations: context.computations.length > 0 ? context.computations : undefined,
       warnings: context.warnings.length > 0 ? context.warnings : undefined,
     }),
@@ -1081,15 +1067,9 @@ function buildResearchStructuredContent(
     ...(structured.urlContextSources ? { urlContextSources: structured.urlContextSources } : {}),
     ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
     ...(structured.toolsUsed ? { toolsUsed: structured.toolsUsed } : {}),
-    ...(structured.grounded !== undefined ? { grounded: structured.grounded } : {}),
     ...(structured.groundingSignals ? { groundingSignals: structured.groundingSignals } : {}),
     ...(structured.findings ? { findings: structured.findings } : {}),
-    ...(structured.claimLinkedSources ? { claimLinkedSources: structured.claimLinkedSources } : {}),
-    ...(structured.urlContextUsed !== undefined
-      ? { urlContextUsed: structured.urlContextUsed }
-      : {}),
     ...(structured.citations ? { citations: structured.citations } : {}),
-    ...(structured.searchEntryPoint ? { searchEntryPoint: structured.searchEntryPoint } : {}),
     ...(structured.computations ? { computations: structured.computations } : {}),
     ...(structured.contextUsed ? { contextUsed: structured.contextUsed } : {}),
     ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),

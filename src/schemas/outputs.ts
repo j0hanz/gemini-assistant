@@ -145,23 +145,12 @@ export const ResearchOutputSchema = z.strictObject({
   }),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
   toolsUsed: z.array(z.string()).optional().describe('Tools invoked during deep research'),
-  grounded: z
-    .boolean()
-    .optional()
-    .describe('Deprecated: whether claim-level grounding citations were surfaced'),
   groundingSignals: GroundingSignalsSchema.optional(),
   findings: z.array(FindingSchema).optional().describe('Claim-level findings with attribution'),
-  claimLinkedSources: publicHttpUrlArray({
-    optional: true,
-    description: 'Subset of sources cited by at least one finding',
-    itemDescription: 'Claim-linked source URL',
-  }),
-  urlContextUsed: z.boolean().optional().describe('Whether URL Context retrieval succeeded'),
   citations: z
     .array(GroundingCitationSchema)
     .optional()
     .describe('Claim-level citations derived from Gemini grounding supports'),
-  searchEntryPoint: SearchEntryPointSchema.optional().describe('Deprecated; render from content.'),
   computations: z
     .array(ComputationSchema)
     .optional()

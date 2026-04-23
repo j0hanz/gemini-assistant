@@ -278,12 +278,7 @@ export const OptionalFileSearchSpecSchema = z
  */
 export const OptionalFunctionsSpecSchema = z
   .preprocess((value) => {
-    if (
-      value &&
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      'declarations' in value
-    ) {
+    if (value && typeof value === 'object' && !Array.isArray(value) && 'declarations' in value) {
       const declarations = (value as { declarations?: unknown }).declarations;
       if (Array.isArray(declarations) && declarations.length === 0) {
         return undefined;

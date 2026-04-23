@@ -101,7 +101,6 @@ describe('ResearchOutputSchema', () => {
       mode: 'deep',
       summary: 'Deep answer',
       sources: ['https://example.com'],
-      grounded: true,
       citations: [
         {
           text: 'Supported claim',
@@ -110,10 +109,6 @@ describe('ResearchOutputSchema', () => {
           sourceUrls: ['https://example.com'],
         },
       ],
-      searchEntryPoint: {
-        renderedContent: '<div>search</div>',
-      },
-      urlContextUsed: true,
       urlContextSources: ['https://example.com/context'],
       sourceDetails: [
         { domain: 'example.com', origin: 'both', title: 'Example', url: 'https://example.com' },
@@ -124,20 +119,15 @@ describe('ResearchOutputSchema', () => {
         retrievalPerformed: true,
         urlContextUsed: true,
         groundingSupportsCount: 1,
-        supportedFindingsCount: 1,
-        unsupportedFindingsCount: 0,
-        claimCoverage: 1,
         confidence: 'medium',
       },
       findings: [
         {
           claim: 'Supported claim',
           supportingSourceUrls: ['https://example.com'],
-          supportText: 'Supported claim',
           verificationStatus: 'supported',
         },
       ],
-      claimLinkedSources: ['https://example.com'],
       computations: [
         {
           id: 'exec-1',

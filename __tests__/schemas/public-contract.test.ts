@@ -151,7 +151,6 @@ describe('public contract schemas', () => {
         mode: 'quick',
         summary: 'x',
         sources: [],
-        urlContextUsed: false,
         groundingSignals: {
           retrievalPerformed: true,
           urlContextUsed: true,
@@ -165,7 +164,6 @@ describe('public contract schemas', () => {
             verificationStatus: 'supported',
           },
         ],
-        claimLinkedSources: ['https://example.com'],
         sourceDetails: [
           { domain: 'example.com', origin: 'urlContext', url: 'https://example.com' },
         ],

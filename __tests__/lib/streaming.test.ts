@@ -664,9 +664,11 @@ describe('consumeStreamWithProgress', () => {
       ctx,
     );
 
+    // Empty signature-only parts are not surfaced as tool events; only the
+    // thought event remains.
     assert.deepStrictEqual(
       result.toolEvents.map((event) => event.kind),
-      ['thought', 'part'],
+      ['thought'],
     );
   });
 
@@ -872,7 +874,7 @@ describe('consumeStreamWithProgress', () => {
     );
   });
 
-  it('captures signature-only parts even when they have no text', async () => {
+  it('does not emit toolEvents for signature-only parts', async () => {
     const { ctx } = makeMockContext();
     const stream = fakeStream([
       makeChunk([{ text: 'partial answer' }]),
@@ -882,11 +884,7 @@ describe('consumeStreamWithProgress', () => {
     const result = await consumeStreamWithProgress(stream, ctx);
 
     assert.strictEqual(result.text, 'partial answer');
-    assert.deepStrictEqual(result.toolEvents.at(-1), {
-      kind: 'part',
-      text: '',
-      thoughtSignature: 'sig-final',
-    });
+    assert.deepStrictEqual(result.toolEvents, []);
   });
 
   it('does not transition to generating or enqueue queue messages for empty signature-only parts', async () => {
@@ -907,9 +905,7 @@ describe('consumeStreamWithProgress', () => {
     );
 
     assert.strictEqual(result.text, '');
-    assert.deepStrictEqual(result.toolEvents, [
-      { kind: 'part', text: '', thoughtSignature: 'sig-empty' },
-    ]);
+    assert.deepStrictEqual(result.toolEvents, []);
     assert.strictEqual(queued.length, 0);
     const messages = progressCalls.map((call) => call.message);
     assert.ok(!messages.includes('Generating response'));
@@ -924,9 +920,7 @@ describe('consumeStreamWithProgress', () => {
     );
 
     assert.strictEqual(result.text, '');
-    assert.deepStrictEqual(result.toolEvents, [
-      { kind: 'part', thoughtSignature: 'sig-undefined' },
-    ]);
+    assert.deepStrictEqual(result.toolEvents, []);
     const messages = progressCalls.map((call) => call.message);
     assert.ok(!messages.includes('Generating response'));
   });

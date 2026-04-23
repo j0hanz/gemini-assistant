@@ -145,14 +145,6 @@ export function mergeSourceDetails(
   return [...merged.values()];
 }
 
-export function filterClaimLinkedSourceDetails(
-  sourceDetails: readonly SourceDetail[],
-  citations: readonly GroundingCitation[],
-): SourceDetail[] {
-  const linkedUrls = new Set(citations.flatMap((citation) => citation.sourceUrls));
-  return sourceDetails.filter((source) => linkedUrls.has(source.url));
-}
-
 // ── Grounding Citations & Signals ─────────────────────────────────────
 
 export function collectGroundingCitations(groundingMetadata: GroundingMetadata | undefined): {
@@ -205,7 +197,6 @@ export function deriveFindingsFromCitations(citations: readonly GroundingCitatio
     findings.set(citation.text, {
       claim: citation.text,
       supportingSourceUrls: [...citation.sourceUrls],
-      supportText: citation.text,
       verificationStatus: 'supported',
     });
   }
@@ -223,8 +214,6 @@ export function computeGroundingSignals(
   const urlContextUsed = sourceDetails.some(
     (source) => source.origin === 'urlContext' || source.origin === 'both',
   );
-  const supportedFindingsCount = citations.length;
-  const unsupportedFindingsCount = 0;
   const confidence =
     citations.length >= 3
       ? 'high'
@@ -238,9 +227,6 @@ export function computeGroundingSignals(
     retrievalPerformed,
     urlContextUsed,
     groundingSupportsCount: citations.length,
-    supportedFindingsCount,
-    unsupportedFindingsCount,
-    claimCoverage: supportedFindingsCount > 0 ? 1 : 0,
     confidence,
   };
 }

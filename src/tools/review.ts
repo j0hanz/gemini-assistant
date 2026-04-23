@@ -35,6 +35,8 @@ import {
 import { ReviewOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, getAI, MODEL, type ToolCostProfileName } from '../client.js';
+import { getReviewDocs } from '../config.js';
+import { SCAN_FILE_NAMES } from '../lib/workspace-context.js';
 
 const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
 
@@ -1065,7 +1067,6 @@ export async function analyzePrWork(
     maxOutputTokens,
     thinkingBudget,
     safetySettings,
-    docFilesToCheck,
   }: AnalyzePrInput & {
     maxOutputTokens?: ReviewInput['maxOutputTokens'];
     thinkingBudget?: ReviewInput['thinkingBudget'];
@@ -1122,7 +1123,8 @@ export async function analyzePrWork(
   await progress.step(2, 3, 'Analyzing generated diff');
   await logSnapshotStats(ctx, snapshot, budgetedDiff.truncated);
 
-  const docPathsToCheck = docFilesToCheck ?? ['README.md', 'AGENTS.md'];
+  const envDocs = getReviewDocs();
+  const docPathsToCheck = envDocs ?? Array.from(SCAN_FILE_NAMES);
   const docContexts = await readDocFiles(workingDirectory, docPathsToCheck);
 
   const prompt = buildAnalysisPrompt(
@@ -1242,7 +1244,6 @@ async function reviewWork(
         focus: args.focus,
         maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
-        docFilesToCheck: args.docFilesToCheck,
       },
       ctx,
       rootsFetcher,

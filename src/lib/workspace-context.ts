@@ -206,7 +206,7 @@ const WORKSPACE_CACHE_DISPLAY = 'gemini-assistant-workspace';
 const HASH_CHECK_INTERVAL_MS = 30_000;
 const log = logger.child('workspace');
 
-const SCAN_FILE_NAMES = new Set([
+export const SCAN_FILE_NAMES = new Set([
   'readme.md',
   'package.json',
   'tsconfig.json',

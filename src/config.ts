@@ -220,6 +220,15 @@ export function getWorkspaceAutoScan(): boolean {
   return parseBooleanEnv('AUTO_SCAN', false);
 }
 
+export function getReviewDocs(): string[] | undefined {
+  const raw = process.env.REVIEW_DOCS;
+  if (raw === undefined || raw.trim() === '') return undefined;
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 export function getMaxOutputTokens(): number {
   return parseIntEnv('GEMINI_MAX_OUTPUT_TOKENS', DEFAULT_MAX_OUTPUT_TOKENS, {
     min: 1,

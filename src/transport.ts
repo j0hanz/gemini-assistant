@@ -8,16 +8,14 @@ import type {
 } from '@modelcontextprotocol/server';
 import { WebStandardStreamableHTTPServerTransport as WebHttpTransport } from '@modelcontextprotocol/server';
 
-import { randomUUID } from 'node:crypto';
+import { Buffer } from 'node:buffer';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
-import {
-  isAutoDerivedAllowedHosts,
-  resolveAllowedHosts,
-  validateHostHeader,
-} from './lib/validation.js';
+import { createRateLimiter, type RateLimiter } from './lib/rate-limit.js';
+import { resolveAllowedHosts, validateHostHeader } from './lib/validation.js';
 
 import { getTransportConfig } from './config.js';
 
@@ -108,11 +106,24 @@ interface ResolvedTransportConfig {
   isStateless: boolean;
   maxSessions: number;
   port: number;
+  rateLimitBurst: number;
+  rateLimitRps: number;
   sessionTtlMs: number;
+  token?: string;
 }
 
 function resolveTransportRuntimeConfig(): ResolvedTransportConfig {
-  const { port, host, corsOrigin, isStateless, maxSessions, sessionTtlMs } = getTransportConfig();
+  const {
+    port,
+    host,
+    corsOrigin,
+    isStateless,
+    maxSessions,
+    rateLimitBurst,
+    rateLimitRps,
+    sessionTtlMs,
+    token,
+  } = getTransportConfig();
   return {
     allowedHosts: resolveAllowedHosts(host),
     corsOrigin,
@@ -120,7 +131,10 @@ function resolveTransportRuntimeConfig(): ResolvedTransportConfig {
     isStateless,
     maxSessions,
     port,
+    rateLimitBurst,
+    rateLimitRps,
     sessionTtlMs,
+    ...(token ? { token } : {}),
   };
 }
 
@@ -151,21 +165,81 @@ export interface WebStandardTransportResult {
 
 const log = logger.child('transport');
 
-function warnIfUnprotected(host: string, hasProtection: boolean): void {
-  if (!hasProtection && (host === '0.0.0.0' || host === '::')) {
-    log.warn(
-      `SECURITY: bound to ${host} without DNS rebinding protection. ` +
-        'Bind to 127.0.0.1 (default) or set HOST to a specific hostname.',
-    );
-    return;
-  }
+function isLoopbackBindHost(host: string): boolean {
+  return host === '127.0.0.1' || host === '::1' || host === 'localhost';
+}
 
-  if (isAutoDerivedAllowedHosts(host)) {
-    log.warn(
-      `SECURITY: bound to ${host} with auto-derived Host header protection only. ` +
-        'Requests sent through DNS aliases, load balancers, or reverse proxies may be rejected.',
+function assertHttpBindIsProtected(host: string, token: string | undefined): void {
+  if (!isLoopbackBindHost(host) && !token) {
+    throw new AppError(
+      'transport',
+      `HTTP transport bound to ${host} requires MCP_HTTP_TOKEN.`,
+      'server',
     );
   }
+}
+
+function isAuthorized(
+  authorization: string | undefined | null,
+  token: string | undefined,
+): boolean {
+  if (!token) return true;
+  const prefix = 'Bearer ';
+  if (!authorization?.startsWith(prefix)) return false;
+  const supplied = authorization.slice(prefix.length);
+  const suppliedBuffer = Buffer.from(supplied);
+  const tokenBuffer = Buffer.from(token);
+  return (
+    suppliedBuffer.length === tokenBuffer.length && timingSafeEqual(suppliedBuffer, tokenBuffer)
+  );
+}
+
+function nodeRateLimitKey(req: IncomingMessage, sessionId: string | undefined): string {
+  return sessionId ?? req.socket.remoteAddress ?? 'unknown';
+}
+
+function webRateLimitKey(req: Request, sessionId: string | undefined): string {
+  return sessionId ?? req.headers.get('x-forwarded-for') ?? 'unknown';
+}
+
+function takeRateLimit(rateLimiter: RateLimiter, key: string): boolean {
+  return rateLimiter.take(key);
+}
+
+function nodeUnauthorizedResponse(res: ServerResponse): void {
+  if (res.headersSent) return;
+  res.statusCode = 401;
+  res.setHeader('WWW-Authenticate', 'Bearer');
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(rpcErrorPayload('Unauthorized')));
+}
+
+function nodeRateLimitedResponse(res: ServerResponse): void {
+  if (res.headersSent) return;
+  res.statusCode = 429;
+  res.setHeader('Retry-After', '1');
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(rpcErrorPayload('Rate limited')));
+}
+
+function webUnauthorizedResponse(corsOrigin: string): Response {
+  return withCors(
+    new Response(JSON.stringify(rpcErrorPayload('Unauthorized')), {
+      status: 401,
+      headers: { 'content-type': 'application/json', 'www-authenticate': 'Bearer' },
+    }),
+    corsOrigin,
+  );
+}
+
+function webRateLimitedResponse(corsOrigin: string): Response {
+  return withCors(
+    new Response(JSON.stringify(rpcErrorPayload('Rate limited')), {
+      status: 429,
+      headers: { 'content-type': 'application/json', 'retry-after': '1' },
+    }),
+    corsOrigin,
+  );
 }
 
 function appendUniqueHeaderValue(existing: string | null, value: string): string {
@@ -583,7 +657,7 @@ function applyCors(app: ReturnType<typeof createMcpExpressApp>, corsOrigin: stri
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, mcp-session-id, Last-Event-Id, mcp-protocol-version',
+      'Authorization, Content-Type, mcp-session-id, Last-Event-Id, mcp-protocol-version',
     );
     res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id, mcp-protocol-version');
     next();
@@ -605,7 +679,7 @@ function applyCorsHeaders(headers: Headers, corsOrigin: string): void {
   headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   headers.set(
     'Access-Control-Allow-Headers',
-    'Content-Type, mcp-session-id, Last-Event-Id, mcp-protocol-version',
+    'Authorization, Content-Type, mcp-session-id, Last-Event-Id, mcp-protocol-version',
   );
   // Credentials mode is intentionally unsupported. Do not emit
   // Access-Control-Allow-Credentials without a dedicated stateful-session review.
@@ -665,9 +739,20 @@ export async function startHttpTransport(
   createServer: ServerFactory,
   createEventStore?: EventStoreFactory,
 ): Promise<HttpTransportResult> {
-  const { port, host, corsOrigin, isStateless, maxSessions, sessionTtlMs, allowedHosts } =
-    resolveTransportRuntimeConfig();
-  warnIfUnprotected(host, !!allowedHosts);
+  const {
+    port,
+    host,
+    corsOrigin,
+    isStateless,
+    maxSessions,
+    rateLimitBurst,
+    rateLimitRps,
+    sessionTtlMs,
+    allowedHosts,
+    token,
+  } = resolveTransportRuntimeConfig();
+  assertHttpBindIsProtected(host, token);
+  const rateLimiter = createRateLimiter({ rps: rateLimitRps, burst: rateLimitBurst });
 
   const app = createMcpExpressApp({
     host,
@@ -705,6 +790,14 @@ export async function startHttpTransport(
 
   app.all('/mcp', async (req, res) => {
     const sessionId = getNodeSessionId(req);
+    if (!isAuthorized(req.headers.authorization, token)) {
+      nodeUnauthorizedResponse(res);
+      return;
+    }
+    if (!takeRateLimit(rateLimiter, nodeRateLimitKey(req, sessionId))) {
+      nodeRateLimitedResponse(res);
+      return;
+    }
     if (rejectDeleteWithoutSession(req.method, sessionId, isStateless)) {
       nodeErrorResponse(res, 400, 'mcp-session-id header required for DELETE');
       return;
@@ -793,9 +886,20 @@ export function startWebStandardTransport(
   createServer: ServerFactory,
   createEventStore?: EventStoreFactory,
 ): Promise<WebStandardTransportResult> {
-  const { port, host, corsOrigin, isStateless, maxSessions, sessionTtlMs, allowedHosts } =
-    resolveTransportRuntimeConfig();
-  warnIfUnprotected(host, !!allowedHosts);
+  const {
+    port,
+    host,
+    corsOrigin,
+    isStateless,
+    maxSessions,
+    rateLimitBurst,
+    rateLimitRps,
+    sessionTtlMs,
+    allowedHosts,
+    token,
+  } = resolveTransportRuntimeConfig();
+  assertHttpBindIsProtected(host, token);
+  const rateLimiter = createRateLimiter({ rps: rateLimitRps, burst: rateLimitBurst });
 
   const statefulPairs = new Map<string, ManagedPair<WebStandardStreamableHTTPServerTransport>>();
   const acquireStatefulCreationLock = createAsyncLock();
@@ -824,6 +928,12 @@ export function startWebStandardTransport(
     }
 
     const sessionId = getRequestSessionId(req);
+    if (!isAuthorized(req.headers.get('authorization'), token)) {
+      return webUnauthorizedResponse(corsOrigin);
+    }
+    if (!takeRateLimit(rateLimiter, webRateLimitKey(req, sessionId))) {
+      return webRateLimitedResponse(corsOrigin);
+    }
     if (rejectDeleteWithoutSession(req.method, sessionId, isStateless)) {
       return withCors(responseError(400, 'mcp-session-id header required for DELETE'), corsOrigin);
     }

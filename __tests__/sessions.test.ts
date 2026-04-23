@@ -5,8 +5,9 @@ import { FinishReason } from '@google/genai';
 
 import { AppError } from '../src/lib/errors.js';
 import {
+  buildReplayHistoryParts,
+  buildTranscriptParts,
   createSessionStore,
-  sanitizeHistoryParts,
   type SessionStore,
   type SessionStoreOptions,
 } from '../src/sessions.js';
@@ -48,8 +49,8 @@ afterEach(() => {
 });
 
 describe('sessions', () => {
-  describe('sanitizeHistoryParts', () => {
-    it('drops thought and verbose tool parts while preserving replay-safe parts', () => {
+  describe('buildReplayHistoryParts', () => {
+    it('drops thought parts while preserving Gemini replay parts', () => {
       const parts = [
         { text: 'summary', thought: true },
         { text: '', thoughtSignature: 'sig-empty' },
@@ -61,10 +62,13 @@ describe('sessions', () => {
         { text: 'plain' },
       ];
 
-      assert.deepStrictEqual(sanitizeHistoryParts(parts as never), [
+      assert.deepStrictEqual(buildReplayHistoryParts(parts as never), [
         { text: '', thoughtSignature: 'sig-empty' },
         { text: 'visible', thoughtSignature: 'sig-text' },
         { functionCall: { name: 'lookup', args: { q: 'x' } }, thoughtSignature: 'sig-fn' },
+        { toolCall: { toolType: 'URL_CONTEXT' }, thoughtSignature: 'sig-tool' },
+        { executableCode: { code: 'print(1)' }, thoughtSignature: 'sig-code' },
+        { codeExecutionResult: { output: '1' }, thoughtSignature: 'sig-result' },
         { text: 'plain' },
       ]);
     });
@@ -78,7 +82,7 @@ describe('sessions', () => {
         ]),
       ) as never;
 
-      assert.deepStrictEqual(sanitizeHistoryParts(persisted), [
+      assert.deepStrictEqual(buildReplayHistoryParts(persisted), [
         { text: 'old answer' },
         { functionCall: { name: 'lookup' }, thoughtSignature: 'sig-old' },
       ]);
@@ -114,7 +118,7 @@ describe('sessions', () => {
         { functionCall: { name: '', args: { empty: true } } },
         { text: 'after' },
       ];
-      assert.deepStrictEqual(sanitizeHistoryParts(parts as never), [
+      assert.deepStrictEqual(buildReplayHistoryParts(parts as never), [
         { functionCall: { name: 'lookup', args: { q: 'x' } } },
         { text: 'after' },
       ]);
@@ -126,9 +130,23 @@ describe('sessions', () => {
       ];
 
       assert.strictEqual(
-        sanitizeHistoryParts(parts as never)[0]?.thoughtSignature,
+        buildReplayHistoryParts(parts as never)[0]?.thoughtSignature,
         'opaque-signature-value',
       );
+    });
+
+    it('builds transcript parts from user-visible text and media only', () => {
+      const parts = [
+        { text: 'visible' },
+        { text: 'private', thought: true },
+        { functionCall: { name: 'lookup', args: { q: 'x' } } },
+        { inlineData: { data: 'abc', mimeType: 'text/plain' } },
+      ];
+
+      assert.deepStrictEqual(buildTranscriptParts(parts as never), [
+        { text: 'visible' },
+        { inlineData: { data: 'abc', mimeType: 'text/plain' } },
+      ]);
     });
 
     it('buildRebuiltChatContents skips entries whose parts sanitize to empty', () => {

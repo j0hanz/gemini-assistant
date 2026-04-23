@@ -115,7 +115,9 @@ export function resolveServerSideToolInvocations(
 ): boolean | undefined {
   if (policy === 'never') return undefined;
   if (policy === 'always') return true;
-  return activeCapabilities.size > 0 ? true : undefined;
+  const hasBuiltIn = BUILT_IN_TOOL_NAMES.some((name) => activeCapabilities.has(name));
+  const hasFunctions = activeCapabilities.has('functions');
+  return hasBuiltIn && hasFunctions ? true : undefined;
 }
 
 export function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationConfig {

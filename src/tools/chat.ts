@@ -79,9 +79,9 @@ import {
   getWorkspaceCacheEnabled,
 } from '../config.js';
 import {
+  buildReplayHistoryParts,
   type ContentEntry,
   createSessionStore,
-  sanitizeHistoryParts,
   type SessionEventEntry,
   type SessionGenerationContract,
   type SessionStore,
@@ -464,7 +464,7 @@ export function buildRebuiltChatContents(contents: ContentEntry[], maxBytes: num
   return selectReplayWindow(contents, maxBytes)
     .kept.map((entry) => ({
       role: entry.role,
-      parts: sanitizeHistoryParts(structuredClone(entry.parts)),
+      parts: buildReplayHistoryParts(structuredClone(entry.parts)),
     }))
     .filter((content) => content.parts.length > 0);
 }
@@ -838,7 +838,7 @@ function appendSessionTurn(
   });
   deps.appendSessionContent(sessionId, {
     role: 'model',
-    parts: sanitizeHistoryParts(askResult.streamResult.parts),
+    parts: buildReplayHistoryParts(askResult.streamResult.parts),
     timestamp,
     ...(taskId ? { taskId } : {}),
     ...(askResult.streamResult.finishReason !== undefined

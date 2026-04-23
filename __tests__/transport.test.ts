@@ -72,7 +72,7 @@ function createServerInstance(options: ServerInstanceOptions = {}) {
 function createRequest(
   body: unknown,
   sessionId?: string,
-  options: { hostHeader?: string; requestUrl?: string } = {},
+  options: { authorization?: string; hostHeader?: string; requestUrl?: string } = {},
 ): Request {
   return new Request(options.requestUrl ?? 'http://127.0.0.1:3000/mcp', {
     method: 'POST',
@@ -80,6 +80,7 @@ function createRequest(
       host: options.hostHeader ?? '127.0.0.1:3000',
       accept: 'application/json, text/event-stream',
       'content-type': 'application/json',
+      ...(options.authorization ? { authorization: options.authorization } : {}),
       ...(sessionId ? { 'mcp-session-id': sessionId } : {}),
     },
     body: JSON.stringify(body),
@@ -185,6 +186,9 @@ afterEach(() => {
   delete process.env.PORT;
   delete process.env.STATELESS;
   delete process.env.ALLOWED_HOSTS;
+  delete process.env.MCP_HTTP_TOKEN;
+  delete process.env.MCP_HTTP_RATE_LIMIT_RPS;
+  delete process.env.MCP_HTTP_RATE_LIMIT_BURST;
   ScopedLogger.prototype.error = originalScopedLoggerError;
   ScopedLogger.prototype.warn = originalScopedLoggerWarn;
   WebStandardStreamableHTTPServerTransport.prototype.handleRequest = originalWebHandleRequest;
@@ -208,6 +212,7 @@ describe('startWebStandardTransport', () => {
 
   it('accepts matching Host headers for specific non-local binds', async () => {
     process.env.HOST = 'example.internal';
+    process.env.MCP_HTTP_TOKEN = 't'.repeat(32);
     const transport = await startWebStandardTransport(() => createServerInstance());
 
     try {
@@ -227,6 +232,7 @@ describe('startWebStandardTransport', () => {
           {
             hostHeader: 'example.internal:3000',
             requestUrl: 'http://example.internal:3000/mcp',
+            authorization: `Bearer ${'t'.repeat(32)}`,
           },
         ),
       );
@@ -240,6 +246,7 @@ describe('startWebStandardTransport', () => {
 
   it('rejects mismatched Host headers for specific non-local binds', async () => {
     process.env.HOST = 'example.internal';
+    process.env.MCP_HTTP_TOKEN = 't'.repeat(32);
     const transport = await startWebStandardTransport(() => createServerInstance());
 
     try {
@@ -377,21 +384,13 @@ describe('startWebStandardTransport', () => {
     assert.strictEqual(stopCalls, 1);
   });
 
-  it('warns when STATELESS=true is exposed without ALLOWED_HOSTS', async () => {
-    const warnings: string[] = [];
+  it('rejects exposed binds without MCP_HTTP_TOKEN', async () => {
     process.env.HOST = '0.0.0.0';
     process.env.STATELESS = 'true';
-    ScopedLogger.prototype.warn = function mockWarn(message: string) {
-      warnings.push(message);
-    };
-
-    const transport = await startWebStandardTransport(() => createServerInstance());
-
-    try {
-      assert.ok(warnings.some((message) => message.includes('without DNS rebinding protection')));
-    } finally {
-      await transport.close();
-    }
+    assert.throws(
+      () => startWebStandardTransport(() => createServerInstance()),
+      /requires MCP_HTTP_TOKEN/,
+    );
   });
 });
 

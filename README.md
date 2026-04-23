@@ -186,6 +186,9 @@ Optional local transport:
 - `CORS_ORIGIN`: optional CORS origin for HTTP transports; use `*` or one `http(s)` origin
 - `STATELESS`: enable stateless HTTP transport behavior when set to `true`, default `false`
 - `ALLOWED_HOSTS`: optional comma-separated Host header allow-list for HTTP transports
+- `MCP_HTTP_TOKEN`: bearer token required when `HOST` is not `127.0.0.1`, `::1`, or `localhost`; must be at least 32 characters
+- `MCP_HTTP_RATE_LIMIT_RPS`: per-session/IP request refill rate for `/mcp`, default `10`
+- `MCP_HTTP_RATE_LIMIT_BURST`: per-session/IP request burst for `/mcp`, default `20`
 - `MAX_TRANSPORT_SESSIONS`: maximum stateful HTTP transport sessions, default `100`
 - `TRANSPORT_SESSION_TTL_MS`: idle TTL for stateful HTTP transport sessions, default `1800000`
 - `SESSION_REPLAY_MAX_BYTES`: byte budget for rebuilt chat history, default `200000`
@@ -219,6 +222,10 @@ HTTP transport:
 ```bash
 TRANSPORT=http npx tsx src/index.ts
 ```
+
+For non-loopback HTTP binds, set `MCP_HTTP_TOKEN` and send requests with
+`Authorization: Bearer <token>`. Requests over the configured burst return `429`
+with `Retry-After`.
 
 Web-standard transport:
 

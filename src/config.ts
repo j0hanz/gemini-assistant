@@ -6,6 +6,9 @@ interface TransportConfig {
   isStateless: boolean;
   maxSessions: number;
   port: number;
+  token?: string;
+  rateLimitBurst: number;
+  rateLimitRps: number;
   sessionTtlMs: number;
 }
 
@@ -19,6 +22,8 @@ const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_SESSIONS = 50;
 const DEFAULT_TRANSPORT_SESSION_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_TRANSPORT_SESSIONS = 100;
+const DEFAULT_HTTP_RATE_LIMIT_RPS = 10;
+const DEFAULT_HTTP_RATE_LIMIT_BURST = 20;
 const DEFAULT_MAX_TRANSCRIPT_ENTRIES = 50;
 const DEFAULT_MAX_EVENT_ENTRIES = 50;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_096;
@@ -85,6 +90,16 @@ function parseNonEmptyStringEnv(name: string, fallback: string): string {
   return trimmed;
 }
 
+function parseOptionalTokenEnv(name: string): string | undefined {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length < 32) {
+    throw new Error(`${name} must be at least 32 characters when set.`);
+  }
+  return trimmed;
+}
+
 function parseCorsOriginEnv(): string {
   const raw = process.env.CORS_ORIGIN;
   if (raw === undefined) return '';
@@ -130,6 +145,7 @@ export function getTransportMode(): TransportMode {
 
 export function getTransportConfig(): TransportConfig {
   const host = parseNonEmptyStringEnv('HOST', DEFAULT_HTTP_HOST);
+  const token = parseOptionalTokenEnv('MCP_HTTP_TOKEN');
 
   return {
     corsOrigin: parseCorsOriginEnv(),
@@ -140,6 +156,11 @@ export function getTransportConfig(): TransportConfig {
       max: 10_000,
     }),
     port: parseIntEnv('PORT', DEFAULT_HTTP_PORT, { min: 1, max: 65_535 }),
+    ...(token ? { token } : {}),
+    rateLimitBurst: parseIntEnv('MCP_HTTP_RATE_LIMIT_BURST', DEFAULT_HTTP_RATE_LIMIT_BURST, {
+      min: 1,
+    }),
+    rateLimitRps: parseIntEnv('MCP_HTTP_RATE_LIMIT_RPS', DEFAULT_HTTP_RATE_LIMIT_RPS, { min: 1 }),
     sessionTtlMs: parseIntEnv('TRANSPORT_SESSION_TTL_MS', DEFAULT_TRANSPORT_SESSION_TTL_MS, {
       min: 1_000,
     }),

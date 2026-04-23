@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-import { assertProtocolError, assertToolExecutionError } from './lib/mcp-contract-assertions.js';
-import { createServerHarness, type ToolCallResult } from './lib/mcp-contract-client.js';
+import { assertToolExecutionError } from './lib/mcp-contract-assertions.js';
+import {
+  createServerHarness,
+  isJsonRpcFailure,
+  type JsonRpcResponse,
+  type ToolCallResult,
+} from './lib/mcp-contract-client.js';
 import { MockGeminiEnvironment } from './lib/mock-gemini-environment.js';
 
 import { createServerInstance } from '../src/server.js';
@@ -28,8 +33,19 @@ async function createHarness() {
   );
 }
 
+function assertMaterializedToolFailure(
+  response: JsonRpcResponse,
+  expectedMessagePattern: RegExp,
+): void {
+  assert.equal(isJsonRpcFailure(response), false);
+  if (isJsonRpcFailure(response)) {
+    assert.fail(`Unexpected JSON-RPC failure: ${response.error.message}`);
+  }
+  assertToolExecutionError(response.result as ToolCallResult, expectedMessagePattern);
+}
+
 describe('public MCP error taxonomy', () => {
-  it('surfaces invalid request shapes through the protocol boundary', async () => {
+  it('materializes invalid request shapes as tool errors', async () => {
     const harness = await createHarness();
 
     try {
@@ -38,7 +54,7 @@ describe('public MCP error taxonomy', () => {
         name: 'analyze',
       });
 
-      assertProtocolError(response, -32602, /filePath/i);
+      assertMaterializedToolFailure(response, /filePath/i);
     } finally {
       await harness.close();
     }
@@ -113,7 +129,7 @@ describe('public MCP error taxonomy', () => {
     }
   });
 
-  it('rejects unknown top-level keys on chat arguments at the protocol boundary', async () => {
+  it('materializes unknown top-level keys on chat arguments as tool errors', async () => {
     const harness = await createHarness();
 
     try {
@@ -122,7 +138,7 @@ describe('public MCP error taxonomy', () => {
         name: 'chat',
       });
 
-      assertProtocolError(response, -32602, /foo|unrecognized|unknown/i);
+      assertMaterializedToolFailure(response, /foo|unrecognized|unknown/i);
     } finally {
       await harness.close();
     }

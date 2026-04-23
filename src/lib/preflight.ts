@@ -14,21 +14,12 @@ export interface GeminiRequestPreflight {
 
 type PreflightCheck = (req: GeminiRequestPreflight) => CallToolResult | undefined;
 
-function usesBuiltInTool(caps: ReadonlySet<ActiveCapability>): boolean {
-  return (
-    caps.has('googleSearch') ||
-    caps.has('urlContext') ||
-    caps.has('codeExecution') ||
-    caps.has('fileSearch')
-  );
-}
-
-const disallowSchemaWithBuiltIn: PreflightCheck = (req) => {
+const disallowSchemaWithCodeExecution: PreflightCheck = (req) => {
   const schemaRequested = req.jsonMode ?? req.responseSchema !== undefined;
-  if (schemaRequested && usesBuiltInTool(req.activeCapabilities)) {
+  if (schemaRequested && req.activeCapabilities.has('codeExecution')) {
     return new AppError(
       'chat',
-      'chat: responseSchema cannot be combined with built-in tools (googleSearch, urlContext, codeExecution, fileSearch)',
+      'chat: responseSchema cannot be combined with codeExecution',
     ).toToolResult();
   }
   return undefined;
@@ -58,7 +49,7 @@ const disallowSchemaInExistingSession: PreflightCheck = (req) => {
 };
 
 const CHECKS: readonly PreflightCheck[] = [
-  disallowSchemaWithBuiltIn,
+  disallowSchemaWithCodeExecution,
   disallowEmptyFileSearchStore,
   disallowSchemaInExistingSession,
 ];

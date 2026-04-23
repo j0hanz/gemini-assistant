@@ -4,11 +4,7 @@ import type {
   ServerContext,
   Task,
 } from '@modelcontextprotocol/server';
-import {
-  InMemoryTaskMessageQueue,
-  InMemoryTaskStore,
-  McpServer,
-} from '@modelcontextprotocol/server';
+import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
@@ -18,7 +14,6 @@ import { z } from 'zod/v4';
 import {
   createToolTaskHandlers,
   elicitTaskInput,
-  installTaskSafeToolCallHandler,
   registerTaskTool,
   runToolAsTask,
   taskTtl,
@@ -26,58 +21,8 @@ import {
 
 process.env.API_KEY ??= 'test-key-for-task-utils';
 
-interface InternalServerWithSpy {
-  __taskSafeToolCallHandlerInstalled?: boolean;
-  server: {
-    setRequestHandler: (method: 'tools/call', handler: unknown) => void;
-  };
-}
-
-function createServer(): McpServer {
-  return new McpServer(
-    { name: 'task-utils-test', version: '0.0.1' },
-    {
-      capabilities: {
-        logging: {},
-        tools: {},
-        tasks: {
-          requests: { tools: { call: {} } },
-          taskStore: new InMemoryTaskStore(),
-          taskMessageQueue: new InMemoryTaskMessageQueue(),
-        },
-      },
-    },
-  );
-}
-
 afterEach(async () => {
   // No-op placeholder to keep node:test happy if future cases add cleanup.
-});
-
-describe('installTaskSafeToolCallHandler', () => {
-  it('installs the tools/call handler only once per server', async () => {
-    const server = createServer();
-    const internalServer = server as unknown as InternalServerWithSpy;
-    let installCalls = 0;
-    const originalSetRequestHandler = internalServer.server.setRequestHandler.bind(
-      internalServer.server,
-    );
-
-    internalServer.server.setRequestHandler = (method, handler) => {
-      installCalls += 1;
-      originalSetRequestHandler(method, handler);
-    };
-
-    try {
-      installTaskSafeToolCallHandler(server);
-      installTaskSafeToolCallHandler(server);
-
-      assert.equal(internalServer.__taskSafeToolCallHandlerInstalled, true);
-      assert.equal(installCalls, 1);
-    } finally {
-      await server.close();
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -749,5 +694,44 @@ describe('registerTaskTool', () => {
       status: 'completed',
       summary: 'ok',
     });
+  });
+
+  it('stores failed status when input validation rejects task args', async () => {
+    const store = makeMockStore();
+    const ctx = makeMockContext({ taskStore: store });
+    const queue = new InMemoryTaskMessageQueue();
+    const { server, getHandler } = makeMockServer();
+    let workCalled = false;
+
+    registerTaskTool(
+      server,
+      'test-tool',
+      {
+        title: 'Test Tool',
+        description: 'test',
+        inputSchema: z.strictObject({ msg: z.string() }),
+        outputSchema: z.strictObject({ summary: z.string() }),
+        annotations: {},
+      },
+      queue,
+      async () => {
+        workCalled = true;
+        return {
+          content: [{ type: 'text', text: 'should not run' }],
+          structuredContent: { summary: 'should not run' },
+        };
+      },
+    );
+
+    const result = await getHandler().createTask({ msg: 123 }, ctx);
+
+    assert.strictEqual(result.task.taskId, 'task-1');
+    assert.strictEqual(workCalled, false);
+    assert.strictEqual(store.stored.length, 1);
+    const entry = store.stored[0];
+    assert.ok(entry);
+    assert.strictEqual(entry.status, 'failed');
+    assert.strictEqual(entry.result.isError, true);
+    assert.match(entry.result.content[0]?.text ?? '', /test-tool failed/i);
   });
 });

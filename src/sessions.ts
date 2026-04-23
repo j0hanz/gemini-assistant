@@ -184,14 +184,11 @@ function cloneContentEntry(item: ContentEntry): ContentEntry {
   };
 }
 
-export function sanitizeHistoryParts(parts: Part[]): Part[] {
+export function buildReplayHistoryParts(parts: Part[]): Part[] {
   const inlineDataMaxBytes = getSessionLimits().replayInlineDataMaxBytes;
   return parts.filter((part) => {
     if (part.thought === true) return false;
     if (part.functionCall && !part.functionCall.name) return false;
-    if (part.toolResponse || part.toolCall || part.codeExecutionResult || part.executableCode) {
-      return false;
-    }
     if (part.inlineData?.data && part.inlineData.data.length > inlineDataMaxBytes) {
       // Replay history must not retain large raw media blobs; callers should
       // use fileData for durable replayable media references instead.
@@ -202,6 +199,13 @@ export function sanitizeHistoryParts(parts: Part[]): Part[] {
       return false;
     }
     return true;
+  });
+}
+
+export function buildTranscriptParts(parts: Part[]): Part[] {
+  return parts.filter((part) => {
+    if (part.thought === true) return false;
+    return !!part.text || !!part.inlineData || !!part.fileData;
   });
 }
 

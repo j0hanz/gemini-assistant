@@ -8,11 +8,6 @@ import type {
   Task,
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
-import {
-  ProtocolError,
-  ProtocolErrorCode,
-  UrlElicitationRequiredError,
-} from '@modelcontextprotocol/server';
 
 import { AppError } from './errors.js';
 import { logger, maybeSummarizePayload } from './logger.js';
@@ -43,58 +38,6 @@ type TaskContext = NonNullable<ServerContext['task']>;
 type ExtendedTaskContext = TaskContext & { queue: TaskMessageQueue };
 type ExtendedServerContext = ServerContext & { task?: ExtendedTaskContext };
 
-interface TaskCallRequest {
-  params: {
-    arguments?: unknown;
-    name: string;
-    task?: Record<string, unknown>;
-  };
-}
-
-interface RegisteredTaskTool {
-  enabled: boolean;
-  execution?: { taskSupport?: string };
-  executor: (args: unknown, ctx: ServerContext) => Promise<CallToolResult | CreateTaskResult>;
-  handler: unknown;
-  inputSchema?: unknown;
-  outputSchema?: unknown;
-}
-
-interface InternalMcpServer {
-  _registeredTools: Record<string, RegisteredTaskTool>;
-  __taskSafeToolCallHandlerInstalled?: boolean;
-  createToolError: (errorMessage: string) => CallToolResult;
-  executeToolHandler: (
-    tool: RegisteredTaskTool,
-    args: unknown,
-    ctx: ServerContext,
-  ) => Promise<CallToolResult | CreateTaskResult>;
-  handleAutomaticTaskPolling: (
-    tool: RegisteredTaskTool,
-    request: TaskCallRequest,
-    ctx: ServerContext,
-  ) => Promise<CallToolResult>;
-  server: {
-    setRequestHandler: (
-      method: 'tools/call',
-      handler: (
-        request: TaskCallRequest,
-        ctx: ServerContext,
-      ) => Promise<CallToolResult | CreateTaskResult>,
-    ) => void;
-  };
-  validateToolInput: (
-    tool: RegisteredTaskTool,
-    args: unknown,
-    toolName: string,
-  ) => Promise<unknown>;
-  validateToolOutput: (
-    tool: RegisteredTaskTool,
-    result: CallToolResult,
-    toolName: string,
-  ) => Promise<void>;
-}
-
 type TaskWork<TArgs> = (args: TArgs, ctx: ExtendedServerContext) => Promise<CallToolResult>;
 
 interface ToolTaskHandlers<TArgs> {
@@ -106,6 +49,77 @@ interface ToolTaskHandlers<TArgs> {
 type RegisterToolTask = McpServer['experimental']['tasks']['registerToolTask'];
 type TaskToolConfig = Omit<Parameters<RegisterToolTask>[1], 'execution'>;
 type TaskToolHandler = Parameters<RegisterToolTask>[2];
+interface SafeParseSchema {
+  safeParse: (
+    value: unknown,
+  ) => { success: true; data: unknown } | { success: false; error: unknown };
+}
+interface ParseSchema {
+  parse: (value: unknown) => unknown;
+}
+interface JsonSchemaProvider {
+  input: (options: { target: string }) => unknown;
+  output?: (options: { target: string }) => unknown;
+}
+interface StandardSchemaLike {
+  '~standard': {
+    jsonSchema: JsonSchemaProvider;
+    validate: (value: unknown) => { value: unknown };
+  };
+}
+
+function hasSafeParse(schema: unknown): schema is SafeParseSchema {
+  return (
+    typeof schema === 'object' &&
+    schema !== null &&
+    'safeParse' in schema &&
+    typeof schema.safeParse === 'function'
+  );
+}
+
+function hasParse(schema: unknown): schema is ParseSchema {
+  return (
+    typeof schema === 'object' &&
+    schema !== null &&
+    'parse' in schema &&
+    typeof schema.parse === 'function'
+  );
+}
+
+function hasStandardSchema(schema: unknown): schema is StandardSchemaLike {
+  return (
+    typeof schema === 'object' &&
+    schema !== null &&
+    '~standard' in schema &&
+    typeof schema['~standard'] === 'object' &&
+    schema['~standard'] !== null
+  );
+}
+
+function createSdkPassthroughInputSchema(schema: unknown): unknown {
+  if (!hasStandardSchema(schema)) {
+    return schema;
+  }
+
+  return {
+    '~standard': {
+      jsonSchema: schema['~standard'].jsonSchema,
+      validate: (value: unknown) => ({ value }),
+    },
+  } satisfies StandardSchemaLike;
+}
+
+function parseTaskInput(schema: unknown, args: unknown): unknown {
+  if (hasSafeParse(schema)) {
+    const parsed = schema.safeParse(args);
+    if (parsed.success) return parsed.data;
+    throw parsed.error;
+  }
+  if (hasParse(schema)) {
+    return schema.parse(args);
+  }
+  return args;
+}
 
 export async function elicitTaskInput(
   ctx: ServerContext,
@@ -260,10 +274,6 @@ async function materializeTaskFailure(
   await store.storeTaskResult(task.taskId, 'failed', appError.toToolResult());
 }
 
-function isTaskHandler(handler: unknown): handler is TaskToolHandler {
-  return typeof handler === 'object' && handler !== null && 'createTask' in handler;
-}
-
 function wrapTaskSafeWork<TArgs>(toolName: string, work: TaskWork<TArgs>): TaskWork<TArgs> {
   return async (args, ctx) => {
     try {
@@ -292,143 +302,24 @@ async function ensureTerminalTaskProgress(
   return result;
 }
 
-async function validateAndExecute<TResult extends CallToolResult | CreateTaskResult>(
-  server: InternalMcpServer,
-  tool: RegisteredTaskTool,
-  request: TaskCallRequest,
-  ctx: ServerContext,
-): Promise<TResult> {
-  const args = await server.validateToolInput(tool, request.params.arguments, request.params.name);
-  return (await server.executeToolHandler(tool, args, ctx)) as TResult;
-}
-
-async function handleStandardToolCall(
-  server: InternalMcpServer,
-  tool: RegisteredTaskTool,
-  request: TaskCallRequest,
-  ctx: ServerContext,
-): Promise<CallToolResult> {
-  try {
-    const result = await validateAndExecute<CallToolResult>(server, tool, request, ctx);
-    await server.validateToolOutput(tool, result, request.params.name);
-    return result;
-  } catch (error) {
-    rethrowElicitation(error);
-    return server.createToolError(error instanceof Error ? error.message : String(error));
-  }
-}
-
-async function handleTaskAugmentedToolCall(
-  server: InternalMcpServer,
-  tool: RegisteredTaskTool,
-  request: TaskCallRequest,
-  ctx: ServerContext,
-): Promise<CreateTaskResult> {
-  try {
-    return await validateAndExecute<CreateTaskResult>(server, tool, request, ctx);
-  } catch (error) {
-    rethrowElicitation(error);
-
-    const { task, taskContext } = await createTaskOrFail(ctx);
-    await materializeTaskFailure(
-      request.params.name,
-      taskContext.store,
-      task,
-      error,
-      request.params.arguments,
-    );
-    return { task };
-  }
-}
-
-function rethrowElicitation(error: unknown): void {
-  if (error instanceof UrlElicitationRequiredError) {
-    throw error;
-  }
-}
-
-function checkTaskSupportConstraints(
-  toolName: string,
-  taskSupport: string | undefined,
-  taskRequest: boolean,
-  taskHandler: boolean,
-): void {
-  if (taskRequest && !taskHandler) {
-    throw new ProtocolError(
-      ProtocolErrorCode.MethodNotFound,
-      `Tool ${toolName} does not support task augmentation`,
-    );
-  }
-  if ((taskSupport === 'required' || taskSupport === 'optional') && !taskHandler) {
-    throw new ProtocolError(
-      ProtocolErrorCode.InternalError,
-      `Tool ${toolName} has taskSupport '${taskSupport}' but was not registered with registerToolTask`,
-    );
-  }
-  if (taskSupport === 'required' && !taskRequest) {
-    throw new ProtocolError(
-      ProtocolErrorCode.MethodNotFound,
-      `Tool ${toolName} requires task augmentation (taskSupport: 'required')`,
-    );
-  }
-}
-
-export function installTaskSafeToolCallHandler(server: McpServer): void {
-  const internalServer = server as unknown as InternalMcpServer;
-  if (internalServer.__taskSafeToolCallHandlerInstalled) {
-    return;
-  }
-  internalServer.__taskSafeToolCallHandlerInstalled = true;
-
-  internalServer.server.setRequestHandler(
-    'tools/call',
-    async (request: TaskCallRequest, ctx: ServerContext) => {
-      const tool = internalServer._registeredTools[request.params.name];
-      if (!tool) {
-        throw new ProtocolError(
-          ProtocolErrorCode.InvalidParams,
-          `Tool ${request.params.name} not found`,
-        );
-      }
-      if (!tool.enabled) {
-        throw new ProtocolError(
-          ProtocolErrorCode.InvalidParams,
-          `Tool ${request.params.name} disabled`,
-        );
-      }
-
-      const taskSupport = tool.execution?.taskSupport;
-      const taskRequest = !!request.params.task;
-      const taskHandler = isTaskHandler(tool.handler);
-
-      checkTaskSupportConstraints(request.params.name, taskSupport, taskRequest, taskHandler);
-
-      if (taskSupport === 'optional' && !taskRequest && taskHandler) {
-        return await internalServer.handleAutomaticTaskPolling(tool, request, ctx);
-      }
-
-      // The SDK validates task-augmented results against CreateTaskResultSchema after this
-      // handler returns. If input validation fails here and we return a normal tool error
-      // result, the outer wrapper rewrites the real cause to the opaque -32602 "Invalid
-      // task creation result". Convert failures into stored failed tasks and return { task }.
-      if (taskRequest) {
-        return await handleTaskAugmentedToolCall(internalServer, tool, request, ctx);
-      }
-
-      return await handleStandardToolCall(internalServer, tool, request, ctx);
-    },
-  );
-}
-
 export function createToolTaskHandlers<TArgs>(
   toolName: string,
   work: TaskWork<TArgs>,
   taskMessageQueue: TaskMessageQueue,
   toolLabel = toolName,
+  inputSchema?: unknown,
 ): ToolTaskHandlers<TArgs> {
   return {
-    createTask: async (args, ctx) => {
+    createTask: async (rawArgs, ctx) => {
       const { task, taskContext } = await createTaskOrFail(ctx);
+      let args: TArgs;
+      try {
+        args = parseTaskInput(inputSchema, rawArgs) as TArgs;
+      } catch (err) {
+        await materializeTaskFailure(toolName, taskContext.store, task, err, rawArgs);
+        return { task };
+      }
+
       const taskExecutionContext: ExtendedServerContext = {
         ...ctx,
         task: {
@@ -499,18 +390,20 @@ export function registerTaskTool<TArgs>(
           name,
           toolLabel,
           args,
-          work as unknown as (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
+          work as (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
         ),
       ),
     ),
     taskMessageQueue,
     toolLabel,
+    config.inputSchema,
   ) as TaskToolHandler;
 
   server.experimental.tasks.registerToolTask(
     name,
     {
       ...config,
+      inputSchema: createSdkPassthroughInputSchema(config.inputSchema),
       execution: TASK_EXECUTION,
     } as Parameters<RegisterToolTask>[1],
     handler,

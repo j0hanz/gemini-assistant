@@ -29,6 +29,9 @@ const NEW_VARS = [
   'CORS_ORIGIN',
   'STATELESS',
   'ALLOWED_HOSTS',
+  'MCP_HTTP_TOKEN',
+  'MCP_HTTP_RATE_LIMIT_RPS',
+  'MCP_HTTP_RATE_LIMIT_BURST',
   'MAX_TRANSPORT_SESSIONS',
   'TRANSPORT_SESSION_TTL_MS',
   'ROOTS',
@@ -129,6 +132,8 @@ describe('config parsing', () => {
       isStateless: true,
       maxSessions: 250,
       port: 3100,
+      rateLimitBurst: 20,
+      rateLimitRps: 10,
       sessionTtlMs: 60_000,
     });
   });
@@ -140,8 +145,33 @@ describe('config parsing', () => {
       isStateless: false,
       maxSessions: 100,
       port: 3000,
+      rateLimitBurst: 20,
+      rateLimitRps: 10,
       sessionTtlMs: 30 * 60 * 1000,
     });
+  });
+
+  it('returns validated HTTP auth and rate-limit config values', () => {
+    process.env.MCP_HTTP_TOKEN = 'x'.repeat(32);
+    process.env.MCP_HTTP_RATE_LIMIT_RPS = '7';
+    process.env.MCP_HTTP_RATE_LIMIT_BURST = '11';
+
+    assert.strictEqual(getTransportConfig().token, 'x'.repeat(32));
+    assert.strictEqual(getTransportConfig().rateLimitRps, 7);
+    assert.strictEqual(getTransportConfig().rateLimitBurst, 11);
+  });
+
+  it('rejects invalid HTTP auth and rate-limit config values', () => {
+    process.env.MCP_HTTP_TOKEN = 'short';
+    assert.throws(() => getTransportConfig(), /MCP_HTTP_TOKEN/);
+
+    delete process.env.MCP_HTTP_TOKEN;
+    process.env.MCP_HTTP_RATE_LIMIT_RPS = '0';
+    assert.throws(() => getTransportConfig(), /MCP_HTTP_RATE_LIMIT_RPS/);
+
+    process.env.MCP_HTTP_RATE_LIMIT_RPS = '1';
+    process.env.MCP_HTTP_RATE_LIMIT_BURST = '0';
+    assert.throws(() => getTransportConfig(), /MCP_HTTP_RATE_LIMIT_BURST/);
   });
 
   it('accepts wildcard CORS origin', () => {

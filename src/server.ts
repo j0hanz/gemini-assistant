@@ -11,7 +11,6 @@ import { AppError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
 import { SESSIONS_LIST_URI } from './lib/resource-uris.js';
-import { installTaskSafeToolCallHandler } from './lib/task-utils.js';
 import { buildServerRootsFetcher } from './lib/validation.js';
 import { createWorkspaceCacheManager } from './lib/workspace-context.js';
 
@@ -177,7 +176,6 @@ export function createServerInstance(): ServerInstance {
   });
 
   registerServerTools(server, { sessionStore, taskMessageQueue, workspaceCacheManager });
-  installTaskSafeToolCallHandler(server);
 
   const rootsFetcher = buildServerRootsFetcher(server);
   registerPrompts(server);

@@ -163,8 +163,29 @@ describe('ask contract', () => {
     });
   });
 
-  it('returns the exact validation error for responseSchema plus googleSearch', async () => {
-    const askWork = createAskWork(createDeps());
+  it('allows responseSchema plus googleSearch', async () => {
+    const askWork = createAskWork(
+      createDeps({
+        runWithoutSession: async (args: Record<string, unknown>) =>
+          ({
+            result: {
+              content: [{ type: 'text' as const, text: '{"answer":"ok"}' }],
+              structuredContent: { answer: '', data: { answer: 'ok' } },
+            },
+            streamResult: {
+              functionCalls: [],
+              parts: [],
+              text: '{"answer":"ok"}',
+              thoughtText: '',
+              toolEvents: [],
+              toolsUsed: [],
+              toolsUsedOccurrences: [],
+            },
+            toolProfile: 'googleSearch',
+            observedArgs: args,
+          }) as never,
+      }),
+    );
 
     const result = await askWork(
       {
@@ -178,19 +199,32 @@ describe('ask contract', () => {
       createContext(),
     );
 
-    assert.deepStrictEqual(result, {
-      content: [
-        {
-          type: 'text',
-          text: 'chat: responseSchema cannot be combined with built-in tools (googleSearch, urlContext, codeExecution, fileSearch)',
-        },
-      ],
-      isError: true,
-    });
+    assert.strictEqual(result.isError, undefined);
   });
 
-  it('returns the exact validation error for responseSchema plus url context', async () => {
-    const askWork = createAskWork(createDeps());
+  it('allows responseSchema plus url context', async () => {
+    const askWork = createAskWork(
+      createDeps({
+        runWithoutSession: async (args: Record<string, unknown>) =>
+          ({
+            result: {
+              content: [{ type: 'text' as const, text: '{"answer":"ok"}' }],
+              structuredContent: { answer: '', data: { answer: 'ok' } },
+            },
+            streamResult: {
+              functionCalls: [],
+              parts: [],
+              text: '{"answer":"ok"}',
+              thoughtText: '',
+              toolEvents: [],
+              toolsUsed: [],
+              toolsUsedOccurrences: [],
+            },
+            toolProfile: 'urlContext',
+            observedArgs: args,
+          }) as never,
+      }),
+    );
 
     const result = await askWork(
       {
@@ -204,11 +238,29 @@ describe('ask contract', () => {
       createContext(),
     );
 
+    assert.strictEqual(result.isError, undefined);
+  });
+
+  it('returns the exact validation error for responseSchema plus codeExecution', async () => {
+    const askWork = createAskWork(createDeps());
+
+    const result = await askWork(
+      {
+        message: 'hello',
+        codeExecution: true,
+        responseSchema: {
+          type: 'object',
+          properties: { answer: { type: 'string' } },
+        },
+      },
+      createContext(),
+    );
+
     assert.deepStrictEqual(result, {
       content: [
         {
           type: 'text',
-          text: 'chat: responseSchema cannot be combined with built-in tools (googleSearch, urlContext, codeExecution, fileSearch)',
+          text: 'chat: responseSchema cannot be combined with codeExecution',
         },
       ],
       isError: true,

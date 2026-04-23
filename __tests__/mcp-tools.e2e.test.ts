@@ -5,11 +5,13 @@ import { FinishReason } from '@google/genai';
 
 import {
   assertAdvertisedOutputSchema,
-  assertProtocolError,
+  assertToolExecutionError,
   schemaRequiresField,
 } from './lib/mcp-contract-assertions.js';
 import {
   createServerHarness,
+  isJsonRpcFailure,
+  type JsonRpcResponse,
   type JsonRpcTestClient,
   type ToolAnnotations,
   type ToolCallResult,
@@ -49,6 +51,17 @@ async function createHarness() {
       flushBeforeClose: 2,
     },
   );
+}
+
+function assertMaterializedToolFailure(
+  response: JsonRpcResponse,
+  expectedMessagePattern: RegExp,
+): void {
+  assert.equal(isJsonRpcFailure(response), false);
+  if (isJsonRpcFailure(response)) {
+    assert.fail(`Unexpected JSON-RPC failure: ${response.error.message}`);
+  }
+  assertToolExecutionError(response.result as ToolCallResult, expectedMessagePattern);
 }
 
 async function listTools(client: JsonRpcTestClient): Promise<ToolInfo[]> {
@@ -485,7 +498,7 @@ describe('MCP tool smoke coverage', () => {
     }
   });
 
-  it('surfaces invalid public tool payloads through the request boundary', async () => {
+  it('materializes invalid public task-tool payloads as tool errors', async () => {
     const harness = await createHarness();
 
     try {
@@ -493,7 +506,7 @@ describe('MCP tool smoke coverage', () => {
         arguments: { goal: 'Summarize this file' },
         name: 'analyze',
       });
-      assertProtocolError(invalidAnalyzeShape, -32602, /filePath/i);
+      assertMaterializedToolFailure(invalidAnalyzeShape, /filePath/i);
 
       const invalidAnalyzeTargets = await harness.client.requestRaw('tools/call', {
         arguments: {
@@ -504,7 +517,7 @@ describe('MCP tool smoke coverage', () => {
         },
         name: 'analyze',
       });
-      assertProtocolError(invalidAnalyzeTargets, -32602, /public http:\/\/ or https:\/\//i);
+      assertMaterializedToolFailure(invalidAnalyzeTargets, /public http:\/\/ or https:\/\//i);
 
       const invalidChatSchema = await harness.client.requestRaw('tools/call', {
         arguments: {
@@ -518,7 +531,7 @@ describe('MCP tool smoke coverage', () => {
         },
         name: 'chat',
       });
-      assertProtocolError(invalidChatSchema, -32602, /responseSchemaJson|type|number/i);
+      assertMaterializedToolFailure(invalidChatSchema, /responseSchemaJson|type|number/i);
 
       const removedChatSession = await harness.client.requestRaw('tools/call', {
         arguments: {
@@ -527,7 +540,7 @@ describe('MCP tool smoke coverage', () => {
         },
         name: 'chat',
       });
-      assertProtocolError(removedChatSession, -32602, /session/i);
+      assertMaterializedToolFailure(removedChatSession, /session/i);
 
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);
     } finally {

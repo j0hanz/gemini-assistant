@@ -75,9 +75,15 @@ describe('buildOrchestrationConfig', () => {
     assert.deepStrictEqual(result.toolConfig, { includeServerSideToolInvocations: true });
   });
 
-  it('auto-enables server-side tool invocations only when capabilities are active', () => {
+  it('auto-enables server-side tool invocations only for mixed built-in and function flows', () => {
     const result = buildOrchestrationConfig({ builtInToolNames: ['googleSearch'] });
-    assert.deepStrictEqual(result.toolConfig, { includeServerSideToolInvocations: true });
+    assert.strictEqual(result.toolConfig, undefined);
+
+    const mixed = buildOrchestrationConfig({
+      builtInToolNames: ['googleSearch'],
+      functionDeclarations: [{ name: 'lookup', parameters: {} }],
+    });
+    assert.deepStrictEqual(mixed.toolConfig, { includeServerSideToolInvocations: true });
 
     const empty = buildOrchestrationConfig({});
     assert.strictEqual(empty.toolConfig, undefined);
@@ -135,7 +141,7 @@ describe('buildOrchestrationConfig', () => {
     assert.deepStrictEqual(result.tools, [{ functionDeclarations: declarations }]);
     assert.strictEqual(result.activeCapabilities.has('functions'), true);
     assert.strictEqual(result.functionCallingMode, FunctionCallingConfigMode.ANY);
-    assert.deepStrictEqual(result.toolConfig, { includeServerSideToolInvocations: true });
+    assert.strictEqual(result.toolConfig, undefined);
   });
 
   it('rejects legacy builtInToolNames fileSearch without a spec', () => {
@@ -194,7 +200,14 @@ describe('resolveServerSideToolInvocations', () => {
   it('resolves the policy truth table', () => {
     assert.strictEqual(resolveServerSideToolInvocations('auto', new Set()), undefined);
     assert.strictEqual(resolveServerSideToolInvocations(undefined, new Set()), undefined);
-    assert.strictEqual(resolveServerSideToolInvocations('auto', new Set(['googleSearch'])), true);
+    assert.strictEqual(
+      resolveServerSideToolInvocations('auto', new Set(['googleSearch'])),
+      undefined,
+    );
+    assert.strictEqual(
+      resolveServerSideToolInvocations('auto', new Set(['googleSearch', 'functions'])),
+      true,
+    );
     assert.strictEqual(resolveServerSideToolInvocations('always', new Set()), true);
     assert.strictEqual(
       resolveServerSideToolInvocations('never', new Set(['googleSearch'])),

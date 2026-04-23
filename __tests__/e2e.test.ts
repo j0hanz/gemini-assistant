@@ -6,8 +6,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
-import { assertProtocolError, assertStablePublicSurface } from './lib/mcp-contract-assertions.js';
-import { createServerHarness } from './lib/mcp-contract-client.js';
+import {
+  assertProtocolError,
+  assertStablePublicSurface,
+  assertToolExecutionError,
+} from './lib/mcp-contract-assertions.js';
+import {
+  createServerHarness,
+  isJsonRpcFailure,
+  type ToolCallResult,
+} from './lib/mcp-contract-client.js';
 
 import {
   PUBLIC_PROMPT_NAMES,
@@ -106,7 +114,7 @@ describe('in-memory MCP server e2e', () => {
     assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);
   });
 
-  it('surfaces request-shape validation as JSON-RPC protocol errors', async () => {
+  it('materializes task-tool request-shape validation as tool errors', async () => {
     const harness = await createServerHarness(createServerInstance, {
       capabilities: { roots: {} },
     });
@@ -118,7 +126,11 @@ describe('in-memory MCP server e2e', () => {
       arguments: { goal: 'Summarize this file' },
       name: 'analyze',
     });
-    assertProtocolError(invalidAnalyzeRequest, -32602, /filePath/i);
+    assert.equal(isJsonRpcFailure(invalidAnalyzeRequest), false);
+    if (isJsonRpcFailure(invalidAnalyzeRequest)) {
+      assert.fail(`Unexpected JSON-RPC failure: ${invalidAnalyzeRequest.error.message}`);
+    }
+    assertToolExecutionError(invalidAnalyzeRequest.result as ToolCallResult, /filePath/i);
 
     const invalidChatSchema = await harness.client.requestRaw('tools/call', {
       arguments: {
@@ -132,7 +144,14 @@ describe('in-memory MCP server e2e', () => {
       },
       name: 'chat',
     });
-    assertProtocolError(invalidChatSchema, -32602, /responseSchemaJson|type|number/i);
+    assert.equal(isJsonRpcFailure(invalidChatSchema), false);
+    if (isJsonRpcFailure(invalidChatSchema)) {
+      assert.fail(`Unexpected JSON-RPC failure: ${invalidChatSchema.error.message}`);
+    }
+    assertToolExecutionError(
+      invalidChatSchema.result as ToolCallResult,
+      /responseSchemaJson|type|number/i,
+    );
   });
 
   it('reads workspace://context as markdown through MCP', async () => {

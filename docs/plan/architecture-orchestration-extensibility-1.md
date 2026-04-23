@@ -9,6 +9,9 @@ tags: [architecture, feature, refactor, orchestration]
 
 # Introduction
 
+> [!NOTE]
+> The `additionalTools` goal of this plan has been **reverted** by [`refactor-public-contract-integrity-1.md`](refactor-public-contract-integrity-1.md). No public surface actually plumbed client-supplied function declarations through the `additionalTools` path, and the field remained undocumented on the public contract. The Zod input fields, the `OrchestrationRequest.additionalTools` property, and all call-site plumbing have been removed. Client-side function calling on `chat` remains available via the dedicated `functions` field. The dynamic-capability-set and Code Execution portions of this plan remain in effect.
+
 ![Status: Completed](https://img.shields.io/badge/status-Completed-brightgreen)
 
 This plan implements the high-value architectural improvements identified during the Gemini tool orchestration audit. It focuses on three critical enhancements: refactoring rigid capability flags into dynamic sets, plumbing custom `additionalTools` through to the public MCP inputs, and exposing Gemini Code Execution directly within standard chat sessions.

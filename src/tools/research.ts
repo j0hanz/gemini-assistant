@@ -81,7 +81,7 @@ type StreamResponseBuilder<T extends Record<string, unknown>> = Parameters<
 >[4];
 type GenerationConfigFields = Pick<
   ResearchInput,
-  'maxOutputTokens' | 'safetySettings' | 'thinkingBudget' | 'additionalTools' | 'fileSearch'
+  'maxOutputTokens' | 'safetySettings' | 'thinkingBudget' | 'fileSearch'
 >;
 
 function buildResearchBuiltInSpecs(
@@ -619,7 +619,6 @@ async function runDeepResearchPlan(
     urls?: readonly string[] | undefined;
     maxOutputTokens?: number | undefined;
     safetySettings?: ResearchInput['safetySettings'] | undefined;
-    additionalTools?: ResearchInput['additionalTools'] | undefined;
     fileSearch?: ResearchInput['fileSearch'] | undefined;
   },
   ctx: ServerContext,
@@ -670,10 +669,6 @@ async function runDeepResearchPlan(
         args.fileSearch,
       ),
       urls: args.urls,
-      serverSideToolInvocations: 'always',
-      ...(args.additionalTools
-        ? { additionalTools: args.additionalTools as import('@google/genai').ToolListUnion }
-        : {}),
     },
     ctx,
     'agentic_search',
@@ -718,7 +713,6 @@ async function runDeepResearchPlan(
         args.searchDepth >= 4 ? (['codeExecution'] as const) : undefined,
         args.fileSearch,
       ),
-      serverSideToolInvocations: 'always',
     },
     ctx,
     'agentic_search',
@@ -795,7 +789,6 @@ async function searchWork(
     thinkingBudget,
     maxOutputTokens,
     safetySettings,
-    additionalTools,
     fileSearch,
   }: SearchInput & GenerationConfigFields,
   ctx: ServerContext,
@@ -809,10 +802,6 @@ async function searchWork(
         fileSearch,
       ),
       urls,
-      serverSideToolInvocations: 'always',
-      ...(additionalTools
-        ? { additionalTools: additionalTools as import('@google/genai').ToolListUnion }
-        : {}),
     },
     ctx,
     'search',
@@ -867,7 +856,6 @@ export async function analyzeUrlWork(
     {
       builtInToolSpecs: buildResearchBuiltInSpecs(['urlContext'] as const, fileSearch),
       urls,
-      serverSideToolInvocations: 'always',
     },
     ctx,
     'analyze_url',
@@ -920,7 +908,6 @@ async function agenticSearchWork(
     urls,
     maxOutputTokens,
     safetySettings,
-    additionalTools,
     fileSearch,
   }: Omit<AgenticSearchInput, 'thinkingLevel'> &
     GenerationConfigFields & {
@@ -959,7 +946,6 @@ async function agenticSearchWork(
         urls,
         maxOutputTokens,
         safetySettings,
-        additionalTools,
         fileSearch,
       },
       ctx,
@@ -982,10 +968,6 @@ async function agenticSearchWork(
         fileSearch,
       ),
       urls,
-      serverSideToolInvocations: 'always',
-      ...(additionalTools
-        ? { additionalTools: additionalTools as import('@google/genai').ToolListUnion }
-        : {}),
     },
     ctx,
     'agentic_search',
@@ -1038,7 +1020,6 @@ async function runQuickResearch(
       urls: args.urls,
       maxOutputTokens: args.maxOutputTokens,
       safetySettings: args.safetySettings,
-      additionalTools: args.additionalTools,
       fileSearch: args.fileSearch,
     },
     ctx,
@@ -1060,7 +1041,6 @@ async function runDeepResearch(args: ResearchInput, ctx: ServerContext): Promise
       urls: args.urls,
       maxOutputTokens: args.maxOutputTokens,
       safetySettings: args.safetySettings,
-      additionalTools: args.additionalTools,
       fileSearch: args.fileSearch,
     },
     ctx,

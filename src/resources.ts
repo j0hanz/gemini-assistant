@@ -449,7 +449,7 @@ export function getSessionTurnPartsResourceData(
     );
   }
 
-  return structuredClone(contentEntry.parts);
+  return structuredClone(contentEntry.rawParts ?? contentEntry.parts);
 }
 
 export function readSessionTranscriptResource(
@@ -643,8 +643,9 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
     {
       title: 'Chat Session Turn Parts',
       description:
-        'Raw Gemini model-turn Part[] for replay-safe orchestration. ' +
-        'This resource serves the verbatim persisted parts for one session content entry.',
+        'Raw Gemini model-turn `Part[]` for replay-safe orchestration. ' +
+        'Oversized `inlineData` payloads are elided but all other parts — ' +
+        'including `thought` and `thoughtSignature` — are served verbatim.',
       mimeType: 'application/json',
       annotations: {
         audience: ['assistant'],

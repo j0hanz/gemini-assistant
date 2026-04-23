@@ -119,10 +119,6 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
       'Typed Gemini function declarations. The MCP client owns function execution and returns function responses through the session.',
     ),
     serverSideToolInvocations: ServerSideToolInvocationsSchema,
-    additionalTools: withFieldMetadata(
-      z.unknown().array().optional(),
-      'Optional list of custom Gemini Tool declarations. The MCP server will return functionCalls for the client to execute.',
-    ),
   });
 }
 
@@ -152,10 +148,6 @@ export const ResearchInputBaseSchema = z.strictObject({
   fileSearch: withFieldMetadata(
     FileSearchSpecSchema.optional(),
     'Enable Gemini File Search over named stores alongside research retrieval.',
-  ),
-  additionalTools: withFieldMetadata(
-    z.unknown().array().optional(),
-    'Optional list of custom Gemini Tool declarations. The MCP server will return functionCalls for the client to execute.',
   ),
 });
 export const ResearchInputSchema = ResearchInputBaseSchema.superRefine(validateFlatResearchInput);
@@ -312,10 +304,6 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
       'Typed Gemini function declarations. The MCP client owns function execution and returns function responses through the session.',
     ),
     serverSideToolInvocations: ServerSideToolInvocationsSchema,
-    additionalTools: withFieldMetadata(
-      z.unknown().array().optional(),
-      'Optional list of custom Gemini Tool declarations. The MCP server will return functionCalls for the client to execute.',
-    ),
     googleSearch: withFieldMetadata(
       z.boolean().optional(),
       'Enable Google Search grounding. Optional; additive. Combine with `urls` for URL Context.',

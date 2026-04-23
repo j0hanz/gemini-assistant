@@ -267,7 +267,7 @@ describe('ask contract', () => {
     });
   });
 
-  it('resolves orchestration config with codeExecution and additionalTools', async () => {
+  it('resolves orchestration config with codeExecution', async () => {
     const stub = withGeminiStreamStub(['ok']);
     try {
       const askWork = createAskWork(
@@ -279,7 +279,6 @@ describe('ask contract', () => {
         {
           message: 'Hello',
           codeExecution: true,
-          additionalTools: [{ functionDeclarations: [{ name: 'test', parameters: {} }] }] as never,
         },
         createContext(),
       );
@@ -289,10 +288,6 @@ describe('ask contract', () => {
       assert.ok(
         tools?.some((t) => 'codeExecution' in t),
         'codeExecution was not included',
-      );
-      assert.ok(
-        tools?.some((t) => 'functionDeclarations' in t),
-        'additionalTools were not included',
       );
     } finally {
       stub.restore();

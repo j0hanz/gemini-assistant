@@ -30,7 +30,14 @@ export interface TranscriptEntry {
 
 export interface ContentEntry {
   role: 'user' | 'model';
+  /** Replay-safe parts for session rebuild. Filtered via {@link buildReplayHistoryParts}. */
   parts: Part[];
+  /**
+   * SDK-faithful Gemini `Part[]` for the `gemini://sessions/.../parts` resource.
+   * Oversized `inlineData` payloads are elided, but `thought` parts and
+   * `thoughtSignature` values are preserved verbatim.
+   */
+  rawParts?: Part[];
   timestamp: number;
   taskId?: string;
   finishReason?: FinishReason;
@@ -178,10 +185,31 @@ function cloneContentEntry(item: ContentEntry): ContentEntry {
   return {
     ...item,
     parts: cloneValue(item.parts),
+    ...(item.rawParts !== undefined ? { rawParts: cloneValue(item.rawParts) } : {}),
     ...(item.finishReason !== undefined ? { finishReason: item.finishReason } : {}),
     ...(item.finishMessage !== undefined ? { finishMessage: item.finishMessage } : {}),
     ...(item.promptBlockReason !== undefined ? { promptBlockReason: item.promptBlockReason } : {}),
   };
+}
+
+/**
+ * Produce SDK-faithful Gemini parts for persistence under {@link ContentEntry.rawParts}.
+ * Only oversized `inlineData` payloads are dropped (to cap memory); `thought`
+ * parts, nameless `functionCall`s, and `thoughtSignature` values are preserved
+ * so replay-safe orchestration retains Gemini-native structure.
+ */
+export function capRawParts(parts: Part[]): Part[] {
+  const inlineDataMaxBytes = getSessionLimits().replayInlineDataMaxBytes;
+  return parts.filter((part) => {
+    if (part.inlineData?.data && part.inlineData.data.length > inlineDataMaxBytes) {
+      logger.child('sessions').debug('Dropping oversized inlineData part from raw parts', {
+        inlineDataBytes: part.inlineData.data.length,
+        inlineDataMaxBytes,
+      });
+      return false;
+    }
+    return true;
+  });
 }
 
 export function buildReplayHistoryParts(parts: Part[]): Part[] {

@@ -256,7 +256,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
             ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
           ],
           urls,
-          serverSideToolInvocations: 'always',
+          // Built-in tools only; no function-calling mix. Default 'auto' policy.
         },
         (activeCaps) => {
           const { promptText, systemInstruction } = buildFileAnalysisPrompt({
@@ -345,7 +345,7 @@ async function analyzeMultiFileWork(
           ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
         ],
         urls,
-        serverSideToolInvocations: 'always',
+        // Built-in tools only; no function-calling mix. Default 'auto' policy.
       },
       (activeCaps) => {
         const prompt = buildFileAnalysisPrompt({
@@ -438,7 +438,8 @@ async function analyzeDiagramWork(
       {
         builtInToolNames: diagramBuiltInTools,
         ...(args.targetKind === 'url' ? { urls: args.urls } : {}),
-        serverSideToolInvocations: diagramBuiltInTools.length > 0 ? 'always' : 'never',
+        // Built-in tools only when present; no function-calling mix. Suppress traces when no built-ins.
+        serverSideToolInvocations: diagramBuiltInTools.length > 0 ? 'auto' : 'never',
       },
       () => {
         const prompt = buildDiagramGenerationPrompt({

@@ -97,17 +97,6 @@ describe('buildOrchestrationConfig', () => {
     assert.strictEqual(result.toolConfig, undefined);
   });
 
-  it('composes additional tools alongside built-ins', () => {
-    const result = buildOrchestrationConfig({
-      builtInToolNames: ['googleSearch'],
-      additionalTools: [{ functionDeclarations: [{ name: 'x', parameters: {} }] }],
-    });
-    const tools = result.tools ?? [];
-    assert.strictEqual(tools.length, 2);
-    assert.strictEqual(result.activeCapabilities.has('googleSearch'), true);
-    assert.ok(tools.some((tool) => 'functionDeclarations' in tool));
-  });
-
   it('threads functionCallingMode through the resolved config', () => {
     const result = buildOrchestrationConfig({
       builtInToolNames: ['googleSearch'],

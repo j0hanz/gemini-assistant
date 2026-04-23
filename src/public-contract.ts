@@ -130,10 +130,9 @@ export const DISCOVERY_ENTRIES = [
       'fileSearch?',
       'functions?',
       'serverSideToolInvocations?',
-      'additionalTools?',
     ],
     returns:
-      'A direct answer, optional structured data, usage/safety/citation metadata, and session resource links, including raw turn parts for replay orchestration when sessions are active.',
+      'A direct answer, optional structured data, usage/safety/citation metadata, and session resource links. When sessions are active, raw Gemini `Part[]` are persisted for replay-safe orchestration via the session-turn-parts resource.',
     limitations: [
       'Sessions are stored in server memory only and expire or evict over time.',
       'Sessions require a stateful server connection path; stateless transport mode does not preserve chat continuity across requests.',
@@ -164,7 +163,6 @@ export const DISCOVERY_ENTRIES = [
       'maxOutputTokens?',
       'safetySettings?',
       'fileSearch?',
-      'additionalTools?',
     ],
     returns:
       'A summary with grounding status, grounding signals, claim-linked findings, Google Search sources, URL Context provenance, warnings, and tool-usage details from the multi-step research path.',
@@ -365,10 +363,11 @@ export const DISCOVERY_ENTRIES = [
     name: 'gemini://sessions/{sessionId}/turns/{turnIndex}/parts',
     kind: 'resource',
     title: 'Session Turn Parts Resource',
-    bestFor: 'Retrieving raw Gemini Part[] for one persisted model turn.',
+    bestFor: 'Retrieving SDK-faithful Gemini `Part[]` for one persisted model turn.',
     whenToUse: 'Use for replay-safe multi-turn orchestration that needs SDK-faithful parts.',
     inputs: ['sessionId', 'turnIndex'],
-    returns: 'JSON array of raw Gemini Part objects for the selected persisted turn.',
+    returns:
+      'JSON array of Gemini `Part` objects for the selected persisted turn. Oversized `inlineData` payloads are elided but all other parts — including `thought` and `thoughtSignature` — are served verbatim.',
     related: [{ kind: 'resource', name: 'session://{sessionId}' }],
   },
   {

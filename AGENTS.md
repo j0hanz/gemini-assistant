@@ -15,6 +15,7 @@
 - Tool-based
 - Session history is sanitized on write and on rebuild via `sanitizeHistoryParts`.
 - Thought-summary parts are never replayed; `thoughtSignature` is preserved on functionCall/toolCall/executableCode parts only.
+- Persisted chat turns carry both replay-filtered `parts` and SDK-faithful `rawParts`; the `gemini://sessions/{id}/turns/{n}/parts` resource serves `rawParts` (with only oversized `inlineData` elided) so orchestrators can replay thought signatures verbatim.
 
 ## Testing Strategy
 

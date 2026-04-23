@@ -304,7 +304,7 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
             ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
           ],
           urls,
-          serverSideToolInvocations: 'always',
+          // Built-in tools only; no function-calling mix. Default 'auto' policy.
         },
         prompt.promptParts,
         prompt.systemInstruction,
@@ -381,7 +381,7 @@ async function diagnoseFailureWork(
         ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
       ],
       urls,
-      serverSideToolInvocations: 'always',
+      // Built-in tools only; no function-calling mix. Default 'auto' policy.
     },
     [prompt.promptText],
     prompt.systemInstruction,
@@ -1103,7 +1103,7 @@ export async function analyzePrWork(
     REVIEW_DIFF_TOOL_LABEL,
     {
       builtInToolNames: [],
-      serverSideToolInvocations: 'always',
+      // No built-in tools and no function-calling mix. Default 'auto' policy.
     },
     [modelPrompt.promptText],
     modelPrompt.systemInstruction,

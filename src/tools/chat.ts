@@ -80,6 +80,7 @@ import {
 } from '../config.js';
 import {
   buildReplayHistoryParts,
+  capRawParts,
   type ContentEntry,
   createSessionStore,
   type SessionEventEntry,
@@ -360,6 +361,8 @@ function toFunctionCallingConfigMode(
       return FunctionCallingConfigMode.ANY;
     case 'NONE':
       return FunctionCallingConfigMode.NONE;
+    case 'VALIDATED':
+      return FunctionCallingConfigMode.VALIDATED;
   }
 }
 
@@ -384,9 +387,6 @@ function buildChatOrchestrationRequest(args: AskArgs) {
     functionCallingMode: toFunctionCallingConfigMode(args.functions?.mode),
     serverSideToolInvocations: args.serverSideToolInvocations,
     ...(urls ? { urls } : {}),
-    ...(args.additionalTools
-      ? { additionalTools: args.additionalTools as import('@google/genai').ToolListUnion }
-      : {}),
   } as const;
 }
 
@@ -839,6 +839,7 @@ function appendSessionTurn(
   deps.appendSessionContent(sessionId, {
     role: 'model',
     parts: buildReplayHistoryParts(askResult.streamResult.parts),
+    rawParts: capRawParts(structuredClone(askResult.streamResult.parts)),
     timestamp,
     ...(taskId ? { taskId } : {}),
     ...(askResult.streamResult.finishReason !== undefined
@@ -1369,7 +1370,6 @@ export async function chatWork(
       fileSearch: args.fileSearch,
       functions: args.functions,
       serverSideToolInvocations: args.serverSideToolInvocations,
-      additionalTools: args.additionalTools,
       systemInstruction: args.systemInstruction,
       temperature: args.temperature,
       thinkingLevel: args.thinkingLevel,

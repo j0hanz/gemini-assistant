@@ -10,6 +10,9 @@ tags: [refactor, architecture, gemini, orchestration]
 
 # Introduction
 
+> [!NOTE]
+> Partially superseded by [`refactor-public-contract-integrity-1.md`](refactor-public-contract-integrity-1.md). The `additionalTools` field introduced here has been removed from both the public Zod schemas and the internal `OrchestrationRequest` type because no public surface plumbed user-supplied function declarations through it. Function-calling on `chat` remains available via the dedicated `functions` field. The rest of this plan (built-in tool array, `functionCallingMode` plumbing, chat consolidation, uniform server-side trace policy) stands.
+
 ![Status: Planned](https://img.shields.io/badge/status-Planned-blue)
 
 Refactor the Gemini built-in tool orchestration layer from a closed 8-entry preset enum (`none|search|url|search_url|code|search_code|search_url_code|url_code`) to an explicit, composable built-in tool array. The refactor (a) removes the preset bottleneck that blocks File Search, custom function calling, and mixed built-in combinations; (b) makes `includeServerSideToolInvocations` an explicit per-surface product policy instead of an incidental conditional; (c) consolidates `chat`'s three duplicate orchestration call sites; and (d) exposes `functionCallingMode` as a native option in the config builder so future function-calling work plugs in without touching the orchestration layer.

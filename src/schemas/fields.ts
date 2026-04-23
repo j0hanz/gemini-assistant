@@ -16,7 +16,7 @@ const ANALYZE_TARGET_KIND_OPTIONS = ['file', 'url', 'multi'] as const;
 const ANALYZE_OUTPUT_KIND_OPTIONS = ['summary', 'diagram'] as const;
 export const REVIEW_SUBJECT_OPTIONS = ['diff', 'comparison', 'failure'] as const;
 export const SERVER_SIDE_TOOL_INVOCATIONS_OPTIONS = ['auto', 'always', 'never'] as const;
-export const FUNCTION_CALLING_MODE_OPTIONS = ['AUTO', 'ANY', 'NONE'] as const;
+export const FUNCTION_CALLING_MODE_OPTIONS = ['AUTO', 'ANY', 'NONE', 'VALIDATED'] as const;
 
 function buildTextSchema(maxLength?: number) {
   const schema = z.string().trim().min(1);
@@ -169,7 +169,7 @@ export function thinkingLevel(
 }
 
 export function thinkingBudget(
-  description = 'Override thinking token budget. Combines with thinkingLevel when both are set.',
+  description = 'Override thinking token budget. Applied only when `thinkingLevel` is omitted; `thinkingLevel` takes precedence when both are set.',
 ) {
   return withFieldMetadata(z.number().int().min(0).optional(), description);
 }
@@ -244,12 +244,12 @@ export const FunctionsSpecSchema = z.strictObject({
   ),
   mode: withFieldMetadata(
     z.enum(FUNCTION_CALLING_MODE_OPTIONS).optional(),
-    'Gemini function-calling mode for the declared functions.',
+    'Gemini function-calling mode. `AUTO` (default model choice), `ANY` (must call a declared function), `NONE` (disable calling), `VALIDATED` (stronger default for mixed tool + structured-output flows).',
   ),
 });
 export type FunctionsSpecInput = z.infer<typeof FunctionsSpecSchema>;
 
 export const ServerSideToolInvocationsSchema = withFieldMetadata(
   z.enum(SERVER_SIDE_TOOL_INVOCATIONS_OPTIONS).default('auto'),
-  'Server-side Gemini tool trace policy: auto enables traces only when tools are active; always forces traces; never omits them.',
+  'Server-side Gemini tool trace policy. `auto` (default): enabled only when built-in tools AND function declarations are both active. `always`: forces traces regardless of tool mix. `never`: omits traces.',
 );

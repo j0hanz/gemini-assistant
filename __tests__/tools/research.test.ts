@@ -251,50 +251,6 @@ describe('research tool contracts', () => {
     }
   });
 
-  it('resolves orchestration config with additionalTools', async () => {
-    const { research } = getHandlers();
-    const store = makeMockStore();
-    const client = getAI();
-    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
-    let observedRequest: Record<string, unknown> | undefined;
-
-    // @ts-expect-error test override
-    client.models.generateContentStream = async (req: Record<string, unknown>) => {
-      observedRequest = req;
-      return fakeStream([
-        {
-          candidates: [
-            {
-              content: { parts: [{ text: 'ok' }] },
-              finishReason: 'STOP',
-            },
-          ],
-        },
-      ]);
-    };
-
-    try {
-      await research.createTask(
-        {
-          goal: 'test tools',
-          mode: 'quick',
-          additionalTools: [{ functionDeclarations: [{ name: 'test', parameters: {} }] }] as never,
-        },
-        makeMockContext(store),
-      );
-      await flushTaskWork();
-
-      const config = observedRequest?.config as Record<string, unknown> | undefined;
-      const tools = config?.tools as Record<string, unknown>[] | undefined;
-      assert.ok(
-        tools?.some((t) => 'functionDeclarations' in t),
-        'additionalTools were not included',
-      );
-    } finally {
-      client.models.generateContentStream = originalGenerateContentStream;
-    }
-  });
-
   it('composes fileSearch with googleSearch and urlContext', async () => {
     const { research } = getHandlers();
     const store = makeMockStore();

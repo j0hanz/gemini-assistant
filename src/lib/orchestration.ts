@@ -68,11 +68,6 @@ function buildBuiltInTools(specs: readonly BuiltInToolSpec[]): ToolListUnion {
   return specs.map((spec) => BUILT_IN_TOOL_FACTORIES[spec.kind](spec));
 }
 
-function cloneTools(tools: ToolListUnion | undefined): ToolListUnion {
-  if (!tools || tools.length === 0) return [];
-  return tools.map((tool) => ({ ...tool }));
-}
-
 function hasTool(tools: ToolListUnion, key: BuiltInToolName): boolean {
   return tools.some((tool) => Object.prototype.hasOwnProperty.call(tool, key));
 }
@@ -94,7 +89,6 @@ export type ServerSideToolInvocationsPolicy = 'auto' | 'always' | 'never';
 export interface OrchestrationRequest {
   builtInToolSpecs?: readonly BuiltInToolSpec[] | undefined;
   builtInToolNames?: readonly BuiltInToolName[] | undefined;
-  additionalTools?: ToolListUnion | undefined;
   functionDeclarations?: readonly FunctionDeclaration[] | undefined;
   functionCallingMode?: FunctionCallingConfigMode | undefined;
   serverSideToolInvocations?: ServerSideToolInvocationsPolicy | undefined;
@@ -123,12 +117,11 @@ export function resolveServerSideToolInvocations(
 export function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationConfig {
   const specs = request.builtInToolSpecs ?? specsFromNames(request.builtInToolNames ?? []);
   const builtInTools = buildBuiltInTools(specs);
-  const extraTools = cloneTools(request.additionalTools);
   const functionTools: ToolListUnion =
     request.functionDeclarations && request.functionDeclarations.length > 0
       ? [{ functionDeclarations: [...request.functionDeclarations] }]
       : [];
-  const tools: ToolListUnion = [...builtInTools, ...functionTools, ...extraTools];
+  const tools: ToolListUnion = [...builtInTools, ...functionTools];
 
   const activeCapabilities = new Set<ActiveCapability>();
   for (const name of BUILT_IN_TOOL_NAMES) {

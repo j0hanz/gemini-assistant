@@ -26,6 +26,7 @@ import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/ta
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
 import { getWorkspaceCacheName } from '../lib/workspace-context.js';
+import { SCAN_FILE_NAMES } from '../lib/workspace-context.js';
 import {
   type AnalyzePrInput,
   type CompareFilesInput,
@@ -36,7 +37,6 @@ import { ReviewOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, getAI, MODEL, type ToolCostProfileName } from '../client.js';
 import { getReviewDocs } from '../config.js';
-import { SCAN_FILE_NAMES } from '../lib/workspace-context.js';
 
 const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
 

@@ -163,6 +163,83 @@ describe('ask contract', () => {
     });
   });
 
+  it('returns the exact validation error for functionResponses without a session', async () => {
+    const askWork = createAskWork(createDeps());
+
+    const result = await askWork(
+      {
+        message: 'continue',
+        functionResponses: [{ name: 'lookup_order', response: { output: 'ok' } }],
+      },
+      createContext(),
+    );
+
+    assert.deepStrictEqual(result, {
+      content: [{ type: 'text', text: 'chat: functionResponses requires sessionId.' }],
+      isError: true,
+    });
+  });
+
+  it('returns the exact validation error for functionResponses with a missing session', async () => {
+    const askWork = createAskWork(createDeps());
+
+    const result = await askWork(
+      {
+        message: 'continue',
+        sessionId: 'missing',
+        functionResponses: [{ name: 'lookup_order', response: { output: 'ok' } }],
+      },
+      createContext(),
+    );
+
+    assert.deepStrictEqual(result, {
+      content: [{ type: 'text', text: 'chat: functionResponses requires an existing sessionId.' }],
+      isError: true,
+    });
+  });
+
+  it('persists functionResponses before continuing an existing session', async () => {
+    const contentEntries: Record<string, unknown>[] = [];
+    const askWork = createAskWork(
+      createDeps({
+        appendSessionContent: (_sessionId, entry: Record<string, unknown>) => {
+          contentEntries.push(entry);
+          return true;
+        },
+        getSession: (sessionId?: string) =>
+          sessionId === 'sess-1' ? ({ kind: 'chat' } as never) : undefined,
+        getSessionEntry: (sessionId?: string) =>
+          sessionId === 'sess-1' ? ({ id: 'sess-1' } as never) : undefined,
+      }),
+    );
+
+    const result = await askWork(
+      {
+        message: 'continue',
+        sessionId: 'sess-1',
+        functionResponses: [
+          { id: 'call-1', name: 'lookup_order', response: { output: { status: 'ok' } } },
+        ],
+      },
+      createContext(),
+    );
+
+    assert.strictEqual(result.isError, undefined);
+    assert.deepStrictEqual(contentEntries[0], {
+      role: 'user',
+      parts: [
+        {
+          functionResponse: {
+            id: 'call-1',
+            name: 'lookup_order',
+            response: { output: { status: 'ok' } },
+          },
+        },
+      ],
+      timestamp: 1,
+    });
+  });
+
   it('allows responseSchema plus googleSearch', async () => {
     const askWork = createAskWork(
       createDeps({
@@ -670,6 +747,45 @@ describe('ask contract', () => {
 
       assert.ok(observedConfig);
       assert.deepStrictEqual(Object.keys(observedConfig).sort(), ['abortSignal', 'thinkingConfig']);
+    } finally {
+      process.env.CACHE = originalCache;
+    }
+  });
+
+  it('sends functionResponses as chat message parts on the first resumed attempt', async () => {
+    const originalCache = process.env.CACHE;
+    process.env.CACHE = 'false';
+    let observedMessage: unknown;
+    const chat = {
+      sendMessageStream: async (request: { message?: unknown }) => {
+        observedMessage = request.message;
+        return fakeStream('Done');
+      },
+    };
+
+    try {
+      await askWithoutSession(
+        {
+          message: 'Continue',
+          sessionId: 'sess-1',
+          functionResponses: [
+            { id: 'call-1', name: 'lookup_order', response: { output: { status: 'ok' } } },
+          ],
+        },
+        createContext(),
+        chat as never,
+      );
+
+      assert.deepStrictEqual(observedMessage, [
+        {
+          functionResponse: {
+            id: 'call-1',
+            name: 'lookup_order',
+            response: { output: { status: 'ok' } },
+          },
+        },
+        { text: 'Continue' },
+      ]);
     } finally {
       process.env.CACHE = originalCache;
     }

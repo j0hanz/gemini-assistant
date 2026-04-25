@@ -9,6 +9,7 @@ import {
   analyzeOutputKind,
   analyzeTargetKind,
   DIAGRAM_TYPES,
+  FunctionResponsesSchema,
   goalText,
   mediaResolution,
   optionalField,
@@ -117,6 +118,10 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
     functions: withFieldMetadata(
       OptionalFunctionsSpecSchema,
       'Typed Gemini function declarations. The MCP client owns function execution and returns function responses through the session.',
+    ),
+    functionResponses: withFieldMetadata(
+      FunctionResponsesSchema.optional(),
+      'Caller-executed Gemini function responses for an existing session. Requires sessionId and continues the model after functionCalls returned by a previous turn.',
     ),
     serverSideToolInvocations: ServerSideToolInvocationsSchema,
   });
@@ -302,6 +307,10 @@ function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => [])
     functions: withFieldMetadata(
       OptionalFunctionsSpecSchema,
       'Typed Gemini function declarations. The MCP client owns function execution and returns function responses through the session.',
+    ),
+    functionResponses: withFieldMetadata(
+      FunctionResponsesSchema.optional(),
+      'Caller-executed Gemini function responses for an existing session. Requires sessionId and continues the model after functionCalls returned by a previous turn.',
     ),
     serverSideToolInvocations: ServerSideToolInvocationsSchema,
     googleSearch: withFieldMetadata(

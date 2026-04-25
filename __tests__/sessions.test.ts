@@ -422,7 +422,10 @@ describe('sessions', () => {
       assert.strictEqual(
         appendToolResponseTurn(
           'sess-function-response',
-          [{ id: 'call-1', name: 'lookup', response: { ok: true } }],
+          [
+            { id: 'call-1', name: 'lookup', response: { ok: true } },
+            { id: 'call-2', name: 'lookup_more', response: { value: 42 } },
+          ],
           {
             appendSessionContent: store.appendSessionContent.bind(store),
             now: () => 123,
@@ -435,11 +438,37 @@ describe('sessions', () => {
       assert.deepStrictEqual(store.listSessionContentEntries('sess-function-response'), [
         {
           role: 'user',
-          parts: [{ functionResponse: { id: 'call-1', name: 'lookup', response: { ok: true } } }],
+          parts: [
+            { functionResponse: { id: 'call-1', name: 'lookup', response: { ok: true } } },
+            {
+              functionResponse: { id: 'call-2', name: 'lookup_more', response: { value: 42 } },
+            },
+          ],
           timestamp: 123,
           taskId: 'task-response',
         },
       ]);
+      assert.deepStrictEqual(
+        buildRebuiltChatContents(
+          store.listSessionContentEntries('sess-function-response') ?? [],
+          200_000,
+        ),
+        [
+          {
+            role: 'user',
+            parts: [
+              { functionResponse: { id: 'call-1', name: 'lookup', response: { ok: true } } },
+              {
+                functionResponse: {
+                  id: 'call-2',
+                  name: 'lookup_more',
+                  response: { value: 42 },
+                },
+              },
+            ],
+          },
+        ],
+      );
     });
   });
 

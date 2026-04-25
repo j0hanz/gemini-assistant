@@ -13,6 +13,7 @@ import type {
   FunctionDeclaration,
   FunctionResponse,
   GenerateContentConfig,
+  PartListUnion,
 } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
@@ -402,6 +403,7 @@ function validateAskRequest(
   }
 
   const hasExistingSession = sessionId ? deps.getSessionEntry(sessionId) !== undefined : false;
+  const hasFunctionResponses = (args.functionResponses?.length ?? 0) > 0;
   const orchestration = buildOrchestrationConfig(buildChatOrchestrationRequest(args));
   const preflightResult = validateGeminiRequest({
     hasExistingSession,
@@ -417,6 +419,15 @@ function validateAskRequest(
 
   const conflicts: [boolean, string][] = [
     [hasExpiredSession(sessionId, deps), `chat: Session '${sessionId}' has expired.`],
+    [hasFunctionResponses && !sessionId, 'chat: functionResponses requires sessionId.'],
+    [
+      hasFunctionResponses && !hasExistingSession,
+      'chat: functionResponses requires an existing sessionId.',
+    ],
+    [
+      hasFunctionResponses && responseSchema !== undefined,
+      'chat: functionResponses cannot be combined with responseSchemaJson.',
+    ],
   ];
 
   for (const [condition, message] of conflicts) {
@@ -435,6 +446,28 @@ function buildAskPrompt(message: string, urls?: readonly string[]): string {
   }
 
   return `${message}\n\nUse these URLs too:\n${urls.join('\n')}`;
+}
+
+function buildChatMessage(prompt: string, functionResponses?: FunctionResponse[]): PartListUnion {
+  if (!functionResponses || functionResponses.length === 0) {
+    return prompt;
+  }
+
+  return [...functionResponses.map((functionResponse) => ({ functionResponse })), { text: prompt }];
+}
+
+function normalizeFunctionResponses(
+  responses: AskArgs['functionResponses'],
+): FunctionResponse[] | undefined {
+  if (!responses || responses.length === 0) {
+    return undefined;
+  }
+
+  return responses.map((response) => ({
+    ...(response.id !== undefined ? { id: response.id } : {}),
+    name: response.name,
+    response: response.response,
+  }));
 }
 
 async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
@@ -673,7 +706,10 @@ export async function askWithoutSession(
       () =>
         chat
           ? chat.sendMessageStream({
-              message: currentPrompt,
+              message: buildChatMessage(
+                currentPrompt,
+                attempt === 0 ? normalizeFunctionResponses(args.functionResponses) : undefined,
+              ),
               config: perTurnConfig,
             })
           : getAI().models.generateContentStream({
@@ -1061,12 +1097,11 @@ async function askExistingSession(
   contextUsed?: ContextUsed,
   sessionSummary?: string,
 ): Promise<CallToolResult | undefined> {
-  // Local custom function-call audit:
-  // This chat path sends user text through the SDK chat object and observes
-  // functionCall/functionResponse parts returned by Gemini streams. There is
-  // no separate local tool execution loop in this repository; if one is added,
-  // persist its caller-supplied FunctionResponse objects through
-  // appendToolResponseTurn before the follow-up sendMessageStream call.
+  const functionResponses = normalizeFunctionResponses(args.functionResponses);
+  if (functionResponses) {
+    appendToolResponseTurn(args.sessionId, functionResponses, deps, ctx.task?.id);
+  }
+
   const resumedArgs = sessionSummary
     ? { ...args, message: `${sessionSummary}\n\n${args.message}` }
     : args;
@@ -1369,6 +1404,7 @@ export async function chatWork(
       codeExecution: args.codeExecution,
       fileSearch: args.fileSearch,
       functions: args.functions,
+      functionResponses: args.functionResponses,
       serverSideToolInvocations: args.serverSideToolInvocations,
       systemInstruction: args.systemInstruction,
       temperature: args.temperature,

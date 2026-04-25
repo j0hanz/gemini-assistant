@@ -56,6 +56,14 @@ describe('documentation and package metadata', () => {
     assert.match(readme, /no backward-compatible aliases/i);
   });
 
+  it('documents process-local runtime state limits', () => {
+    assert.match(readme, /process-local/i);
+    assert.match(readme, /process restart/i);
+    assert.match(readme, /task results/i);
+    assert.match(readme, /task queues/i);
+    assert.match(readme, /in-memory/i);
+  });
+
   it('keeps web-standard runtime guidance aligned with transport behavior', () => {
     assert.match(readme, /Auto-serves only when the process is running under Bun or Deno\./);
     assert.match(readme, /returns a `handler` but does not start a listener/);

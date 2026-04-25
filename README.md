@@ -76,6 +76,14 @@ not replayed.
 
 Workspace context state is exposed through `discover://context`, `workspace://context`, and `workspace://cache`.
 
+### Production Limits
+
+Runtime state is process-local by design. Chat sessions, task records, task message queues, and
+workspace cache state are kept in memory and are not durable storage. A server restart, process
+replacement, or stateless deployment path loses that state; use a stateful server connection for
+multi-turn chat and task polling. Durable persistence is a future implementation concern, not part
+of the current public contract.
+
 ## Capability Notes
 
 The job-first surface is intentionally opinionated:
@@ -88,6 +96,31 @@ The job-first surface is intentionally opinionated:
 - `chat` and `research` can use Gemini File Search stores; Live API sessions are not exposed.
 - `thinkingBudget` is available anywhere `thinkingLevel` is accepted and maps directly to
   Gemini `thinkingConfig.thinkingBudget`.
+
+### Chat Function Calling
+
+`chat.functions` exposes typed Gemini function declarations to the model, but this server does not
+execute local MCP tools or host functions on the caller's behalf. When Gemini returns
+`functionCalls[]`, the MCP client is responsible for executing those calls and then calling `chat`
+again with the same `sessionId` and `functionResponses`:
+
+```json
+{
+  "goal": "Continue after the function result.",
+  "sessionId": "session-id-from-previous-turn",
+  "functionResponses": [
+    {
+      "id": "optional-call-id",
+      "name": "lookup_order",
+      "response": { "output": { "status": "shipped" } }
+    }
+  ]
+}
+```
+
+`functionResponses` is accepted only for an existing session and cannot be combined with structured
+JSON output mode. The response turn is persisted in the session replay substrate and sent to Gemini
+as the next chat message so the model can finish the function-calling loop.
 
 ### Structured Output Notes
 
@@ -256,7 +289,8 @@ Minimal stdio client configuration:
 
 - File inputs require workspace-relative or absolute paths inside configured roots.
 - URL inputs accept only public `http/https` URLs.
-- Sessions and transcripts are in-memory only and disappear on expiry or eviction.
+- Sessions, transcripts, task results, and task queues are in-memory only and disappear on
+  expiry, eviction, or process restart.
 - The public surface intentionally has no backward-compatible aliases for the legacy tool names.
 
 ## Commands

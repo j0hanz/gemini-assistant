@@ -129,15 +129,16 @@ export const DISCOVERY_ENTRIES = [
       'codeExecution?',
       'fileSearch?',
       'functions?',
+      'functionResponses?',
       'serverSideToolInvocations?',
     ],
     returns:
       'A direct answer, optional structured data, usage/safety/citation metadata, and session resource links. When sessions are active, raw Gemini `Part[]` are persisted for replay-safe orchestration via the session-turn-parts resource.',
     limitations: [
-      'Sessions are stored in server memory only and expire or evict over time.',
+      'Sessions, task state, and task message queues are process-local memory state; restarts or stateless deployments lose continuity.',
       'Sessions require a stateful server connection path; stateless transport mode does not preserve chat continuity across requests.',
       'Structured output is intended for single-turn calls and new sessions, not resumed sessions.',
-      'Declared functions are executed by the MCP client, not by this server.',
+      'Declared functions are executed by the MCP client, not by this server; return results through functionResponses on the same sessionId.',
     ],
     related: [
       { kind: 'resource', name: 'session://' },
@@ -400,6 +401,7 @@ export const WORKFLOW_ENTRIES = [
     steps: [
       'Read discover://catalog for the current public surface.',
       'Read discover://workflows for the guided entry points.',
+      'Treat HTTP deployments as local-first unless the operator supplies durable task/session infrastructure outside this server.',
       'Use chat for direct conversation once the starting point is clear.',
     ],
     recommendedTools: ['chat'],
@@ -412,6 +414,7 @@ export const WORKFLOW_ENTRIES = [
     whenToUse: 'Use when the task is conversational and may span multiple turns.',
     steps: [
       'Call chat with a goal and optional sessionId.',
+      'If Gemini returns functionCalls, execute them in the MCP client and call chat again with the same sessionId plus functionResponses.',
       'Inspect session:// if you need to find an active session.',
       'Inspect session://{sessionId}/transcript or /events when you need read-only inspection.',
       'Use gemini://sessions/{sessionId}/turns/{turnIndex}/parts when an orchestrator needs replay-safe raw turn parts.',

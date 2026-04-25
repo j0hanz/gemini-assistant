@@ -95,6 +95,22 @@ describe('AskInputSchema', () => {
     assert.ok(result.success);
   });
 
+  it('accepts function responses for session continuation', () => {
+    const result = AskInputSchema.safeParse({
+      message: 'continue',
+      sessionId: 'sess-1',
+      functionResponses: [
+        {
+          id: 'call-1',
+          name: 'lookup_order',
+          response: { output: { status: 'shipped' } },
+        },
+      ],
+    });
+
+    assert.ok(result.success);
+  });
+
   it('rejects responseSchema objects without a JSON Schema keyword', () => {
     const result = AskInputSchema.safeParse({
       message: 'test',
@@ -296,9 +312,10 @@ describe('ChatInputSchema', () => {
     );
   });
 
-  it('validates fileSearch, functions, and serverSideToolInvocations', () => {
+  it('validates fileSearch, functions, functionResponses, and serverSideToolInvocations', () => {
     const result = ChatInputSchema.safeParse({
       goal: 'Use tools',
+      sessionId: 'sess-1',
       fileSearch: { fileSearchStoreNames: ['fileSearchStores/docs_1'] },
       functions: {
         declarations: [
@@ -310,6 +327,12 @@ describe('ChatInputSchema', () => {
         ],
         mode: 'AUTO',
       },
+      functionResponses: [
+        {
+          name: 'lookup_doc',
+          response: { output: { title: 'Doc' } },
+        },
+      ],
       serverSideToolInvocations: 'never',
     });
     assert.ok(result.success);
@@ -366,6 +389,41 @@ describe('ChatInputSchema', () => {
           declarations: [{ name: 'valid', description: 'Valid declaration' }],
           mode: 'FORCED',
         },
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'bad function response',
+        functionResponses: [{ name: 'lookup_doc', response: 'not an object' }],
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'empty function responses',
+        functionResponses: [],
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'missing function response name',
+        functionResponses: [{ response: { output: 'ok' } }],
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'missing function response payload',
+        functionResponses: [{ name: 'lookup_doc' }],
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'unknown function response key',
+        functionResponses: [{ name: 'lookup_doc', response: {}, extra: true }],
       }).success,
       false,
     );

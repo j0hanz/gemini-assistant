@@ -143,4 +143,22 @@ describe('public MCP error taxonomy', () => {
       await harness.close();
     }
   });
+
+  it('materializes functionResponses without a sessionId as a chat tool error', async () => {
+    const harness = await createHarness();
+
+    try {
+      const response = await harness.client.requestRaw('tools/call', {
+        arguments: {
+          goal: 'Continue after a tool result',
+          functionResponses: [{ name: 'lookup_order', response: { output: 'ok' } }],
+        },
+        name: 'chat',
+      });
+
+      assertMaterializedToolFailure(response, /functionResponses requires sessionId/i);
+    } finally {
+      await harness.close();
+    }
+  });
 });

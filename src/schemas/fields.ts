@@ -249,6 +249,27 @@ export const FunctionsSpecSchema = z.strictObject({
 });
 export type FunctionsSpecInput = z.infer<typeof FunctionsSpecSchema>;
 
+export const FunctionResponseSchema = z.strictObject({
+  id: withFieldMetadata(
+    z.string().trim().min(1).optional(),
+    'Optional Gemini function call ID this response answers.',
+  ),
+  name: withFieldMetadata(
+    z.string().trim().min(1).max(64),
+    'Function name matching the Gemini functionCall name.',
+  ),
+  response: withFieldMetadata(
+    z.record(z.string(), z.unknown()),
+    'Function response JSON object. Use output and error keys when possible.',
+  ),
+});
+
+export const FunctionResponsesSchema = withFieldMetadata(
+  z.array(FunctionResponseSchema).min(1).max(32),
+  'Caller-executed Gemini function responses for an existing session.',
+);
+export type FunctionResponseInput = z.infer<typeof FunctionResponseSchema>;
+
 /**
  * Tolerant wrapper around `FileSearchSpecSchema.optional()` that treats a
  * wrapper object carrying an empty `fileSearchStoreNames` array as "unset",

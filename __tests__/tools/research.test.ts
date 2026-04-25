@@ -474,7 +474,7 @@ describe('research tool contracts', () => {
       assert.deepStrictEqual(synthesisConfig.tools, [{ codeExecution: {} }]);
       assert.strictEqual(
         (synthesisConfig.thinkingConfig as Record<string, unknown>).thinkingLevel,
-        'LOW',
+        'MEDIUM',
       );
       assert.match(String(synthesisConfig.systemInstruction), /Preferred shape:.*decision memo/);
       assert.ok(calls.length >= 4);

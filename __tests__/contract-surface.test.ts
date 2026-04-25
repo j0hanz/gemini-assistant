@@ -99,11 +99,22 @@ describe('contract surface invariants', () => {
 
     assert.ok(chat?.inputs.includes('fileSearch?'));
     assert.ok(chat?.inputs.includes('functions?'));
+    assert.ok(chat?.inputs.includes('googleSearch?'));
+    assert.ok(chat?.inputs.includes('urls?'));
     assert.ok(chat?.inputs.includes('serverSideToolInvocations?'));
     assert.ok(research?.inputs.includes('fileSearch?'));
-    assert.strictEqual(research?.inputs.includes('functions?'), false);
-    assert.strictEqual(analyze?.inputs.includes('fileSearch?'), false);
-    assert.strictEqual(review?.inputs.includes('functions?'), false);
+    assert.strictEqual(
+      (research?.inputs as readonly string[] | undefined)?.includes('functions?'),
+      false,
+    );
+    assert.strictEqual(
+      (analyze?.inputs as readonly string[] | undefined)?.includes('fileSearch?'),
+      false,
+    );
+    assert.strictEqual(
+      (review?.inputs as readonly string[] | undefined)?.includes('functions?'),
+      false,
+    );
   });
 
   it('does not advertise resources.subscribe in the initialize capability set', async () => {

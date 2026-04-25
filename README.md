@@ -88,14 +88,17 @@ of the current public contract.
 
 The job-first surface is intentionally opinionated:
 
-- `research.mode` is required and chooses between quick lookup and deeper multi-step research.
-- `outputKind` is required for `analyze` and chooses between summary analysis and diagram generation.
+- `research.mode` defaults to `quick`; set `mode="deep"` for deeper multi-step research.
+- `analyze.outputKind` defaults to `summary`; set `outputKind="diagram"` for diagram generation.
 - `subjectKind="failure"` is the public failure-diagnosis path.
 - `chat.responseSchemaJson` is intended for single-turn calls and brand-new sessions.
 - The public surface does not expose the legacy `discover` callable tool or the retired standalone `search`, `analyze_url`, `agentic_search`, `explain_error`, `diagram`, or `execute_code` tools.
 - `chat` and `research` can use Gemini File Search stores; Live API sessions are not exposed.
-- `thinkingBudget` is available anywhere `thinkingLevel` is accepted and maps directly to
-  Gemini `thinkingConfig.thinkingBudget`.
+- `thinkingLevel` can be omitted to use each tool's job-specific cost profile. Common profiles use
+  `LOW`, while diagram and deep synthesis paths may use `MEDIUM`.
+- `thinkingBudget` is available anywhere `thinkingLevel` is accepted and maps to Gemini
+  `thinkingConfig.thinkingBudget` only when `thinkingLevel` is omitted; `thinkingLevel` takes
+  precedence when both are supplied.
 
 ### Chat Function Calling
 
@@ -134,17 +137,22 @@ Successful tool results may include these optional metadata fields in `structure
 
 Research results separate Google Search grounding from URL Context:
 
-- `grounded` is true only when Google Search grounding sources exist.
-- `urlContextUsed` and `urlContextSources[]` report successful URL Context retrieval.
+- `status` is `completed` for successful calls.
+- `groundingSignals` reports whether retrieval ran, whether URL Context succeeded, the count of
+  claim-level supports, and derived confidence.
+- `sourceDetails[]`, `urlContextSources[]`, `urlMetadata[]`, `findings[]`, `citations[]`, and
+  optional `computations[]` carry source and tool-use provenance.
 - `sourceDetails[].origin` is `googleSearch`, `urlContext`, or `both`.
 - `warnings[]` may include dropped non-public grounding-support counts; private URLs are never
   surfaced.
-- Google Search Suggestions are returned in both `structuredContent.searchEntryPoint` and
-  `content[]` for clients that render only content blocks.
+- Google Search Suggestions may be appended to `content[]` when Gemini provides
+  `groundingMetadata.searchEntryPoint.renderedContent`.
 
 ### Tool Capability Matrix
 
-Orchestration composes server-side tool capabilities per call. `googleSearch`, `urls`, File Search, Code Execution, and chat function declarations are additive when supported by the selected job.
+Orchestration composes server-side tool capabilities per call. Public `chat.googleSearch` and
+`chat.urls` enable direct conversation grounding; `googleSearch`, `urls`, File Search, Code
+Execution, and chat function declarations are additive when supported by the selected job.
 
 | Profile       | Google Search | URL Context | Code Execution |
 | ------------- | :-----------: | :---------: | :------------: |
@@ -224,8 +232,8 @@ Optional local transport:
 - `MCP_HTTP_RATE_LIMIT_BURST`: per-session/IP request burst for `/mcp`, default `20`
 - `MAX_TRANSPORT_SESSIONS`: maximum stateful HTTP transport sessions, default `100`
 - `TRANSPORT_SESSION_TTL_MS`: idle TTL for stateful HTTP transport sessions, default `1800000`
-- `SESSION_REPLAY_MAX_BYTES`: byte budget for rebuilt chat history, default `200000`
-- `SESSION_REPLAY_INLINE_DATA_MAX_BYTES`: max inline media bytes retained in replay history, default `65536`
+- `SESSION_REPLAY_MAX_BYTES`: byte budget for rebuilt chat history, default `50000`
+- `SESSION_REPLAY_INLINE_DATA_MAX_BYTES`: max inline media bytes retained in replay history, default `16384`
 
 Booleans accept only the literal strings `true` or `false` when set. Old variable names (`GEMINI_MODEL`, `ALLOWED_FILE_ROOTS`, `WORKSPACE_*`, `MCP_TRANSPORT`, `MCP_HTTP_HOST`, `MCP_HTTP_PORT`, `LOG_VERBOSE_PAYLOADS`, etc.) are not supported and have no effect.
 

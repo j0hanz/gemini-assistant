@@ -5,7 +5,7 @@ import { z } from 'zod/v4';
 
 import { isPublicHttpUrl } from '../lib/validation.js';
 
-import { DEFAULT_TEMPERATURE, DEFAULT_THINKING_LEVEL, THINKING_LEVELS } from '../client.js';
+import { DEFAULT_TEMPERATURE, THINKING_LEVELS } from '../client.js';
 import { PUBLIC_TOOL_NAMES } from '../public-contract.js';
 
 const WINDOWS_DRIVE_RELATIVE_PATH_PATTERN = /^[A-Za-z]:(?![\\/])/;
@@ -163,9 +163,9 @@ export function temperatureField(description = 'Sampling temperature 0-2 (defaul
 }
 
 export function thinkingLevel(
-  description = 'Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH (default LOW).',
+  description = 'Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH. Omit to use the job-specific default cost profile.',
 ) {
-  return withFieldMetadata(z.enum(THINKING_LEVELS).default(DEFAULT_THINKING_LEVEL), description);
+  return withFieldMetadata(z.enum(THINKING_LEVELS).optional(), description);
 }
 
 export function thinkingBudget(

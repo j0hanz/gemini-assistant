@@ -22,7 +22,6 @@ import {
 // ── Config Utilities ──────────────────────────────────────────────────
 
 export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
-export const DEFAULT_THINKING_LEVEL = 'LOW' as const;
 export const DEFAULT_TEMPERATURE = 1.0;
 export type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
 export const EXPOSE_THOUGHTS = getExposeThoughts();
@@ -183,7 +182,8 @@ export function buildGenerateContentConfig(
     functionCallingMode,
   } = options;
   const profile = resolveCostProfile(costProfile);
-  const resolvedThinkingLevel = thinkingLevel ?? profile?.thinkingLevel;
+  const resolvedThinkingLevel =
+    thinkingLevel ?? (thinkingBudget === undefined ? profile?.thinkingLevel : undefined);
   const resolvedMaxOutputTokens =
     maxOutputTokens ?? profile?.maxOutputTokens ?? getMaxOutputTokens();
   const mergedToolConfig = buildMergedToolConfig(toolConfig, functionCallingMode);

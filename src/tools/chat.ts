@@ -92,9 +92,19 @@ import {
 } from '../sessions.js';
 
 type WithOptionalTemperature<T> = T extends { temperature: infer Temperature }
-  ? Omit<T, 'temperature'> & { temperature?: Temperature }
+  ? Omit<T, 'temperature'> & { temperature?: Temperature | undefined }
   : T;
-export type AskArgs = WithOptionalTemperature<AskInput> & { cacheName?: string };
+type WithOptionalChatDefaults<T extends { serverSideToolInvocations?: unknown }> = Omit<
+  T,
+  'serverSideToolInvocations' | 'urls'
+> & {
+  serverSideToolInvocations?: T['serverSideToolInvocations'] | undefined;
+  urls?: string[] | undefined;
+};
+type ChatWorkInput = WithOptionalTemperature<WithOptionalChatDefaults<ChatInput>>;
+export type AskArgs = WithOptionalTemperature<WithOptionalChatDefaults<AskInput>> & {
+  cacheName?: string;
+};
 
 interface AskStructuredContent extends Record<string, unknown> {
   answer: string;
@@ -1379,7 +1389,7 @@ function assembleChatOutput(
 
 export async function chatWork(
   askWork: ReturnType<typeof createAskWork>,
-  args: ChatInput,
+  args: ChatWorkInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   let responseSchema: GeminiResponseSchema | undefined;
@@ -1402,6 +1412,8 @@ export async function chatWork(
       seed: args.seed,
       safetySettings: args.safetySettings,
       codeExecution: args.codeExecution,
+      googleSearch: args.googleSearch,
+      urls: args.urls,
       fileSearch: args.fileSearch,
       functions: args.functions,
       functionResponses: args.functionResponses,

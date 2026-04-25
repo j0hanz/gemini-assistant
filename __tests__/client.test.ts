@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { HarmBlockThreshold, ThinkingLevel } from '@google/genai';
 
 import { buildGenerateContentConfig } from '../src/client.js';
+import { ChatInputSchema } from '../src/schemas/inputs.js';
 
 describe('client config', () => {
   it('maps thinking level strings to SDK enum values', () => {
@@ -48,6 +49,15 @@ describe('client config', () => {
       thinkingBudget: 64,
     });
 
+    assert.strictEqual(config.thinkingConfig?.thinkingLevel, undefined);
+    assert.strictEqual(config.thinkingConfig?.thinkingBudget, 64);
+  });
+
+  it('lets public chat thinkingBudget bypass cost-profile thinkingLevel when omitted', () => {
+    const parsed = ChatInputSchema.parse({ goal: 'Use a budget', thinkingBudget: 64 });
+    const config = buildGenerateContentConfig({ ...parsed, costProfile: 'chat' });
+
+    assert.strictEqual(parsed.thinkingLevel, undefined);
     assert.strictEqual(config.thinkingConfig?.thinkingLevel, undefined);
     assert.strictEqual(config.thinkingConfig?.thinkingBudget, 64);
   });

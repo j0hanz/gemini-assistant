@@ -113,7 +113,8 @@ export const DISCOVERY_ENTRIES = [
     name: 'chat',
     kind: 'tool',
     title: 'Chat',
-    bestFor: 'Direct Gemini chat, structured output, and multi-turn server-managed sessions.',
+    bestFor:
+      'Direct Gemini chat, structured output, optional Search/URL grounding, and multi-turn server-managed sessions.',
     whenToUse: 'Use for conversational tasks that span multiple turns.',
     inputs: [
       'goal',
@@ -127,6 +128,8 @@ export const DISCOVERY_ENTRIES = [
       'temperature?',
       'seed?',
       'codeExecution?',
+      'googleSearch?',
+      'urls?',
       'fileSearch?',
       'functions?',
       'functionResponses?',

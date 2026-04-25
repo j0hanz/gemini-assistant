@@ -111,6 +111,17 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
       z.boolean().optional(),
       'Enable native Python code execution within the chat session. Useful for math, logic, or data processing.',
     ),
+    googleSearch: withFieldMetadata(
+      z.boolean().optional(),
+      'Enable Google Search grounding for chat. Optional; additive. Combine with `urls` for URL Context.',
+    ),
+    ...createUrlContextFields({
+      itemDescription: 'Public URL to analyze with URL Context during chat',
+      description: 'Public URLs to analyze with URL Context during chat.',
+      min: 1,
+      max: 20,
+      optional: true,
+    }),
     fileSearch: withFieldMetadata(
       OptionalFileSearchSpecSchema,
       'Enable Gemini File Search over named stores for retrieval-augmented chat.',

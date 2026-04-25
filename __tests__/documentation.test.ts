@@ -64,6 +64,30 @@ describe('documentation and package metadata', () => {
     assert.match(readme, /in-memory/i);
   });
 
+  it('documents current public defaults and grounding metadata accurately', () => {
+    assert.match(readme, /`research\.mode` defaults to `quick`/);
+    assert.match(readme, /`analyze\.outputKind` defaults to `summary`/);
+    assert.match(readme, /`thinkingBudget`.*only when `thinkingLevel` is omitted/s);
+    assert.match(readme, /`groundingSignals` reports/);
+    assert.doesNotMatch(readme, /`grounded` is true/);
+    assert.doesNotMatch(readme, /structuredContent\.searchEntryPoint/);
+  });
+
+  it('documents replay defaults from config', () => {
+    assert.match(readme, /`SESSION_REPLAY_MAX_BYTES`: byte budget.*default `50000`/);
+    assert.match(
+      readme,
+      /`SESSION_REPLAY_INLINE_DATA_MAX_BYTES`: max inline media.*default `16384`/,
+    );
+  });
+
+  it('documents public chat grounding inputs', () => {
+    assert.match(
+      readme,
+      /Public `chat\.googleSearch` and\s+`chat\.urls` enable direct conversation grounding/,
+    );
+  });
+
   it('keeps web-standard runtime guidance aligned with transport behavior', () => {
     assert.match(readme, /Auto-serves only when the process is running under Bun or Deno\./);
     assert.match(readme, /returns a `handler` but does not start a listener/);

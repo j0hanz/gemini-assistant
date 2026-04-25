@@ -178,8 +178,40 @@ describe('ChatInputSchema', () => {
     const result = ChatInputSchema.safeParse({ goal: 'help me debug this' });
     assert.ok(result.success);
     if (result.success) {
-      assert.strictEqual(result.data.thinkingLevel, 'LOW');
+      assert.strictEqual(result.data.thinkingLevel, undefined);
     }
+  });
+
+  it('accepts public chat grounding inputs', () => {
+    const result = ChatInputSchema.safeParse({
+      goal: 'Summarize this page',
+      googleSearch: true,
+      urls: ['https://example.com/docs'],
+    });
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.googleSearch, true);
+      assert.deepStrictEqual(result.data.urls, ['https://example.com/docs']);
+    }
+  });
+
+  it('rejects invalid public chat URL inputs', () => {
+    assert.strictEqual(ChatInputSchema.safeParse({ goal: 'test', urls: [] }).success, false);
+    assert.strictEqual(
+      ChatInputSchema.safeParse({ goal: 'test', urls: ['not-a-url'] }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({ goal: 'test', urls: ['http://localhost:3000'] }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'test',
+        urls: Array.from({ length: 21 }, (_, index) => `https://example.com/${index}`),
+      }).success,
+      false,
+    );
   });
 
   it('accepts the flat sessionId and responseSchemaJson fields', () => {
@@ -296,7 +328,7 @@ describe('ChatInputSchema', () => {
     assert.strictEqual(ChatInputSchema.shape.goal.description, 'User goal or requested outcome');
     assert.strictEqual(
       ChatInputSchema.shape.thinkingLevel.description,
-      'Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH (default LOW).',
+      'Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH. Omit to use the job-specific default cost profile.',
     );
     assert.strictEqual(
       ChatInputSchema.shape.responseSchemaJson.description,
@@ -309,6 +341,14 @@ describe('ChatInputSchema', () => {
     assert.strictEqual(
       ChatInputSchema.shape.seed.description,
       'Fixed random seed for reproducible outputs.',
+    );
+    assert.strictEqual(
+      ChatInputSchema.shape.googleSearch.description,
+      'Enable Google Search grounding for chat. Optional; additive. Combine with `urls` for URL Context.',
+    );
+    assert.strictEqual(
+      ChatInputSchema.shape.urls.description,
+      'Public URLs to analyze with URL Context during chat.',
     );
   });
 
@@ -560,7 +600,7 @@ describe('ResearchInputSchema', () => {
     assert.ok(result.success);
     if (result.success) {
       assert.strictEqual(result.data.mode, 'quick');
-      assert.strictEqual(result.data.thinkingLevel, 'LOW');
+      assert.strictEqual(result.data.thinkingLevel, undefined);
     }
   });
 
@@ -760,8 +800,8 @@ describe('AnalyzeFileInputSchema', () => {
   });
 });
 
-describe('shared thinkingLevel defaults', () => {
-  it('defaults analyze input to LOW', () => {
+describe('shared thinkingLevel metadata', () => {
+  it('leaves analyze input thinkingLevel unset when omitted', () => {
     const result = AnalyzeInputSchema.safeParse({
       goal: 'Summarize the architecture',
       targetKind: 'file',
@@ -770,17 +810,29 @@ describe('shared thinkingLevel defaults', () => {
     });
     assert.ok(result.success);
     if (result.success) {
-      assert.strictEqual(result.data.thinkingLevel, 'LOW');
+      assert.strictEqual(result.data.thinkingLevel, undefined);
     }
   });
 
-  it('defaults review input to LOW', () => {
+  it('leaves review input thinkingLevel unset when omitted', () => {
     const result = ReviewInputSchema.safeParse({
       subjectKind: 'diff',
     });
     assert.ok(result.success);
     if (result.success) {
-      assert.strictEqual(result.data.thinkingLevel, 'LOW');
+      assert.strictEqual(result.data.thinkingLevel, undefined);
+    }
+  });
+
+  it('accepts thinkingBudget without injecting thinkingLevel', () => {
+    const result = ChatInputSchema.safeParse({
+      goal: 'Use a fixed reasoning budget',
+      thinkingBudget: 64,
+    });
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.thinkingBudget, 64);
+      assert.strictEqual(result.data.thinkingLevel, undefined);
     }
   });
 
@@ -791,8 +843,8 @@ describe('shared thinkingLevel defaults', () => {
 
     assert.strictEqual(analyzeThinking.description, chatThinking.description);
     assert.strictEqual(reviewThinking.description, chatThinking.description);
-    assert.strictEqual(analyzeThinking.safeParse(undefined).data, 'LOW');
-    assert.strictEqual(reviewThinking.safeParse(undefined).data, 'LOW');
+    assert.strictEqual(analyzeThinking.safeParse(undefined).data, undefined);
+    assert.strictEqual(reviewThinking.safeParse(undefined).data, undefined);
   });
 });
 

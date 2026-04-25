@@ -199,10 +199,10 @@ describe('ask contract', () => {
   });
 
   it('persists functionResponses before continuing an existing session', async () => {
-    const contentEntries: Record<string, unknown>[] = [];
+    const contentEntries: unknown[] = [];
     const askWork = createAskWork(
       createDeps({
-        appendSessionContent: (_sessionId, entry: Record<string, unknown>) => {
+        appendSessionContent: (_sessionId, entry) => {
           contentEntries.push(entry);
           return true;
         },
@@ -366,6 +366,31 @@ describe('ask contract', () => {
         tools?.some((t) => 'codeExecution' in t),
         'codeExecution was not included',
       );
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('resolves orchestration config with googleSearch and url context', async () => {
+    const stub = withGeminiStreamStub(['ok']);
+    try {
+      const askWork = createAskWork(
+        createDeps({
+          runWithoutSession: askWithoutSession,
+        }),
+      );
+      await askWork(
+        {
+          message: 'Hello',
+          googleSearch: true,
+          urls: ['https://example.com/docs'],
+        },
+        createContext(),
+      );
+
+      assert.strictEqual(stub.calls.length, 1);
+      const callConfig = stub.calls[0]?.config as Record<string, unknown> | undefined;
+      assert.deepStrictEqual(callConfig?.tools, [{ googleSearch: {} }, { urlContext: {} }]);
     } finally {
       stub.restore();
     }
@@ -593,6 +618,30 @@ describe('ask contract', () => {
     }
   });
 
+  it('chatWork forwards public grounding inputs to askWork', async () => {
+    let observedArgs: Record<string, unknown> | undefined;
+
+    const result = await chatWork(
+      async (args) => {
+        observedArgs = args;
+        return {
+          content: [{ type: 'text', text: 'Assistant answer' }],
+          structuredContent: { answer: 'Assistant answer' },
+        };
+      },
+      {
+        goal: 'Ground this answer',
+        googleSearch: true,
+        urls: ['https://example.com/docs'],
+      },
+      createContext(),
+    );
+
+    assert.strictEqual(result.isError, undefined);
+    assert.strictEqual(observedArgs?.googleSearch, true);
+    assert.deepStrictEqual(observedArgs?.urls, ['https://example.com/docs']);
+  });
+
   it('chatWork returns a tool error for unsupported responseSchemaJson $ref usage', async () => {
     const result = await chatWork(
       async () =>
@@ -614,7 +663,8 @@ describe('ask contract', () => {
     );
 
     assert.strictEqual(result.isError, true);
-    assert.match(result.content[0]?.text ?? '', /\$ref is not supported/);
+    const firstContent = result.content[0];
+    assert.match(firstContent?.type === 'text' ? firstContent.text : '', /\$ref is not supported/);
   });
 
   it('retries once with repair suffix when first JSON response fails schema validation', async () => {
@@ -641,9 +691,12 @@ describe('ask contract', () => {
       assert.deepStrictEqual(structured.data, { count: 2 });
       assert.strictEqual(structured.schemaWarnings, undefined);
       assert.strictEqual(stub.calls.length, 2);
-      assert.strictEqual(typeof stub.calls[1]?.contents, 'string');
+      const retryContents = stub.calls[1]?.contents;
+      if (typeof retryContents !== 'string') {
+        assert.fail('Expected retry contents to be a string');
+      }
       assert.match(
-        stub.calls[1].contents,
+        retryContents,
         /CRITICAL: The previous response was invalid JSON or failed schema validation/,
       );
     } finally {
@@ -800,7 +853,6 @@ describe('ask contract', () => {
       await askWithoutSession(
         {
           message: 'Summarize this page',
-          toolProfile: 'url',
           urls: ['https://example.com/docs'],
         },
         createContext(),
@@ -1018,7 +1070,7 @@ describe('ask contract', () => {
   });
 
   it('persists sentMessage for rebuilt sessions with summaries and stores finishReason', async () => {
-    const events: Record<string, unknown>[] = [];
+    const events: unknown[] = [];
     const transcript = [
       { role: 'user' as const, text: 'previous question', timestamp: 1 },
       { role: 'assistant' as const, text: 'previous answer', timestamp: 2 },
@@ -1096,7 +1148,7 @@ describe('ask contract', () => {
     }
   });
 
-  it('uses the chat profile thinking level instead of raw thinkingBudget', async () => {
+  it('uses raw thinkingBudget when thinkingLevel is omitted', async () => {
     const stub = withGeminiStreamStub(['Assistant answer']);
     const originalCache = process.env.CACHE;
     process.env.CACHE = 'false';
@@ -1114,12 +1166,12 @@ describe('ask contract', () => {
       assert.strictEqual(
         (stub.calls[0]?.config as { thinkingConfig?: { thinkingBudget?: number } } | undefined)
           ?.thinkingConfig?.thinkingBudget,
-        undefined,
+        128,
       );
       assert.strictEqual(
         (stub.calls[0]?.config as { thinkingConfig?: { thinkingLevel?: string } } | undefined)
           ?.thinkingConfig?.thinkingLevel,
-        'LOW',
+        undefined,
       );
     } finally {
       process.env.CACHE = originalCache;

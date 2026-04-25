@@ -249,12 +249,12 @@ describe('MCP tool smoke coverage', () => {
         assert.ok(thinkingLevel, `Expected ${toolName} to advertise thinkingLevel`);
         assert.equal(
           thinkingLevel.default,
-          'LOW',
-          `Expected ${toolName}.thinkingLevel default to be LOW`,
+          undefined,
+          `Expected ${toolName}.thinkingLevel to omit schema-level default`,
         );
         assert.equal(
           thinkingLevel.description,
-          'Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH (default LOW).',
+          'Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH. Omit to use the job-specific default cost profile.',
           `Expected ${toolName}.thinkingLevel description to stay consistent`,
         );
       }
@@ -269,6 +269,8 @@ describe('MCP tool smoke coverage', () => {
       const responseSchemaJson = getObjectProperty(chatSchema, 'responseSchemaJson');
       const temperature = getObjectProperty(chatSchema, 'temperature');
       const seed = getObjectProperty(chatSchema, 'seed');
+      const googleSearch = getObjectProperty(chatSchema, 'googleSearch');
+      const urls = getObjectProperty(chatSchema, 'urls');
 
       assert.ok(goal);
       assert.equal(goal.description, 'User goal or requested outcome');
@@ -290,6 +292,17 @@ describe('MCP tool smoke coverage', () => {
 
       assert.ok(seed);
       assert.equal(seed.description, 'Fixed random seed for reproducible outputs.');
+
+      assert.ok(googleSearch);
+      assert.equal(
+        googleSearch.description,
+        'Enable Google Search grounding for chat. Optional; additive. Combine with `urls` for URL Context.',
+      );
+
+      assert.ok(urls);
+      assert.equal(urls.description, 'Public URLs to analyze with URL Context during chat.');
+      assert.equal(urls.minItems, 1);
+      assert.equal(urls.maxItems, 20);
 
       const analyzeSchema = toolMap.get('analyze')?.inputSchema;
       const analyzeTargetKind = getObjectProperty(analyzeSchema, 'targetKind');

@@ -1,6 +1,10 @@
 import { z } from 'zod/v4';
 
-import type { AnalyzeInputBaseSchema, ResearchInputBaseSchema } from './inputs.js';
+import type {
+  AnalyzeInputBaseSchema,
+  ResearchInputBaseSchema,
+  ReviewInputBaseSchema,
+} from './inputs.js';
 
 type IssuePath = (string | number)[];
 
@@ -285,4 +289,62 @@ export function validateFlatResearchInput(
   }
 
   forbidFields(ctx, value, ['systemInstruction'], 'mode', mode);
+}
+
+type FlatReviewInput = z.input<typeof ReviewInputBaseSchema>;
+
+export function validateFlatReviewInput(
+  value: FlatReviewInput,
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+): void {
+  const subjectKind = value.subjectKind ?? 'diff';
+
+  if (subjectKind === 'diff') {
+    forbidFields(
+      ctx,
+      value,
+      ['filePathA', 'filePathB', 'question', 'error', 'codeContext', 'urls', 'googleSearch'],
+      'subjectKind',
+      subjectKind,
+    );
+    return;
+  }
+
+  if (subjectKind === 'comparison') {
+    if (!value.filePathA) {
+      addCustomIssue(
+        ctx,
+        'filePathA is required when subjectKind=comparison.',
+        ['filePathA'],
+        value.filePathA,
+      );
+    }
+    if (!value.filePathB) {
+      addCustomIssue(
+        ctx,
+        'filePathB is required when subjectKind=comparison.',
+        ['filePathB'],
+        value.filePathB,
+      );
+    }
+    forbidFields(
+      ctx,
+      value,
+      ['dryRun', 'language', 'error', 'codeContext'],
+      'subjectKind',
+      subjectKind,
+    );
+    return;
+  }
+
+  if (!value.error) {
+    addCustomIssue(ctx, 'error is required when subjectKind=failure.', ['error'], value.error);
+  }
+  forbidFields(
+    ctx,
+    value,
+    ['dryRun', 'filePathA', 'filePathB', 'question'],
+    'subjectKind',
+    subjectKind,
+  );
 }

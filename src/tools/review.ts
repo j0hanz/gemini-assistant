@@ -1226,6 +1226,15 @@ function buildReviewStructuredContent(
   }) as unknown as z.infer<typeof ReviewOutputSchema>;
 }
 
+function requireReviewField(
+  value: string | undefined,
+  field: string,
+  subjectKind: ReviewInput['subjectKind'],
+): string {
+  if (value) return value;
+  throw new Error(`${field} is required when subjectKind=${subjectKind}.`);
+}
+
 async function reviewWork(
   compareWork: ReturnType<typeof createCompareFileWork>,
   rootsFetcher: RootsFetcher,
@@ -1249,10 +1258,13 @@ async function reviewWork(
       rootsFetcher,
     );
   } else if (args.subjectKind === 'comparison') {
+    const filePathA = requireReviewField(args.filePathA, 'filePathA', args.subjectKind);
+    const filePathB = requireReviewField(args.filePathB, 'filePathB', args.subjectKind);
+
     result = await compareWork(
       {
-        filePathA: args.filePathA,
-        filePathB: args.filePathB,
+        filePathA,
+        filePathB,
         question: args.question ?? args.focus,
         thinkingLevel: args.thinkingLevel,
         thinkingBudget: args.thinkingBudget,
@@ -1264,9 +1276,11 @@ async function reviewWork(
       ctx,
     );
   } else {
+    const error = requireReviewField(args.error, 'error', args.subjectKind);
+
     result = await diagnoseFailureWork(
       {
-        error: args.error,
+        error,
         codeContext: args.codeContext,
         kind: 'failure',
         language: args.language,

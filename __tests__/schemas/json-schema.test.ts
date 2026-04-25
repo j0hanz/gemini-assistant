@@ -35,14 +35,6 @@ function jsonSchemaProperty(
   return undefined;
 }
 
-function oneOfBranches(schema: unknown): unknown[] {
-  return schema &&
-    typeof schema === 'object' &&
-    Array.isArray((schema as { oneOf?: unknown }).oneOf)
-    ? (schema as { oneOf: unknown[] }).oneOf
-    : [];
-}
-
 describe('GeminiResponseSchema', () => {
   it('does not advertise unsupported prefixItems in the supported-key message', () => {
     const result = GeminiResponseSchema.safeParse({});
@@ -101,16 +93,13 @@ describe('public input JSON Schema', () => {
     );
   });
 
-  it('publishes review as an action-specific oneOf schema', () => {
-    const reviewBranches = oneOfBranches(z.toJSONSchema(ReviewInputSchema));
+  it('publishes review as a flat object schema for form-based MCP clients', () => {
+    const reviewSchema = z.toJSONSchema(ReviewInputSchema);
 
-    assert.strictEqual(reviewBranches.length, 3);
-    assert.ok(
-      reviewBranches.some((branch) =>
-        ((branch as { required?: unknown }).required as unknown[] | undefined)?.includes(
-          'filePathA',
-        ),
-      ),
-    );
+    assert.strictEqual((reviewSchema as { oneOf?: unknown }).oneOf, undefined);
+    assert.strictEqual(jsonSchemaProperty(reviewSchema, 'subjectKind')?.default, 'diff');
+    assert.ok(jsonSchemaProperty(reviewSchema, 'filePathA'));
+    assert.ok(jsonSchemaProperty(reviewSchema, 'filePathB'));
+    assert.ok(jsonSchemaProperty(reviewSchema, 'error'));
   });
 });

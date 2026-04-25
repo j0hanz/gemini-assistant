@@ -17,6 +17,7 @@ import {
   OptionalFunctionsSpecSchema,
   requiredText,
   researchMode,
+  REVIEW_SUBJECT_OPTIONS,
   ServerSideToolInvocationsSchema,
   sessionId,
   temperatureField,
@@ -37,6 +38,7 @@ import {
   validateExclusiveSourceFileFields,
   validateFlatAnalyzeInput,
   validateFlatResearchInput,
+  validateFlatReviewInput,
 } from './validators.js';
 import { validateGeminiJsonSchema } from './validators.js';
 
@@ -211,12 +213,6 @@ export const AnalyzeInputBaseSchema = z.strictObject({
 });
 export const AnalyzeInputSchema = AnalyzeInputBaseSchema.superRefine(validateFlatAnalyzeInput);
 export type AnalyzeInput = z.infer<typeof AnalyzeInputSchema>;
-const reviewSubjectKindLiteral = <T extends 'diff' | 'comparison' | 'failure'>(value: T) =>
-  withFieldMetadata(
-    value === 'diff' ? z.literal(value).default(value) : z.literal(value),
-    'What to review: the current diff, a file comparison, or a failure report.',
-  );
-
 const reviewCommonShape = {
   focus: optionalField(textField('Review priorities (e.g. regressions, security, performance).')),
   thinkingLevel: thinkingLevelField,
@@ -224,68 +220,41 @@ const reviewCommonShape = {
   ...generationConfigFields,
 };
 
-const ReviewDiffInputSchema = z.strictObject({
-  subjectKind: reviewSubjectKindLiteral('diff'),
+export const ReviewInputBaseSchema = z.strictObject({
+  subjectKind: withFieldMetadata(
+    z.enum(REVIEW_SUBJECT_OPTIONS).default('diff'),
+    'What to review: the current diff, a file comparison, or a failure report.',
+  ),
   dryRun: withFieldMetadata(z.boolean().optional(), 'Skip model review for subjectKind=diff.'),
   language: optionalField(textField('Primary language hint for diff or failure review.')),
-  ...reviewCommonShape,
-});
-
-const ReviewComparisonInputSchema = z.strictObject({
-  subjectKind: reviewSubjectKindLiteral('comparison'),
-  filePathA: workspacePath(
-    'Workspace-relative or absolute path to the first file when subjectKind=comparison',
+  filePathA: optionalField(
+    workspacePath(
+      'Workspace-relative or absolute path to the first file when subjectKind=comparison',
+    ),
   ),
-  filePathB: workspacePath(
-    'Workspace-relative or absolute path to the second file when subjectKind=comparison',
+  filePathB: optionalField(
+    workspacePath(
+      'Workspace-relative or absolute path to the second file when subjectKind=comparison',
+    ),
   ),
   question: optionalField(
     textField('Comparison focus when subjectKind=comparison (behavior, APIs, security, etc.).'),
   ),
+  error: optionalField(textField('Error message or stack trace when subjectKind=failure.')),
+  codeContext: optionalField(textField('Relevant source code context when subjectKind=failure.')),
   googleSearch: withFieldMetadata(
     z.boolean().optional(),
     'Enable Google Search when subjectKind=comparison or subjectKind=failure.',
   ),
   ...createUrlContextFields({
     itemDescription: 'Public URL to include via URL Context',
-    description: 'Public URLs for additional context when subjectKind=comparison.',
+    description: 'Public URLs for additional context when subjectKind=comparison or failure.',
     max: 20,
     optional: true,
   }),
   ...reviewCommonShape,
 });
-
-const ReviewFailureInputSchema = z.strictObject({
-  subjectKind: reviewSubjectKindLiteral('failure'),
-  language: optionalField(textField('Primary language hint for diff or failure review.')),
-  error: textField('Error message or stack trace when subjectKind=failure.'),
-  codeContext: optionalField(textField('Relevant source code context when subjectKind=failure.')),
-  ...createUrlContextFields({
-    itemDescription: 'Public URL for additional context',
-    description: 'Public URLs for additional context when subjectKind=failure.',
-    max: 20,
-    optional: true,
-  }),
-  googleSearch: withFieldMetadata(
-    z.boolean().optional(),
-    'Enable Google Search when subjectKind=comparison or subjectKind=failure.',
-  ),
-  ...reviewCommonShape,
-});
-
-const ReviewInputUnionSchema = z.discriminatedUnion('subjectKind', [
-  ReviewDiffInputSchema,
-  ReviewComparisonInputSchema,
-  ReviewFailureInputSchema,
-]);
-
-export const ReviewInputSchema = z.preprocess((value) => {
-  if (value && typeof value === 'object' && !('subjectKind' in value)) {
-    return { ...value, subjectKind: 'diff' };
-  }
-
-  return value;
-}, ReviewInputUnionSchema);
+export const ReviewInputSchema = ReviewInputBaseSchema.superRefine(validateFlatReviewInput);
 export type ReviewInput = z.infer<typeof ReviewInputSchema>;
 
 function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => []) {

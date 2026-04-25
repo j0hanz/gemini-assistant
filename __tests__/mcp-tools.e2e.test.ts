@@ -332,10 +332,14 @@ describe('MCP tool smoke coverage', () => {
 
       const reviewSchema = toolMap.get('review')?.inputSchema;
       const reviewSubjectKind = findPropertyInSchema(reviewSchema, 'subjectKind');
+      const reviewFilePathA = getObjectProperty(reviewSchema, 'filePathA');
+      const reviewError = getObjectProperty(reviewSchema, 'error');
       const researchSchema = toolMap.get('research')?.inputSchema;
       const researchMode = getObjectProperty(researchSchema, 'mode');
 
       assert.ok(reviewSubjectKind);
+      assert.ok(reviewFilePathA);
+      assert.ok(reviewError);
       assert.equal(
         reviewSubjectKind.description,
         'What to review: the current diff, a file comparison, or a failure report.',
@@ -344,6 +348,7 @@ describe('MCP tool smoke coverage', () => {
       assert.equal(researchMode.description, 'Research mode selector (`quick` or `deep`).');
       assert.equal(researchMode.default, 'quick');
       assert.equal((researchSchema as { oneOf?: unknown }).oneOf, undefined);
+      assert.equal((reviewSchema as { oneOf?: unknown } | undefined)?.oneOf, undefined);
       assert.equal(reviewSubjectKind.default, 'diff');
 
       assert.deepStrictEqual(harness.client.getUnexpectedServerRequests(), []);

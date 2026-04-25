@@ -1091,6 +1091,14 @@ describe('ReviewInputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
+  it('rejects missing failure error text', () => {
+    const result = ReviewInputSchema.safeParse({
+      subjectKind: 'failure',
+      codeContext: 'throw new Error("boom")',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
   it('keeps the standard description for subject selection', () => {
     assert.strictEqual(
       getObjectShape(ReviewInputSchema).subjectKind.description,

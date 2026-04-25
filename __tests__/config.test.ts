@@ -292,6 +292,7 @@ describe('config parsing', () => {
     process.env.GEMINI_SAFETY_SETTINGS = JSON.stringify([
       {
         category: 'HARM_CATEGORY_HARASSMENT',
+        method: 'PROBABILITY',
         threshold: 'BLOCK_ONLY_HIGH',
       },
     ]);
@@ -299,9 +300,31 @@ describe('config parsing', () => {
     assert.deepStrictEqual(getSafetySettings(), [
       {
         category: 'HARM_CATEGORY_HARASSMENT',
+        method: 'PROBABILITY',
         threshold: 'BLOCK_ONLY_HIGH',
       },
     ]);
+  });
+
+  it('rejects invalid GEMINI_SAFETY_SETTINGS entries', () => {
+    process.env.GEMINI_SAFETY_SETTINGS = JSON.stringify([
+      {
+        category: 'HARM_CATEGORY_HARASSMENT',
+        threshold: 'NOT_A_THRESHOLD',
+      },
+    ]);
+
+    assert.throws(() => getSafetySettings(), /GEMINI_SAFETY_SETTINGS\[0\]\.threshold/);
+
+    process.env.GEMINI_SAFETY_SETTINGS = JSON.stringify([
+      {
+        category: 'HARM_CATEGORY_HARASSMENT',
+        threshold: 'BLOCK_ONLY_HIGH',
+        extra: true,
+      },
+    ]);
+
+    assert.throws(() => getSafetySettings(), /unknown keys: extra/);
   });
 
   it('returns the configured CACHE_TTL when set', () => {

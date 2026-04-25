@@ -1,4 +1,9 @@
-import type { SafetySetting } from '@google/genai';
+import {
+  HarmBlockMethod,
+  HarmBlockThreshold,
+  HarmCategory,
+  type SafetySetting,
+} from '@google/genai';
 
 interface TransportConfig {
   corsOrigin: string;
@@ -261,6 +266,54 @@ function parseRegexPattern(raw: string): RegExp {
   return new RegExp(trimmed);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isEnumValue<T extends Record<string, string>>(
+  enumObject: T,
+  value: unknown,
+): value is T[keyof T] {
+  return typeof value === 'string' && Object.values(enumObject).includes(value);
+}
+
+function parseSafetySetting(value: unknown, index: number): SafetySetting {
+  if (!isRecord(value)) {
+    throw new Error(`GEMINI_SAFETY_SETTINGS[${String(index)}] must be an object.`);
+  }
+
+  const unknownKeys = Object.keys(value).filter(
+    (key) => key !== 'category' && key !== 'method' && key !== 'threshold',
+  );
+  if (unknownKeys.length > 0) {
+    throw new Error(
+      `GEMINI_SAFETY_SETTINGS[${String(index)}] contains unknown keys: ${unknownKeys.join(', ')}.`,
+    );
+  }
+
+  if (!isEnumValue(HarmCategory, value.category)) {
+    throw new Error(
+      `GEMINI_SAFETY_SETTINGS[${String(index)}].category must be a valid HarmCategory value.`,
+    );
+  }
+  if (!isEnumValue(HarmBlockThreshold, value.threshold)) {
+    throw new Error(
+      `GEMINI_SAFETY_SETTINGS[${String(index)}].threshold must be a valid HarmBlockThreshold value.`,
+    );
+  }
+  if (value.method !== undefined && !isEnumValue(HarmBlockMethod, value.method)) {
+    throw new Error(
+      `GEMINI_SAFETY_SETTINGS[${String(index)}].method must be a valid HarmBlockMethod value.`,
+    );
+  }
+
+  return {
+    category: value.category,
+    ...(value.method !== undefined ? { method: value.method } : {}),
+    threshold: value.threshold,
+  };
+}
+
 export function getSafetySettings(): SafetySetting[] | undefined {
   const raw = process.env.GEMINI_SAFETY_SETTINGS;
   if (cachedSafetySettingsSource === raw) {
@@ -278,7 +331,7 @@ export function getSafetySettings(): SafetySetting[] | undefined {
     throw new Error('GEMINI_SAFETY_SETTINGS must be a JSON array when set.');
   }
 
-  cachedSafetySettings = parsed as SafetySetting[];
+  cachedSafetySettings = parsed.map(parseSafetySetting);
   cachedSafetySettingsSource = raw;
   return cachedSafetySettings;
 }

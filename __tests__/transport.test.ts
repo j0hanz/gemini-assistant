@@ -186,6 +186,7 @@ afterEach(() => {
   delete process.env.PORT;
   delete process.env.STATELESS;
   delete process.env.ALLOWED_HOSTS;
+  delete process.env.MAX_TRANSPORT_SESSIONS;
   delete process.env.MCP_HTTP_TOKEN;
   delete process.env.MCP_HTTP_RATE_LIMIT_RPS;
   delete process.env.MCP_HTTP_RATE_LIMIT_BURST;
@@ -290,6 +291,24 @@ describe('startWebStandardTransport', () => {
 
       assert.strictEqual(response.status, 500);
       assert.strictEqual(closeCalls, 1);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('keeps stateful sessions up to the configured capacity', async () => {
+    process.env.MAX_TRANSPORT_SESSIONS = '2';
+    const transport = await startWebStandardTransport(() => createServerInstance());
+
+    try {
+      const firstSessionId = await initializeSession(transport);
+      await initializeSession(transport);
+
+      const response = await transport.handler(
+        createRequest({ jsonrpc: '2.0', id: 3, method: 'ping' }, firstSessionId),
+      );
+
+      assert.strictEqual(response.status, 200);
     } finally {
       await transport.close();
     }

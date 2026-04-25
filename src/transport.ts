@@ -454,7 +454,7 @@ async function ensureStatefulPairCapacity<TTransport>(
   maxSessions: number,
   getReservedStatefulSlots: () => number,
 ): Promise<void> {
-  while (statefulPairs.size + getReservedStatefulSlots() >= maxSessions) {
+  while (statefulPairs.size + getReservedStatefulSlots() > maxSessions) {
     const oldestId = oldestStatefulPairId(statefulPairs);
     if (!oldestId) return;
     await evictStatefulPair(statefulPairs, oldestId, 'capacity');

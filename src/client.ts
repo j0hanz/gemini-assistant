@@ -5,7 +5,7 @@ import type {
   ToolConfig,
   ToolListUnion,
 } from '@google/genai';
-import { GoogleGenAI, HarmBlockThreshold, ThinkingLevel } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 import { logger } from './lib/logger.js';
 import type { GeminiResponseSchema } from './schemas/json-schema.js';
@@ -61,7 +61,7 @@ interface ConfigBuilderOptions {
   responseSchema?: GeminiResponseSchema | undefined;
   jsonMode?: boolean | undefined;
   maxOutputTokens?: number | undefined;
-  safetySettings?: unknown[] | undefined;
+  safetySettings?: SafetySettingInput[] | undefined;
   temperature?: number | undefined;
   seed?: number | undefined;
   mediaResolution?: GenerateContentConfig['mediaResolution'] | undefined;
@@ -71,6 +71,11 @@ interface ConfigBuilderOptions {
 }
 
 const clientLog = logger.child('client');
+interface SafetySettingInput {
+  category: NonNullable<SafetySetting['category']>;
+  method?: NonNullable<SafetySetting['method']> | undefined;
+  threshold: NonNullable<SafetySetting['threshold']>;
+}
 
 export function buildMergedToolConfig(
   toolConfig: ToolConfig | undefined,
@@ -110,19 +115,21 @@ function buildThinkingConfig(thinkingLevel?: AskThinkingLevel, thinkingBudget?: 
 }
 
 function normalizeSafetySettings(
-  safetySettings: readonly unknown[] | readonly SafetySetting[] | undefined,
+  safetySettings: readonly (SafetySetting | SafetySettingInput)[] | undefined,
 ): SafetySetting[] | undefined {
   if (!safetySettings) {
     return undefined;
   }
 
   return safetySettings.map((setting) => {
-    const candidate: Partial<SafetySetting> =
-      typeof setting === 'object' && setting !== null ? setting : {};
+    if (setting.category === undefined || setting.threshold === undefined) {
+      throw new Error('safetySettings entries require category and threshold.');
+    }
+
     return {
-      ...(candidate.category !== undefined ? { category: candidate.category } : {}),
-      ...(candidate.method !== undefined ? { method: candidate.method } : {}),
-      threshold: candidate.threshold ?? HarmBlockThreshold.BLOCK_ONLY_HIGH,
+      category: setting.category,
+      threshold: setting.threshold,
+      ...(setting.method !== undefined ? { method: setting.method } : {}),
     };
   });
 }

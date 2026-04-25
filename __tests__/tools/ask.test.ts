@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { FinishReason } from '@google/genai';
+import { FinishReason, HarmCategory } from '@google/genai';
 
 import { getAI } from '../../src/client.js';
 import { workspaceCacheManager } from '../../src/lib/workspace-context.js';
@@ -792,7 +792,12 @@ describe('ask contract', () => {
           maxOutputTokens: 100,
           systemInstruction: 'Return JSON',
           thinkingLevel: 'LOW',
-          safetySettings: [{ threshold: 'BLOCK_ONLY_HIGH' }],
+          safetySettings: [
+            {
+              category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+              threshold: 'BLOCK_ONLY_HIGH',
+            },
+          ],
         },
         createContext(),
         chat as never,

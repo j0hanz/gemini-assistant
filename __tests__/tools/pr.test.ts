@@ -22,6 +22,7 @@ const {
   buildUntrackedFilePatch,
   computeDiffStats,
   formatGitError,
+  isSensitiveUntrackedPath,
   matchesNoisyPath,
   resolveReviewWorkingDirectory,
   scoreDiffUnitRisk,
@@ -113,6 +114,31 @@ describe('matchesNoisyPath', () => {
   it('keeps normal source files', () => {
     assert.strictEqual(matchesNoisyPath('src/index.ts'), false);
     assert.strictEqual(matchesNoisyPath('README.md'), false);
+  });
+});
+
+describe('isSensitiveUntrackedPath', () => {
+  it('matches common credential filenames, extensions, segments, and basename markers', () => {
+    const sensitivePaths = [
+      '.env',
+      '.env.local',
+      'config/.npmrc',
+      '.aws/credentials',
+      '.ssh/id_ed25519',
+      'certs/service.pem',
+      'certs/service.key',
+      'notes/api-token.txt',
+      'docs/password-list.md',
+    ];
+
+    for (const filePath of sensitivePaths) {
+      assert.strictEqual(isSensitiveUntrackedPath(filePath), true, filePath);
+    }
+  });
+
+  it('does not match normal source paths', () => {
+    assert.strictEqual(isSensitiveUntrackedPath('src/index.ts'), false);
+    assert.strictEqual(isSensitiveUntrackedPath('README.md'), false);
   });
 });
 
@@ -330,6 +356,7 @@ describe('buildLocalDiffSnapshot', () => {
       runGit(repoRoot, ['add', 'src/staged.ts']);
       await writeFile(join(repoRoot, 'src', 'unstaged.ts'), 'export const unstaged = 2;\n');
       await writeFile(join(repoRoot, 'src', 'new-file.ts'), 'export const created = true;\n');
+      await writeFile(join(repoRoot, '.env'), 'API_KEY=super-secret\n');
       await writeFile(join(repoRoot, 'assets', 'logo.png'), Buffer.from([0, 1, 2, 3]));
       await writeFile(join(repoRoot, 'fixtures-large.json'), 'x'.repeat(1_100_000));
       await writeFile(join(repoRoot, 'dist', 'bundle.min.js'), 'console.log("skip");\n');
@@ -343,10 +370,12 @@ describe('buildLocalDiffSnapshot', () => {
       assert.ok(snapshot.includedUntracked.includes('src/new-file.ts'));
       assert.ok(snapshot.skippedBinaryPaths.includes('assets/logo.png'));
       assert.ok(snapshot.skippedLargePaths.includes('fixtures-large.json'));
+      assert.ok(snapshot.skippedSensitivePaths.includes('.env'));
       assert.ok(!snapshot.reviewedPaths.includes('dist/bundle.min.js'));
       assert.match(snapshot.diff, /src\/staged\.ts/);
       assert.match(snapshot.diff, /src\/unstaged\.ts/);
       assert.match(snapshot.diff, /src\/new-file\.ts/);
+      assert.doesNotMatch(snapshot.diff, /super-secret/);
       assert.doesNotMatch(snapshot.diff, /bundle\.min\.js/);
       assert.ok(snapshot.stats.files >= 3);
     } finally {
@@ -415,6 +444,20 @@ describe('buildLocalDiffSnapshot', () => {
       await rm(repoRoot, { recursive: true, force: true });
     }
   });
+
+  it('skips sensitive untracked paths before patch creation', async () => {
+    const repoRoot = await createTempRepo();
+
+    try {
+      await writeFile(join(repoRoot, '.env'), 'API_KEY=super-secret\n');
+
+      const result = await buildUntrackedPatch(repoRoot, '.env');
+
+      assert.deepStrictEqual(result, { path: '.env', skipReason: 'sensitive' });
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('buildAnalysisPrompt', () => {
@@ -452,6 +495,25 @@ describe('buildAnalysisPrompt', () => {
     assert.ok(prompt.includes('- fixtures/big.json'));
     assert.ok(prompt.includes('Omitted:'));
     assert.ok(prompt.includes('- src/omitted.ts'));
+  });
+
+  it('includes skipped sensitive metadata without adding file contents', () => {
+    const prompt = buildAnalysisPrompt(
+      'diff content',
+      stats,
+      reviewedPaths,
+      [],
+      [],
+      [],
+      [],
+      undefined,
+      undefined,
+      ['.env'],
+    );
+
+    assert.ok(prompt.includes('Skipped sensitive:'));
+    assert.ok(prompt.includes('- .env'));
+    assert.ok(!prompt.includes('API_KEY='));
   });
 
   it('omits Focus section when focus is not provided', () => {
@@ -575,6 +637,26 @@ describe('analyzePrWork roots handling', () => {
 
       assert.strictEqual(result.isError, undefined);
       assert.deepStrictEqual(structured.reviewedPaths, ['tracked.txt']);
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('reports skipped sensitive paths and omits sensitive content during dry runs', async () => {
+    const repoRoot = await createTempRepo();
+
+    try {
+      await writeFile(join(repoRoot, 'tracked.txt'), 'before\n');
+      runGit(repoRoot, ['add', '.']);
+      runGit(repoRoot, ['commit', '-m', 'initial']);
+      await writeFile(join(repoRoot, '.env'), 'API_KEY=super-secret\n');
+
+      const result = await analyzePrWork({ dryRun: true }, makeContext(), async () => [repoRoot]);
+      const structured = result.structuredContent as Record<string, unknown>;
+
+      assert.strictEqual(result.isError, undefined);
+      assert.deepStrictEqual(structured.skippedSensitivePaths, ['.env']);
+      assert.doesNotMatch(String(result.content[0]?.text ?? ''), /super-secret/);
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
     }

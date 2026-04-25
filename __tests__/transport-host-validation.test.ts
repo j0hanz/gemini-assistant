@@ -144,4 +144,21 @@ describe('transport HTTP protection', () => {
       delete process.env.HOST;
     }
   });
+
+  it('normalizes explicit ALLOWED_HOSTS entries with ports', async () => {
+    process.env.HOST = '127.0.0.1';
+    process.env.ALLOWED_HOSTS = 'localhost:3000';
+    const transport = await startWebStandardTransport(() => createNoopServerInstance());
+    try {
+      const accepted = await transport.handler(request({ host: 'localhost:3000' }));
+      const rejected = await transport.handler(request({ host: 'evil.example' }));
+
+      assert.notStrictEqual(accepted.status, 403);
+      assert.strictEqual(rejected.status, 403);
+    } finally {
+      await transport.close();
+      delete process.env.HOST;
+      delete process.env.ALLOWED_HOSTS;
+    }
+  });
 });

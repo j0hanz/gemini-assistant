@@ -149,6 +149,24 @@ const NOISY_EXACT_BASENAMES = new Set([
   'bun.lockb',
 ]);
 const NOISY_SUFFIXES = ['.map', '.min.js', '.min.css'];
+const SENSITIVE_UNTRACKED_BASENAMES = new Set([
+  '.env',
+  '.env.local',
+  '.env.development',
+  '.env.production',
+  '.env.test',
+  '.npmrc',
+  '.pypirc',
+  '.netrc',
+  'credentials',
+  'credentials.json',
+  'id_ed25519',
+  'id_rsa',
+  'secrets.json',
+]);
+const SENSITIVE_UNTRACKED_EXTENSIONS = new Set(['.key', '.p12', '.pfx', '.pem']);
+const SENSITIVE_UNTRACKED_SEGMENTS = new Set(['.aws', '.gnupg', '.ssh', 'credentials', 'secrets']);
+const SENSITIVE_UNTRACKED_BASENAME_PARTS = ['credential', 'password', 'secret', 'token'];
 
 const NOISY_EXCLUDE_PATHSPECS = [
   ...[...NOISY_EXACT_BASENAMES].map((basename) => `:!${basename}`),
@@ -211,13 +229,14 @@ interface LocalDiffSnapshot {
   includedUntracked: string[];
   skippedBinaryPaths: string[];
   skippedLargePaths: string[];
+  skippedSensitivePaths: string[];
   empty: boolean;
 }
 
 interface UntrackedPatchResult {
   patch?: string;
   path: string;
-  skipReason?: 'binary' | 'too_large';
+  skipReason?: 'binary' | 'sensitive' | 'too_large';
 }
 
 type AnalyzePrStructuredContent = Record<string, unknown> & {
@@ -227,6 +246,7 @@ type AnalyzePrStructuredContent = Record<string, unknown> & {
   includedUntracked: string[];
   skippedBinaryPaths: string[];
   skippedLargePaths: string[];
+  skippedSensitivePaths: string[];
   omittedPaths?: string[];
   empty: boolean;
   truncated?: boolean;
@@ -408,6 +428,20 @@ export function matchesNoisyPath(filePath: string): boolean {
   return (
     NOISY_EXACT_BASENAMES.has(basename) ||
     NOISY_SUFFIXES.some((suffix) => basename.endsWith(suffix))
+  );
+}
+
+export function isSensitiveUntrackedPath(relativePath: string): boolean {
+  const normalized = relativePath.replaceAll('\\', '/').toLowerCase();
+  const segments = normalized.split('/').filter(Boolean);
+  const basename = segments.at(-1) ?? normalized;
+
+  return (
+    SENSITIVE_UNTRACKED_BASENAMES.has(basename) ||
+    basename.startsWith('.env.') ||
+    SENSITIVE_UNTRACKED_EXTENSIONS.has(getExtension(basename)) ||
+    segments.some((segment) => SENSITIVE_UNTRACKED_SEGMENTS.has(segment)) ||
+    SENSITIVE_UNTRACKED_BASENAME_PARTS.some((part) => basename.includes(part))
   );
 }
 
@@ -642,6 +676,10 @@ export async function buildUntrackedPatch(
   signal?: AbortSignal,
 ): Promise<UntrackedPatchResult> {
   signal?.throwIfAborted();
+  if (isSensitiveUntrackedPath(relativePath)) {
+    return { path: relativePath, skipReason: 'sensitive' };
+  }
+
   const absolutePath = join(gitRoot, relativePath);
   const fileStats = await lstat(absolutePath).catch(() => null);
 
@@ -802,6 +840,7 @@ export function buildAnalysisPrompt(
   omittedPaths: string[] = [],
   language?: string,
   focus?: string,
+  skippedSensitivePaths: string[] = [],
 ): string {
   const parts = [
     '## Snapshot',
@@ -820,6 +859,7 @@ export function buildAnalysisPrompt(
     `Skipped large (> ${String(MAX_UNTRACKED_FILE_BYTES)} bytes):`,
     skippedLargePaths,
   );
+  appendPromptSection(parts, 'Skipped sensitive:', skippedSensitivePaths);
   appendPromptSection(parts, 'Omitted:', omittedPaths);
   parts.push('', '```diff', diff, '```');
 
@@ -830,11 +870,13 @@ function summarizeUntrackedResults(untrackedResults: UntrackedPatchResult[]): {
   includedUntracked: string[];
   skippedBinaryPaths: string[];
   skippedLargePaths: string[];
+  skippedSensitivePaths: string[];
   untrackedPatches: string[];
 } {
   const includedUntracked: string[] = [];
   const skippedBinaryPaths: string[] = [];
   const skippedLargePaths: string[] = [];
+  const skippedSensitivePaths: string[] = [];
   const untrackedPatches: string[] = [];
 
   for (const result of untrackedResults) {
@@ -844,6 +886,10 @@ function summarizeUntrackedResults(untrackedResults: UntrackedPatchResult[]): {
     }
     if (result.skipReason === 'too_large') {
       skippedLargePaths.push(result.path);
+      continue;
+    }
+    if (result.skipReason === 'sensitive') {
+      skippedSensitivePaths.push(result.path);
       continue;
     }
     if (!result.patch?.trim()) {
@@ -856,8 +902,15 @@ function summarizeUntrackedResults(untrackedResults: UntrackedPatchResult[]): {
   includedUntracked.sort();
   skippedBinaryPaths.sort();
   skippedLargePaths.sort();
+  skippedSensitivePaths.sort();
 
-  return { includedUntracked, skippedBinaryPaths, skippedLargePaths, untrackedPatches };
+  return {
+    includedUntracked,
+    skippedBinaryPaths,
+    skippedLargePaths,
+    skippedSensitivePaths,
+    untrackedPatches,
+  };
 }
 
 function buildSnapshotDiff(diff: string, untrackedPatches: string[]): string {
@@ -900,6 +953,7 @@ function buildStructuredContent(
     includedUntracked: snapshot.includedUntracked,
     skippedBinaryPaths: snapshot.skippedBinaryPaths,
     skippedLargePaths: snapshot.skippedLargePaths,
+    skippedSensitivePaths: snapshot.skippedSensitivePaths,
     ...(omittedPaths.length > 0 ? { omittedPaths } : {}),
     empty: snapshot.empty,
     ...(truncated ? { truncated } : {}),
@@ -914,6 +968,9 @@ function buildNoChangesAnalysis(snapshot: LocalDiffSnapshot): string {
       : '',
     snapshot.skippedLargePaths.length > 0
       ? `large untracked files over ${String(MAX_UNTRACKED_FILE_BYTES)} bytes: ${snapshot.skippedLargePaths.join(', ')}`
+      : '',
+    snapshot.skippedSensitivePaths.length > 0
+      ? `sensitive untracked files: ${snapshot.skippedSensitivePaths.join(', ')}`
       : '',
   ].filter(Boolean);
 
@@ -981,8 +1038,13 @@ export async function buildLocalDiffSnapshot(
   ]);
 
   const untrackedResults = await collectUntrackedResults(gitRoot, untrackedPaths, signal);
-  const { includedUntracked, skippedBinaryPaths, skippedLargePaths, untrackedPatches } =
-    summarizeUntrackedResults(untrackedResults);
+  const {
+    includedUntracked,
+    skippedBinaryPaths,
+    skippedLargePaths,
+    skippedSensitivePaths,
+    untrackedPatches,
+  } = summarizeUntrackedResults(untrackedResults);
   const reviewedPaths = uniqueSortedPaths([...trackedSnapshot.paths, ...includedUntracked]);
   const diff = buildSnapshotDiff(trackedSnapshot.diff, untrackedPatches);
   const { empty, stats } = buildSnapshotStats(diff);
@@ -994,6 +1056,7 @@ export async function buildLocalDiffSnapshot(
     includedUntracked,
     skippedBinaryPaths,
     skippedLargePaths,
+    skippedSensitivePaths,
     empty,
   };
 }
@@ -1113,6 +1176,7 @@ export async function analyzePrWork(
     budgetedDiff.omittedPaths,
     language,
     focus,
+    snapshot.skippedSensitivePaths,
   );
 
   const modelPrompt = buildDiffReviewPrompt({
@@ -1188,6 +1252,7 @@ function buildReviewStructuredContent(
     includedUntracked: structured.includedUntracked,
     skippedBinaryPaths: structured.skippedBinaryPaths,
     skippedLargePaths: structured.skippedLargePaths,
+    skippedSensitivePaths: structured.skippedSensitivePaths,
     omittedPaths: structured.omittedPaths,
     empty: typeof structured.empty === 'boolean' ? structured.empty : undefined,
     truncated: typeof structured.truncated === 'boolean' ? structured.truncated : undefined,

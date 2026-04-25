@@ -18,14 +18,35 @@ function normalizeAllowedHost(host: string): string {
   return isIP(cleanHost) === 6 ? `[${cleanHost}]` : cleanHost;
 }
 
+function stripHostPort(host: string): string {
+  const trimmed = host.trim().toLowerCase();
+  if (trimmed.startsWith('[')) {
+    const bracketEnd = trimmed.indexOf(']');
+    return bracketEnd === -1 ? trimmed : trimmed.slice(0, bracketEnd + 1);
+  }
+
+  if (isIP(trimmed) === 6) {
+    return trimmed;
+  }
+
+  const colonIdx = trimmed.lastIndexOf(':');
+  return colonIdx === -1 ? trimmed : trimmed.slice(0, colonIdx);
+}
+
+function normalizeAllowedHostEntry(host: string): string {
+  return normalizeAllowedHost(stripHostPort(host));
+}
+
+function dedupeAllowedHosts(hosts: string[]): string[] {
+  return [...new Set(hosts)];
+}
+
 export function parseAllowedHosts(): string[] | undefined {
   const raw = getAllowedHostsEnv();
   if (!raw) return undefined;
-  const hosts = raw
-    .split(',')
-    .map((h) => h.trim())
-    .filter(Boolean);
-  return hosts.length > 0 ? hosts : undefined;
+  const hosts = raw.split(',').map(normalizeAllowedHostEntry).filter(Boolean);
+  const deduped = dedupeAllowedHosts(hosts);
+  return deduped.length > 0 ? deduped : undefined;
 }
 
 /**
@@ -58,20 +79,8 @@ export function isAutoDerivedAllowedHosts(bindHost: string): boolean {
 export function validateHostHeader(hostHeader: string | null, allowedHosts: string[]): boolean {
   if (!hostHeader) return false;
 
-  let hostname: string;
-
-  if (hostHeader.startsWith('[')) {
-    // IPv6 with brackets — e.g. [::1]:3000 or [::1]
-    const bracketEnd = hostHeader.indexOf(']');
-    hostname = bracketEnd === -1 ? hostHeader : hostHeader.slice(0, bracketEnd + 1);
-  } else {
-    // IPv4 / hostname — strip port after last colon
-    const colonIdx = hostHeader.lastIndexOf(':');
-    hostname = colonIdx === -1 ? hostHeader : hostHeader.slice(0, colonIdx);
-  }
-
-  const lower = hostname.toLowerCase();
-  return allowedHosts.some((h) => h.toLowerCase() === lower);
+  const normalizedHost = normalizeAllowedHostEntry(hostHeader);
+  return allowedHosts.some((host) => normalizeAllowedHostEntry(host) === normalizedHost);
 }
 
 // ── Path Validation ───────────────────────────────────────────────────

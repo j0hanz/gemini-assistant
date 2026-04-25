@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { HarmBlockMethod, HarmBlockThreshold, HarmCategory } from '@google/genai';
 import { z } from 'zod/v4';
 
 import { AppError } from '../../src/lib/errors.js';
@@ -845,6 +846,87 @@ describe('shared thinkingLevel metadata', () => {
     assert.strictEqual(reviewThinking.description, chatThinking.description);
     assert.strictEqual(analyzeThinking.safeParse(undefined).data, undefined);
     assert.strictEqual(reviewThinking.safeParse(undefined).data, undefined);
+  });
+});
+
+describe('shared safetySettings validation', () => {
+  const validSafetySetting = {
+    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+  };
+  const validSafetySettingWithMethod = {
+    ...validSafetySetting,
+    method: HarmBlockMethod.SEVERITY,
+  };
+
+  const publicSchemaCases = [
+    {
+      name: 'chat',
+      schema: ChatInputSchema,
+      input: { goal: 'test' },
+    },
+    {
+      name: 'research',
+      schema: ResearchInputSchema,
+      input: { goal: 'test' },
+    },
+    {
+      name: 'analyze',
+      schema: AnalyzeInputSchema,
+      input: { goal: 'test', filePath: 'src/index.ts' },
+    },
+    {
+      name: 'review',
+      schema: ReviewInputSchema,
+      input: {},
+    },
+  ] as const;
+
+  it('accepts valid SafetySetting objects on all public generation schemas', () => {
+    for (const testCase of publicSchemaCases) {
+      assert.strictEqual(
+        testCase.schema.safeParse({
+          ...testCase.input,
+          safetySettings: [validSafetySetting, validSafetySettingWithMethod],
+        }).success,
+        true,
+        testCase.name,
+      );
+    }
+  });
+
+  it('rejects invalid SafetySetting objects on all public generation schemas', () => {
+    const invalidSafetySettings = [
+      [{ category: 'BAD', threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }],
+      [{ category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: 'BAD' }],
+      [
+        {
+          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+          method: 'BAD',
+          threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        },
+      ],
+      ['not-an-object'],
+      [
+        {
+          ...validSafetySetting,
+          extra: true,
+        },
+      ],
+    ];
+
+    for (const testCase of publicSchemaCases) {
+      for (const safetySettings of invalidSafetySettings) {
+        assert.strictEqual(
+          testCase.schema.safeParse({
+            ...testCase.input,
+            safetySettings,
+          }).success,
+          false,
+          `${testCase.name}: ${JSON.stringify(safetySettings)}`,
+        );
+      }
+    }
   });
 });
 

@@ -226,7 +226,7 @@ Optional local transport:
 - `PORT`: HTTP bind port, default `3000`
 - `CORS_ORIGIN`: optional CORS origin for HTTP transports; use `*` or one `http(s)` origin
 - `STATELESS`: enable stateless HTTP transport behavior when set to `true`, default `false`
-- `ALLOWED_HOSTS`: optional comma-separated Host header allow-list for HTTP transports
+- `ALLOWED_HOSTS`: optional comma-separated Host header allow-list for HTTP transports; entries are normalized for case, ports, and bracketed IPv6 forms
 - `MCP_HTTP_TOKEN`: bearer token required when `HOST` is not `127.0.0.1`, `::1`, or `localhost`; must be at least 32 characters
 - `MCP_HTTP_RATE_LIMIT_RPS`: per-session/IP request refill rate for `/mcp`, default `10`
 - `MCP_HTTP_RATE_LIMIT_BURST`: per-session/IP request burst for `/mcp`, default `20`

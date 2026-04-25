@@ -181,6 +181,10 @@ export const ReviewOutputSchema = z.strictObject({
   includedUntracked: z.array(z.string()).optional().describe('Included untracked text files'),
   skippedBinaryPaths: z.array(z.string()).optional().describe('Skipped untracked binary files'),
   skippedLargePaths: z.array(z.string()).optional().describe('Skipped large untracked files'),
+  skippedSensitivePaths: z
+    .array(z.string())
+    .optional()
+    .describe('Skipped untracked files that matched sensitive credential path rules'),
   omittedPaths: z.array(z.string()).optional().describe('Local diff paths omitted due to budget'),
   empty: z.boolean().optional().describe('Whether the local diff is empty (no changes)'),
   truncated: z.boolean().optional().describe('Whether the diff review was truncated'),

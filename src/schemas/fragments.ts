@@ -1,3 +1,4 @@
+import { HarmBlockMethod, HarmBlockThreshold, HarmCategory } from '@google/genai';
 import { z } from 'zod/v4';
 
 import {
@@ -28,8 +29,14 @@ const usageMetadataFields = {
 
 export const UsageMetadataSchema = z.strictObject(usageMetadataFields);
 
-const SafetySettingPassthroughSchema = z
-  .array(z.unknown())
+const SafetySettingSchema = z.strictObject({
+  category: z.enum(HarmCategory).describe('Gemini harm category'),
+  method: z.enum(HarmBlockMethod).optional().describe('Gemini harm block method'),
+  threshold: z.enum(HarmBlockThreshold).describe('Gemini harm block threshold'),
+});
+
+export const SafetySettingsSchema = z
+  .array(SafetySettingSchema)
   .optional()
   .describe('Gemini SafetySetting[]');
 
@@ -223,6 +230,6 @@ export function createGenerationConfigFields() {
       .max(1_048_576)
       .optional()
       .describe('Maximum Gemini output tokens.'),
-    safetySettings: SafetySettingPassthroughSchema,
+    safetySettings: SafetySettingsSchema,
   };
 }

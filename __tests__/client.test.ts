@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { HarmBlockThreshold, ThinkingLevel } from '@google/genai';
+import { HarmBlockThreshold, HarmCategory, ThinkingLevel } from '@google/genai';
 
 import { buildGenerateContentConfig } from '../src/client.js';
 import { ChatInputSchema } from '../src/schemas/inputs.js';
@@ -26,11 +26,20 @@ describe('client config', () => {
     );
   });
 
-  it('defaults safety setting thresholds to BLOCK_ONLY_HIGH', () => {
+  it('passes validated safety settings through to Gemini config', () => {
     const config = buildGenerateContentConfig({
-      safetySettings: [{}] as never,
+      safetySettings: [
+        {
+          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+          threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        },
+      ],
     });
 
+    assert.strictEqual(
+      config.safetySettings?.[0]?.category,
+      HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    );
     assert.strictEqual(config.safetySettings?.[0]?.threshold, HarmBlockThreshold.BLOCK_ONLY_HIGH);
   });
 

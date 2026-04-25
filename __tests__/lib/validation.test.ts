@@ -17,7 +17,9 @@ import {
 // ── Host Validation ───────────────────────────────────────────────────
 
 const ROOTS_ENV_KEY = 'ROOTS';
+const ALLOWED_HOSTS_ENV_KEY = 'ALLOWED_HOSTS';
 const savedAllowedFileRootsEnv = process.env[ROOTS_ENV_KEY];
+const savedAllowedHostsEnv = process.env[ALLOWED_HOSTS_ENV_KEY];
 
 function restoreAllowedFileRootsEnv(): void {
   if (savedAllowedFileRootsEnv === undefined) {
@@ -36,9 +38,38 @@ function setAllowedFileRootsEnv(value: string | undefined): void {
   }
 }
 
+function restoreAllowedHostsEnv(): void {
+  if (savedAllowedHostsEnv === undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete process.env[ALLOWED_HOSTS_ENV_KEY];
+  } else {
+    process.env[ALLOWED_HOSTS_ENV_KEY] = savedAllowedHostsEnv;
+  }
+}
+
+function setAllowedHostsEnv(value: string | undefined): void {
+  if (value === undefined) {
+    restoreAllowedHostsEnv();
+  } else {
+    process.env[ALLOWED_HOSTS_ENV_KEY] = value;
+  }
+}
+
+afterEach(() => {
+  restoreAllowedHostsEnv();
+});
+
 describe('parseAllowedHosts', () => {
-  it('returns undefined (allowed-hosts env surface is removed)', () => {
+  it('returns undefined when ALLOWED_HOSTS is unset', () => {
+    setAllowedHostsEnv(undefined);
+
     assert.equal(parseAllowedHosts(), undefined);
+  });
+
+  it('normalizes explicit allowed-host entries', () => {
+    setAllowedHostsEnv('Example.com:3000, EXAMPLE.com, ::1, [2001:db8::10]:8080');
+
+    assert.deepEqual(parseAllowedHosts(), ['example.com', '[::1]', '[2001:db8::10]']);
   });
 });
 
@@ -124,8 +155,8 @@ describe('validateHostHeader', () => {
     assert.equal(validateHostHeader('[::1]:3000', ALLOWED), true);
   });
 
-  it('rejects IPv6 without brackets when allowlist uses brackets', () => {
-    assert.equal(validateHostHeader('::1', ALLOWED), false);
+  it('normalizes bare IPv6 when allowlist uses brackets', () => {
+    assert.equal(validateHostHeader('::1', ALLOWED), true);
   });
 
   it('works with custom allowlist', () => {
@@ -133,6 +164,13 @@ describe('validateHostHeader', () => {
     assert.equal(validateHostHeader('myapp.local:8080', custom), true);
     assert.equal(validateHostHeader('api.internal', custom), true);
     assert.equal(validateHostHeader('other.host', custom), false);
+  });
+
+  it('accepts normalized equivalent configured host forms', () => {
+    assert.equal(validateHostHeader('example.com', ['example.com:3000']), true);
+    assert.equal(validateHostHeader('example.com:8080', ['EXAMPLE.com']), true);
+    assert.equal(validateHostHeader('[::1]:3000', ['::1']), true);
+    assert.equal(validateHostHeader('[::1]', ['[::1]']), true);
   });
 });
 

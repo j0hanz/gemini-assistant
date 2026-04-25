@@ -773,7 +773,7 @@ function hasCodeExecutionEvents(toolEvents: readonly ToolEvent[]): boolean {
   );
 }
 
-export function renderCodeExecutionParts(
+function renderCodeExecutionParts(
   toolEvents: readonly ToolEvent[] = [],
 ): { type: 'text'; text: string }[] {
   return toolEvents.flatMap((event) => {

@@ -30,6 +30,16 @@ export type BuiltInToolSpec =
       metadataFilter?: unknown;
     };
 
+export function selectSearchAndUrlContextTools(
+  googleSearch?: boolean,
+  urls?: readonly string[],
+): BuiltInToolName[] {
+  return [
+    ...(googleSearch ? (['googleSearch'] as const) : []),
+    ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
+  ];
+}
+
 const BUILT_IN_TOOL_FACTORIES: Record<
   BuiltInToolName,
   (spec: BuiltInToolSpec) => ToolListUnion[number]

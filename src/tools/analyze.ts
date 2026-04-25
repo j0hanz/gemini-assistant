@@ -14,7 +14,11 @@ import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
 import { buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
 import { pickDefined } from '../lib/object.js';
-import { type BuiltInToolName, resolveOrchestration } from '../lib/orchestration.js';
+import {
+  type BuiltInToolName,
+  resolveOrchestration,
+  selectSearchAndUrlContextTools,
+} from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import { buildBaseStructuredOutput, safeValidateStructuredContent } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
@@ -251,10 +255,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
         'analyze_file',
         ANALYZE_FILE_TOOL_LABEL,
         {
-          builtInToolNames: [
-            ...(googleSearch ? (['googleSearch'] as const) : []),
-            ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
-          ],
+          builtInToolNames: selectSearchAndUrlContextTools(googleSearch, urls),
           urls,
           // Built-in tools only; no function-calling mix. Default 'auto' policy.
         },
@@ -340,10 +341,7 @@ async function analyzeMultiFileWork(
       'analyze',
       ANALYZE_TOOL_LABEL,
       {
-        builtInToolNames: [
-          ...(googleSearch ? (['googleSearch'] as const) : []),
-          ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
-        ],
+        builtInToolNames: selectSearchAndUrlContextTools(googleSearch, urls),
         urls,
         // Built-in tools only; no function-calling mix. Default 'auto' policy.
       },

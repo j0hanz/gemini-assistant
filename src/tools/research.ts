@@ -24,6 +24,7 @@ import {
   type BuiltInToolName,
   type BuiltInToolSpec,
   resolveOrchestration,
+  selectSearchAndUrlContextTools,
 } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import {
@@ -98,6 +99,17 @@ function buildResearchBuiltInSpecs(
     });
   }
   return specs;
+}
+
+function buildGroundedResearchBuiltInSpecs(
+  urls: readonly string[] | undefined,
+  fileSearch: ResearchInput['fileSearch'] | undefined,
+  extraTools: readonly BuiltInToolName[] = [],
+): BuiltInToolSpec[] {
+  return buildResearchBuiltInSpecs(
+    [...selectSearchAndUrlContextTools(true, urls), ...extraTools],
+    fileSearch,
+  );
 }
 
 async function runToolStream<T extends Record<string, unknown>>(
@@ -430,7 +442,7 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
   };
 }
 
-export function summarizeRetrieval(text: string, maxChars = 1_500): string {
+function summarizeRetrieval(text: string, maxChars = 1_500): string {
   const findingsIndex = text.indexOf('## Findings');
   const candidate = findingsIndex >= 0 ? text.slice(findingsIndex) : text;
   const trimmed = candidate.trim();
@@ -648,12 +660,7 @@ async function runDeepResearchPlan(
 
   const resolvedRetrieval = await resolveOrchestration(
     {
-      builtInToolSpecs: buildResearchBuiltInSpecs(
-        (args.urls?.length ?? 0) > 0
-          ? (['googleSearch', 'urlContext'] as const)
-          : (['googleSearch'] as const),
-        args.fileSearch,
-      ),
+      builtInToolSpecs: buildGroundedResearchBuiltInSpecs(args.urls, args.fileSearch),
       urls: args.urls,
     },
     ctx,
@@ -781,12 +788,7 @@ async function searchWork(
 ): Promise<CallToolResult> {
   const resolved = await resolveOrchestration(
     {
-      builtInToolSpecs: buildResearchBuiltInSpecs(
-        (urls?.length ?? 0) > 0
-          ? (['googleSearch', 'urlContext'] as const)
-          : (['googleSearch'] as const),
-        fileSearch,
-      ),
+      builtInToolSpecs: buildGroundedResearchBuiltInSpecs(urls, fileSearch),
       urls,
     },
     ctx,
@@ -947,12 +949,7 @@ async function agenticSearchWork(
 
   const resolved = await resolveOrchestration(
     {
-      builtInToolSpecs: buildResearchBuiltInSpecs(
-        (urls?.length ?? 0) > 0
-          ? (['googleSearch', 'urlContext', 'codeExecution'] as const)
-          : (['googleSearch', 'codeExecution'] as const),
-        fileSearch,
-      ),
+      builtInToolSpecs: buildGroundedResearchBuiltInSpecs(urls, fileSearch, ['codeExecution']),
       urls,
     },
     ctx,

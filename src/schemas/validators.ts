@@ -1,11 +1,5 @@
 import { z } from 'zod/v4';
 
-import type {
-  AnalyzeInputBaseSchema,
-  ResearchInputBaseSchema,
-  ReviewInputBaseSchema,
-} from './inputs.js';
-
 type IssuePath = (string | number)[];
 
 function addCustomIssue(
@@ -209,7 +203,14 @@ export function validateExclusiveSourceFileFields(
   );
 }
 
-type FlatAnalyzeInput = z.input<typeof AnalyzeInputBaseSchema>;
+interface FlatAnalyzeInput {
+  filePath?: string | undefined;
+  filePaths?: string[] | undefined;
+  outputKind?: 'diagram' | 'summary' | undefined;
+  targetKind?: 'file' | 'multi' | 'url' | undefined;
+  urls?: string[] | undefined;
+  validateSyntax?: boolean | undefined;
+}
 
 function addForbiddenFieldIssue(
   ctx: z.core.$RefinementCtx<Record<string, unknown>>,
@@ -275,7 +276,11 @@ export function validateFlatAnalyzeInput(
   }
 }
 
-type FlatResearchInput = z.input<typeof ResearchInputBaseSchema>;
+interface FlatResearchInput {
+  deliverable?: string | undefined;
+  mode?: 'deep' | 'quick' | undefined;
+  systemInstruction?: string | undefined;
+}
 
 export function validateFlatResearchInput(
   value: FlatResearchInput,
@@ -291,7 +296,18 @@ export function validateFlatResearchInput(
   forbidFields(ctx, value, ['systemInstruction'], 'mode', mode);
 }
 
-type FlatReviewInput = z.input<typeof ReviewInputBaseSchema>;
+interface FlatReviewInput {
+  codeContext?: string | undefined;
+  dryRun?: boolean | undefined;
+  error?: string | undefined;
+  filePathA?: string | undefined;
+  filePathB?: string | undefined;
+  googleSearch?: boolean | undefined;
+  language?: string | undefined;
+  question?: string | undefined;
+  subjectKind?: 'comparison' | 'diff' | 'failure' | undefined;
+  urls?: string[] | undefined;
+}
 
 export function validateFlatReviewInput(
   value: FlatReviewInput,

@@ -1,4 +1,3 @@
-import { HarmBlockMethod, HarmBlockThreshold, HarmCategory } from '@google/genai';
 import { z } from 'zod/v4';
 
 import {
@@ -29,21 +28,10 @@ const usageMetadataFields = {
 
 export const UsageMetadataSchema = z.strictObject(usageMetadataFields);
 
-const HARM_CATEGORY_VALUES = Object.values(HarmCategory) as [string, ...string[]];
-const HARM_BLOCK_METHOD_VALUES = Object.values(HarmBlockMethod) as [string, ...string[]];
-const HARM_BLOCK_THRESHOLD_VALUES = Object.values(HarmBlockThreshold) as [string, ...string[]];
-
-export const SafetySettingInputSchema = z.strictObject({
-  category: z.enum(HARM_CATEGORY_VALUES).optional().describe('Safety harm category to block'),
-  method: z.enum(HARM_BLOCK_METHOD_VALUES).optional().describe('Optional blocking method'),
-  threshold: z.enum(HARM_BLOCK_THRESHOLD_VALUES).describe('Safety blocking threshold'),
-});
-export const SafetySettingPassthroughSchema = z
+const SafetySettingPassthroughSchema = z
   .array(z.unknown())
   .optional()
   .describe('Gemini SafetySetting[]');
-
-export type SafetySettingInput = z.infer<typeof SafetySettingInputSchema>;
 
 const functionCallEntryFields = {
   name: z.string().describe('Function/tool name').optional(),

@@ -27,6 +27,28 @@ export interface CollectedItems<T> {
   droppedNonPublic: number;
 }
 
+const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
+
+export function tryParseJsonResponse(text: string): unknown {
+  const candidates = [text.trim()];
+  const fencedMatch = JSON_CODE_BLOCK_PATTERN.exec(text)?.[1]?.trim();
+  if (fencedMatch && fencedMatch !== candidates[0]) {
+    candidates.push(fencedMatch);
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+
+    try {
+      return JSON.parse(candidate) as unknown;
+    } catch {
+      // Ignore invalid JSON candidates and fall back to raw text output.
+    }
+  }
+
+  return undefined;
+}
+
 // ── URL Metadata ──────────────────────────────────────────────────────
 
 function domainFromPublicUrl(url: string): string | undefined {

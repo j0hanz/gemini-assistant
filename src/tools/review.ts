@@ -19,9 +19,13 @@ import { logger, type ScopedLogger } from '../lib/logger.js';
 import { buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { buildDiffReviewPrompt } from '../lib/model-prompts.js';
 import { pickDefined } from '../lib/object.js';
-import { resolveOrchestration } from '../lib/orchestration.js';
+import { resolveOrchestration, selectSearchAndUrlContextTools } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
-import { buildBaseStructuredOutput, safeValidateStructuredContent } from '../lib/response.js';
+import {
+  buildBaseStructuredOutput,
+  safeValidateStructuredContent,
+  tryParseJsonResponse,
+} from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
@@ -37,28 +41,6 @@ import { ReviewOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, getAI, MODEL, type ToolCostProfileName } from '../client.js';
 import { getReviewDocs } from '../config.js';
-
-const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
-
-function tryParseJsonResponse(text: string): unknown {
-  const candidates = [text.trim()];
-  const fencedMatch = JSON_CODE_BLOCK_PATTERN.exec(text)?.[1]?.trim();
-  if (fencedMatch && fencedMatch !== candidates[0]) {
-    candidates.push(fencedMatch);
-  }
-
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-
-    try {
-      return JSON.parse(candidate) as unknown;
-    } catch {
-      // Ignore invalid JSON candidates and fall back to raw text output.
-    }
-  }
-
-  return undefined;
-}
 
 const execFileAsync = promisify(execFile);
 
@@ -324,10 +306,7 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
         'compare_files',
         COMPARE_FILE_TOOL_LABEL,
         {
-          builtInToolNames: [
-            ...(googleSearch ? (['googleSearch'] as const) : []),
-            ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
-          ],
+          builtInToolNames: selectSearchAndUrlContextTools(googleSearch, urls),
           urls,
           // Built-in tools only; no function-calling mix. Default 'auto' policy.
         },
@@ -401,10 +380,7 @@ async function diagnoseFailureWork(
     'review_failure',
     'Review Failure',
     {
-      builtInToolNames: [
-        ...(googleSearch ? (['googleSearch'] as const) : []),
-        ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
-      ],
+      builtInToolNames: selectSearchAndUrlContextTools(googleSearch, urls),
       urls,
       // Built-in tools only; no function-calling mix. Default 'auto' policy.
     },

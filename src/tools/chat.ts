@@ -40,6 +40,7 @@ import {
   createResourceLink,
   extractTextContent,
   safeValidateStructuredContent,
+  tryParseJsonResponse,
   withRelatedTaskMeta,
 } from '../lib/response.js';
 import {
@@ -160,7 +161,6 @@ export interface AskExecutionResult {
 }
 
 const ASK_TOOL_LABEL = 'Chat';
-const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
 const JSON_REPAIR_MAX_RETRIES = 1;
 const JSON_REPAIR_WARNING_TEXT_LIMIT = 2_000;
 
@@ -173,26 +173,6 @@ function validateJsonAgainstSchema(data: unknown, schema: GeminiResponseSchema):
   } catch {
     return ['Schema validation could not be performed'];
   }
-}
-
-function tryParseJsonResponse(text: string): unknown {
-  const candidates = [text.trim()];
-  const fencedMatch = JSON_CODE_BLOCK_PATTERN.exec(text)?.[1]?.trim();
-  if (fencedMatch && fencedMatch !== candidates[0]) {
-    candidates.push(fencedMatch);
-  }
-
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-
-    try {
-      return JSON.parse(candidate) as unknown;
-    } catch {
-      // Ignore invalid JSON candidates and fall back to raw text output.
-    }
-  }
-
-  return undefined;
 }
 
 function buildAskWarnings(

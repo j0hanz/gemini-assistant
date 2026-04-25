@@ -1,4 +1,8 @@
 export type PublicJobName = 'chat' | 'research' | 'analyze' | 'review';
+export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
+export type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
+export const DEFAULT_TEMPERATURE = 1.0;
+
 export type PublicPromptName = 'discover' | 'research' | 'review';
 export type PublicWorkflowName = 'start-here' | 'chat' | 'research' | 'analyze' | 'review';
 export type PublicResourceUri =

@@ -5,8 +5,7 @@ import { z } from 'zod/v4';
 
 import { isPublicHttpUrl } from '../lib/validation.js';
 
-import { DEFAULT_TEMPERATURE, THINKING_LEVELS } from '../client.js';
-import { PUBLIC_TOOL_NAMES } from '../public-contract.js';
+import { DEFAULT_TEMPERATURE, PUBLIC_TOOL_NAMES, THINKING_LEVELS } from '../public-contract.js';
 
 const WINDOWS_DRIVE_RELATIVE_PATH_PATTERN = /^[A-Za-z]:(?![\\/])/;
 const PUBLIC_HTTP_URL_ERROR = 'URL must be a valid public http:// or https:// URL';
@@ -15,8 +14,8 @@ export const RESEARCH_MODE_OPTIONS = ['quick', 'deep'] as const;
 const ANALYZE_TARGET_KIND_OPTIONS = ['file', 'url', 'multi'] as const;
 const ANALYZE_OUTPUT_KIND_OPTIONS = ['summary', 'diagram'] as const;
 export const REVIEW_SUBJECT_OPTIONS = ['diff', 'comparison', 'failure'] as const;
-export const SERVER_SIDE_TOOL_INVOCATIONS_OPTIONS = ['auto', 'always', 'never'] as const;
-export const FUNCTION_CALLING_MODE_OPTIONS = ['AUTO', 'ANY', 'NONE', 'VALIDATED'] as const;
+const SERVER_SIDE_TOOL_INVOCATIONS_OPTIONS = ['auto', 'always', 'never'] as const;
+const FUNCTION_CALLING_MODE_OPTIONS = ['AUTO', 'ANY', 'NONE', 'VALIDATED'] as const;
 
 function buildTextSchema(maxLength?: number) {
   const schema = z.string().trim().min(1);
@@ -197,7 +196,7 @@ export function mediaResolution(description: string) {
   );
 }
 
-export const FileSearchSpecSchema = z.strictObject({
+const FileSearchSpecSchema = z.strictObject({
   fileSearchStoreNames: withFieldMetadata(
     z
       .array(
@@ -216,9 +215,8 @@ export const FileSearchSpecSchema = z.strictObject({
     'Optional Gemini File Search metadata filter.',
   ),
 });
-export type FileSearchSpecInput = z.infer<typeof FileSearchSpecSchema>;
 
-export const FunctionDeclarationSchema = z.strictObject({
+const FunctionDeclarationSchema = z.strictObject({
   name: withFieldMetadata(
     z
       .string()
@@ -237,7 +235,7 @@ export const FunctionDeclarationSchema = z.strictObject({
   ),
 });
 
-export const FunctionsSpecSchema = z.strictObject({
+const FunctionsSpecSchema = z.strictObject({
   declarations: withFieldMetadata(
     z.array(FunctionDeclarationSchema).min(1).max(32),
     'Typed function declarations exposed to Gemini. The MCP client executes calls.',
@@ -247,9 +245,8 @@ export const FunctionsSpecSchema = z.strictObject({
     'Gemini function-calling mode. `AUTO` (default model choice), `ANY` (must call a declared function), `NONE` (disable calling), `VALIDATED` (stronger default for mixed tool + structured-output flows).',
   ),
 });
-export type FunctionsSpecInput = z.infer<typeof FunctionsSpecSchema>;
 
-export const FunctionResponseSchema = z.strictObject({
+const FunctionResponseSchema = z.strictObject({
   id: withFieldMetadata(
     z.string().trim().min(1).optional(),
     'Optional Gemini function call ID this response answers.',
@@ -268,7 +265,6 @@ export const FunctionResponsesSchema = withFieldMetadata(
   z.array(FunctionResponseSchema).min(1).max(32),
   'Caller-executed Gemini function responses for an existing session.',
 );
-export type FunctionResponseInput = z.infer<typeof FunctionResponseSchema>;
 
 /**
  * Tolerant wrapper around `FileSearchSpecSchema.optional()` that treats a

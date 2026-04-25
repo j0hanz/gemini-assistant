@@ -18,15 +18,14 @@ import {
   getSafetySettings,
   getThinkingBudgetCap,
 } from './config.js';
+import { type AskThinkingLevel } from './public-contract.js';
 
 // ── Config Utilities ──────────────────────────────────────────────────
 
-export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
-export const DEFAULT_TEMPERATURE = 1.0;
-export type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
+export { DEFAULT_TEMPERATURE } from './public-contract.js';
 export const EXPOSE_THOUGHTS = getExposeThoughts();
 
-export const DEFAULT_TOOL_COST_PROFILES = {
+const DEFAULT_TOOL_COST_PROFILES = {
   chat: { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
   'research.quick': { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
   'research.deep.plan': { thinkingLevel: 'MINIMAL', maxOutputTokens: 1_024 },

@@ -143,7 +143,7 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
 export const ChatInputSchema = createChatInputSchema();
 export type ChatInput = z.infer<typeof ChatInputSchema>;
 
-export const ResearchInputBaseSchema = z.strictObject({
+const ResearchInputBaseSchema = z.strictObject({
   mode: researchMode(),
   goal: goalText('Question or research goal to answer quickly'),
   ...createUrlContextFields({
@@ -171,7 +171,7 @@ export const ResearchInputBaseSchema = z.strictObject({
 export const ResearchInputSchema = ResearchInputBaseSchema.superRefine(validateFlatResearchInput);
 export type ResearchInput = z.infer<typeof ResearchInputSchema>;
 
-export const AnalyzeInputBaseSchema = z.strictObject({
+const AnalyzeInputBaseSchema = z.strictObject({
   goal: goalText('Question or analysis goal for the selected targets'),
   targetKind: analyzeTargetKind(),
   filePath: optionalField(
@@ -220,7 +220,7 @@ const reviewCommonShape = {
   ...generationConfigFields,
 };
 
-export const ReviewInputBaseSchema = z.strictObject({
+const ReviewInputBaseSchema = z.strictObject({
   subjectKind: withFieldMetadata(
     z.enum(REVIEW_SUBJECT_OPTIONS).default('diff'),
     'What to review: the current diff, a file comparison, or a failure report.',
@@ -397,17 +397,13 @@ export const AnalyzeUrlInputSchema = z.strictObject({
 });
 export type AnalyzeUrlInput = z.infer<typeof AnalyzeUrlInputSchema>;
 
-export const AnalyzePrInputSchema = z.strictObject({
-  dryRun: withFieldMetadata(
-    z.boolean().optional(),
-    'Skip model review, return diff snapshot only.',
-  ),
-  thinkingLevel: thinkingLevelField,
-  thinkingBudget: thinkingBudgetField,
-  language: optionalField(textField('Primary language hint.')),
-  focus: optionalField(textField('Optional review focus hint.')),
-});
-export type AnalyzePrInput = z.infer<typeof AnalyzePrInputSchema>;
+export interface AnalyzePrInput {
+  dryRun?: boolean | undefined;
+  focus?: string | undefined;
+  language?: string | undefined;
+  thinkingBudget?: ReviewInput['thinkingBudget'];
+  thinkingLevel?: ReviewInput['thinkingLevel'];
+}
 
 export const ExplainErrorInputSchema = z.strictObject({
   error: requiredText('Error message, stack trace, or log output to diagnose'),

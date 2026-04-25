@@ -163,7 +163,7 @@ export function temperatureField(description = 'Sampling temperature 0-2 (defaul
 }
 
 export function thinkingLevel(
-  description = 'Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH. Omit to use the job-specific default cost profile.',
+  description = 'Optional reasoning depth override. Omit to use the job default.',
 ) {
   return withFieldMetadata(z.enum(THINKING_LEVELS).optional(), description);
 }

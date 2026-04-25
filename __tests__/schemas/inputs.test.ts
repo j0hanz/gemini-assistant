@@ -328,7 +328,7 @@ describe('ChatInputSchema', () => {
     assert.strictEqual(ChatInputSchema.shape.goal.description, 'User goal or requested outcome');
     assert.strictEqual(
       ChatInputSchema.shape.thinkingLevel.description,
-      'Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH. Omit to use the job-specific default cost profile.',
+      'Optional reasoning depth override. Omit to use the job default.',
     );
     assert.strictEqual(
       ChatInputSchema.shape.responseSchemaJson.description,

@@ -254,7 +254,7 @@ describe('MCP tool smoke coverage', () => {
         );
         assert.equal(
           thinkingLevel.description,
-          'Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH. Omit to use the job-specific default cost profile.',
+          'Optional reasoning depth override. Omit to use the job default.',
           `Expected ${toolName}.thinkingLevel description to stay consistent`,
         );
       }

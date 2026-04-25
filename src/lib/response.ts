@@ -345,6 +345,47 @@ export function buildBaseStructuredOutput(
   });
 }
 
+const SHARED_STRUCTURED_RESULT_KEYS = [
+  'contextUsed',
+  'functionCalls',
+  'thoughts',
+  'toolEvents',
+  'usage',
+  'safetyRatings',
+  'finishMessage',
+  'citationMetadata',
+] as const;
+
+type SharedStructuredResultKey = (typeof SHARED_STRUCTURED_RESULT_KEYS)[number];
+
+function pickSharedStructuredResultFields(
+  structured: Record<string, unknown>,
+): Partial<Record<SharedStructuredResultKey, unknown>> {
+  return pickDefined(
+    Object.fromEntries(
+      SHARED_STRUCTURED_RESULT_KEYS.map((key) => [key, structured[key]]),
+    ) as Record<SharedStructuredResultKey, unknown>,
+  );
+}
+
+export function buildSuccessfulStructuredContent<TDomain extends Record<string, unknown>>({
+  requestId,
+  warnings,
+  domain,
+  shared,
+}: {
+  requestId?: string | undefined;
+  warnings?: readonly string[] | undefined;
+  domain: TDomain;
+  shared?: Record<string, unknown> | undefined;
+}): TDomain & ReturnType<typeof buildBaseStructuredOutput> & Record<string, unknown> {
+  return pickDefined({
+    ...buildBaseStructuredOutput(requestId, warnings),
+    ...domain,
+    ...(shared ? pickSharedStructuredResultFields(shared) : {}),
+  }) as TDomain & ReturnType<typeof buildBaseStructuredOutput> & Record<string, unknown>;
+}
+
 export function validateStructuredContent<TSchema extends z.ZodType>(
   toolName: string,
   outputSchema: TSchema,

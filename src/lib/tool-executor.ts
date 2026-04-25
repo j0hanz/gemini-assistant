@@ -3,9 +3,13 @@ import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server
 
 import { randomUUID } from 'node:crypto';
 
+import type { ContentListUnion, GenerateContentConfig } from '@google/genai';
+
+import { buildGenerateContentConfig, getAI, MODEL } from '../client.js';
 import { EXPOSE_THOUGHTS } from '../client.js';
 import { AppError } from './errors.js';
 import { logContext, logger, maybeSummarizePayload, type ScopedLogger } from './logger.js';
+import { type OrchestrationRequest, resolveOrchestration } from './orchestration.js';
 import { reportCompletion, reportFailure } from './progress.js';
 import { buildSharedStructuredMetadata, extractTextContent } from './response.js';
 import { executeToolStream, extractUsage, type StreamResult } from './streaming.js';
@@ -18,6 +22,25 @@ type StreamResponseBuilder<T extends Record<string, unknown>> = (
   structuredContent?: T;
   reportMessage?: string;
 };
+
+type GeminiGenerationConfigFields = Omit<
+  Parameters<typeof buildGenerateContentConfig>[0],
+  'functionCallingMode' | 'systemInstruction' | 'toolConfig' | 'tools'
+>;
+
+interface GeminiStreamRequest<T extends Record<string, unknown>> {
+  buildContents: (activeCapabilities: Set<string>) => {
+    contents: ContentListUnion;
+    systemInstruction?: string | undefined;
+  };
+  config: GeminiGenerationConfigFields & {
+    mediaResolution?: GenerateContentConfig['mediaResolution'] | undefined;
+  };
+  label: string;
+  orchestration: OrchestrationRequest;
+  responseBuilder?: StreamResponseBuilder<T>;
+  toolName: string;
+}
 
 export class ToolExecutor {
   constructor(private readonly scopedLogger: ScopedLogger) {}
@@ -202,6 +225,39 @@ export class ToolExecutor {
         return { result: mergedResult, reportMessage: built.reportMessage };
       },
       true,
+    );
+  }
+
+  async runGeminiStream<T extends Record<string, unknown>>(
+    ctx: ServerContext,
+    request: GeminiStreamRequest<T>,
+  ): Promise<CallToolResult> {
+    const resolved = await resolveOrchestration(request.orchestration, ctx, request.toolName);
+    if (resolved.error) return resolved.error;
+
+    const { contents, systemInstruction } = request.buildContents(
+      resolved.config.activeCapabilities,
+    );
+
+    return await this.runStream(
+      ctx,
+      request.toolName,
+      request.label,
+      () =>
+        getAI().models.generateContentStream({
+          model: MODEL,
+          contents,
+          config: buildGenerateContentConfig(
+            {
+              systemInstruction,
+              ...request.config,
+              tools: resolved.config.tools,
+              toolConfig: resolved.config.toolConfig,
+            },
+            ctx.mcpReq.signal,
+          ),
+        }),
+      request.responseBuilder,
     );
   }
 }

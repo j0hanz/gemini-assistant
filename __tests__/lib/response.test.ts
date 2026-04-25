@@ -9,6 +9,7 @@ import {
   appendSources,
   appendUrlStatus,
   buildSharedStructuredMetadata,
+  buildSuccessfulStructuredContent,
   collectGroundedSourceDetails,
   collectGroundedSources,
   collectGroundingCitations,
@@ -224,6 +225,48 @@ describe('buildSharedStructuredMetadata', () => {
         safetyRatings: [{ category: 'x' }],
         citationMetadata: { citations: [{ startIndex: 0 }] },
         finishMessage: 'max tokens',
+      },
+    );
+  });
+});
+
+describe('buildSuccessfulStructuredContent', () => {
+  it('keeps request id, non-empty warnings, domain fields, and shared stream metadata', () => {
+    assert.deepStrictEqual(
+      buildSuccessfulStructuredContent({
+        requestId: 'task-1',
+        warnings: ['check sources'],
+        domain: {
+          summary: 'done',
+          omitted: undefined,
+        },
+        shared: {
+          functionCalls: [{ name: 'lookup' }],
+          usage: { totalTokenCount: 10 },
+          safetyRatings: undefined,
+        },
+      }),
+      {
+        status: 'completed',
+        requestId: 'task-1',
+        warnings: ['check sources'],
+        summary: 'done',
+        functionCalls: [{ name: 'lookup' }],
+        usage: { totalTokenCount: 10 },
+      },
+    );
+  });
+
+  it('omits empty optional base fields', () => {
+    assert.deepStrictEqual(
+      buildSuccessfulStructuredContent({
+        warnings: [],
+        domain: { summary: 'done' },
+        shared: {},
+      }),
+      {
+        status: 'completed',
+        summary: 'done',
       },
     );
   });

@@ -8,7 +8,7 @@ import { getMimeType, MAX_FILE_SIZE } from '../../src/lib/file.js';
 process.env.API_KEY ??= 'test-key-for-file-upload';
 
 const fileModule: typeof import('../../src/lib/file.js') = await import('../../src/lib/file.js');
-const { deleteUploadedFiles, uploadFile } = fileModule;
+const { deleteUploadedFiles, uploadFile, withUploadedFilesCleanup } = fileModule;
 const { getAI } = await import('../../src/client.js');
 
 // ── MIME / Size ───────────────────────────────────────────────────────
@@ -135,13 +135,87 @@ describe('deleteUploadedFiles', () => {
   });
 });
 
+describe('withUploadedFilesCleanup', () => {
+  function makeContext() {
+    const logs: { level: string; message: string }[] = [];
+    return {
+      ctx: {
+        mcpReq: {
+          log: async (level: string, message: string) => {
+            logs.push({ level, message });
+          },
+        },
+      } as never,
+      logs,
+    };
+  }
+
+  it('deletes tracked uploads in insertion order after success', async () => {
+    const deleted: string[] = [];
+    const client = getAI();
+    const original = client.files.delete.bind(client.files);
+    const { ctx } = makeContext();
+
+    // @ts-expect-error mock override for testing
+    client.files.delete = async (opts: { name: string }) => {
+      deleted.push(opts.name);
+    };
+
+    try {
+      const result = await withUploadedFilesCleanup(ctx, async (uploads) => {
+        uploads.addName('file-a');
+        uploads.addUploadedFile({ name: 'file-b' });
+        return 'ok';
+      });
+
+      assert.strictEqual(result, 'ok');
+      assert.deepStrictEqual(deleted, ['file-a', 'file-b']);
+    } finally {
+      client.files.delete = original;
+    }
+  });
+
+  it('cleans up tracked uploads and logs cleanup failures when the operation throws', async () => {
+    const deleted: string[] = [];
+    const client = getAI();
+    const original = client.files.delete.bind(client.files);
+    const { ctx, logs } = makeContext();
+
+    // @ts-expect-error mock override for testing
+    client.files.delete = async (opts: { name: string }) => {
+      deleted.push(opts.name);
+      if (opts.name === 'file-a') {
+        throw new Error('delete failed');
+      }
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          withUploadedFilesCleanup(ctx, async (uploads) => {
+            uploads.addName('file-a');
+            uploads.addName('file-b');
+            throw new Error('operation failed');
+          }),
+        { message: 'operation failed' },
+      );
+
+      assert.deepStrictEqual(deleted, ['file-a', 'file-b']);
+      assert.deepStrictEqual(logs, [
+        { level: 'warning', message: 'File cleanup failed: delete failed' },
+      ]);
+    } finally {
+      client.files.delete = original;
+    }
+  });
+});
+
 describe('uploadFile', () => {
   it('accepts relative paths under cwd', async () => {
     const controller = new AbortController();
     const client = getAI();
     const original = client.files.upload.bind(client.files);
 
-    // @ts-expect-error test override
     client.files.upload = async (opts: { file: string }) => ({
       uri: 'gs://files/abc',
       mimeType: 'application/json',
@@ -174,7 +248,6 @@ describe('uploadFile', () => {
     const client = getAI();
     const original = client.files.upload.bind(client.files);
 
-    // @ts-expect-error test override
     client.files.upload = async () => ({
       uri: 'gs://files/abc',
       mimeType: 'text/plain',

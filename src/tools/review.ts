@@ -13,16 +13,14 @@ import { promisify } from 'node:util';
 import { createPartFromUri } from '@google/genai';
 import type { z } from 'zod/v4';
 
-import { cleanupErrorLogger } from '../lib/errors.js';
-import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
+import { uploadFile, withUploadedFilesCleanup } from '../lib/file.js';
 import { logger, type ScopedLogger } from '../lib/logger.js';
 import { buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { buildDiffReviewPrompt } from '../lib/model-prompts.js';
-import { pickDefined } from '../lib/object.js';
-import { resolveOrchestration, selectSearchAndUrlContextTools } from '../lib/orchestration.js';
+import { selectSearchAndUrlContextTools } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import {
-  buildBaseStructuredOutput,
+  buildSuccessfulStructuredContent,
   safeValidateStructuredContent,
   tryParseJsonResponse,
 } from '../lib/response.js';
@@ -39,7 +37,6 @@ import {
 } from '../schemas/inputs.js';
 import { ReviewOutputSchema } from '../schemas/outputs.js';
 
-import { buildGenerateContentConfig, getAI, MODEL, type ToolCostProfileName } from '../client.js';
 import { getReviewDocs } from '../config.js';
 
 const execFileAsync = promisify(execFile);
@@ -173,49 +170,6 @@ const NOISY_EXCLUDE_PATHSPECS = [
   ...NOISY_SUFFIXES.map((suffix) => `:!*${suffix}`),
 ];
 
-async function runReviewGeneration(
-  ctx: ServerContext,
-  toolKey: string,
-  label: string,
-  resolveParams: Parameters<typeof resolveOrchestration>[0],
-  promptParts: (string | import('@google/genai').Part)[],
-  systemInstruction: string | undefined,
-  configParams: {
-    thinkingLevel?: ReviewInput['thinkingLevel'] | undefined;
-    thinkingBudget?: number | undefined;
-    maxOutputTokens?: number | undefined;
-    safetySettings?: ReviewInput['safetySettings'] | undefined;
-    costProfile?: ToolCostProfileName | undefined;
-    cacheName?: string | undefined;
-  },
-  resultMod: NonNullable<Parameters<typeof executor.runStream>[4]>,
-): Promise<CallToolResult> {
-  const resolved = await resolveOrchestration(resolveParams, ctx, toolKey);
-  if (resolved.error) return resolved.error;
-  const { tools, toolConfig } = resolved.config;
-
-  return await executor.runStream(
-    ctx,
-    toolKey,
-    label,
-    () =>
-      getAI().models.generateContentStream({
-        model: MODEL,
-        contents: promptParts,
-        config: buildGenerateContentConfig(
-          {
-            systemInstruction,
-            ...configParams,
-            tools,
-            toolConfig,
-          },
-          ctx.mcpReq.signal,
-        ),
-      }),
-    resultMod,
-  );
-}
-
 interface DiffStats {
   files: number;
   additions: number;
@@ -293,18 +247,16 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
     },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
-    const uploadedNames: string[] = [];
-
     const progress = new ProgressReporter(ctx, COMPARE_FILE_TOOL_LABEL);
 
-    try {
+    return await withUploadedFilesCleanup(ctx, async (uploadedFiles) => {
       await progress.step(0, 4, 'Uploading file A');
       const fileA = await uploadFile(filePathA, ctx.mcpReq.signal, rootsFetcher);
-      uploadedNames.push(fileA.name);
+      uploadedFiles.addUploadedFile(fileA);
 
       await progress.step(1, 4, 'Uploading file B');
       const fileB = await uploadFile(filePathB, ctx.mcpReq.signal, rootsFetcher);
-      uploadedNames.push(fileB.name);
+      uploadedFiles.addUploadedFile(fileB);
 
       await ctx.mcpReq.log('info', `Comparing: ${fileA.displayPath} vs ${fileB.displayPath}`);
       await progress.step(2, 4, 'Analyzing differences');
@@ -321,18 +273,19 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
       });
 
       const cacheName = await getWorkspaceCacheName(ctx);
-      return await runReviewGeneration(
-        ctx,
-        'compare_files',
-        COMPARE_FILE_TOOL_LABEL,
-        {
+      return await executor.runGeminiStream(ctx, {
+        toolName: 'compare_files',
+        label: COMPARE_FILE_TOOL_LABEL,
+        orchestration: {
           builtInToolNames: selectSearchAndUrlContextTools(googleSearch, urls),
           urls,
           // Built-in tools only; no function-calling mix. Default 'auto' policy.
         },
-        prompt.promptParts,
-        prompt.systemInstruction,
-        {
+        buildContents: () => ({
+          contents: prompt.promptParts,
+          systemInstruction: prompt.systemInstruction,
+        }),
+        config: {
           costProfile: 'review.comparison',
           thinkingLevel,
           thinkingBudget,
@@ -340,15 +293,13 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
           safetySettings,
           cacheName,
         },
-        (_streamResult, textContent: string) => ({
+        responseBuilder: (_streamResult, textContent: string) => ({
           structuredContent: {
             summary: textContent || '',
           },
         }),
-      );
-    } finally {
-      await deleteUploadedFiles(uploadedNames, cleanupErrorLogger(ctx));
-    }
+      });
+    });
   };
 }
 
@@ -395,18 +346,19 @@ async function diagnoseFailureWork(
   await ctx.mcpReq.log('info', `Review failure: ${error.length} chars`);
 
   const cacheName = await getWorkspaceCacheName(ctx);
-  return await runReviewGeneration(
-    ctx,
-    'review_failure',
-    'Review Failure',
-    {
+  return await executor.runGeminiStream(ctx, {
+    toolName: 'review_failure',
+    label: 'Review Failure',
+    orchestration: {
       builtInToolNames: selectSearchAndUrlContextTools(googleSearch, urls),
       urls,
       // Built-in tools only; no function-calling mix. Default 'auto' policy.
     },
-    [prompt.promptText],
-    prompt.systemInstruction,
-    {
+    buildContents: () => ({
+      contents: [prompt.promptText],
+      systemInstruction: prompt.systemInstruction,
+    }),
+    config: {
       costProfile: 'review.failure',
       thinkingLevel,
       thinkingBudget,
@@ -414,12 +366,12 @@ async function diagnoseFailureWork(
       safetySettings,
       cacheName,
     },
-    (_streamResult, textContent: string) => ({
+    responseBuilder: (_streamResult, textContent: string) => ({
       structuredContent: {
         summary: textContent || '',
       },
     }),
-  );
+  });
 }
 
 export function matchesNoisyPath(filePath: string): boolean {
@@ -1186,17 +1138,18 @@ export async function analyzePrWork(
   });
 
   const cacheName = await getWorkspaceCacheName(ctx);
-  return await runReviewGeneration(
-    ctx,
-    'analyze_pr',
-    REVIEW_DIFF_TOOL_LABEL,
-    {
+  return await executor.runGeminiStream(ctx, {
+    toolName: 'analyze_pr',
+    label: REVIEW_DIFF_TOOL_LABEL,
+    orchestration: {
       builtInToolNames: [],
       // No built-in tools and no function-calling mix. Default 'auto' policy.
     },
-    [modelPrompt.promptText],
-    modelPrompt.systemInstruction,
-    {
+    buildContents: () => ({
+      contents: [modelPrompt.promptText],
+      systemInstruction: modelPrompt.systemInstruction,
+    }),
+    config: {
       costProfile: 'review.diff',
       thinkingLevel,
       thinkingBudget,
@@ -1204,7 +1157,7 @@ export async function analyzePrWork(
       safetySettings,
       cacheName,
     },
-    (_streamResult, textContent: string) => {
+    responseBuilder: (_streamResult, textContent: string) => {
       let finalSummary = textContent || '';
       let documentationDrift:
         | { file: string; driftDescription: string; suggestedUpdate: string }[]
@@ -1235,7 +1188,7 @@ export async function analyzePrWork(
         reportMessage: `${String(snapshot.stats.files)} files reviewed (+${String(snapshot.stats.additions)}, -${String(snapshot.stats.deletions)})`,
       };
     },
-  );
+  });
 }
 
 function buildReviewStructuredContent(
@@ -1243,27 +1196,23 @@ function buildReviewStructuredContent(
   subjectKind: ReviewInput['subjectKind'],
   structured: Record<string, unknown>,
 ): z.infer<typeof ReviewOutputSchema> {
-  return pickDefined({
-    ...buildBaseStructuredOutput(taskId),
-    subjectKind,
-    summary: typeof structured.summary === 'string' ? structured.summary : '',
-    stats: structured.stats,
-    reviewedPaths: structured.reviewedPaths,
-    includedUntracked: structured.includedUntracked,
-    skippedBinaryPaths: structured.skippedBinaryPaths,
-    skippedLargePaths: structured.skippedLargePaths,
-    skippedSensitivePaths: structured.skippedSensitivePaths,
-    omittedPaths: structured.omittedPaths,
-    empty: typeof structured.empty === 'boolean' ? structured.empty : undefined,
-    truncated: typeof structured.truncated === 'boolean' ? structured.truncated : undefined,
-    documentationDrift: structured.documentationDrift,
-    functionCalls: structured.functionCalls,
-    safetyRatings: structured.safetyRatings,
-    finishMessage: structured.finishMessage,
-    citationMetadata: structured.citationMetadata,
-    thoughts: structured.thoughts,
-    toolEvents: structured.toolEvents,
-    usage: structured.usage,
+  return buildSuccessfulStructuredContent({
+    requestId: taskId,
+    domain: {
+      subjectKind,
+      summary: typeof structured.summary === 'string' ? structured.summary : '',
+      stats: structured.stats,
+      reviewedPaths: structured.reviewedPaths,
+      includedUntracked: structured.includedUntracked,
+      skippedBinaryPaths: structured.skippedBinaryPaths,
+      skippedLargePaths: structured.skippedLargePaths,
+      skippedSensitivePaths: structured.skippedSensitivePaths,
+      omittedPaths: structured.omittedPaths,
+      empty: typeof structured.empty === 'boolean' ? structured.empty : undefined,
+      truncated: typeof structured.truncated === 'boolean' ? structured.truncated : undefined,
+      documentationDrift: structured.documentationDrift,
+    },
+    shared: structured,
   }) as unknown as z.infer<typeof ReviewOutputSchema>;
 }
 

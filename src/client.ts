@@ -40,7 +40,7 @@ const DEFAULT_TOOL_COST_PROFILES = {
   'chat.jsonRepair': { thinkingLevel: 'MINIMAL', maxOutputTokens: 2_048 },
 } as const satisfies Record<string, { thinkingLevel: AskThinkingLevel; maxOutputTokens: number }>;
 
-export type ToolCostProfileName = keyof typeof DEFAULT_TOOL_COST_PROFILES;
+type ToolCostProfileName = keyof typeof DEFAULT_TOOL_COST_PROFILES;
 
 const THINKING_LEVEL_MAP: Record<AskThinkingLevel, ThinkingLevel> = {
   MINIMAL: ThinkingLevel.MINIMAL,

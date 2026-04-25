@@ -237,6 +237,44 @@ function forbidFields(
   }
 }
 
+interface SelectorRule<TValue extends string> {
+  forbiddenFields?: readonly string[];
+  requiredFields?: readonly string[];
+  selector: string;
+  value: TValue;
+}
+
+function applySelectorRule<TValue extends string>(
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+  value: Record<string, unknown>,
+  rule: SelectorRule<TValue>,
+): void {
+  for (const field of rule.requiredFields ?? []) {
+    if (!value[field]) {
+      addCustomIssue(
+        ctx,
+        `${field} is required when ${rule.selector}=${rule.value}.`,
+        [field],
+        value[field],
+      );
+    }
+  }
+
+  forbidFields(ctx, value, rule.forbiddenFields ?? [], rule.selector, rule.value);
+}
+
+function applySelectorRules<TValue extends string>(
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+  value: Record<string, unknown>,
+  rules: readonly SelectorRule<TValue>[],
+  selectorValue: TValue,
+): void {
+  const rule = rules.find((candidate) => candidate.value === selectorValue);
+  if (rule) {
+    applySelectorRule(ctx, value, rule);
+  }
+}
+
 export function validateFlatAnalyzeInput(
   value: FlatAnalyzeInput,
   ctx: z.core.$RefinementCtx<Record<string, unknown>>,
@@ -244,37 +282,38 @@ export function validateFlatAnalyzeInput(
   const targetKind = value.targetKind ?? 'file';
   const outputKind = value.outputKind ?? 'summary';
 
-  if (targetKind === 'file') {
-    if (!value.filePath) {
-      addCustomIssue(
-        ctx,
-        'filePath is required when targetKind=file.',
-        ['filePath'],
-        value.filePath,
-      );
-    }
-    forbidFields(ctx, value, ['filePaths'], 'targetKind', targetKind);
-  } else if (targetKind === 'url') {
-    if (!value.urls) {
-      addCustomIssue(ctx, 'urls is required when targetKind=url.', ['urls'], value.urls);
-    }
-    forbidFields(ctx, value, ['filePath', 'filePaths'], 'targetKind', targetKind);
-  } else {
-    if (!value.filePaths) {
-      addCustomIssue(
-        ctx,
-        'filePaths is required when targetKind=multi.',
-        ['filePaths'],
-        value.filePaths,
-      );
-    }
-    forbidFields(ctx, value, ['filePath'], 'targetKind', targetKind);
-  }
-
-  if (outputKind === 'summary') {
-    forbidFields(ctx, value, ['validateSyntax'], 'outputKind', outputKind);
-  }
+  applySelectorRules(ctx, value as Record<string, unknown>, ANALYZE_TARGET_RULES, targetKind);
+  applySelectorRules(ctx, value as Record<string, unknown>, ANALYZE_OUTPUT_RULES, outputKind);
 }
+
+const ANALYZE_TARGET_RULES = [
+  {
+    selector: 'targetKind',
+    value: 'file',
+    requiredFields: ['filePath'],
+    forbiddenFields: ['filePaths'],
+  },
+  {
+    selector: 'targetKind',
+    value: 'url',
+    requiredFields: ['urls'],
+    forbiddenFields: ['filePath', 'filePaths'],
+  },
+  {
+    selector: 'targetKind',
+    value: 'multi',
+    requiredFields: ['filePaths'],
+    forbiddenFields: ['filePath'],
+  },
+] as const satisfies readonly SelectorRule<NonNullable<FlatAnalyzeInput['targetKind']>>[];
+
+const ANALYZE_OUTPUT_RULES = [
+  {
+    selector: 'outputKind',
+    value: 'summary',
+    forbiddenFields: ['validateSyntax'],
+  },
+] as const satisfies readonly SelectorRule<NonNullable<FlatAnalyzeInput['outputKind']>>[];
 
 interface FlatResearchInput {
   deliverable?: string | undefined;
@@ -288,13 +327,21 @@ export function validateFlatResearchInput(
 ): void {
   const mode = value.mode ?? 'quick';
 
-  if (mode === 'quick') {
-    forbidFields(ctx, value, ['deliverable'], 'mode', mode);
-    return;
-  }
-
-  forbidFields(ctx, value, ['systemInstruction'], 'mode', mode);
+  applySelectorRules(ctx, value as Record<string, unknown>, RESEARCH_MODE_RULES, mode);
 }
+
+const RESEARCH_MODE_RULES = [
+  {
+    selector: 'mode',
+    value: 'quick',
+    forbiddenFields: ['deliverable'],
+  },
+  {
+    selector: 'mode',
+    value: 'deep',
+    forbiddenFields: ['systemInstruction'],
+  },
+] as const satisfies readonly SelectorRule<NonNullable<FlatResearchInput['mode']>>[];
 
 interface FlatReviewInput {
   codeContext?: string | undefined;
@@ -315,52 +362,33 @@ export function validateFlatReviewInput(
 ): void {
   const subjectKind = value.subjectKind ?? 'diff';
 
-  if (subjectKind === 'diff') {
-    forbidFields(
-      ctx,
-      value,
-      ['filePathA', 'filePathB', 'question', 'error', 'codeContext', 'urls', 'googleSearch'],
-      'subjectKind',
-      subjectKind,
-    );
-    return;
-  }
-
-  if (subjectKind === 'comparison') {
-    if (!value.filePathA) {
-      addCustomIssue(
-        ctx,
-        'filePathA is required when subjectKind=comparison.',
-        ['filePathA'],
-        value.filePathA,
-      );
-    }
-    if (!value.filePathB) {
-      addCustomIssue(
-        ctx,
-        'filePathB is required when subjectKind=comparison.',
-        ['filePathB'],
-        value.filePathB,
-      );
-    }
-    forbidFields(
-      ctx,
-      value,
-      ['dryRun', 'language', 'error', 'codeContext'],
-      'subjectKind',
-      subjectKind,
-    );
-    return;
-  }
-
-  if (!value.error) {
-    addCustomIssue(ctx, 'error is required when subjectKind=failure.', ['error'], value.error);
-  }
-  forbidFields(
-    ctx,
-    value,
-    ['dryRun', 'filePathA', 'filePathB', 'question'],
-    'subjectKind',
-    subjectKind,
-  );
+  applySelectorRules(ctx, value as Record<string, unknown>, REVIEW_SUBJECT_RULES, subjectKind);
 }
+
+const REVIEW_SUBJECT_RULES = [
+  {
+    selector: 'subjectKind',
+    value: 'diff',
+    forbiddenFields: [
+      'filePathA',
+      'filePathB',
+      'question',
+      'error',
+      'codeContext',
+      'urls',
+      'googleSearch',
+    ],
+  },
+  {
+    selector: 'subjectKind',
+    value: 'comparison',
+    requiredFields: ['filePathA', 'filePathB'],
+    forbiddenFields: ['dryRun', 'language', 'error', 'codeContext'],
+  },
+  {
+    selector: 'subjectKind',
+    value: 'failure',
+    requiredFields: ['error'],
+    forbiddenFields: ['dryRun', 'filePathA', 'filePathB', 'question'],
+  },
+] as const satisfies readonly SelectorRule<NonNullable<FlatReviewInput['subjectKind']>>[];

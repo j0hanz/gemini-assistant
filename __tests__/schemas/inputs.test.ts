@@ -52,6 +52,22 @@ function getObjectShape(schema: unknown): Record<string, z.ZodType> {
   throw new Error('Expected object-like schema');
 }
 
+function assertSchemaIssue(
+  result: { success: true } | { success: false; error: z.ZodError },
+  path: (string | number)[],
+  message: string,
+): void {
+  assert.strictEqual(result.success, false);
+  if (!result.success) {
+    assert.ok(
+      result.error.issues.some(
+        (issue) => issue.message === message && JSON.stringify(issue.path) === JSON.stringify(path),
+      ),
+      `Expected issue ${JSON.stringify({ path, message })}; got ${JSON.stringify(result.error.issues)}`,
+    );
+  }
+}
+
 describe('AskInputSchema', () => {
   it('accepts valid minimal input', () => {
     const result = AskInputSchema.safeParse({ message: 'hello' });
@@ -658,6 +674,23 @@ describe('ResearchInputSchema', () => {
     });
     assert.strictEqual(result.success, true);
   });
+
+  it('reports exact selector issue paths and messages', () => {
+    assertSchemaIssue(
+      ResearchInputSchema.safeParse({ mode: 'quick', goal: 'test', deliverable: 'report' }),
+      ['deliverable'],
+      'deliverable is not allowed when mode=quick.',
+    );
+    assertSchemaIssue(
+      ResearchInputSchema.safeParse({
+        mode: 'deep',
+        goal: 'test',
+        systemInstruction: 'brief',
+      }),
+      ['systemInstruction'],
+      'systemInstruction is not allowed when mode=deep.',
+    );
+  });
 });
 
 describe('AgenticSearchInputSchema', () => {
@@ -1120,6 +1153,45 @@ describe('AnalyzeInputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
+  it('reports exact selector issue paths and messages', () => {
+    assertSchemaIssue(
+      AnalyzeInputSchema.safeParse({ goal: 'test', targetKind: 'file' }),
+      ['filePath'],
+      'filePath is required when targetKind=file.',
+    );
+    assertSchemaIssue(
+      AnalyzeInputSchema.safeParse({ goal: 'test', targetKind: 'url' }),
+      ['urls'],
+      'urls is required when targetKind=url.',
+    );
+    assertSchemaIssue(
+      AnalyzeInputSchema.safeParse({ goal: 'test', targetKind: 'multi' }),
+      ['filePaths'],
+      'filePaths is required when targetKind=multi.',
+    );
+    assertSchemaIssue(
+      AnalyzeInputSchema.safeParse({
+        goal: 'test',
+        targetKind: 'url',
+        urls: ['https://example.com'],
+        filePath: absolutePath('src', 'index.ts'),
+      }),
+      ['filePath'],
+      'filePath is not allowed when targetKind=url.',
+    );
+    assertSchemaIssue(
+      AnalyzeInputSchema.safeParse({
+        goal: 'test',
+        targetKind: 'file',
+        filePath: absolutePath('src', 'index.ts'),
+        outputKind: 'summary',
+        validateSyntax: true,
+      }),
+      ['validateSyntax'],
+      'validateSyntax is not allowed when outputKind=summary.',
+    );
+  });
+
   it('keeps standard descriptions for flat selector fields', () => {
     const analyzeShape = getObjectShape(AnalyzeInputSchema);
 
@@ -1179,6 +1251,37 @@ describe('ReviewInputSchema', () => {
       codeContext: 'throw new Error("boom")',
     });
     assert.strictEqual(result.success, false);
+  });
+
+  it('reports exact selector issue paths and messages', () => {
+    assertSchemaIssue(
+      ReviewInputSchema.safeParse({
+        subjectKind: 'comparison',
+        filePathA: absolutePath('src', 'a.ts'),
+      }),
+      ['filePathB'],
+      'filePathB is required when subjectKind=comparison.',
+    );
+    assertSchemaIssue(
+      ReviewInputSchema.safeParse({ subjectKind: 'failure' }),
+      ['error'],
+      'error is required when subjectKind=failure.',
+    );
+    assertSchemaIssue(
+      ReviewInputSchema.safeParse({ subjectKind: 'diff', googleSearch: true }),
+      ['googleSearch'],
+      'googleSearch is not allowed when subjectKind=diff.',
+    );
+    assertSchemaIssue(
+      ReviewInputSchema.safeParse({
+        subjectKind: 'comparison',
+        filePathA: absolutePath('src', 'a.ts'),
+        filePathB: absolutePath('src', 'b.ts'),
+        dryRun: true,
+      }),
+      ['dryRun'],
+      'dryRun is not allowed when subjectKind=comparison.',
+    );
   });
 
   it('keeps the standard description for subject selection', () => {

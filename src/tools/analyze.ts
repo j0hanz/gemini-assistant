@@ -9,18 +9,20 @@ import { createPartFromUri } from '@google/genai';
 import type { Part } from '@google/genai';
 import type { z } from 'zod/v4';
 
-import { cleanupErrorLogger } from '../lib/errors.js';
-import { deleteUploadedFiles, uploadFile } from '../lib/file.js';
+import {
+  type UploadedFilesCleanupTracker,
+  uploadFile,
+  withUploadedFilesCleanup,
+} from '../lib/file.js';
 import { buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
 import { pickDefined } from '../lib/object.js';
-import {
-  type BuiltInToolName,
-  resolveOrchestration,
-  selectSearchAndUrlContextTools,
-} from '../lib/orchestration.js';
+import { type BuiltInToolName, selectSearchAndUrlContextTools } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
-import { buildBaseStructuredOutput, safeValidateStructuredContent } from '../lib/response.js';
+import {
+  buildSuccessfulStructuredContent,
+  safeValidateStructuredContent,
+} from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
@@ -28,7 +30,6 @@ import { getWorkspaceCacheName } from '../lib/workspace-context.js';
 import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 
-import { buildGenerateContentConfig, getAI, MODEL, type ToolCostProfileName } from '../client.js';
 import { analyzeUrlWork } from './research.js';
 
 const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
@@ -142,10 +143,10 @@ async function uploadFilesBatch(
   rootsFetcher: RootsFetcher,
   progress: ProgressReporter,
   labelTemplate: (filePath: string, index: number, total: number) => string,
+  uploadedFiles: UploadedFilesCleanupTracker,
   indexOffset = 1,
-): Promise<{ parts: Part[]; uploadedNames: string[]; uploadedCount: number }> {
+): Promise<{ parts: Part[]; uploadedCount: number }> {
   const parts: Part[] = [];
-  const uploadedNames: string[] = [];
   const totalSteps = filePaths.length + 1;
   let uploadedCount = 0;
 
@@ -162,59 +163,12 @@ async function uploadFilesBatch(
 
     const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
     uploadedCount += 1;
-    uploadedNames.push(uploaded.name);
+    uploadedFiles.addUploadedFile(uploaded);
     parts.push({ text: `File: ${uploaded.displayPath}` });
     parts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
   }
 
-  return { parts, uploadedNames, uploadedCount };
-}
-
-async function runAnalyzeGeneration(
-  ctx: ServerContext,
-  toolKey: string,
-  label: string,
-  resolveParams: Parameters<typeof resolveOrchestration>[0],
-  buildPrompt: (activeCaps: Set<string>) => {
-    parts: Part[];
-    systemInstruction?: string | undefined;
-  },
-  configParams: {
-    thinkingLevel?: AnalyzeInput['thinkingLevel'] | undefined;
-    thinkingBudget?: number | undefined;
-    maxOutputTokens?: number | undefined;
-    safetySettings?: AnalyzeInput['safetySettings'] | undefined;
-    mediaResolution?: import('@google/genai').GenerateContentConfig['mediaResolution'] | undefined;
-    costProfile?: ToolCostProfileName | undefined;
-    cacheName?: string | undefined;
-  },
-  resultMod: NonNullable<Parameters<typeof executor.runStream>[4]>,
-): Promise<CallToolResult> {
-  const resolved = await resolveOrchestration(resolveParams, ctx, toolKey);
-  if (resolved.error) return resolved.error;
-
-  const { parts, systemInstruction } = buildPrompt(resolved.config.activeCapabilities);
-
-  return await executor.runStream(
-    ctx,
-    toolKey,
-    label,
-    () =>
-      getAI().models.generateContentStream({
-        model: MODEL,
-        contents: parts,
-        config: buildGenerateContentConfig(
-          {
-            systemInstruction,
-            ...configParams,
-            tools: resolved.config.tools,
-            toolConfig: resolved.config.toolConfig,
-          },
-          ctx.mcpReq.signal,
-        ),
-      }),
-    resultMod,
-  );
+  return { parts, uploadedCount };
 }
 
 function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
@@ -237,29 +191,26 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
     },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
-    let uploadedFileName: string | undefined;
-
     const progress = new ProgressReporter(ctx, ANALYZE_FILE_TOOL_LABEL);
 
-    try {
+    return await withUploadedFilesCleanup(ctx, async (uploadedFiles) => {
       await progress.step(0, 3, 'Uploading to Gemini');
       const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
-      uploadedFileName = uploaded.name;
+      uploadedFiles.addUploadedFile(uploaded);
 
       await ctx.mcpReq.log('info', `Analyzing ${uploaded.displayPath} (${uploaded.mimeType})`);
       await progress.step(1, 3, 'Analyzing content');
 
       const cacheName = await getWorkspaceCacheName(ctx);
-      return await runAnalyzeGeneration(
-        ctx,
-        'analyze_file',
-        ANALYZE_FILE_TOOL_LABEL,
-        {
+      return await executor.runGeminiStream(ctx, {
+        toolName: 'analyze_file',
+        label: ANALYZE_FILE_TOOL_LABEL,
+        orchestration: {
           builtInToolNames: selectSearchAndUrlContextTools(googleSearch, urls),
           urls,
           // Built-in tools only; no function-calling mix. Default 'auto' policy.
         },
-        (activeCaps) => {
+        buildContents: (activeCaps) => {
           const { promptText, systemInstruction } = buildFileAnalysisPrompt({
             goal: question,
             kind: 'single',
@@ -269,7 +220,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
               ? [{ text: `Context URLs:\n${urls.join('\n')}` }]
               : [];
           return {
-            parts: [
+            contents: [
               createPartFromUri(uploaded.uri, uploaded.mimeType),
               { text: promptText },
               ...urlContextPart,
@@ -277,7 +228,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
             systemInstruction,
           };
         },
-        {
+        config: {
           costProfile: 'analyze.summary',
           thinkingLevel,
           thinkingBudget,
@@ -286,18 +237,13 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
           safetySettings,
           cacheName,
         },
-        (_streamResult, textContent: string) => ({
+        responseBuilder: (_streamResult, textContent: string) => ({
           structuredContent: {
             summary: textContent || '',
           },
         }),
-      );
-    } finally {
-      await deleteUploadedFiles(
-        uploadedFileName ? [uploadedFileName] : [],
-        cleanupErrorLogger(ctx),
-      );
-    }
+      });
+    });
   };
 }
 
@@ -319,33 +265,31 @@ async function analyzeMultiFileWork(
 ): Promise<CallToolResult> {
   const { maxOutputTokens, safetySettings, googleSearch, urls } = extra;
   const { thinkingBudget } = extra;
-  let uploadedNames: string[] = [];
   const progress = new ProgressReporter(ctx, ANALYZE_TOOL_LABEL);
 
-  try {
-    const { parts: contents, uploadedNames: fileUploadedNames } = await uploadFilesBatch(
+  return await withUploadedFilesCleanup(ctx, async (uploadedFiles) => {
+    const { parts: contents } = await uploadFilesBatch(
       filePaths,
       ctx,
       rootsFetcher,
       progress,
       (filePath) => `Uploading ${filePath.split(/[\\/]/).pop() ?? filePath}`,
+      uploadedFiles,
       0, // indexOffset
     );
-    uploadedNames = fileUploadedNames;
 
     await progress.step(filePaths.length, filePaths.length + 1, 'Analyzing content');
 
     const cacheName = await getWorkspaceCacheName(ctx);
-    return await runAnalyzeGeneration(
-      ctx,
-      'analyze',
-      ANALYZE_TOOL_LABEL,
-      {
+    return await executor.runGeminiStream(ctx, {
+      toolName: 'analyze',
+      label: ANALYZE_TOOL_LABEL,
+      orchestration: {
         builtInToolNames: selectSearchAndUrlContextTools(googleSearch, urls),
         urls,
         // Built-in tools only; no function-calling mix. Default 'auto' policy.
       },
-      (activeCaps) => {
+      buildContents: (activeCaps) => {
         const prompt = buildFileAnalysisPrompt({
           attachedParts: contents,
           goal,
@@ -355,9 +299,9 @@ async function analyzeMultiFileWork(
         if (urls && urls.length > 0 && !activeCaps.has('urlContext')) {
           finalParts.push({ text: `Context URLs:\n${urls.join('\n')}` });
         }
-        return { parts: finalParts, systemInstruction: prompt.systemInstruction };
+        return { contents: finalParts, systemInstruction: prompt.systemInstruction };
       },
-      {
+      config: {
         costProfile: 'analyze.summary',
         thinkingLevel,
         thinkingBudget,
@@ -365,17 +309,15 @@ async function analyzeMultiFileWork(
         safetySettings,
         cacheName,
       },
-      (_streamResult, textContent: string) => ({
+      responseBuilder: (_streamResult, textContent: string) => ({
         structuredContent: {
           summary: textContent || '',
           targetKind: 'multi',
           analyzedPaths: filePaths,
         },
       }),
-    );
-  } finally {
-    await deleteUploadedFiles(uploadedNames, cleanupErrorLogger(ctx));
-  }
+    });
+  });
 }
 
 function pickDiagramBuiltInTools(args: AnalyzeDiagramInput): BuiltInToolName[] {
@@ -390,10 +332,9 @@ async function analyzeDiagramWork(
   args: AnalyzeDiagramInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  let uploadedNames: string[] = [];
   const progress = new ProgressReporter(ctx, ANALYZE_DIAGRAM_TOOL_LABEL);
 
-  try {
+  return await withUploadedFilesCleanup(ctx, async (uploadedFiles) => {
     let attachedParts: Part[] = [];
     let uploadedCount = 0;
 
@@ -409,11 +350,11 @@ async function analyzeDiagramWork(
         progress,
         (filePath, index, total) =>
           `Uploaded ${filePath.split(/[\\/]/).pop() ?? filePath} (${index + 1}/${total})`,
+        uploadedFiles,
         1, // indexOffset
       );
       attachedParts = batchResult.parts;
       uploadedCount = batchResult.uploadedCount;
-      uploadedNames = batchResult.uploadedNames;
     } else {
       attachedParts = [
         {
@@ -429,26 +370,25 @@ async function analyzeDiagramWork(
     const diagramBuiltInTools = pickDiagramBuiltInTools(args);
 
     const cacheName = await getWorkspaceCacheName(ctx);
-    return await runAnalyzeGeneration(
-      ctx,
-      'analyze_diagram',
-      ANALYZE_DIAGRAM_TOOL_LABEL,
-      {
+    return await executor.runGeminiStream(ctx, {
+      toolName: 'analyze_diagram',
+      label: ANALYZE_DIAGRAM_TOOL_LABEL,
+      orchestration: {
         builtInToolNames: diagramBuiltInTools,
         ...(args.targetKind === 'url' ? { urls: args.urls } : {}),
         // Built-in tools only when present; no function-calling mix. Suppress traces when no built-ins.
         serverSideToolInvocations: diagramBuiltInTools.length > 0 ? 'auto' : 'never',
       },
-      () => {
+      buildContents: () => {
         const prompt = buildDiagramGenerationPrompt({
           attachedParts,
           description: args.goal,
           diagramType: args.diagramType,
           validateSyntax: args.validateSyntax,
         });
-        return { parts: prompt.promptParts, systemInstruction: prompt.systemInstruction };
+        return { contents: prompt.promptParts, systemInstruction: prompt.systemInstruction };
       },
-      {
+      config: {
         costProfile: 'analyze.diagram',
         thinkingLevel: args.thinkingLevel,
         thinkingBudget: args.thinkingBudget,
@@ -456,7 +396,7 @@ async function analyzeDiagramWork(
         safetySettings: args.safetySettings,
         cacheName,
       },
-      (_streamResult, textContent: string) => {
+      responseBuilder: (_streamResult, textContent: string) => {
         const { diagram, explanation } = extractDiagram(textContent, args.diagramType, ctx);
         const diagramType = args.diagramType;
         const formatted = formatAnalyzeDiagramMarkdown(diagram, diagramType, explanation);
@@ -472,10 +412,8 @@ async function analyzeDiagramWork(
           },
         };
       },
-    );
-  } finally {
-    await deleteUploadedFiles(uploadedNames, cleanupErrorLogger(ctx));
-  }
+    });
+  });
 }
 
 async function analyzeWork(
@@ -575,7 +513,6 @@ function buildAnalyzeStructuredContent(
   structured: Record<string, unknown>,
 ): z.infer<typeof AnalyzeOutputSchema> {
   const base = {
-    ...buildBaseStructuredOutput(ctx.task?.id),
     functionCalls: structured.functionCalls,
     safetyRatings: structured.safetyRatings,
     finishMessage: structured.finishMessage,
@@ -589,26 +526,36 @@ function buildAnalyzeStructuredContent(
     const diagramType = requireAnalyzeDiagramType(args);
 
     return pickDefined({
-      ...base,
-      kind: 'diagram' as const,
-      targetKind: args.targetKind,
-      diagramType,
-      diagram: getDiagramString(structured.diagram),
-      explanation: getExplanationString(structured.explanation),
-      urlMetadata: structured.urlMetadata,
-      analyzedPaths: getAnalyzedPaths(args),
+      ...buildSuccessfulStructuredContent({
+        requestId: ctx.task?.id,
+        domain: {
+          kind: 'diagram' as const,
+          targetKind: args.targetKind,
+          diagramType,
+          diagram: getDiagramString(structured.diagram),
+          explanation: getExplanationString(structured.explanation),
+          urlMetadata: structured.urlMetadata,
+          analyzedPaths: getAnalyzedPaths(args),
+        },
+        shared: base,
+      }),
     }) as unknown as z.infer<typeof AnalyzeOutputSchema>;
   }
 
   return pickDefined({
-    ...base,
-    status: typeof structured.status === 'string' ? structured.status : base.status,
-    kind: 'summary' as const,
-    targetKind: args.targetKind,
-    summary: typeof structured.summary === 'string' ? structured.summary : '',
-    groundingSignals: structured.groundingSignals,
-    urlMetadata: structured.urlMetadata,
-    analyzedPaths: args.targetKind === 'multi' ? requireAnalyzeFilePaths(args) : undefined,
+    ...buildSuccessfulStructuredContent({
+      requestId: ctx.task?.id,
+      domain: {
+        status: typeof structured.status === 'string' ? structured.status : 'completed',
+        kind: 'summary' as const,
+        targetKind: args.targetKind,
+        summary: typeof structured.summary === 'string' ? structured.summary : '',
+        groundingSignals: structured.groundingSignals,
+        urlMetadata: structured.urlMetadata,
+        analyzedPaths: args.targetKind === 'multi' ? requireAnalyzeFilePaths(args) : undefined,
+      },
+      shared: base,
+    }),
   }) as unknown as z.infer<typeof AnalyzeOutputSchema>;
 }
 

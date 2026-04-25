@@ -1,7 +1,10 @@
+import type { ServerContext } from '@modelcontextprotocol/server';
+
 import { stat } from 'node:fs/promises';
 import { extname } from 'node:path';
 
 import { getAI } from '../client.js';
+import { cleanupErrorLogger } from './errors.js';
 import { withRetry } from './errors.js';
 import type { RootsFetcher } from './validation.js';
 import { resolveWorkspacePath } from './validation.js';
@@ -132,5 +135,35 @@ export async function deleteUploadedFiles(
     if (r.status === 'rejected') {
       onCleanupError?.(r.reason);
     }
+  }
+}
+
+export interface UploadedFilesCleanupTracker {
+  readonly names: readonly string[];
+  addName(name: string): void;
+  addUploadedFile(file: Pick<UploadedFile, 'name'>): void;
+}
+
+export async function withUploadedFilesCleanup<T>(
+  ctx: ServerContext,
+  operation: (tracker: UploadedFilesCleanupTracker) => Promise<T>,
+): Promise<T> {
+  const uploadedNames: string[] = [];
+  const tracker: UploadedFilesCleanupTracker = {
+    get names() {
+      return uploadedNames;
+    },
+    addName(name: string) {
+      uploadedNames.push(name);
+    },
+    addUploadedFile(file: Pick<UploadedFile, 'name'>) {
+      uploadedNames.push(file.name);
+    },
+  };
+
+  try {
+    return await operation(tracker);
+  } finally {
+    await deleteUploadedFiles(uploadedNames, cleanupErrorLogger(ctx));
   }
 }

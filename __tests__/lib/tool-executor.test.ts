@@ -10,11 +10,14 @@ import { FinishReason } from '@google/genai';
 import type { GenerateContentResponse, Part } from '@google/genai';
 import { z } from 'zod/v4';
 
+import { getAI, MODEL } from '../../src/client.js';
 import { resetProgressThrottle } from '../../src/lib/errors.js';
 import { Logger } from '../../src/lib/logger.js';
 import { validateStructuredToolResult } from '../../src/lib/response.js';
 import { registerTaskTool } from '../../src/lib/task-utils.js';
 import { ToolExecutor } from '../../src/lib/tool-executor.js';
+
+process.env.API_KEY ??= 'test-key-for-tool-executor';
 
 function makeChunk(parts: Part[], finishReason?: FinishReason): GenerateContentResponse {
   return {
@@ -379,6 +382,91 @@ describe('ToolExecutor', () => {
       overlayOnly: true,
       builtOnly: true,
     });
+  });
+
+  it('runGeminiStream resolves orchestration and forwards generation config fields', async () => {
+    const executor = createExecutor();
+    const { ctx } = makeMockContext();
+    const client = getAI();
+    const originalGenerate = client.models.generateContentStream.bind(client.models);
+    let capturedRequest: Record<string, unknown> | undefined;
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async (request: Record<string, unknown>) => {
+      capturedRequest = request;
+      return fakeStream([makeChunk([{ text: 'answer' }], FinishReason.STOP)]);
+    };
+
+    try {
+      const result = await executor.runGeminiStream(ctx, {
+        toolName: 'search',
+        label: 'Web Search',
+        orchestration: {
+          builtInToolNames: ['urlContext'],
+          urls: ['https://example.com/docs'],
+        },
+        buildContents: (activeCapabilities) => {
+          assert.strictEqual(activeCapabilities.has('urlContext'), true);
+          return {
+            contents: 'prompt text',
+            systemInstruction: 'system text',
+          };
+        },
+        config: {
+          costProfile: 'research.quick',
+          thinkingBudget: 32,
+          maxOutputTokens: 123,
+        },
+        responseBuilder: (_streamResult, text) => ({ structuredContent: { answer: text } }),
+      });
+
+      assert.strictEqual(result.isError, undefined);
+      assert.deepStrictEqual(result.structuredContent, { answer: 'answer' });
+      assert.strictEqual(capturedRequest?.model, MODEL);
+      assert.strictEqual(capturedRequest?.contents, 'prompt text');
+      const config = capturedRequest?.config as {
+        abortSignal?: AbortSignal;
+        maxOutputTokens?: number;
+        systemInstruction?: string;
+        tools?: unknown[];
+      };
+      assert.strictEqual(config.systemInstruction, 'system text');
+      assert.strictEqual(config.maxOutputTokens, 123);
+      assert.strictEqual(config.abortSignal, ctx.mcpReq.signal);
+      assert.deepStrictEqual(config.tools, [{ urlContext: {} }]);
+    } finally {
+      client.models.generateContentStream = originalGenerate;
+    }
+  });
+
+  it('runGeminiStream returns URL validation errors before model calls', async () => {
+    const executor = createExecutor();
+    const { ctx } = makeMockContext();
+    const client = getAI();
+    const originalGenerate = client.models.generateContentStream.bind(client.models);
+    let modelCalled = false;
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () => {
+      modelCalled = true;
+      return fakeStream([makeChunk([{ text: 'unexpected' }], FinishReason.STOP)]);
+    };
+
+    try {
+      const result = await executor.runGeminiStream(ctx, {
+        toolName: 'search',
+        label: 'Web Search',
+        orchestration: { builtInToolNames: ['urlContext'], urls: ['http://localhost:3000'] },
+        buildContents: () => ({ contents: 'prompt' }),
+        config: { costProfile: 'research.quick' },
+      });
+
+      assert.strictEqual(result.isError, true);
+      assert.strictEqual(modelCalled, false);
+      assert.match(String(result.content[0]?.text ?? ''), /Private, loopback, and localhost URLs/);
+    } finally {
+      client.models.generateContentStream = originalGenerate;
+    }
   });
 
   it('registerTaskTool emits a single terminal completion from the inner stream executor', async () => {

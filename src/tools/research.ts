@@ -30,7 +30,7 @@ import { ProgressReporter } from '../lib/progress.js';
 import {
   appendSources,
   appendUrlStatus,
-  buildBaseStructuredOutput,
+  buildSuccessfulStructuredContent,
   collectGroundedSourceDetailsWithCounts,
   collectGroundedSourcesWithCounts,
   collectGroundingCitations,
@@ -1049,34 +1049,27 @@ function buildResearchStructuredContent(
   ctx: ServerContext,
   structured: Record<string, unknown>,
 ): Record<string, unknown> {
-  return {
-    ...buildBaseStructuredOutput(
-      ctx.task?.id,
-      Array.isArray(structured.warnings)
-        ? structured.warnings.filter((warning): warning is string => typeof warning === 'string')
-        : undefined,
-    ),
-    ...(structured.status ? { status: structured.status } : {}),
-    mode: args.mode,
-    summary: extractResearchSummary(structured),
-    ...(Array.isArray(structured.sources) ? { sources: structured.sources } : {}),
-    ...(structured.sourceDetails ? { sourceDetails: structured.sourceDetails } : {}),
-    ...(structured.urlContextSources ? { urlContextSources: structured.urlContextSources } : {}),
-    ...(structured.urlMetadata ? { urlMetadata: structured.urlMetadata } : {}),
-    ...(structured.toolsUsed ? { toolsUsed: structured.toolsUsed } : {}),
-    ...(structured.groundingSignals ? { groundingSignals: structured.groundingSignals } : {}),
-    ...(structured.findings ? { findings: structured.findings } : {}),
-    ...(structured.citations ? { citations: structured.citations } : {}),
-    ...(structured.computations ? { computations: structured.computations } : {}),
-    ...(structured.contextUsed ? { contextUsed: structured.contextUsed } : {}),
-    ...(structured.functionCalls ? { functionCalls: structured.functionCalls } : {}),
-    ...(structured.thoughts ? { thoughts: structured.thoughts } : {}),
-    ...(structured.toolEvents ? { toolEvents: structured.toolEvents } : {}),
-    ...(structured.usage ? { usage: structured.usage } : {}),
-    ...(structured.safetyRatings ? { safetyRatings: structured.safetyRatings } : {}),
-    ...(structured.finishMessage ? { finishMessage: structured.finishMessage } : {}),
-    ...(structured.citationMetadata ? { citationMetadata: structured.citationMetadata } : {}),
-  };
+  return buildSuccessfulStructuredContent({
+    requestId: ctx.task?.id,
+    warnings: Array.isArray(structured.warnings)
+      ? structured.warnings.filter((warning): warning is string => typeof warning === 'string')
+      : undefined,
+    domain: {
+      status: structured.status,
+      mode: args.mode,
+      summary: extractResearchSummary(structured),
+      sources: Array.isArray(structured.sources) ? structured.sources : undefined,
+      sourceDetails: structured.sourceDetails,
+      urlContextSources: structured.urlContextSources,
+      urlMetadata: structured.urlMetadata,
+      toolsUsed: structured.toolsUsed,
+      groundingSignals: structured.groundingSignals,
+      findings: structured.findings,
+      citations: structured.citations,
+      computations: structured.computations,
+    },
+    shared: structured,
+  });
 }
 
 async function researchWork(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {

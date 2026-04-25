@@ -222,7 +222,7 @@ export function getWorkspaceCacheTtl(): string {
 }
 
 export function getWorkspaceAutoScan(): boolean {
-  return parseBooleanEnv('AUTO_SCAN', false);
+  return parseBooleanEnv('AUTO_SCAN', true);
 }
 
 export function getReviewDocs(): string[] | undefined {

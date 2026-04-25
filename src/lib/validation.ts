@@ -94,10 +94,10 @@ interface ResolvedWorkspacePath {
   workspaceRoot: string | undefined;
 }
 
-function getEnvRoots(): string[] {
+function getConfiguredRoots(): string[] | undefined {
   const allowedFileRootsEnv = getRootsEnv();
   if (!allowedFileRootsEnv) {
-    return [normalize(process.cwd())];
+    return undefined;
   }
 
   const roots = allowedFileRootsEnv
@@ -107,7 +107,7 @@ function getEnvRoots(): string[] {
     .map((root) => normalize(root))
     .filter(Boolean);
 
-  return roots.length > 0 ? roots : [normalize(process.cwd())];
+  return roots.length > 0 ? roots : undefined;
 }
 
 function parseRootUri(uri: string): string | undefined {
@@ -310,18 +310,23 @@ function intersectRoots(serverRoots: string[], clientRoots: string[]): string[] 
 }
 
 export async function getAllowedRoots(rootsFetcher?: RootsFetcher): Promise<string[]> {
-  const serverRoots = getEnvRoots();
-  if (!rootsFetcher) return serverRoots;
+  const configuredRoots = getConfiguredRoots();
+  const fallbackRoots = configuredRoots ?? [getDefaultWorkspaceRoot()];
+  if (!rootsFetcher) return fallbackRoots;
 
   try {
     const clientRoots = await rootsFetcher();
-    if (clientRoots.length === 0) {
-      return serverRoots;
+    if (!configuredRoots) {
+      return clientRoots.length > 0 ? clientRoots : fallbackRoots;
     }
 
-    return intersectRoots(serverRoots, clientRoots);
+    if (clientRoots.length === 0) {
+      return fallbackRoots;
+    }
+
+    return intersectRoots(configuredRoots, clientRoots);
   } catch {
-    return serverRoots;
+    return fallbackRoots;
   }
 }
 

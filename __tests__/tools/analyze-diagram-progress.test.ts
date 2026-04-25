@@ -3,7 +3,7 @@ import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { basename } from 'node:path';
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 
 import { FinishReason } from '@google/genai';
@@ -14,6 +14,8 @@ import { resetProgressThrottle } from '../../src/lib/errors.js';
 import { buildDiagramFencePattern, registerAnalyzeTool } from '../../src/tools/analyze.js';
 
 process.env.API_KEY ??= 'test-key-for-analyze-progress';
+
+let originalCacheEnv: string | undefined;
 
 interface ToolTaskHandler<TArgs> {
   createTask: (args: TArgs, ctx: ServerContext) => Promise<{ task: Task }>;
@@ -148,7 +150,17 @@ async function* fakeStream(
 
 describe('analyze diagram progress', () => {
   beforeEach(() => {
+    originalCacheEnv = process.env.CACHE;
+    process.env.CACHE = 'false';
     resetProgressThrottle();
+  });
+
+  afterEach(() => {
+    if (originalCacheEnv === undefined) {
+      delete process.env.CACHE;
+    } else {
+      process.env.CACHE = originalCacheEnv;
+    }
   });
 
   it('builds diagram fence patterns that require the requested language tag', () => {

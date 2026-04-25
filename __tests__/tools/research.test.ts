@@ -1,13 +1,28 @@
 import type { RequestTaskStore, ServerContext, Task } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { getAI } from '../../src/client.js';
 import { ResearchOutputSchema } from '../../src/schemas/outputs.js';
 import { registerResearchTool } from '../../src/tools/research.js';
 
 process.env.API_KEY ??= 'test-key-for-research-tools';
+
+let originalCacheEnv: string | undefined;
+
+beforeEach(() => {
+  originalCacheEnv = process.env.CACHE;
+  process.env.CACHE = 'false';
+});
+
+afterEach(() => {
+  if (originalCacheEnv === undefined) {
+    delete process.env.CACHE;
+  } else {
+    process.env.CACHE = originalCacheEnv;
+  }
+});
 
 interface ToolTaskHandler<TArgs> {
   createTask: (args: TArgs, ctx: ServerContext) => Promise<{ task: Task }>;

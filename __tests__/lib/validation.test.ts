@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
 import {
+  getAllowedRoots,
   isPathWithinRoot,
   parseAllowedHosts,
   resolveAllowedHosts,
@@ -53,6 +54,11 @@ function setAllowedHostsEnv(value: string | undefined): void {
   } else {
     process.env[ALLOWED_HOSTS_ENV_KEY] = value;
   }
+}
+
+function firstTextContent(result: ReturnType<typeof validateUrls>): string {
+  const entry = result?.content[0];
+  return entry?.type === 'text' ? entry.text : '';
 }
 
 afterEach(() => {
@@ -230,6 +236,20 @@ describe('resolveAndValidatePath', () => {
     const fetcher = async () => [process.cwd()];
     const result = await resolveAndValidatePath(testPath, fetcher);
     assert.ok(result.endsWith('package.json'));
+  });
+
+  it('defaults allowed roots to client workspace roots when ROOTS is unset', async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'gemini-assistant-client-roots-'));
+    setAllowedFileRootsEnv('');
+
+    try {
+      const roots = await getAllowedRoots(async () => [tempRoot]);
+
+      assert.deepStrictEqual(roots, [tempRoot]);
+    } finally {
+      restoreAllowedFileRootsEnv();
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it('rejects path outside rootsFetcher roots', async () => {
@@ -422,7 +442,7 @@ describe('validateUrls', () => {
   it('rejects custom schemes', () => {
     const result = validateUrls(['ftp://example.com/file.txt']);
     assert.strictEqual(result?.isError, true);
-    assert.match(result?.content[0]?.text ?? '', /Only http:\/\/ and https:\/\//);
+    assert.match(firstTextContent(result), /Only http:\/\/ and https:\/\//);
   });
 
   it('rejects localhost and private-network targets', () => {
@@ -431,7 +451,7 @@ describe('validateUrls', () => {
 
     assert.strictEqual(localhost?.isError, true);
     assert.strictEqual(privateNet?.isError, true);
-    assert.match(localhost?.content[0]?.text ?? '', /Private, loopback, and localhost URLs/);
-    assert.match(privateNet?.content[0]?.text ?? '', /Private, loopback, and localhost URLs/);
+    assert.match(firstTextContent(localhost), /Private, loopback, and localhost URLs/);
+    assert.match(firstTextContent(privateNet), /Private, loopback, and localhost URLs/);
   });
 });

@@ -248,8 +248,8 @@ describe('config parsing', () => {
     assert.strictEqual(getWorkspaceCacheEnabled(), true);
   });
 
-  it('defaults AUTO_SCAN to false', () => {
-    assert.strictEqual(getWorkspaceAutoScan(), false);
+  it('defaults AUTO_SCAN to true', () => {
+    assert.strictEqual(getWorkspaceAutoScan(), true);
   });
 
   it('honours AUTO_SCAN=false', () => {
@@ -353,7 +353,7 @@ describe('config parsing', () => {
 
     assert.strictEqual(getGeminiModel(), 'gemini-3-flash-preview');
     assert.strictEqual(getWorkspaceCacheEnabled(), true);
-    assert.strictEqual(getWorkspaceAutoScan(), false);
+    assert.strictEqual(getWorkspaceAutoScan(), true);
     assert.strictEqual(getTransportMode(), 'stdio');
     assert.strictEqual(getVerbosePayloadLogging(), false);
     assert.strictEqual(getExposeThoughts(), false);

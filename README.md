@@ -206,9 +206,9 @@ Model:
 
 Workspace:
 
-- `ROOTS`: optional comma-separated absolute roots allowed for file tools, `workspace://context`, and automatic workspace caching
+- `ROOTS`: optional comma-separated absolute roots allowed for file tools, `workspace://context`, and automatic workspace caching; defaults to client workspace roots when available, otherwise the server working directory
 - `CONTEXT`: optional path to a custom context file to include in workspace context
-- `AUTO_SCAN`: auto-scan workspace roots for known project files, default `false`
+- `AUTO_SCAN`: auto-scan workspace roots for known project files, default `true`
 
 Workspace cache:
 

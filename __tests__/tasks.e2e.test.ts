@@ -26,14 +26,22 @@ import { createServerInstance } from '../src/server.js';
 process.env.API_KEY ??= 'test-key-for-tasks';
 
 let env: MockGeminiEnvironment;
+let originalCacheEnv: string | undefined;
 
 beforeEach(() => {
+  originalCacheEnv = process.env.CACHE;
+  process.env.CACHE = 'false';
   env = new MockGeminiEnvironment();
   env.install();
 });
 
 afterEach(() => {
   env.restore();
+  if (originalCacheEnv === undefined) {
+    delete process.env.CACHE;
+  } else {
+    process.env.CACHE = originalCacheEnv;
+  }
 });
 
 async function createHarness() {

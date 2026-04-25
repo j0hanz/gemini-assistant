@@ -1,24 +1,22 @@
 import { z } from 'zod/v4';
 
 import {
-  DIAGRAM_TYPES,
-  enumField,
-  nonNegativeInt,
-  publicHttpUrlArray,
-  RESEARCH_MODE_OPTIONS,
-  REVIEW_SUBJECT_OPTIONS,
-} from './fields.js';
-import {
   UsageMetadataSchema as BaseUsageMetadataSchema,
+  DIAGRAM_TYPES,
   diffStatsFields,
+  enumField,
   FindingSchema,
   GroundingCitationSchema,
   GroundingSignalsSchema,
+  nonNegativeInt,
   publicBaseOutputFields,
+  publicHttpUrlArray,
+  RESEARCH_MODE_OPTIONS,
+  REVIEW_SUBJECT_OPTIONS,
   SearchEntryPointSchema,
   SourceDetailSchema,
   UrlMetadataEntrySchema,
-} from './fragments.js';
+} from './fields.js';
 
 export const UsageMetadataSchema = BaseUsageMetadataSchema;
 

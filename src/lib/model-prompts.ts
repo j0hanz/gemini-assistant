@@ -85,33 +85,35 @@ export function buildGroundedAnswerPrompt(
   );
 }
 
+type FileAnalysisPromptArgs =
+  | {
+      cacheName?: string | undefined;
+      goal: string;
+      kind: 'single';
+    }
+  | {
+      cacheName?: string | undefined;
+      goal: string;
+      kind: 'url';
+      urls: readonly string[];
+    }
+  | {
+      attachedParts?: readonly Part[];
+      cacheName?: string | undefined;
+      goal: string;
+      kind: 'multi';
+    };
+
+type FileAnalysisPromptResult<A extends FileAnalysisPromptArgs> = A extends { kind: 'multi' }
+  ? ResolvedPartPrompt
+  : ResolvedTextPrompt;
+
+export function buildFileAnalysisPrompt<A extends FileAnalysisPromptArgs>(
+  args: A,
+): FileAnalysisPromptResult<A>;
 export function buildFileAnalysisPrompt(
-  args:
-    | {
-        cacheName?: string | undefined;
-        goal: string;
-        kind: 'single';
-      }
-    | {
-        cacheName?: string | undefined;
-        goal: string;
-        kind: 'url';
-        urls: readonly string[];
-      },
-): ResolvedTextPrompt;
-export function buildFileAnalysisPrompt(args: {
-  attachedParts?: readonly Part[];
-  cacheName?: string | undefined;
-  goal: string;
-  kind: 'multi';
-}): ResolvedPartPrompt;
-export function buildFileAnalysisPrompt(args: {
-  attachedParts?: readonly Part[];
-  goal: string;
-  kind: 'single' | 'multi' | 'url';
-  urls?: readonly string[];
-  cacheName?: string | undefined;
-}): ResolvedTextPrompt | ResolvedPartPrompt {
+  args: FileAnalysisPromptArgs,
+): ResolvedTextPrompt | ResolvedPartPrompt {
   if (args.kind === 'single') {
     return resolveTextPrompt(
       {
@@ -127,7 +129,7 @@ export function buildFileAnalysisPrompt(args: {
     return resolveTextPrompt(
       {
         promptText: joinNonEmpty([
-          args.urls && args.urls.length > 0 ? `URLs:\n${args.urls.join('\n')}` : undefined,
+          args.urls.length > 0 ? `URLs:\n${args.urls.join('\n')}` : undefined,
           `Task: ${args.goal}`,
         ]),
         systemInstruction:
@@ -147,31 +149,35 @@ export function buildFileAnalysisPrompt(args: {
   );
 }
 
-export function buildDiffReviewPrompt(args: {
-  cacheName?: string | undefined;
-  focus?: string | undefined;
-  mode: 'compare';
-  promptParts: readonly Part[];
-}): ResolvedPartPrompt;
-export function buildDiffReviewPrompt(args: {
-  cacheName?: string | undefined;
-  mode: 'review';
-  promptText: string;
-  docContexts?: { filename: string; content: string }[];
-}): ResolvedTextPrompt;
-export function buildDiffReviewPrompt(args: {
-  cacheName?: string | undefined;
-  mode: 'compare' | 'review';
-  promptText?: string;
-  promptParts?: readonly Part[];
-  focus?: string | undefined;
-  docContexts?: { filename: string; content: string }[];
-}): ResolvedTextPrompt | ResolvedPartPrompt {
+type DiffReviewPromptArgs =
+  | {
+      cacheName?: string | undefined;
+      focus?: string | undefined;
+      mode: 'compare';
+      promptParts: readonly Part[];
+    }
+  | {
+      cacheName?: string | undefined;
+      mode: 'review';
+      promptText: string;
+      docContexts?: { filename: string; content: string }[];
+    };
+
+type DiffReviewPromptResult<A extends DiffReviewPromptArgs> = A extends { mode: 'compare' }
+  ? ResolvedPartPrompt
+  : ResolvedTextPrompt;
+
+export function buildDiffReviewPrompt<A extends DiffReviewPromptArgs>(
+  args: A,
+): DiffReviewPromptResult<A>;
+export function buildDiffReviewPrompt(
+  args: DiffReviewPromptArgs,
+): ResolvedTextPrompt | ResolvedPartPrompt {
   if (args.mode === 'compare') {
     return resolvePartPrompt(
       {
         promptParts: [
-          ...(args.promptParts ?? []),
+          ...args.promptParts,
           { text: args.focus ? `Focus: ${args.focus}` : 'Compare the two files.' },
         ],
         cacheText: 'Compare the files. Output: Summary, Differences, Impact. Cite short quotes.',
@@ -200,7 +206,7 @@ export function buildDiffReviewPrompt(args: {
   return resolveTextPrompt(
     {
       cacheText: 'Review the diff for bugs and behavior risk. Ignore formatting-only changes.',
-      promptText: (args.promptText ?? '') + docContent,
+      promptText: args.promptText + docContent,
       systemInstruction: buildOutputInstruction(
         `Review the unified diff for bugs, regressions, and behavior risk. Ignore formatting-only changes. Cite file paths and hunk context. Do not invent line numbers. If the diff looks clean, say so briefly.${docInstruction}`,
         ['Output:', '## Findings', '## Fixes'],

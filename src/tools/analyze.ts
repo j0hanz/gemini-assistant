@@ -16,14 +16,18 @@ import {
 } from '../lib/file.js';
 import { buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
-import { pickDefined } from '../lib/object.js';
-import { type BuiltInToolName, selectSearchAndUrlContextTools } from '../lib/orchestration.js';
+import {
+  type BuiltInToolName,
+  selectSearchAndUrlContextTools,
+  type ServerSideToolInvocationsPolicy,
+} from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
+import { pickDefined } from '../lib/response.js';
 import {
   buildSuccessfulStructuredContent,
   safeValidateStructuredContent,
 } from '../lib/response.js';
-import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
 import { getWorkspaceCacheName } from '../lib/workspace-context.js';
@@ -377,7 +381,9 @@ async function analyzeDiagramWork(
         builtInToolNames: diagramBuiltInTools,
         ...(args.targetKind === 'url' ? { urls: args.urls } : {}),
         // Built-in tools only when present; no function-calling mix. Suppress traces when no built-ins.
-        serverSideToolInvocations: diagramBuiltInTools.length > 0 ? 'auto' : 'never',
+        serverSideToolInvocations: (diagramBuiltInTools.length > 0
+          ? 'auto'
+          : 'never') satisfies ServerSideToolInvocationsPolicy,
       },
       buildContents: () => {
         const prompt = buildDiagramGenerationPrompt({
@@ -563,10 +569,10 @@ export function registerAnalyzeTool(server: McpServer, taskMessageQueue: TaskMes
   const rootsFetcher = buildServerRootsFetcher(server);
   const fileWork = createAnalyzeFileWork(rootsFetcher);
 
-  registerTaskTool(
+  registerWorkTool<AnalyzeInput>({
     server,
-    'analyze',
-    {
+    tool: {
+      name: 'analyze',
       title: 'Analyze',
       description:
         'Analyze one file, one or more public URLs, a small file set, or generate a diagram.',
@@ -574,7 +580,7 @@ export function registerAnalyzeTool(server: McpServer, taskMessageQueue: TaskMes
       outputSchema: AnalyzeOutputSchema,
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
-    taskMessageQueue,
-    (args: AnalyzeInput, ctx: ServerContext) => analyzeWork(rootsFetcher, fileWork, args, ctx),
-  );
+    queue: taskMessageQueue,
+    work: (args, ctx) => analyzeWork(rootsFetcher, fileWork, args, ctx),
+  });
 }

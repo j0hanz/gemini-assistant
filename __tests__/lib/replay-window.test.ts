@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { selectReplayWindow } from '../../src/lib/replay-window.js';
+import { selectReplayWindow } from '../../src/sessions.js';
 import type { ContentEntry } from '../../src/sessions.js';
 
 function entry(role: ContentEntry['role'], parts: ContentEntry['parts'], timestamp: number) {

@@ -8,7 +8,7 @@ import type {
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 import { logger } from './lib/logger.js';
-import type { GeminiResponseSchema } from './schemas/json-schema.js';
+import type { GeminiResponseSchema } from './schemas/inputs.js';
 
 import {
   getApiKey,

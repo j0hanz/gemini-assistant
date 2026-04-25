@@ -9,7 +9,7 @@ import {
   ResearchInputSchema,
   ReviewInputSchema,
 } from '../../src/schemas/inputs.js';
-import { GeminiResponseSchema } from '../../src/schemas/json-schema.js';
+import { GeminiResponseSchema } from '../../src/schemas/inputs.js';
 
 function jsonSchemaProperty(
   schema: unknown,

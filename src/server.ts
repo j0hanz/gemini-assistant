@@ -10,13 +10,13 @@ import { join } from 'node:path';
 import { AppError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
-import { SESSIONS_LIST_URI } from './lib/resource-uris.js';
 import { buildServerRootsFetcher } from './lib/validation.js';
 import { createWorkspaceCacheManager } from './lib/workspace-context.js';
 
 import { registerPrompts } from './prompts.js';
 import { PUBLIC_RESOURCE_URIS } from './public-contract.js';
 import { PUBLIC_TOOL_NAMES } from './public-contract.js';
+import { SESSIONS_LIST_URI } from './resources.js';
 import { registerResources } from './resources.js';
 import { createSessionStore, type SessionChangeEvent, type SessionStore } from './sessions.js';
 import { registerAnalyzeTool } from './tools/analyze.js';

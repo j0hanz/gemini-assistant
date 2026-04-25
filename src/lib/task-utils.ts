@@ -38,7 +38,8 @@ type TaskContext = NonNullable<ServerContext['task']>;
 type ExtendedTaskContext = TaskContext & { queue: TaskMessageQueue };
 type ExtendedServerContext = ServerContext & { task?: ExtendedTaskContext };
 
-type TaskWork<TArgs> = (args: TArgs, ctx: ExtendedServerContext) => Promise<CallToolResult>;
+export type TaskWork<TArgs> = (args: TArgs, ctx: ExtendedServerContext) => Promise<CallToolResult>;
+export type { TaskToolConfig };
 
 interface ToolTaskHandlers<TArgs> {
   createTask: (args: TArgs, ctx: ServerContext) => Promise<CreateTaskResult>;
@@ -408,4 +409,21 @@ export function registerTaskTool<TArgs>(
     } as Parameters<RegisterToolTask>[1],
     handler,
   );
+}
+
+interface RegisterWorkToolParams<TArgs> {
+  server: McpServer;
+  tool: { name: string } & TaskToolConfig;
+  queue: TaskMessageQueue;
+  work: TaskWork<TArgs>;
+}
+
+export function registerWorkTool<TArgs>({
+  server,
+  tool,
+  queue,
+  work,
+}: RegisterWorkToolParams<TArgs>): void {
+  const { name, ...config } = tool;
+  registerTaskTool<TArgs>(server, name, config, queue, work);
 }

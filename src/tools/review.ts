@@ -24,7 +24,7 @@ import {
   safeValidateStructuredContent,
   tryParseJsonResponse,
 } from '../lib/response.js';
-import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
 import { getWorkspaceCacheName } from '../lib/workspace-context.js';
@@ -375,27 +375,47 @@ async function diagnoseFailureWork(
 }
 
 export function matchesNoisyPath(filePath: string): boolean {
-  const normalized = filePath.replaceAll('\\', '/');
-  const basename = normalized.split('/').pop()?.toLowerCase() ?? '';
-  return (
-    NOISY_EXACT_BASENAMES.has(basename) ||
-    NOISY_SUFFIXES.some((suffix) => basename.endsWith(suffix))
-  );
+  return PATH_RULES.isNoisy(filePath);
 }
 
 export function isSensitiveUntrackedPath(relativePath: string): boolean {
-  const normalized = relativePath.replaceAll('\\', '/').toLowerCase();
-  const segments = normalized.split('/').filter(Boolean);
-  const basename = segments.at(-1) ?? normalized;
-
-  return (
-    SENSITIVE_UNTRACKED_BASENAMES.has(basename) ||
-    basename.startsWith('.env.') ||
-    SENSITIVE_UNTRACKED_EXTENSIONS.has(getExtension(basename)) ||
-    segments.some((segment) => SENSITIVE_UNTRACKED_SEGMENTS.has(segment)) ||
-    SENSITIVE_UNTRACKED_BASENAME_PARTS.some((part) => basename.includes(part))
-  );
+  return PATH_RULES.isSensitive(relativePath);
 }
+
+const PATH_RULES = {
+  isNoisy(filePath: string): boolean {
+    const normalized = filePath.replaceAll('\\', '/');
+    const basename = normalized.split('/').pop()?.toLowerCase() ?? '';
+    return (
+      NOISY_EXACT_BASENAMES.has(basename) ||
+      NOISY_SUFFIXES.some((suffix) => basename.endsWith(suffix))
+    );
+  },
+  isSensitive(relativePath: string): boolean {
+    const normalized = relativePath.replaceAll('\\', '/').toLowerCase();
+    const segments = normalized.split('/').filter(Boolean);
+    const basename = segments.at(-1) ?? normalized;
+    return (
+      SENSITIVE_UNTRACKED_BASENAMES.has(basename) ||
+      basename.startsWith('.env.') ||
+      SENSITIVE_UNTRACKED_EXTENSIONS.has(getExtension(basename)) ||
+      segments.some((segment) => SENSITIVE_UNTRACKED_SEGMENTS.has(segment)) ||
+      SENSITIVE_UNTRACKED_BASENAME_PARTS.some((part) => basename.includes(part))
+    );
+  },
+  isHighRiskBasename(basename: string): boolean {
+    return HIGH_RISK_BASENAMES.some(
+      (needle) => basename === needle || basename.startsWith(needle) || basename.includes(needle),
+    );
+  },
+  scoreLocation(normalizedPath: string): number {
+    let score = 0;
+    if (normalizedPath.includes('.github/workflows/')) score += 25;
+    if (normalizedPath.includes('/build/') || normalizedPath.includes('/scripts/')) score += 15;
+    if (normalizedPath.includes('/src/')) score += 10;
+    return score;
+  },
+} as const;
 
 function isAdditionLine(line: string): boolean {
   return line.startsWith('+') && !line.startsWith('+++');
@@ -689,17 +709,11 @@ function getExtension(basename: string): string {
 }
 
 function hasHighRiskBasename(basename: string): boolean {
-  return HIGH_RISK_BASENAMES.some(
-    (needle) => basename === needle || basename.startsWith(needle) || basename.includes(needle),
-  );
+  return PATH_RULES.isHighRiskBasename(basename);
 }
 
 function scorePathLocation(normalizedPath: string): number {
-  let score = 0;
-  if (normalizedPath.includes('.github/workflows/')) score += 25;
-  if (normalizedPath.includes('/build/') || normalizedPath.includes('/scripts/')) score += 15;
-  if (normalizedPath.includes('/src/')) score += 10;
-  return score;
+  return PATH_RULES.scoreLocation(normalizedPath);
 }
 
 export function scoreDiffUnitRisk(unit: DiffUnit): number {
@@ -1303,17 +1317,17 @@ export function registerReviewTool(server: McpServer, taskMessageQueue: TaskMess
   const rootsFetcher = buildServerRootsFetcher(server);
   const compareWork = createCompareFileWork(rootsFetcher);
 
-  registerTaskTool(
+  registerWorkTool<ReviewInput>({
     server,
-    'review',
-    {
+    tool: {
+      name: 'review',
       title: 'Review',
       description: 'Review a local diff, compare two files, or diagnose a failing change.',
       inputSchema: ReviewInputSchema,
       outputSchema: ReviewOutputSchema,
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
-    taskMessageQueue,
-    (args: ReviewInput, ctx: ServerContext) => reviewWork(compareWork, rootsFetcher, args, ctx),
-  );
+    queue: taskMessageQueue,
+    work: (args, ctx) => reviewWork(compareWork, rootsFetcher, args, ctx),
+  });
 }

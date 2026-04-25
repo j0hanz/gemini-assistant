@@ -3,18 +3,6 @@ import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontex
 
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
-import {
-  DISCOVER_CATALOG_URI,
-  DISCOVER_CONTEXT_URI,
-  DISCOVER_WORKFLOWS_URI,
-  sessionDetailUri,
-  sessionEventsUri,
-  SESSIONS_LIST_URI,
-  sessionTranscriptUri,
-  sessionTurnPartsUri,
-  WORKSPACE_CACHE_URI,
-  WORKSPACE_CONTEXT_URI,
-} from './lib/resource-uris.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from './lib/validation.js';
 import {
   assembleWorkspaceContext,
@@ -40,6 +28,34 @@ import {
 import type { SessionStore, SessionSummary } from './sessions.js';
 
 export { PUBLIC_RESOURCE_URIS } from './public-contract.js';
+
+export const DISCOVER_CATALOG_URI = 'discover://catalog' as const;
+export const DISCOVER_WORKFLOWS_URI = 'discover://workflows' as const;
+export const DISCOVER_CONTEXT_URI = 'discover://context' as const;
+export const SESSIONS_LIST_URI = 'session://' as const;
+export const WORKSPACE_CONTEXT_URI = 'workspace://context' as const;
+export const WORKSPACE_CACHE_URI = 'workspace://cache' as const;
+
+type SessionDetailUri = `session://${string}`;
+type SessionTranscriptUri = `session://${string}/transcript`;
+type SessionEventsUri = `session://${string}/events`;
+type SessionTurnPartsUri = `gemini://sessions/${string}/turns/${string}/parts`;
+
+export function sessionDetailUri(sessionId: string): SessionDetailUri {
+  return `session://${encodeURIComponent(sessionId)}`;
+}
+
+export function sessionTranscriptUri(sessionId: string): SessionTranscriptUri {
+  return `${sessionDetailUri(sessionId)}/transcript`;
+}
+
+export function sessionEventsUri(sessionId: string): SessionEventsUri {
+  return `${sessionDetailUri(sessionId)}/events`;
+}
+
+export function sessionTurnPartsUri(sessionId: string, turnIndex: number): SessionTurnPartsUri {
+  return `gemini://sessions/${encodeURIComponent(sessionId)}/turns/${String(turnIndex)}/parts`;
+}
 
 interface ResourceListEntry {
   uri: string;

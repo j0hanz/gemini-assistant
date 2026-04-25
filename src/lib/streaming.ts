@@ -12,9 +12,8 @@ import type {
 } from '@google/genai';
 
 import { AppError, finishReasonToError, withRetry } from './errors.js';
-import { pickDefined } from './object.js';
 import { advanceProgress, PROGRESS_TOTAL, sendProgress } from './progress.js';
-import { promptBlockedError } from './response.js';
+import { pickDefined, promptBlockedError } from './response.js';
 
 export { advanceProgress, PROGRESS_CAP, PROGRESS_TOTAL } from './progress.js';
 

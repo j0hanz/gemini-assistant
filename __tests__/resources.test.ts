@@ -7,18 +7,13 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { listDiscoveryEntries, listWorkflowEntries } from '../src/catalog.js';
-import {
-  DISCOVER_CATALOG_URI,
-  DISCOVER_CONTEXT_URI,
-  DISCOVER_WORKFLOWS_URI,
-  sessionTurnPartsUri,
-  WORKSPACE_CACHE_URI,
-  WORKSPACE_CONTEXT_URI,
-} from '../src/lib/resource-uris.js';
 import { workspaceCacheManager } from '../src/lib/workspace-context.js';
 import { PUBLIC_RESOURCE_URIS, PUBLIC_WORKFLOW_NAMES } from '../src/public-contract.js';
 import {
   buildServerContextSnapshot,
+  DISCOVER_CATALOG_URI,
+  DISCOVER_CONTEXT_URI,
+  DISCOVER_WORKFLOWS_URI,
   getSessionEventsResourceData,
   getSessionTranscriptResourceData,
   getSessionTurnPartsResourceData,
@@ -31,6 +26,9 @@ import {
   readWorkspaceContextResource,
   renderServerContextMarkdown,
   renderWorkspaceContextMarkdown,
+  sessionTurnPartsUri,
+  WORKSPACE_CACHE_URI,
+  WORKSPACE_CONTEXT_URI,
 } from '../src/resources.js';
 import { createSessionStore, type SessionStore } from '../src/sessions.js';
 

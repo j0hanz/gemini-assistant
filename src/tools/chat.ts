@@ -16,24 +16,16 @@ import type {
   PartListUnion,
 } from '@google/genai';
 
-import { AppError } from '../lib/errors.js';
+import { AppError, assertNever } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { appendFunctionCallingInstruction } from '../lib/model-prompts.js';
-import { pickDefined } from '../lib/object.js';
 import {
   buildOrchestrationConfig,
   type BuiltInToolSpec,
   resolveOrchestration,
 } from '../lib/orchestration.js';
-import { validateGeminiRequest } from '../lib/preflight.js';
 import { ProgressReporter } from '../lib/progress.js';
-import { selectReplayWindow } from '../lib/replay-window.js';
-import {
-  sessionDetailUri,
-  sessionEventsUri,
-  sessionTranscriptUri,
-  sessionTurnPartsUri,
-} from '../lib/resource-uris.js';
+import { pickDefined } from '../lib/response.js';
 import {
   buildBaseStructuredOutput,
   buildSharedStructuredMetadata,
@@ -50,9 +42,9 @@ import {
   type StreamResult,
   type ToolEvent,
 } from '../lib/streaming.js';
-import { MUTABLE_ANNOTATIONS, registerTaskTool } from '../lib/task-utils.js';
+import { MUTABLE_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
-import { getAllowedRoots, validateUrls } from '../lib/validation.js';
+import { getAllowedRoots, validateGeminiRequest, validateUrls } from '../lib/validation.js';
 import {
   buildContextUsed,
   buildSessionSummary,
@@ -65,7 +57,7 @@ import {
   createChatInputSchema,
   parseResponseSchemaJsonValue,
 } from '../schemas/inputs.js';
-import { type GeminiResponseSchema } from '../schemas/json-schema.js';
+import { type GeminiResponseSchema } from '../schemas/inputs.js';
 import { ChatOutputSchema, type ContextUsed, type UsageMetadata } from '../schemas/outputs.js';
 
 import {
@@ -81,10 +73,17 @@ import {
   getWorkspaceCacheEnabled,
 } from '../config.js';
 import {
+  sessionDetailUri,
+  sessionEventsUri,
+  sessionTranscriptUri,
+  sessionTurnPartsUri,
+} from '../resources.js';
+import {
   buildReplayHistoryParts,
   capRawParts,
   type ContentEntry,
   createSessionStore,
+  selectReplayWindow,
   type SessionEventEntry,
   type SessionGenerationContract,
   type SessionStore,
@@ -354,6 +353,8 @@ function toFunctionCallingConfigMode(
       return FunctionCallingConfigMode.NONE;
     case 'VALIDATED':
       return FunctionCallingConfigMode.VALIDATED;
+    default:
+      return assertNever(mode, 'FunctionModeInput');
   }
 }
 
@@ -783,36 +784,43 @@ function sanitizeSessionValue(value: unknown, keyContext?: string): unknown {
   return value;
 }
 
+interface SessionFieldRule {
+  key: string;
+  shouldSanitize: (value: unknown) => boolean;
+}
+
+const FUNCTION_CALL_FIELD_RULES: readonly SessionFieldRule[] = [
+  { key: 'args', shouldSanitize: (value) => Boolean(value) },
+];
+
+const TOOL_EVENT_FIELD_RULES: readonly SessionFieldRule[] = [
+  { key: 'args', shouldSanitize: (value) => Boolean(value) },
+  { key: 'code', shouldSanitize: (value) => value !== undefined },
+  { key: 'output', shouldSanitize: (value) => value !== undefined },
+  { key: 'response', shouldSanitize: (value) => Boolean(value) },
+  { key: 'text', shouldSanitize: (value) => value !== undefined },
+];
+
+function applySessionFieldRules<T extends object>(item: T, rules: readonly SessionFieldRule[]): T {
+  const source = item as Readonly<Record<string, unknown>>;
+  const out: Record<string, unknown> = { ...source };
+  for (const rule of rules) {
+    const value = source[rule.key];
+    if (rule.shouldSanitize(value)) {
+      out[rule.key] = sanitizeSessionValue(value, rule.key);
+    }
+  }
+  return out as T;
+}
+
 function sanitizeFunctionCalls(functionCalls: FunctionCallEntry[]): FunctionCallEntry[] {
-  return functionCalls.map((functionCall) => ({
-    ...functionCall,
-    ...(functionCall.args
-      ? { args: sanitizeSessionValue(functionCall.args, 'args') as Record<string, unknown> }
-      : {}),
-  }));
+  return functionCalls.map((functionCall) =>
+    applySessionFieldRules(functionCall, FUNCTION_CALL_FIELD_RULES),
+  );
 }
 
 function sanitizeToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
-  return toolEvents.map((toolEvent) => ({
-    ...toolEvent,
-    ...(toolEvent.args
-      ? { args: sanitizeSessionValue(toolEvent.args, 'args') as Record<string, unknown> }
-      : {}),
-    ...(toolEvent.code !== undefined
-      ? { code: sanitizeSessionValue(toolEvent.code, 'code') as string }
-      : {}),
-    ...(toolEvent.output !== undefined
-      ? { output: sanitizeSessionValue(toolEvent.output, 'output') as string }
-      : {}),
-    ...(toolEvent.response
-      ? {
-          response: sanitizeSessionValue(toolEvent.response, 'response') as Record<string, unknown>,
-        }
-      : {}),
-    ...(toolEvent.text !== undefined
-      ? { text: sanitizeSessionValue(toolEvent.text, 'text') as string }
-      : {}),
-  }));
+  return toolEvents.map((toolEvent) => applySessionFieldRules(toolEvent, TOOL_EVENT_FIELD_RULES));
 }
 
 function appendTranscriptPair(
@@ -1420,10 +1428,10 @@ export function registerChatTool(
     workspaceCacheManagerInstance,
   );
 
-  registerTaskTool(
+  registerWorkTool<ChatInput>({
     server,
-    'chat',
-    {
+    tool: {
+      name: 'chat',
       title: 'Chat',
       description:
         'Direct Gemini chat with optional server-managed sessions and reusable cache memory.',
@@ -1431,7 +1439,7 @@ export function registerChatTool(
       outputSchema: ChatOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
     },
-    taskMessageQueue,
-    (args: ChatInput, ctx: ServerContext) => chatWork(askWork, args, ctx),
-  );
+    queue: taskMessageQueue,
+    work: (args, ctx) => chatWork(askWork, args, ctx),
+  });
 }

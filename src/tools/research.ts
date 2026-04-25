@@ -19,7 +19,6 @@ import {
   buildFileAnalysisPrompt,
   buildGroundedAnswerPrompt,
 } from '../lib/model-prompts.js';
-import { pickDefined } from '../lib/object.js';
 import {
   type BuiltInToolName,
   type BuiltInToolSpec,
@@ -27,6 +26,7 @@ import {
   selectSearchAndUrlContextTools,
 } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
+import { pickDefined } from '../lib/response.js';
 import {
   appendSources,
   appendUrlStatus,
@@ -51,7 +51,7 @@ import {
 import {
   elicitTaskInput,
   READONLY_NON_IDEMPOTENT_ANNOTATIONS,
-  registerTaskTool,
+  registerWorkTool,
 } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { getWorkspaceCacheName } from '../lib/workspace-context.js';
@@ -84,32 +84,34 @@ type GenerationConfigFields = Pick<
   'maxOutputTokens' | 'safetySettings' | 'thinkingBudget' | 'fileSearch'
 >;
 
-function buildResearchBuiltInSpecs(
-  names: readonly BuiltInToolName[] | undefined,
-  fileSearch: ResearchInput['fileSearch'] | undefined,
-): BuiltInToolSpec[] {
+type ResearchSpecsOptions =
+  | {
+      grounded: true;
+      urls: readonly string[] | undefined;
+      fileSearch: ResearchInput['fileSearch'] | undefined;
+      extraTools?: readonly BuiltInToolName[];
+    }
+  | {
+      grounded: false;
+      names: readonly BuiltInToolName[] | undefined;
+      fileSearch: ResearchInput['fileSearch'] | undefined;
+    };
+
+function buildResearchSpecs(options: ResearchSpecsOptions): BuiltInToolSpec[] {
+  const names: readonly BuiltInToolName[] | undefined = options.grounded
+    ? [...selectSearchAndUrlContextTools(true, options.urls), ...(options.extraTools ?? [])]
+    : options.names;
   const specs: BuiltInToolSpec[] = (names ?? []).map((kind) => ({ kind }) as BuiltInToolSpec);
-  if (fileSearch) {
+  if (options.fileSearch) {
     specs.push({
       kind: 'fileSearch',
-      fileSearchStoreNames: fileSearch.fileSearchStoreNames,
-      ...(fileSearch.metadataFilter !== undefined
-        ? { metadataFilter: fileSearch.metadataFilter }
+      fileSearchStoreNames: options.fileSearch.fileSearchStoreNames,
+      ...(options.fileSearch.metadataFilter !== undefined
+        ? { metadataFilter: options.fileSearch.metadataFilter }
         : {}),
     });
   }
   return specs;
-}
-
-function buildGroundedResearchBuiltInSpecs(
-  urls: readonly string[] | undefined,
-  fileSearch: ResearchInput['fileSearch'] | undefined,
-  extraTools: readonly BuiltInToolName[] = [],
-): BuiltInToolSpec[] {
-  return buildResearchBuiltInSpecs(
-    [...selectSearchAndUrlContextTools(true, urls), ...extraTools],
-    fileSearch,
-  );
 }
 
 async function runToolStream<T extends Record<string, unknown>>(
@@ -534,14 +536,29 @@ function dedupeGroundingSupports(
   return { ...groundingMetadata, groundingSupports };
 }
 
-function mergeGroundingMetadata(results: readonly StreamResult[]): GroundingMetadata | undefined {
+function mergeStreamMetadata<K extends keyof StreamResult>(
+  results: readonly StreamResult[],
+  key: K,
+  combine: (values: readonly NonNullable<StreamResult[K]>[]) => StreamResult[K] | undefined,
+): StreamResult[K] | undefined {
+  const values: NonNullable<StreamResult[K]>[] = [];
+  for (const result of results) {
+    const value = result[key];
+    if (value !== undefined && value !== null) {
+      values.push(value);
+    }
+  }
+  return combine(values);
+}
+
+function combineGroundingMetadata(
+  metadatas: readonly GroundingMetadata[],
+): GroundingMetadata | undefined {
   const groundingChunks: GroundingChunk[] = [];
   const groundingSupports: GroundingSupport[] = [];
   let searchEntryPoint: GroundingMetadata['searchEntryPoint'];
 
-  for (const result of results) {
-    const metadata = result.groundingMetadata;
-    if (!metadata) continue;
+  for (const metadata of metadatas) {
     const offset = groundingChunks.length;
     groundingChunks.push(...(metadata.groundingChunks ?? []));
     for (const support of metadata.groundingSupports ?? []) {
@@ -566,8 +583,10 @@ function mergeGroundingMetadata(results: readonly StreamResult[]): GroundingMeta
   );
 }
 
-function mergeUrlContextMetadata(results: readonly StreamResult[]): UrlContextMetadata | undefined {
-  const urlMetadata = results.flatMap((result) => result.urlContextMetadata?.urlMetadata ?? []);
+function combineUrlContextMetadata(
+  metadatas: readonly UrlContextMetadata[],
+): UrlContextMetadata | undefined {
+  const urlMetadata = metadatas.flatMap((metadata) => metadata.urlMetadata ?? []);
   return urlMetadata.length > 0 ? { urlMetadata } : undefined;
 }
 
@@ -586,8 +605,12 @@ function aggregateStreamResults(
     functionCalls: results.flatMap((result) => result.functionCalls),
     toolEvents: results.flatMap((result) => result.toolEvents),
     hadCandidate: results.some((result) => result.hadCandidate),
-    groundingMetadata: mergeGroundingMetadata(results),
-    urlContextMetadata: mergeUrlContextMetadata(results),
+    groundingMetadata: mergeStreamMetadata(results, 'groundingMetadata', combineGroundingMetadata),
+    urlContextMetadata: mergeStreamMetadata(
+      results,
+      'urlContextMetadata',
+      combineUrlContextMetadata,
+    ),
     finishMessage: warnings.length > 0 ? warnings.join('\n') : undefined,
   });
 }
@@ -660,7 +683,11 @@ async function runDeepResearchPlan(
 
   const resolvedRetrieval = await resolveOrchestration(
     {
-      builtInToolSpecs: buildGroundedResearchBuiltInSpecs(args.urls, args.fileSearch),
+      builtInToolSpecs: buildResearchSpecs({
+        grounded: true,
+        urls: args.urls,
+        fileSearch: args.fileSearch,
+      }),
       urls: args.urls,
     },
     ctx,
@@ -702,10 +729,11 @@ async function runDeepResearchPlan(
     .join('\n\n');
   const resolvedSynthesis = await resolveOrchestration(
     {
-      builtInToolSpecs: buildResearchBuiltInSpecs(
-        args.searchDepth >= 4 ? (['codeExecution'] as const) : undefined,
-        args.fileSearch,
-      ),
+      builtInToolSpecs: buildResearchSpecs({
+        grounded: false,
+        names: args.searchDepth >= 4 ? (['codeExecution'] as const) : undefined,
+        fileSearch: args.fileSearch,
+      }),
     },
     ctx,
     'agentic_search',
@@ -788,7 +816,7 @@ async function searchWork(
 ): Promise<CallToolResult> {
   const resolved = await resolveOrchestration(
     {
-      builtInToolSpecs: buildGroundedResearchBuiltInSpecs(urls, fileSearch),
+      builtInToolSpecs: buildResearchSpecs({ grounded: true, urls, fileSearch }),
       urls,
     },
     ctx,
@@ -842,7 +870,11 @@ export async function analyzeUrlWork(
 ): Promise<CallToolResult> {
   const resolved = await resolveOrchestration(
     {
-      builtInToolSpecs: buildResearchBuiltInSpecs(['urlContext'] as const, fileSearch),
+      builtInToolSpecs: buildResearchSpecs({
+        grounded: false,
+        names: ['urlContext'] as const,
+        fileSearch,
+      }),
       urls,
     },
     ctx,
@@ -949,7 +981,12 @@ async function agenticSearchWork(
 
   const resolved = await resolveOrchestration(
     {
-      builtInToolSpecs: buildGroundedResearchBuiltInSpecs(urls, fileSearch, ['codeExecution']),
+      builtInToolSpecs: buildResearchSpecs({
+        grounded: true,
+        urls,
+        fileSearch,
+        extraTools: ['codeExecution'],
+      }),
       urls,
     },
     ctx,
@@ -1091,17 +1128,17 @@ async function researchWork(args: ResearchInput, ctx: ServerContext): Promise<Ca
 }
 
 export function registerResearchTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
-  registerTaskTool(
+  registerWorkTool<ResearchInput>({
     server,
-    'research',
-    {
+    tool: {
+      name: 'research',
       title: 'Research',
       description: 'Quick grounded lookup or deeper multi-step research with an explicit mode.',
       inputSchema: ResearchInputSchema,
       outputSchema: ResearchOutputSchema,
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
-    taskMessageQueue,
-    researchWork,
-  );
+    queue: taskMessageQueue,
+    work: researchWork,
+  });
 }

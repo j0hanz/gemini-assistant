@@ -7,6 +7,10 @@ export { resetProgressThrottle, sendProgress } from './progress.js';
 
 type AppErrorCategory = 'client' | 'server' | 'safety' | 'cancelled' | 'internal';
 
+export function assertNever(value: never, label = 'unreachable'): never {
+  throw new Error(`${label}: ${String(value)}`);
+}
+
 // ── Error Formatting ──────────────────────────────────────────────────
 
 function hasHttpStatus(err: unknown): err is Error & { status: number } {
@@ -74,6 +78,8 @@ export class AppError extends Error {
         return AppError.fromHttpError(toolName, err as Error & { status: number });
       case 'other':
         return new AppError(toolName, `${toolName} failed: ${AppError.formatMessage(err)}`);
+      default:
+        return assertNever(classified, 'classifyError');
     }
   }
 

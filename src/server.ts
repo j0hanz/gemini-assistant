@@ -14,10 +14,8 @@ import { buildServerRootsFetcher } from './lib/validation.js';
 import { createWorkspaceCacheManager } from './lib/workspace-context.js';
 
 import { registerPrompts } from './prompts.js';
-import { PUBLIC_RESOURCE_URIS } from './public-contract.js';
-import { PUBLIC_TOOL_NAMES } from './public-contract.js';
-import { SESSIONS_LIST_URI } from './resources.js';
-import { registerResources } from './resources.js';
+import { PUBLIC_RESOURCE_URIS, PUBLIC_TOOL_NAMES } from './public-contract.js';
+import { registerResources, SESSIONS_LIST_URI } from './resources.js';
 import { createSessionStore, type SessionChangeEvent, type SessionStore } from './sessions.js';
 import { registerAnalyzeTool } from './tools/analyze.js';
 import { registerChatTool } from './tools/chat.js';
@@ -48,13 +46,13 @@ const SERVER_TOOL_REGISTRARS = [
     );
   },
   (server, services) => {
-    registerResearchTool(server, services.taskMessageQueue);
+    registerResearchTool(server, services.taskMessageQueue, services.workspaceCacheManager);
   },
   (server, services) => {
-    registerAnalyzeTool(server, services.taskMessageQueue);
+    registerAnalyzeTool(server, services.taskMessageQueue, services.workspaceCacheManager);
   },
   (server, services) => {
-    registerReviewTool(server, services.taskMessageQueue);
+    registerReviewTool(server, services.taskMessageQueue, services.workspaceCacheManager);
   },
 ] as const satisfies readonly ServerRegistrar[];
 
@@ -130,10 +128,7 @@ async function runCloseStepAsync(
 
 function throwCloseErrors(closeErrors: Error[]): void {
   if (closeErrors.length === 1) {
-    const firstError = closeErrors[0];
-    if (firstError) {
-      throw firstError;
-    }
+    throw closeErrors[0] ?? new Error('Server instance shutdown failed');
   }
 
   if (closeErrors.length > 1) {
@@ -179,7 +174,7 @@ export function createServerInstance(): ServerInstance {
 
   const rootsFetcher = buildServerRootsFetcher(server);
   registerPrompts(server);
-  registerResources(server, sessionStore, rootsFetcher, workspaceCacheManager);
+  registerResources(server, sessionStore, workspaceCacheManager, rootsFetcher);
 
   return {
     server,

@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { getAI } from '../../src/client.js';
+import { createWorkspaceCacheManager } from '../../src/lib/workspace-context.js';
 
 // Set dummy API key so client.ts doesn't exit
 process.env.API_KEY ??= 'test-key-for-pr';
@@ -28,6 +29,8 @@ const {
   scoreDiffUnitRisk,
   splitDiffUnits,
 } = await import('../../src/tools/review.js');
+
+const workspaceCacheManager = createWorkspaceCacheManager();
 
 function runGit(cwd: string, args: string[]) {
   execFileSync('git', args, { cwd, stdio: 'pipe' });
@@ -560,7 +563,7 @@ describe('analyzePrWork diff budgeting metadata', () => {
       await writeFile(join(repoRoot, 'src', 'small.ts'), 'export const small = 2;\n');
 
       process.chdir(repoRoot);
-      const result = await analyzePrWork({ dryRun: true }, makeContext());
+      const result = await analyzePrWork({ dryRun: true }, makeContext(), workspaceCacheManager);
       const structured = result.structuredContent as Record<string, unknown>;
 
       assert.strictEqual(result.isError, undefined);
@@ -602,7 +605,7 @@ describe('analyzePrWork diff budgeting metadata', () => {
       );
 
       process.chdir(repoRoot);
-      const result = await analyzePrWork({}, makeContext());
+      const result = await analyzePrWork({}, makeContext(), workspaceCacheManager);
       const structured = result.structuredContent as Record<string, unknown>;
 
       assert.strictEqual(result.isError, undefined);
@@ -632,7 +635,12 @@ describe('analyzePrWork roots handling', () => {
       runGit(repoRoot, ['commit', '-m', 'initial']);
       await writeFile(join(repoRoot, 'tracked.txt'), 'after\n');
 
-      const result = await analyzePrWork({ dryRun: true }, makeContext(), async () => [repoRoot]);
+      const result = await analyzePrWork(
+        { dryRun: true },
+        makeContext(),
+        workspaceCacheManager,
+        async () => [repoRoot],
+      );
       const structured = result.structuredContent as Record<string, unknown>;
 
       assert.strictEqual(result.isError, undefined);
@@ -651,7 +659,12 @@ describe('analyzePrWork roots handling', () => {
       runGit(repoRoot, ['commit', '-m', 'initial']);
       await writeFile(join(repoRoot, '.env'), 'API_KEY=super-secret\n');
 
-      const result = await analyzePrWork({ dryRun: true }, makeContext(), async () => [repoRoot]);
+      const result = await analyzePrWork(
+        { dryRun: true },
+        makeContext(),
+        workspaceCacheManager,
+        async () => [repoRoot],
+      );
       const structured = result.structuredContent as Record<string, unknown>;
 
       assert.strictEqual(result.isError, undefined);

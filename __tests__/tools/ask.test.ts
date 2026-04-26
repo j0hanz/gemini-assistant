@@ -9,15 +9,23 @@ import { describe, it } from 'node:test';
 import { FinishReason, HarmCategory } from '@google/genai';
 
 import { getAI } from '../../src/client.js';
-import { workspaceCacheManager } from '../../src/lib/workspace-context.js';
+import { createWorkspaceCacheManager } from '../../src/lib/workspace-context.js';
 import { createSessionStore } from '../../src/sessions.js';
 import {
   askWithoutSession,
   buildRebuiltChatContents,
   chatWork,
-  createAskWork,
+  createAskWork as createBaseAskWork,
   createDefaultAskDependencies,
 } from '../../src/tools/chat.js';
+
+const workspaceCacheManager = createWorkspaceCacheManager();
+
+function createAskWork(
+  deps = createDefaultAskDependencies(createSessionStore(), workspaceCacheManager),
+) {
+  return createBaseAskWork(deps, workspaceCacheManager);
+}
 
 function createContext(): ServerContext {
   return createContextWithSignal(new AbortController().signal);
@@ -1020,7 +1028,7 @@ describe('ask contract', () => {
     const originalCache = process.env.CACHE;
     process.env.CACHE = 'false';
     const store = createSessionStore();
-    const deps = createDefaultAskDependencies(store);
+    const deps = createDefaultAskDependencies(store, workspaceCacheManager);
     const client = getAI();
     const originalCreate = client.chats.create.bind(client.chats);
     const calls: Record<string, unknown>[] = [];

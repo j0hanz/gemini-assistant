@@ -17,8 +17,9 @@ import {
   estimateTokens,
   MIN_CACHE_TOKENS,
   summarizeRootForDashboard,
-  workspaceCacheManager,
 } from '../../src/lib/workspace-context.js';
+
+const workspaceCacheManager = createWorkspaceCacheManager();
 
 describe('buildSessionSummary', () => {
   it('returns undefined for fewer than 2 entries', () => {

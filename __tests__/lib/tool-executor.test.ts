@@ -10,9 +10,10 @@ import { FinishReason } from '@google/genai';
 import type { GenerateContentResponse, Part } from '@google/genai';
 import { z } from 'zod/v4';
 
-import { getAI, MODEL } from '../../src/client.js';
-import { resetProgressThrottle } from '../../src/lib/errors.js';
+import { getAI } from '../../src/client.js';
+import { getGeminiModel } from '../../src/config.js';
 import { Logger } from '../../src/lib/logger.js';
+import { resetProgressThrottle } from '../../src/lib/progress.js';
 import { validateStructuredToolResult } from '../../src/lib/response.js';
 import { registerTaskTool } from '../../src/lib/task-utils.js';
 import { ToolExecutor } from '../../src/lib/tool-executor.js';
@@ -422,7 +423,7 @@ describe('ToolExecutor', () => {
 
       assert.strictEqual(result.isError, undefined);
       assert.deepStrictEqual(result.structuredContent, { answer: 'answer' });
-      assert.strictEqual(capturedRequest?.model, MODEL);
+      assert.strictEqual(capturedRequest?.model, getGeminiModel());
       assert.strictEqual(capturedRequest?.contents, 'prompt text');
       const config = capturedRequest?.config as {
         abortSignal?: AbortSignal;

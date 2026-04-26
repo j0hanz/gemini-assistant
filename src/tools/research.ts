@@ -54,7 +54,7 @@ import {
   registerWorkTool,
 } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
-import { getWorkspaceCacheName } from '../lib/workspace-context.js';
+import { getWorkspaceCacheName, type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import {
   type AgenticSearchInput,
   type AnalyzeUrlInput,
@@ -64,8 +64,8 @@ import {
 } from '../schemas/inputs.js';
 import { ResearchOutputSchema } from '../schemas/outputs.js';
 
-import { buildGenerateContentConfig } from '../client.js';
-import { getAI, MODEL } from '../client.js';
+import { buildGenerateContentConfig, getAI } from '../client.js';
+import { getGeminiModel } from '../config.js';
 
 const SEARCH_TOOL_LABEL = 'Web Search';
 const ANALYZE_URL_TOOL_LABEL = 'Analyze URL';
@@ -623,7 +623,7 @@ async function runDeepResearchTurn(
 ): Promise<{ result: CallToolResult; streamResult: StreamResult }> {
   return executeToolStream(ctx, 'research', label, () =>
     getAI().models.generateContentStream({
-      model: MODEL,
+      model: getGeminiModel(),
       contents,
       config: buildGenerateContentConfig(config, ctx.mcpReq.signal),
     }),
@@ -643,6 +643,7 @@ async function runDeepResearchPlan(
     fileSearch?: ResearchInput['fileSearch'] | undefined;
   },
   ctx: ServerContext,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
   const warnings: string[] = [];
   const results: StreamResult[] = [];
@@ -739,7 +740,7 @@ async function runDeepResearchPlan(
     'agentic_search',
   );
   if (resolvedSynthesis.error) return resolvedSynthesis.error;
-  const cacheName = await getWorkspaceCacheName(ctx);
+  const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
 
   const synthesisPrompt = buildAgenticResearchPrompt({
     deliverable: args.deliverable,
@@ -835,7 +836,7 @@ async function searchWork(
     { query, urlCount: urls?.length ?? 0 },
     () =>
       getAI().models.generateContentStream({
-        model: MODEL,
+        model: getGeminiModel(),
         contents: prompt.promptText,
         config: buildGenerateContentConfig(
           {
@@ -898,7 +899,7 @@ export async function analyzeUrlWork(
     { question, urlCount: urls.length },
     () =>
       getAI().models.generateContentStream({
-        model: MODEL,
+        model: getGeminiModel(),
         contents: prompt.promptText,
         config: buildGenerateContentConfig(
           {
@@ -936,6 +937,7 @@ async function agenticSearchWork(
       urls?: readonly string[] | undefined;
     },
   ctx: ServerContext,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
   if (searchDepth >= 5 || (searchDepth >= 4 && !deliverable)) {
     try {
@@ -969,6 +971,7 @@ async function agenticSearchWork(
         fileSearch,
       },
       ctx,
+      workspaceCacheManager,
     );
   }
 
@@ -1004,7 +1007,7 @@ async function agenticSearchWork(
     { topic, searchDepth, urlCount: urls?.length ?? 0 },
     () =>
       getAI().models.generateContentStream({
-        model: MODEL,
+        model: getGeminiModel(),
         contents: prompt.promptText,
         config: buildGenerateContentConfig(
           {
@@ -1046,7 +1049,11 @@ async function runQuickResearch(
   );
 }
 
-async function runDeepResearch(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {
+async function runDeepResearch(
+  args: ResearchInput,
+  ctx: ServerContext,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
+): Promise<CallToolResult> {
   const searchDepth = args.searchDepth ?? 2;
   const hasExplicitThinkingLevel = Object.prototype.hasOwnProperty.call(args, 'thinkingLevel');
   const thinkingLevel = hasExplicitThinkingLevel ? args.thinkingLevel : undefined;
@@ -1064,6 +1071,7 @@ async function runDeepResearch(args: ResearchInput, ctx: ServerContext): Promise
       fileSearch: args.fileSearch,
     },
     ctx,
+    workspaceCacheManager,
   );
 }
 
@@ -1109,10 +1117,14 @@ function buildResearchStructuredContent(
   });
 }
 
-async function researchWork(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {
+async function researchWork(
+  args: ResearchInput,
+  ctx: ServerContext,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
+): Promise<CallToolResult> {
   const result = isQuickResearchInput(args)
     ? await runQuickResearch(args, ctx)
-    : await runDeepResearch(args, ctx);
+    : await runDeepResearch(args, ctx, workspaceCacheManager);
 
   if (result.isError) {
     return result;
@@ -1127,7 +1139,11 @@ async function researchWork(args: ResearchInput, ctx: ServerContext): Promise<Ca
   );
 }
 
-export function registerResearchTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
+export function registerResearchTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
+): void {
   registerWorkTool<ResearchInput>({
     server,
     tool: {
@@ -1139,6 +1155,6 @@ export function registerResearchTool(server: McpServer, taskMessageQueue: TaskMe
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
     queue: taskMessageQueue,
-    work: researchWork,
+    work: (args, ctx) => researchWork(args, ctx, workspaceCacheManager),
   });
 }

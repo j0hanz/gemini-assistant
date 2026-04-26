@@ -7,7 +7,7 @@ import { beforeEach, describe, it } from 'node:test';
 import { FinishReason, Outcome } from '@google/genai';
 import type { GenerateContentResponse, Part } from '@google/genai';
 
-import { resetProgressThrottle } from '../../src/lib/errors.js';
+import { resetProgressThrottle } from '../../src/lib/progress.js';
 import {
   advanceProgress,
   consumeStreamWithProgress,

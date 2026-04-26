@@ -18,6 +18,7 @@ const { createPromptDefinitions, PUBLIC_PROMPT_NAMES, registerPrompts } =
 const { PUBLIC_RESOURCE_URIS, registerResources } = await import('../../src/resources.js');
 const { createSessionStore } = await import('../../src/sessions.js');
 const { PUBLIC_TOOL_NAMES } = await import('../../src/public-contract.js');
+const { createWorkspaceCacheManager } = await import('../../src/lib/workspace-context.js');
 
 function createServer(): McpServer {
   return new McpServer(
@@ -37,31 +38,32 @@ function createServer(): McpServer {
 
 const queue = new InMemoryTaskMessageQueue();
 const sessionStore = createSessionStore();
+const workspaceCacheManager = createWorkspaceCacheManager();
 
 describe('tool registration', () => {
   it('registers chat without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerChatTool(server, sessionStore, queue));
+    assert.doesNotThrow(() => registerChatTool(server, sessionStore, queue, workspaceCacheManager));
   });
 
   it('registers research without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerResearchTool(server, queue));
+    assert.doesNotThrow(() => registerResearchTool(server, queue, workspaceCacheManager));
   });
 
   it('registers analyze without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerAnalyzeTool(server, queue));
+    assert.doesNotThrow(() => registerAnalyzeTool(server, queue, workspaceCacheManager));
   });
 
   it('registers review without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerReviewTool(server, queue));
+    assert.doesNotThrow(() => registerReviewTool(server, queue, workspaceCacheManager));
   });
 
   it('registers resources without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerResources(server, sessionStore));
+    assert.doesNotThrow(() => registerResources(server, sessionStore, workspaceCacheManager));
   });
 
   it('registers prompts without error', () => {
@@ -72,12 +74,12 @@ describe('tool registration', () => {
   it('registers all public tools, prompts, and resources on the same server', () => {
     const server = createServer();
     assert.doesNotThrow(() => {
-      registerChatTool(server, sessionStore, queue);
-      registerResearchTool(server, queue);
-      registerAnalyzeTool(server, queue);
-      registerReviewTool(server, queue);
+      registerChatTool(server, sessionStore, queue, workspaceCacheManager);
+      registerResearchTool(server, queue, workspaceCacheManager);
+      registerAnalyzeTool(server, queue, workspaceCacheManager);
+      registerReviewTool(server, queue, workspaceCacheManager);
       registerPrompts(server);
-      registerResources(server, sessionStore);
+      registerResources(server, sessionStore, workspaceCacheManager);
     });
   });
 

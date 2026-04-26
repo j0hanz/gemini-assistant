@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
 
-import { getTransportMode, type TransportMode } from './config.js';
+import { getApiKey, getTransportMode, type TransportMode } from './config.js';
 import { createEventStore, createServerInstance } from './server.js';
 import type {
   HttpTransportResult,
@@ -44,6 +44,7 @@ export interface MainDependencies {
   createEventStore: CreateEventStoreFn;
   createServerInstance: CreateServerInstanceFn;
   createStdioTransport: () => StdioServerTransport;
+  getApiKey: () => string;
   getTransportMode: () => TransportMode;
   logger: LoggerLike;
   process: ProcessLike;
@@ -62,6 +63,7 @@ function createMainDependencies(): MainDependencies {
     createEventStore,
     createServerInstance,
     createStdioTransport: () => new StdioServerTransport(),
+    getApiKey,
     getTransportMode,
     logger,
     process,
@@ -109,10 +111,7 @@ export async function closeStartedRuntime(runtime: StartedRuntime): Promise<void
   );
 
   if (errors.length === 1) {
-    const firstError = errors[0];
-    if (firstError) {
-      throw firstError;
-    }
+    throw errors[0] ?? new Error('Unknown shutdown failure');
   }
 
   if (errors.length > 1) {
@@ -233,6 +232,12 @@ async function startTransportForMode(
 }
 
 export async function main(deps: MainDependencies = createMainDependencies()): Promise<void> {
+  try {
+    deps.getApiKey();
+  } catch (err) {
+    logCriticalAndExit('Configuration', err, deps.logger, deps.process);
+    return;
+  }
   const transportMode = deps.getTransportMode();
   const runtime = await startTransportForMode(transportMode, deps);
   let disposeProcessHandlers: () => void = () => undefined;

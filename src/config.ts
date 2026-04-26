@@ -252,6 +252,10 @@ export function getSlimSessionEvents(): boolean {
   return !parseBooleanEnv('SESSION_EVENTS_VERBOSE', false);
 }
 
+/**
+ * Parses admin-controlled environment regex patterns. These values are not
+ * user input and are trusted as deployment configuration.
+ */
 function parseRegexPattern(raw: string): RegExp {
   const trimmed = raw.trim();
   if (!trimmed) {

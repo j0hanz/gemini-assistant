@@ -27,7 +27,7 @@ import {
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
-import { getWorkspaceCacheName } from '../lib/workspace-context.js';
+import { getWorkspaceCacheName, type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import { SCAN_FILE_NAMES } from '../lib/workspace-context.js';
 import {
   type AnalyzePrInput,
@@ -228,7 +228,10 @@ interface GitDiffArgsOptions {
   staged?: boolean;
 }
 
-function createCompareFileWork(rootsFetcher: RootsFetcher) {
+function createCompareFileWork(
+  rootsFetcher: RootsFetcher,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
+) {
   return async function compareFileWork(
     {
       filePathA,
@@ -272,7 +275,7 @@ function createCompareFileWork(rootsFetcher: RootsFetcher) {
         ],
       });
 
-      const cacheName = await getWorkspaceCacheName(ctx);
+      const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
       return await executor.runGeminiStream(ctx, {
         toolName: 'compare_files',
         label: COMPARE_FILE_TOOL_LABEL,
@@ -320,6 +323,7 @@ async function diagnoseFailureWork(
   focus: string | undefined,
   thinkingLevel: ReviewInput['thinkingLevel'],
   ctx: ServerContext,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
   const {
     urls,
@@ -345,7 +349,7 @@ async function diagnoseFailureWork(
   await progress.send(0, undefined, 'Diagnosing');
   await ctx.mcpReq.log('info', `Review failure: ${error.length} chars`);
 
-  const cacheName = await getWorkspaceCacheName(ctx);
+  const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
   return await executor.runGeminiStream(ctx, {
     toolName: 'review_failure',
     label: 'Review Failure',
@@ -1078,6 +1082,7 @@ export async function analyzePrWork(
     safetySettings?: ReviewInput['safetySettings'];
   },
   ctx: ServerContext,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
   rootsFetcher: RootsFetcher = () => Promise.resolve([]),
 ): Promise<CallToolResult> {
   const progress = new ProgressReporter(ctx, REVIEW_DIFF_TOOL_LABEL);
@@ -1151,7 +1156,7 @@ export async function analyzePrWork(
     docContexts,
   });
 
-  const cacheName = await getWorkspaceCacheName(ctx);
+  const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
   return await executor.runGeminiStream(ctx, {
     toolName: 'analyze_pr',
     label: REVIEW_DIFF_TOOL_LABEL,
@@ -1242,6 +1247,7 @@ function requireReviewField(
 async function reviewWork(
   compareWork: ReturnType<typeof createCompareFileWork>,
   rootsFetcher: RootsFetcher,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
   args: ReviewInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -1259,6 +1265,7 @@ async function reviewWork(
         safetySettings: args.safetySettings,
       },
       ctx,
+      workspaceCacheManager,
       rootsFetcher,
     );
   } else if (args.subjectKind === 'comparison') {
@@ -1297,6 +1304,7 @@ async function reviewWork(
       args.focus,
       args.thinkingLevel,
       ctx,
+      workspaceCacheManager,
     );
   }
 
@@ -1313,9 +1321,13 @@ async function reviewWork(
   );
 }
 
-export function registerReviewTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
+export function registerReviewTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
+): void {
   const rootsFetcher = buildServerRootsFetcher(server);
-  const compareWork = createCompareFileWork(rootsFetcher);
+  const compareWork = createCompareFileWork(rootsFetcher, workspaceCacheManager);
 
   registerWorkTool<ReviewInput>({
     server,
@@ -1328,6 +1340,6 @@ export function registerReviewTool(server: McpServer, taskMessageQueue: TaskMess
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
     queue: taskMessageQueue,
-    work: (args, ctx) => reviewWork(compareWork, rootsFetcher, args, ctx),
+    work: (args, ctx) => reviewWork(compareWork, rootsFetcher, workspaceCacheManager, args, ctx),
   });
 }

@@ -97,6 +97,7 @@ describe('startCli', () => {
       createEventStore: createEventStoreStub,
       createServerInstance: createServerInstanceStub,
       createStdioTransport: createStdioTransportStub,
+      getApiKey: () => 'test-key',
       getTransportMode: () => 'http',
       logger: {
         info: () => undefined,
@@ -190,6 +191,43 @@ describe('closeStartedRuntime', () => {
 });
 
 describe('main', () => {
+  it('exits before transport startup when API_KEY is missing', async () => {
+    const processLike = createMockProcess();
+    const fatalCalls: { context: string; message: string }[] = [];
+    let transportStarted = false;
+    const deps: MainDependencies = {
+      createEventStore: createEventStoreStub,
+      createServerInstance: createServerInstanceStub,
+      createStdioTransport: createStdioTransportStub,
+      getApiKey: () => {
+        throw new Error('API_KEY is required');
+      },
+      getTransportMode: () => 'http',
+      logger: {
+        info: () => undefined,
+        fatal: (context, message) => {
+          fatalCalls.push({ context, message });
+        },
+      },
+      process: processLike,
+      startHttpTransport: async () => {
+        transportStarted = true;
+        throw new Error('not used');
+      },
+      startWebStandardTransport: async () => {
+        throw new Error('not used');
+      },
+    };
+
+    await main(deps);
+
+    assert.strictEqual(transportStarted, false);
+    assert.deepStrictEqual(processLike.exitCodes, [1]);
+    assert.deepStrictEqual(fatalCalls, [
+      { context: 'system', message: 'Configuration: API_KEY is required' },
+    ]);
+  });
+
   it('closes the stdio server instance when connect fails', async () => {
     const processLike = createMockProcess();
     let closeCalls = 0;
@@ -205,6 +243,7 @@ describe('main', () => {
           },
         }),
       createStdioTransport: createStdioTransportStub,
+      getApiKey: () => 'test-key',
       getTransportMode: () => 'stdio',
       logger: {
         info: () => undefined,
@@ -230,6 +269,7 @@ describe('main', () => {
       createEventStore: createEventStoreStub,
       createServerInstance: () => createStdioServerInstance(),
       createStdioTransport: createStdioTransportStub,
+      getApiKey: () => 'test-key',
       getTransportMode: () => 'stdio',
       logger: {
         info: () => undefined,

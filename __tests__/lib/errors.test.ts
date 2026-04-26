@@ -8,13 +8,12 @@ import {
   AppError,
   CancelledError,
   finishReasonToError,
-  resetProgressThrottle,
   SafetyError,
-  sendProgress,
   throwValidationError,
   TruncationError,
   withRetry,
 } from '../../src/lib/errors.js';
+import { resetProgressThrottle, sendProgress } from '../../src/lib/progress.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 

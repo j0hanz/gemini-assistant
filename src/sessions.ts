@@ -1,7 +1,9 @@
 import type {
   BlockedReason,
   Chat,
+  Content,
   FinishReason,
+  FunctionResponse,
   GenerateContentConfig,
   GroundingMetadata,
   Part,
@@ -15,7 +17,7 @@ import { logger } from './lib/logger.js';
 import type { FunctionCallEntry, StreamAnomalies, ToolEvent } from './lib/streaming.js';
 import type { UsageMetadata } from './schemas/outputs.js';
 
-import { getSessionLimits, getSlimSessionEvents } from './config.js';
+import { getSessionLimits, getSessionRedactionPatterns, getSlimSessionEvents } from './config.js';
 
 const MAX_EVICTED_ENTRIES = 1000;
 const EVICTED_TRIM_TARGET = Math.floor(MAX_EVICTED_ENTRIES / 2);
@@ -120,6 +122,116 @@ export interface SessionStoreOptions {
 }
 
 type SessionChangeSubscriber = (event: SessionChangeEvent) => void;
+
+const SESSION_VALUE_MAX_STRING_LENGTH = 2000;
+const SESSION_VALUE_MAX_ARRAY_ITEMS = 20;
+const SESSION_VALUE_MAX_OBJECT_KEYS = 50;
+const SESSION_VALUE_TRUNCATION_SUFFIX = '... [truncated]';
+
+interface SessionFieldRule {
+  key: string;
+  shouldSanitize: (value: unknown) => boolean;
+}
+
+const FUNCTION_CALL_FIELD_RULES: readonly SessionFieldRule[] = [
+  { key: 'args', shouldSanitize: (value) => Boolean(value) },
+];
+
+const TOOL_EVENT_FIELD_RULES: readonly SessionFieldRule[] = [
+  { key: 'args', shouldSanitize: (value) => Boolean(value) },
+  { key: 'code', shouldSanitize: (value) => value !== undefined },
+  { key: 'output', shouldSanitize: (value) => value !== undefined },
+  { key: 'response', shouldSanitize: (value) => Boolean(value) },
+  { key: 'text', shouldSanitize: (value) => value !== undefined },
+];
+
+function shouldRedactSessionValue(keyContext?: string): boolean {
+  if (!keyContext) return false;
+  return getSessionRedactionPatterns().some((pattern) => pattern.test(keyContext));
+}
+
+export function sanitizeSessionValue(value: unknown, keyContext?: string): unknown {
+  if (shouldRedactSessionValue(keyContext)) {
+    return '[REDACTED]';
+  }
+
+  if (typeof value === 'string') {
+    if (value.length <= SESSION_VALUE_MAX_STRING_LENGTH) {
+      return value;
+    }
+
+    const maxPrefixLength = Math.max(
+      SESSION_VALUE_MAX_STRING_LENGTH - SESSION_VALUE_TRUNCATION_SUFFIX.length,
+      0,
+    );
+    return `${value.slice(0, maxPrefixLength)}${SESSION_VALUE_TRUNCATION_SUFFIX}`;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, SESSION_VALUE_MAX_ARRAY_ITEMS)
+      .map((item) => sanitizeSessionValue(item, keyContext));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, SESSION_VALUE_MAX_OBJECT_KEYS)
+        .map(([key, nestedValue]) => [key, sanitizeSessionValue(nestedValue, key)]),
+    );
+  }
+
+  return value;
+}
+
+function applySessionFieldRules<T extends object>(item: T, rules: readonly SessionFieldRule[]): T {
+  const source = item as Readonly<Record<string, unknown>>;
+  const out: Record<string, unknown> = { ...source };
+  for (const rule of rules) {
+    const value = source[rule.key];
+    if (rule.shouldSanitize(value)) {
+      out[rule.key] = sanitizeSessionValue(value, rule.key);
+    }
+  }
+  return out as T;
+}
+
+export function sanitizeFunctionCalls(functionCalls: FunctionCallEntry[]): FunctionCallEntry[] {
+  return functionCalls.map((functionCall) =>
+    applySessionFieldRules(functionCall, FUNCTION_CALL_FIELD_RULES),
+  );
+}
+
+export function sanitizeToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
+  return toolEvents.map((toolEvent) => applySessionFieldRules(toolEvent, TOOL_EVENT_FIELD_RULES));
+}
+
+export function buildRebuiltChatContents(contents: ContentEntry[], maxBytes: number): Content[] {
+  return selectReplayWindow(contents, maxBytes)
+    .kept.map((entry) => ({
+      role: entry.role,
+      parts: buildReplayHistoryParts(structuredClone(entry.parts)),
+    }))
+    .filter((content) => content.parts.length > 0);
+}
+
+export function appendToolResponseTurn(
+  sessionId: string,
+  responses: FunctionResponse[],
+  deps: {
+    appendSessionContent: (sessionId: string, item: ContentEntry) => boolean;
+    now: () => number;
+  },
+  taskId?: string,
+): boolean {
+  if (responses.length === 0) return true;
+  return deps.appendSessionContent(sessionId, {
+    role: 'user',
+    parts: responses.map((functionResponse) => ({ functionResponse })),
+    timestamp: deps.now(),
+    ...(taskId ? { taskId } : {}),
+  });
+}
 
 function cloneValue<T>(value: T): T {
   return structuredClone(value);

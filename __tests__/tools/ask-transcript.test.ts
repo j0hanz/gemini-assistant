@@ -3,8 +3,17 @@ import type { ServerContext } from '@modelcontextprotocol/server';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { workspaceCacheManager } from '../../src/lib/workspace-context.js';
-import { createAskWork } from '../../src/tools/chat.js';
+import { createWorkspaceCacheManager } from '../../src/lib/workspace-context.js';
+import { createAskWork as createBaseAskWork } from '../../src/tools/chat.js';
+
+const workspaceCacheManager = createWorkspaceCacheManager();
+
+function createAskWork(
+  deps: Parameters<typeof createBaseAskWork>[0],
+  _workspaceCacheManager = workspaceCacheManager,
+) {
+  return createBaseAskWork(deps, workspaceCacheManager);
+}
 
 function createContext(taskId?: string): ServerContext {
   return {
@@ -90,7 +99,7 @@ function createHarness() {
 describe('ask transcript capture', () => {
   it('captures transcript entries when creating a new session', async () => {
     const harness = createHarness();
-    const askWork = createAskWork(harness.deps as never);
+    const askWork = createAskWork(harness.deps as never, workspaceCacheManager);
 
     const result = await askWork(
       { message: 'Hello', sessionId: 'sess-new' },
@@ -130,7 +139,7 @@ describe('ask transcript capture', () => {
 
   it('encodes session resource links for session IDs with spaces, %, /, and #', async () => {
     const harness = createHarness();
-    const askWork = createAskWork(harness.deps as never);
+    const askWork = createAskWork(harness.deps as never, workspaceCacheManager);
     const sessionId = 'sess special%/#';
 
     const result = await askWork({ message: 'Hello', sessionId }, createContext('task-encoded'));
@@ -166,7 +175,7 @@ describe('ask transcript capture', () => {
     });
     harness.deps.getSession = () => undefined;
     harness.deps.rebuildChat = () => undefined;
-    const askWork = createAskWork(harness.deps as never);
+    const askWork = createAskWork(harness.deps as never, workspaceCacheManager);
 
     const result = await askWork(
       { message: 'Follow up', sessionId: 'sess-legacy' },
@@ -183,7 +192,7 @@ describe('ask transcript capture', () => {
   it('captures transcript entries when resuming an existing session', async () => {
     const harness = createHarness();
     harness.sessions.set('sess-existing', { contents: [], events: [], transcript: [] });
-    const askWork = createAskWork(harness.deps as never);
+    const askWork = createAskWork(harness.deps as never, workspaceCacheManager);
 
     await askWork({ message: 'Follow up', sessionId: 'sess-existing' }, createContext('task-2'));
 
@@ -221,7 +230,7 @@ describe('ask transcript capture', () => {
       },
       toolProfile: 'none' as const,
     });
-    const askWork = createAskWork(harness.deps as never);
+    const askWork = createAskWork(harness.deps as never, workspaceCacheManager);
 
     const result = await askWork({ message: 'Break', sessionId: 'sess-error' }, createContext());
 
@@ -258,7 +267,7 @@ describe('ask transcript capture', () => {
       toolProfile: 'search' as const,
       urls: ['https://example.com'],
     });
-    const askWork = createAskWork(harness.deps as never);
+    const askWork = createAskWork(harness.deps as never, workspaceCacheManager);
 
     await askWork(
       { message: 'Need JSON', sessionId: 'sess-structured' },
@@ -330,7 +339,7 @@ describe('ask transcript capture', () => {
       toolProfile: 'none' as const,
     });
 
-    const askWork = createAskWork(harness.deps as never);
+    const askWork = createAskWork(harness.deps as never, workspaceCacheManager);
     await askWork({ message: 'Store large payload', sessionId: 'sess-large' }, createContext());
 
     const event = harness.sessions.get('sess-large')?.events[0];
@@ -359,7 +368,7 @@ describe('ask transcript capture', () => {
 
     try {
       const harness = createHarness();
-      const askWork = createAskWork(harness.deps as never);
+      const askWork = createAskWork(harness.deps as never, workspaceCacheManager);
 
       const result = await askWork(
         { message: 'Use workspace context', sessionId: 'sess-workspace' },

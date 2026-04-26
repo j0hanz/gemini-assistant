@@ -30,7 +30,7 @@ import {
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
-import { getWorkspaceCacheName } from '../lib/workspace-context.js';
+import { getWorkspaceCacheName, type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 
@@ -171,7 +171,10 @@ async function uploadFilesBatch(
   return { parts, uploadedCount };
 }
 
-function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
+function createAnalyzeFileWork(
+  rootsFetcher: RootsFetcher,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
+) {
   return async function analyzeFileWork(
     {
       filePath,
@@ -201,7 +204,7 @@ function createAnalyzeFileWork(rootsFetcher: RootsFetcher) {
       await ctx.mcpReq.log('info', `Analyzing ${uploaded.displayPath} (${uploaded.mimeType})`);
       await progress.step(1, 3, 'Analyzing content');
 
-      const cacheName = await getWorkspaceCacheName(ctx);
+      const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
       return await executor.runGeminiStream(ctx, {
         toolName: 'analyze_file',
         label: ANALYZE_FILE_TOOL_LABEL,
@@ -257,6 +260,7 @@ interface AnalyzeMultiExtra {
 
 async function analyzeMultiFileWork(
   rootsFetcher: RootsFetcher,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
   filePaths: string[],
   goal: string,
   thinkingLevel: AnalyzeInput['thinkingLevel'],
@@ -280,7 +284,7 @@ async function analyzeMultiFileWork(
 
     await progress.step(filePaths.length, filePaths.length + 1, 'Analyzing content');
 
-    const cacheName = await getWorkspaceCacheName(ctx);
+    const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
     return await executor.runGeminiStream(ctx, {
       toolName: 'analyze',
       label: ANALYZE_TOOL_LABEL,
@@ -329,6 +333,7 @@ function pickDiagramBuiltInTools(args: AnalyzeDiagramInput): BuiltInToolName[] {
 
 async function analyzeDiagramWork(
   rootsFetcher: RootsFetcher,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
   args: AnalyzeDiagramInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -369,7 +374,7 @@ async function analyzeDiagramWork(
 
     const diagramBuiltInTools = pickDiagramBuiltInTools(args);
 
-    const cacheName = await getWorkspaceCacheName(ctx);
+    const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
     return await executor.runGeminiStream(ctx, {
       toolName: 'analyze_diagram',
       label: ANALYZE_DIAGRAM_TOOL_LABEL,
@@ -420,14 +425,20 @@ async function analyzeDiagramWork(
 
 async function analyzeWork(
   rootsFetcher: RootsFetcher,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
   fileWork: ReturnType<typeof createAnalyzeFileWork>,
   args: AnalyzeInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const result =
     args.outputKind === 'diagram'
-      ? await analyzeDiagramWork(rootsFetcher, args as AnalyzeDiagramInput, ctx)
-      : await runAnalyzeTarget(rootsFetcher, fileWork, args, ctx);
+      ? await analyzeDiagramWork(
+          rootsFetcher,
+          workspaceCacheManager,
+          args as AnalyzeDiagramInput,
+          ctx,
+        )
+      : await runAnalyzeTarget(rootsFetcher, workspaceCacheManager, fileWork, args, ctx);
 
   if (result.isError) {
     return result;
@@ -444,6 +455,7 @@ async function analyzeWork(
 
 async function runAnalyzeTarget(
   rootsFetcher: RootsFetcher,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
   fileWork: ReturnType<typeof createAnalyzeFileWork>,
   args: AnalyzeInput,
   ctx: ServerContext,
@@ -481,6 +493,7 @@ async function runAnalyzeTarget(
 
   return await analyzeMultiFileWork(
     rootsFetcher,
+    workspaceCacheManager,
     requireAnalyzeFilePaths(args),
     args.goal,
     args.thinkingLevel,
@@ -561,9 +574,13 @@ function buildAnalyzeStructuredContent(
   }) as unknown as z.infer<typeof AnalyzeOutputSchema>;
 }
 
-export function registerAnalyzeTool(server: McpServer, taskMessageQueue: TaskMessageQueue): void {
+export function registerAnalyzeTool(
+  server: McpServer,
+  taskMessageQueue: TaskMessageQueue,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
+): void {
   const rootsFetcher = buildServerRootsFetcher(server);
-  const fileWork = createAnalyzeFileWork(rootsFetcher);
+  const fileWork = createAnalyzeFileWork(rootsFetcher, workspaceCacheManager);
 
   registerWorkTool<AnalyzeInput>({
     server,
@@ -577,6 +594,6 @@ export function registerAnalyzeTool(server: McpServer, taskMessageQueue: TaskMes
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
     queue: taskMessageQueue,
-    work: (args, ctx) => analyzeWork(rootsFetcher, fileWork, args, ctx),
+    work: (args, ctx) => analyzeWork(rootsFetcher, workspaceCacheManager, fileWork, args, ctx),
   });
 }

@@ -10,7 +10,7 @@ import { FinishReason } from '@google/genai';
 import type { GenerateContentResponse } from '@google/genai';
 
 import { getAI } from '../../src/client.js';
-import { resetProgressThrottle } from '../../src/lib/errors.js';
+import { resetProgressThrottle } from '../../src/lib/progress.js';
 import { buildDiagramFencePattern, registerAnalyzeTool } from '../../src/tools/analyze.js';
 
 process.env.API_KEY ??= 'test-key-for-analyze-progress';

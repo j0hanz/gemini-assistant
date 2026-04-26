@@ -6,7 +6,8 @@ import { basename, isAbsolute, join } from 'node:path';
 
 import type { ContextSourceReport, ContextUsed } from '../schemas/outputs.js';
 
-import { DEFAULT_SYSTEM_INSTRUCTION, getAI, MODEL } from '../client.js';
+import { DEFAULT_SYSTEM_INSTRUCTION, getAI } from '../client.js';
+import { getGeminiModel } from '../config.js';
 import {
   getWorkspaceAutoScan,
   getWorkspaceCacheEnabled,
@@ -596,7 +597,7 @@ export class WorkspaceCacheManagerImpl {
       const cache = await withRetry(
         () =>
           getAI().caches.create({
-            model: MODEL,
+            model: getGeminiModel(),
             config: {
               contents: [{ role: 'user' as const, parts: [{ text: ctx.content }] }],
               systemInstruction: DEFAULT_SYSTEM_INSTRUCTION,
@@ -656,9 +657,10 @@ export function createWorkspaceCacheManager(): WorkspaceCacheManagerImpl {
   return new WorkspaceCacheManagerImpl();
 }
 
-export const workspaceCacheManager = createWorkspaceCacheManager();
-
-export async function getWorkspaceCacheName(ctx: ServerContext): Promise<string | undefined> {
+export async function getWorkspaceCacheName(
+  ctx: ServerContext,
+  manager: WorkspaceCacheManagerImpl,
+): Promise<string | undefined> {
   if (!getWorkspaceCacheEnabled()) {
     return undefined;
   }
@@ -668,7 +670,7 @@ export async function getWorkspaceCacheName(ctx: ServerContext): Promise<string 
     if (allowedRoots.length === 0) {
       return undefined;
     }
-    return await workspaceCacheManager.getOrCreateCache(allowedRoots, ctx.mcpReq.signal);
+    return await manager.getOrCreateCache(allowedRoots, ctx.mcpReq.signal);
   } catch (err) {
     log.warn(`Failed to resolve workspace cache: ${String(err)}`);
     return undefined;

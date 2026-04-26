@@ -3,8 +3,6 @@ import { INVALID_PARAMS, ProtocolError } from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
 
-export { resetProgressThrottle, sendProgress } from './progress.js';
-
 type AppErrorCategory = 'client' | 'server' | 'safety' | 'cancelled' | 'internal';
 
 export function assertNever(value: never, label = 'unreachable'): never {

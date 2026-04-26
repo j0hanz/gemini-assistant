@@ -5,8 +5,8 @@ import { randomUUID } from 'node:crypto';
 
 import type { ContentListUnion, GenerateContentConfig } from '@google/genai';
 
-import { buildGenerateContentConfig, getAI, MODEL } from '../client.js';
-import { EXPOSE_THOUGHTS } from '../client.js';
+import { buildGenerateContentConfig, getAI } from '../client.js';
+import { getExposeThoughts, getGeminiModel } from '../config.js';
 import { AppError } from './errors.js';
 import { logContext, logger, maybeSummarizePayload, type ScopedLogger } from './logger.js';
 import { type OrchestrationRequest, resolveOrchestration } from './orchestration.js';
@@ -206,7 +206,7 @@ export class ToolExecutor {
                 ...(built.structuredContent ?? {}),
                 ...buildSharedStructuredMetadata({
                   functionCalls: streamResult.functionCalls,
-                  includeThoughts: EXPOSE_THOUGHTS,
+                  includeThoughts: getExposeThoughts(),
                   thoughtText: streamResult.thoughtText,
                   toolEvents: streamResult.toolEvents,
                   usage,
@@ -245,7 +245,7 @@ export class ToolExecutor {
       request.label,
       () =>
         getAI().models.generateContentStream({
-          model: MODEL,
+          model: getGeminiModel(),
           contents,
           config: buildGenerateContentConfig(
             {

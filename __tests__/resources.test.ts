@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { listDiscoveryEntries, listWorkflowEntries } from '../src/catalog.js';
-import { workspaceCacheManager } from '../src/lib/workspace-context.js';
+import { createWorkspaceCacheManager } from '../src/lib/workspace-context.js';
 import { PUBLIC_RESOURCE_URIS, PUBLIC_WORKFLOW_NAMES } from '../src/public-contract.js';
 import {
   buildServerContextSnapshot,
@@ -31,6 +31,8 @@ import {
   WORKSPACE_CONTEXT_URI,
 } from '../src/resources.js';
 import { createSessionStore, type SessionStore } from '../src/sessions.js';
+
+const workspaceCacheManager = createWorkspaceCacheManager();
 
 function parseResourceText(result: { contents: { text: string }[] }) {
   return JSON.parse(result.contents[0]?.text ?? 'null') as unknown;
@@ -101,6 +103,7 @@ describe('discovery resources', () => {
       'discover://context',
       async () => [],
       sessionStore,
+      workspaceCacheManager,
     );
     const data = parseResourceText(result) as Awaited<
       ReturnType<typeof buildServerContextSnapshot>
@@ -134,7 +137,11 @@ describe('discovery resources', () => {
     });
 
     try {
-      const snapshot = await buildServerContextSnapshot(async () => [root], sessionStore);
+      const snapshot = await buildServerContextSnapshot(
+        async () => [root],
+        sessionStore,
+        workspaceCacheManager,
+      );
 
       assert.deepStrictEqual(snapshot.workspace.scannedFiles, ['package.json', 'readme.md']);
       assert.strictEqual(snapshot.workspace.estimatedTokens, 321);
@@ -162,7 +169,11 @@ describe('discovery resources', () => {
     });
 
     try {
-      const snapshot = await buildServerContextSnapshot(async () => [], sessionStore);
+      const snapshot = await buildServerContextSnapshot(
+        async () => [],
+        sessionStore,
+        workspaceCacheManager,
+      );
 
       assert.strictEqual(snapshot.workspace.cacheStatus.fresh, false);
     } finally {

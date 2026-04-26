@@ -48,14 +48,13 @@ const BUILT_IN_TOOL_FACTORIES: Record<
   urlContext: () => ({ urlContext: {} }),
   codeExecution: () => ({ codeExecution: {} }),
   fileSearch: (spec) => {
-    // `spec.kind` is narrowed to 'fileSearch' by the Record key; no runtime guard needed.
-    const fileSearchSpec = spec as Extract<BuiltInToolSpec, { kind: 'fileSearch' }>;
+    if (spec.kind !== 'fileSearch') {
+      throw new AppError('orchestration', 'fileSearch tool factory received invalid spec');
+    }
     return {
       fileSearch: {
-        fileSearchStoreNames: [...fileSearchSpec.fileSearchStoreNames],
-        ...(fileSearchSpec.metadataFilter !== undefined
-          ? { metadataFilter: fileSearchSpec.metadataFilter }
-          : {}),
+        fileSearchStoreNames: [...spec.fileSearchStoreNames],
+        ...(spec.metadataFilter !== undefined ? { metadataFilter: spec.metadataFilter } : {}),
       },
     } as ToolListUnion[number];
   },

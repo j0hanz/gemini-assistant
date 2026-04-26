@@ -7,7 +7,6 @@ import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from './l
 import {
   assembleWorkspaceContext,
   summarizeRootForDashboard,
-  workspaceCacheManager,
   type WorkspaceCacheManagerImpl,
 } from './lib/workspace-context.js';
 
@@ -345,7 +344,7 @@ export function renderServerContextMarkdown(snapshot: ServerContextSnapshot): st
 export async function buildServerContextSnapshot(
   rootsFetcher: RootsFetcher,
   sessionStore: SessionStore,
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
 ): Promise<ServerContextSnapshot> {
   const roots = await getAllowedRoots(rootsFetcher);
   const sessionLimits = getSessionLimits();
@@ -387,7 +386,7 @@ export async function readDiscoverContextResource(
   uri: URL | string = DISCOVER_CONTEXT_RESOURCE.uri,
   rootsFetcher: RootsFetcher,
   sessionStore: SessionStore,
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
 ): Promise<ReadResourceResult> {
   const snapshot = await buildServerContextSnapshot(
     rootsFetcher,
@@ -733,7 +732,7 @@ function registerContextResource(
   server: McpServer,
   sessionStore: SessionStore,
   rootsFetcher: RootsFetcher,
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
 ): void {
   server.registerResource(
     'discover-context',
@@ -757,7 +756,7 @@ function registerContextResource(
 function registerWorkspaceResources(
   server: McpServer,
   rootsFetcher: RootsFetcher,
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
 ): void {
   const log = logger.child('resources');
 
@@ -812,8 +811,8 @@ function registerWorkspaceResources(
 export function registerResources(
   server: McpServer,
   sessionStore: SessionStore,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
   rootsFetcher: RootsFetcher = buildServerRootsFetcher(server),
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): void {
   registerSessionResources(server, sessionStore);
   registerDiscoveryResources(server);

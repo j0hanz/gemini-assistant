@@ -13,7 +13,6 @@ import type { GeminiResponseSchema } from './schemas/inputs.js';
 import {
   getApiKey,
   getExposeThoughts,
-  getGeminiModel,
   getMaxOutputTokens,
   getSafetySettings,
   getThinkingBudgetCap,
@@ -23,7 +22,6 @@ import { type AskThinkingLevel } from './public-contract.js';
 // ── Config Utilities ──────────────────────────────────────────────────
 
 export { DEFAULT_TEMPERATURE } from './public-contract.js';
-export const EXPOSE_THOUGHTS = getExposeThoughts();
 
 const DEFAULT_TOOL_COST_PROFILES = {
   chat: { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
@@ -105,7 +103,7 @@ function buildThinkingConfig(thinkingLevel?: AskThinkingLevel, thinkingBudget?: 
   }
 
   return {
-    ...(EXPOSE_THOUGHTS ? { includeThoughts: true } : {}),
+    ...(getExposeThoughts() ? { includeThoughts: true } : {}),
     // Gemini 3 precedence: thinkingLevel wins over thinkingBudget; see .github/google-genai-api.md §7.
     ...(thinkingLevel ? { thinkingLevel: THINKING_LEVEL_MAP[thinkingLevel] } : {}),
     ...(thinkingLevel === undefined && resolvedThinkingBudget !== undefined
@@ -217,8 +215,6 @@ export function buildGenerateContentConfig(
 }
 
 // ── Client ────────────────────────────────────────────────────────────
-
-export const MODEL = getGeminiModel();
 
 let _ai: GoogleGenAI | undefined;
 

@@ -9,7 +9,6 @@ import { Validator } from '@cfworker/json-schema';
 import { FinishReason, FunctionCallingConfigMode } from '@google/genai';
 import type {
   Chat,
-  Content,
   FunctionDeclaration,
   FunctionResponse,
   GenerateContentConfig,
@@ -50,7 +49,7 @@ import {
   buildSessionSummary,
   emptyContextUsed,
 } from '../lib/workspace-context.js';
-import { workspaceCacheManager, type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
+import { type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import {
   type AskInput,
   type ChatInput,
@@ -60,16 +59,11 @@ import {
 import { type GeminiResponseSchema } from '../schemas/inputs.js';
 import { ChatOutputSchema, type ContextUsed, type UsageMetadata } from '../schemas/outputs.js';
 
+import { buildGenerateContentConfig, DEFAULT_TEMPERATURE, getAI } from '../client.js';
 import {
-  buildGenerateContentConfig,
-  DEFAULT_TEMPERATURE,
-  EXPOSE_THOUGHTS,
-  getAI,
-  MODEL,
-} from '../client.js';
-import {
+  getExposeThoughts,
+  getGeminiModel,
   getSessionLimits,
-  getSessionRedactionPatterns,
   getWorkspaceCacheEnabled,
 } from '../config.js';
 import {
@@ -79,17 +73,22 @@ import {
   sessionTurnPartsUri,
 } from '../resources.js';
 import {
+  appendToolResponseTurn,
+  buildRebuiltChatContents,
   buildReplayHistoryParts,
   capRawParts,
   type ContentEntry,
-  createSessionStore,
-  selectReplayWindow,
+  sanitizeFunctionCalls,
+  sanitizeSessionValue,
+  sanitizeToolEvents,
   type SessionEventEntry,
   type SessionGenerationContract,
   type SessionStore,
   type SessionSummary,
   type TranscriptEntry,
 } from '../sessions.js';
+
+export { appendToolResponseTurn, buildRebuiltChatContents } from '../sessions.js';
 
 type WithOptionalTemperature<T> = T extends { temperature: infer Temperature }
   ? Omit<T, 'temperature'> & { temperature?: Temperature | undefined }
@@ -233,7 +232,7 @@ export function buildAskStructuredContent(
   const sharedMetadata = buildSharedStructuredMetadata({
     ...(contextUsed ? { contextUsed } : {}),
     functionCalls: streamResult.functionCalls,
-    includeThoughts: EXPOSE_THOUGHTS,
+    includeThoughts: getExposeThoughts(),
     thoughtText: streamResult.thoughtText,
     toolEvents: streamResult.toolEvents,
     usage,
@@ -484,15 +483,6 @@ async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
   } as const;
 }
 
-export function buildRebuiltChatContents(contents: ContentEntry[], maxBytes: number): Content[] {
-  return selectReplayWindow(contents, maxBytes)
-    .kept.map((entry) => ({
-      role: entry.role,
-      parts: buildReplayHistoryParts(structuredClone(entry.parts)),
-    }))
-    .filter((content) => content.parts.length > 0);
-}
-
 function buildPerTurnConfig(config: ReturnType<typeof buildGenerateContentConfig>) {
   return pickDefined({
     abortSignal: config.abortSignal,
@@ -677,8 +667,10 @@ export async function askWithoutSession(
   );
   const maxRetries = jsonMode && !ctx.mcpReq.signal.aborted ? JSON_REPAIR_MAX_RETRIES : 0;
   let currentPrompt = prompt;
+  let attempt = 0;
+  let askResult!: AskExecutionResult;
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  for (;;) {
     const attemptConfig =
       attempt === 0
         ? config
@@ -692,7 +684,7 @@ export async function askWithoutSession(
             ctx.mcpReq.signal,
           );
     const perTurnConfig = buildPerTurnConfig(attemptConfig);
-    const askResult = await runAskStream(
+    askResult = await runAskStream(
       ctx,
       () =>
         chat
@@ -704,7 +696,7 @@ export async function askWithoutSession(
               config: perTurnConfig,
             })
           : getAI().models.generateContentStream({
-              model: MODEL,
+              model: getGeminiModel(),
               contents: currentPrompt,
               config: attemptConfig,
             }),
@@ -725,7 +717,7 @@ export async function askWithoutSession(
       isRetryableSchemaFailure(warnings, parsedData, jsonMode);
 
     if (!shouldRetry) {
-      return { ...askResult, sentMessage: currentPrompt };
+      break;
     }
 
     logger.child('chat').debug('Retrying JSON response with repair suffix', {
@@ -734,93 +726,10 @@ export async function askWithoutSession(
       hadParsedData: parsedData !== undefined,
     });
     currentPrompt = `${prompt}${buildRepairPromptSuffix(warnings)}`;
+    attempt++;
   }
 
-  throw new Error('chat: unreachable JSON repair retry state');
-}
-
-const SESSION_VALUE_MAX_STRING_LENGTH = 2000;
-const SESSION_VALUE_MAX_ARRAY_ITEMS = 20;
-const SESSION_VALUE_MAX_OBJECT_KEYS = 50;
-const SESSION_VALUE_TRUNCATION_SUFFIX = '... [truncated]';
-const SESSION_REDACTION_PATTERNS = getSessionRedactionPatterns();
-
-function shouldRedactSessionValue(keyContext?: string): boolean {
-  if (!keyContext) return false;
-  return SESSION_REDACTION_PATTERNS.some((pattern) => pattern.test(keyContext));
-}
-
-function sanitizeSessionValue(value: unknown, keyContext?: string): unknown {
-  if (shouldRedactSessionValue(keyContext)) {
-    return '[REDACTED]';
-  }
-
-  if (typeof value === 'string') {
-    if (value.length <= SESSION_VALUE_MAX_STRING_LENGTH) {
-      return value;
-    }
-
-    const maxPrefixLength = Math.max(
-      SESSION_VALUE_MAX_STRING_LENGTH - SESSION_VALUE_TRUNCATION_SUFFIX.length,
-      0,
-    );
-    return `${value.slice(0, maxPrefixLength)}${SESSION_VALUE_TRUNCATION_SUFFIX}`;
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, SESSION_VALUE_MAX_ARRAY_ITEMS)
-      .map((item) => sanitizeSessionValue(item, keyContext));
-  }
-
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value)
-        .slice(0, SESSION_VALUE_MAX_OBJECT_KEYS)
-        .map(([key, nestedValue]) => [key, sanitizeSessionValue(nestedValue, key)]),
-    );
-  }
-
-  return value;
-}
-
-interface SessionFieldRule {
-  key: string;
-  shouldSanitize: (value: unknown) => boolean;
-}
-
-const FUNCTION_CALL_FIELD_RULES: readonly SessionFieldRule[] = [
-  { key: 'args', shouldSanitize: (value) => Boolean(value) },
-];
-
-const TOOL_EVENT_FIELD_RULES: readonly SessionFieldRule[] = [
-  { key: 'args', shouldSanitize: (value) => Boolean(value) },
-  { key: 'code', shouldSanitize: (value) => value !== undefined },
-  { key: 'output', shouldSanitize: (value) => value !== undefined },
-  { key: 'response', shouldSanitize: (value) => Boolean(value) },
-  { key: 'text', shouldSanitize: (value) => value !== undefined },
-];
-
-function applySessionFieldRules<T extends object>(item: T, rules: readonly SessionFieldRule[]): T {
-  const source = item as Readonly<Record<string, unknown>>;
-  const out: Record<string, unknown> = { ...source };
-  for (const rule of rules) {
-    const value = source[rule.key];
-    if (rule.shouldSanitize(value)) {
-      out[rule.key] = sanitizeSessionValue(value, rule.key);
-    }
-  }
-  return out as T;
-}
-
-function sanitizeFunctionCalls(functionCalls: FunctionCallEntry[]): FunctionCallEntry[] {
-  return functionCalls.map((functionCall) =>
-    applySessionFieldRules(functionCall, FUNCTION_CALL_FIELD_RULES),
-  );
-}
-
-function sanitizeToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
-  return toolEvents.map((toolEvent) => applySessionFieldRules(toolEvent, TOOL_EVENT_FIELD_RULES));
+  return { ...askResult, sentMessage: currentPrompt };
 }
 
 function appendTranscriptPair(
@@ -895,21 +804,6 @@ function appendSessionTurn(
   });
 }
 
-export function appendToolResponseTurn(
-  sessionId: string,
-  responses: FunctionResponse[],
-  deps: Pick<AskDependencies, 'appendSessionContent' | 'now'>,
-  taskId?: string,
-): boolean {
-  if (responses.length === 0) return true;
-  return deps.appendSessionContent(sessionId, {
-    role: 'user',
-    parts: responses.map((functionResponse) => ({ functionResponse })),
-    timestamp: deps.now(),
-    ...(taskId ? { taskId } : {}),
-  });
-}
-
 function buildSessionEventRequest(
   message: string,
   sentMessage: string,
@@ -972,8 +866,8 @@ function buildSessionEventResponse(
 
 async function resolveWorkspaceCacheName(
   args: AskArgs,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
   signal?: AbortSignal,
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
 ): Promise<string | undefined> {
   if (
     args.systemInstruction ||
@@ -1005,7 +899,10 @@ function buildAskToolingConfig(args: AskArgs) {
   };
 }
 
-export function createDefaultAskDependencies(sessionStore: SessionStore): AskDependencies {
+export function createDefaultAskDependencies(
+  sessionStore: SessionStore,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
+): AskDependencies {
   return {
     appendSessionContent: sessionStore.appendSessionContent.bind(sessionStore),
     appendSessionEvent: sessionStore.appendSessionEvent.bind(sessionStore),
@@ -1017,12 +914,12 @@ export function createDefaultAskDependencies(sessionStore: SessionStore): AskDep
         costProfile: 'chat',
       });
       const chat = getAI().chats.create({
-        model: MODEL,
+        model: getGeminiModel(),
         config,
       });
       return {
         chat,
-        contract: buildSessionGenerationContract(MODEL, config, functionCallingMode),
+        contract: buildSessionGenerationContract(getGeminiModel(), config, functionCallingMode),
       };
     },
     getSession: sessionStore.getSession.bind(sessionStore),
@@ -1039,7 +936,7 @@ export function createDefaultAskDependencies(sessionStore: SessionStore): AskDep
       const sessionEntry = sessionStore.getSessionEntry(sessionId);
       const contract = sessionEntry?.contract;
       const cacheName = sessionEntry?.cacheName;
-      const activeCacheName = workspaceCacheManager.getCacheStatus().cacheName;
+      const activeCacheName = workspaceCacheManagerInstance.getCacheStatus().cacheName;
       const rebuildArgs =
         cacheName && cacheName === activeCacheName ? { ...args, cacheName } : args;
       if (cacheName && cacheName !== activeCacheName) {
@@ -1063,7 +960,7 @@ export function createDefaultAskDependencies(sessionStore: SessionStore): AskDep
             });
           })();
       const chat = getAI().chats.create({
-        model: contract?.model ?? MODEL,
+        model: contract?.model ?? getGeminiModel(),
         config,
         history: buildRebuiltChatContents(contents, getSessionLimits().replayMaxBytes),
       });
@@ -1162,7 +1059,7 @@ async function prepareAskRequest(
   args: AskArgs,
   deps: AskDependencies,
   signal: AbortSignal,
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
 ): Promise<PreparedAskRequest | CallToolResult> {
   const validationError = validateAskRequest(args, deps);
   if (validationError) return validationError;
@@ -1173,7 +1070,7 @@ async function prepareAskRequest(
   const canUseWorkspaceCache =
     !persistedCacheName && (!args.sessionId || deps.getSessionEntry(args.sessionId) === undefined);
   const workspaceCacheName = canUseWorkspaceCache
-    ? await resolveWorkspaceCacheName(args, signal, workspaceCacheManagerInstance)
+    ? await resolveWorkspaceCacheName(args, workspaceCacheManagerInstance, signal)
     : persistedCacheName;
   const contextUsed = workspaceCacheName
     ? buildContextUsed(
@@ -1194,8 +1091,8 @@ function isPreparedRequest(
 }
 
 export function createAskWork(
-  deps: AskDependencies = createDefaultAskDependencies(createSessionStore()),
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
+  deps: AskDependencies,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
 ) {
   return async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
     const prepared = await prepareAskRequest(
@@ -1421,10 +1318,10 @@ export function registerChatTool(
   server: McpServer,
   sessionStore: SessionStore,
   taskMessageQueue: TaskMessageQueue,
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl = workspaceCacheManager,
+  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
 ): void {
   const askWork = createAskWork(
-    createDefaultAskDependencies(sessionStore),
+    createDefaultAskDependencies(sessionStore, workspaceCacheManagerInstance),
     workspaceCacheManagerInstance,
   );
 

@@ -107,10 +107,12 @@ describe('contract surface invariants', () => {
       (research?.inputs as readonly string[] | undefined)?.includes('functions?'),
       false,
     );
+    assert.ok(analyze?.inputs.includes('fileSearch?'));
     assert.strictEqual(
-      (analyze?.inputs as readonly string[] | undefined)?.includes('fileSearch?'),
+      (analyze?.inputs as readonly string[] | undefined)?.includes('functions?'),
       false,
     );
+    assert.ok(review?.inputs.includes('fileSearch?'));
     assert.strictEqual(
       (review?.inputs as readonly string[] | undefined)?.includes('functions?'),
       false,

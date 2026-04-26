@@ -104,10 +104,70 @@ export interface OrchestrationRequest {
   urls?: readonly string[] | undefined;
 }
 
-interface OrchestrationConfig {
+export interface CommonToolInputs {
+  googleSearch?: boolean | undefined;
+  urls?: readonly string[] | undefined;
+  codeExecution?: boolean | undefined;
+  fileSearch?: { fileSearchStoreNames: readonly string[]; metadataFilter?: unknown } | undefined;
+  functionDeclarations?: readonly FunctionDeclaration[] | undefined;
+  functionCallingMode?: FunctionCallingConfigMode | undefined;
+  serverSideToolInvocations?: ServerSideToolInvocationsPolicy | undefined;
+  extraBuiltInToolSpecs?: readonly BuiltInToolSpec[] | undefined;
+}
+
+export function buildOrchestrationRequestFromInputs(input: CommonToolInputs): OrchestrationRequest {
+  const builtInToolSpecs: BuiltInToolSpec[] = [];
+  if (input.googleSearch) builtInToolSpecs.push({ kind: 'googleSearch' });
+  if ((input.urls?.length ?? 0) > 0) builtInToolSpecs.push({ kind: 'urlContext' });
+  if (input.codeExecution) builtInToolSpecs.push({ kind: 'codeExecution' });
+  if (input.fileSearch) {
+    builtInToolSpecs.push({
+      kind: 'fileSearch',
+      fileSearchStoreNames: input.fileSearch.fileSearchStoreNames,
+      ...(input.fileSearch.metadataFilter !== undefined
+        ? { metadataFilter: input.fileSearch.metadataFilter }
+        : {}),
+    });
+  }
+  if (input.extraBuiltInToolSpecs && input.extraBuiltInToolSpecs.length > 0) {
+    builtInToolSpecs.push(...input.extraBuiltInToolSpecs);
+  }
+  return {
+    builtInToolSpecs,
+    ...(input.functionDeclarations !== undefined
+      ? { functionDeclarations: input.functionDeclarations }
+      : {}),
+    ...(input.functionCallingMode !== undefined
+      ? { functionCallingMode: input.functionCallingMode }
+      : {}),
+    ...(input.serverSideToolInvocations !== undefined
+      ? { serverSideToolInvocations: input.serverSideToolInvocations }
+      : {}),
+    ...(input.urls !== undefined ? { urls: input.urls } : {}),
+  };
+}
+
+export function buildUrlContextFallbackPart(
+  urls: readonly string[] | undefined,
+  activeCapabilities: ReadonlySet<string>,
+): { text: string } | undefined {
+  if (!urls || urls.length === 0) return undefined;
+  if (activeCapabilities.has('urlContext')) return undefined;
+  return { text: `Context URLs:\n${urls.join('\n')}` };
+}
+
+export interface ToolProfileDetails {
+  fileSearchStoreCount?: number;
+  functionCount?: number;
+  functionCallingMode?: string;
+  serverSideToolInvocations?: boolean;
+}
+
+export interface OrchestrationConfig {
   functionCallingMode?: FunctionCallingConfigMode;
   toolConfig?: ToolConfig;
   toolProfile: string;
+  toolProfileDetails: ToolProfileDetails;
   tools?: ToolListUnion;
   activeCapabilities: Set<ActiveCapability>;
 }
@@ -142,15 +202,31 @@ export function buildOrchestrationConfig(request: OrchestrationRequest): Orchest
     activeCapabilities.add('functions');
   }
 
-  const config: OrchestrationConfig = {
-    toolProfile: buildToolProfile(tools),
-    activeCapabilities,
-  };
+  const fileSearchSpec = specs.find((spec) => spec.kind === 'fileSearch');
+  const fileSearchStoreCount =
+    fileSearchSpec?.kind === 'fileSearch' ? fileSearchSpec.fileSearchStoreNames.length : undefined;
+  const functionCount = request.functionDeclarations?.length ?? undefined;
 
   const includeServerSideToolInvocations = resolveServerSideToolInvocations(
     request.serverSideToolInvocations,
     activeCapabilities,
   );
+
+  const toolProfileDetails: ToolProfileDetails = {
+    ...(fileSearchStoreCount !== undefined ? { fileSearchStoreCount } : {}),
+    ...(functionCount !== undefined && functionCount > 0 ? { functionCount } : {}),
+    ...(request.functionCallingMode !== undefined
+      ? { functionCallingMode: request.functionCallingMode }
+      : {}),
+    ...(includeServerSideToolInvocations === true ? { serverSideToolInvocations: true } : {}),
+  };
+
+  const config: OrchestrationConfig = {
+    toolProfile: buildToolProfile(tools),
+    toolProfileDetails,
+    activeCapabilities,
+  };
+
   if (includeServerSideToolInvocations === true) {
     config.toolConfig = { includeServerSideToolInvocations: true };
   }
@@ -193,6 +269,7 @@ export async function resolveOrchestration(
   const payload = {
     toolKey,
     toolProfile: config.toolProfile,
+    toolProfileDetails: config.toolProfileDetails,
     activeCapabilities: [...config.activeCapabilities],
     serverSideToolInvocations,
     urlCount,

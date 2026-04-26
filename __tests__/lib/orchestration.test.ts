@@ -9,7 +9,9 @@ import { buildMergedToolConfig } from '../../src/client.js';
 import { AppError } from '../../src/lib/errors.js';
 import {
   buildOrchestrationConfig,
+  buildOrchestrationRequestFromInputs,
   buildToolProfile,
+  buildUrlContextFallbackPart,
   BUILT_IN_TOOL_NAMES,
   resolveOrchestration,
   resolveServerSideToolInvocations,
@@ -236,5 +238,106 @@ describe('resolveOrchestration', () => {
     assert.strictEqual(resolved.config.activeCapabilities.has('urlContext'), false);
     const warn = calls.find((c) => c.level === 'warning' || c.level === 'warn');
     assert.ok(warn, 'expected warn log when urls provided without URL Context');
+  });
+});
+
+describe('buildOrchestrationRequestFromInputs', () => {
+  it('produces googleSearch+urlContext spec order matching legacy chat assembly', () => {
+    const req = buildOrchestrationRequestFromInputs({
+      googleSearch: true,
+      urls: ['https://example.com'],
+    });
+    assert.deepStrictEqual(req.builtInToolSpecs, [
+      { kind: 'googleSearch' },
+      { kind: 'urlContext' },
+    ]);
+    assert.deepStrictEqual(req.urls, ['https://example.com']);
+  });
+
+  it('orders specs as googleSearch, urlContext, codeExecution, fileSearch', () => {
+    const req = buildOrchestrationRequestFromInputs({
+      googleSearch: true,
+      urls: ['https://example.com'],
+      codeExecution: true,
+      fileSearch: { fileSearchStoreNames: ['stores/x'] },
+    });
+    assert.deepStrictEqual(req.builtInToolSpecs, [
+      { kind: 'googleSearch' },
+      { kind: 'urlContext' },
+      { kind: 'codeExecution' },
+      { kind: 'fileSearch', fileSearchStoreNames: ['stores/x'] },
+    ]);
+  });
+
+  it('forwards function declarations, mode, and ssti policy', () => {
+    const req = buildOrchestrationRequestFromInputs({
+      functionDeclarations: [{ name: 'a' }, { name: 'b' }, { name: 'c' }],
+      functionCallingMode: FunctionCallingConfigMode.VALIDATED,
+      serverSideToolInvocations: 'always',
+    });
+    assert.strictEqual(req.functionDeclarations?.length, 3);
+    assert.strictEqual(req.functionCallingMode, FunctionCallingConfigMode.VALIDATED);
+    assert.strictEqual(req.serverSideToolInvocations, 'always');
+  });
+
+  it('appends extraBuiltInToolSpecs after derived specs', () => {
+    const req = buildOrchestrationRequestFromInputs({
+      googleSearch: true,
+      extraBuiltInToolSpecs: [{ kind: 'codeExecution' }],
+    });
+    assert.deepStrictEqual(req.builtInToolSpecs, [
+      { kind: 'googleSearch' },
+      { kind: 'codeExecution' },
+    ]);
+  });
+});
+
+describe('buildUrlContextFallbackPart', () => {
+  it('returns undefined when urls is empty or undefined', () => {
+    assert.strictEqual(buildUrlContextFallbackPart(undefined, new Set()), undefined);
+    assert.strictEqual(buildUrlContextFallbackPart([], new Set()), undefined);
+  });
+
+  it('returns undefined when urlContext is active', () => {
+    assert.strictEqual(
+      buildUrlContextFallbackPart(['https://example.com'], new Set(['urlContext'])),
+      undefined,
+    );
+  });
+
+  it('returns a Context URLs part when urls present and urlContext inactive', () => {
+    assert.deepStrictEqual(buildUrlContextFallbackPart(['https://a', 'https://b'], new Set()), {
+      text: 'Context URLs:\nhttps://a\nhttps://b',
+    });
+  });
+});
+
+describe('OrchestrationConfig.toolProfileDetails', () => {
+  it('reports fileSearchStoreCount for fileSearch specs', () => {
+    const config = buildOrchestrationConfig({
+      builtInToolSpecs: [{ kind: 'fileSearch', fileSearchStoreNames: ['stores/a', 'stores/b'] }],
+    });
+    assert.strictEqual(config.toolProfileDetails.fileSearchStoreCount, 2);
+  });
+
+  it('reports functionCount and functionCallingMode', () => {
+    const config = buildOrchestrationConfig({
+      functionDeclarations: [{ name: 'a' }, { name: 'b' }, { name: 'c' }],
+      functionCallingMode: FunctionCallingConfigMode.VALIDATED,
+    });
+    assert.strictEqual(config.toolProfileDetails.functionCount, 3);
+    assert.strictEqual(
+      config.toolProfileDetails.functionCallingMode,
+      FunctionCallingConfigMode.VALIDATED,
+    );
+  });
+
+  it('reports serverSideToolInvocations true when built-in + functions present', () => {
+    const config = buildOrchestrationConfig({
+      builtInToolNames: ['googleSearch'],
+      functionDeclarations: [{ name: 'a' }],
+      serverSideToolInvocations: 'auto',
+    });
+    assert.strictEqual(config.toolProfileDetails.serverSideToolInvocations, true);
   });
 });

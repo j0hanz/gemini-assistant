@@ -11,7 +11,11 @@ import type { z } from 'zod/v4';
 import { withUploadsAndPipeline } from '../lib/file.js';
 import { mcpLog } from '../lib/logger.js';
 import { buildDiagramGenerationPrompt, buildFileAnalysisPrompt } from '../lib/model-prompts.js';
-import type { BuiltInToolName, ServerSideToolInvocationsPolicy } from '../lib/orchestration.js';
+import {
+  buildUrlContextFallbackPart,
+  type BuiltInToolName,
+  type BuiltInToolSpec,
+} from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import {
   buildSuccessfulStructuredContent,
@@ -31,6 +35,7 @@ import { analyzeUrlWork } from './research.js';
 interface AnalyzeDiagramInput {
   goal: string;
   diagramType: 'mermaid' | 'plantuml';
+  fileSearch?: AnalyzeInput['fileSearch'] | undefined;
   filePath?: string | undefined;
   filePaths?: string[] | undefined;
   maxOutputTokens?: AnalyzeInput['maxOutputTokens'];
@@ -112,11 +117,13 @@ function createAnalyzeFileWork(
       safetySettings,
       googleSearch,
       urls,
+      fileSearch,
     }: AnalyzeFileInput & {
       maxOutputTokens?: AnalyzeInput['maxOutputTokens'];
       safetySettings?: AnalyzeInput['safetySettings'];
       googleSearch?: boolean | undefined;
       urls?: readonly string[] | undefined;
+      fileSearch?: AnalyzeInput['fileSearch'] | undefined;
     },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
@@ -135,20 +142,24 @@ function createAnalyzeFileWork(
         return await executor.executeGeminiPipeline(ctx, {
           toolName: 'analyze_file',
           label: TOOL_LABELS.analyzeFile,
-          googleSearch,
-          urls,
+          commonInputs: {
+            googleSearch,
+            urls,
+            ...(fileSearch ? { fileSearch } : {}),
+          },
           workspaceCacheManager,
           buildContents: (activeCaps) => {
             const { promptText, systemInstruction } = buildFileAnalysisPrompt({
               goal: question,
               kind: 'single',
             });
-            const urlContextPart =
-              urls && urls.length > 0 && !activeCaps.has('urlContext')
-                ? [{ text: `Context URLs:\n${urls.join('\n')}` }]
-                : [];
+            const urlContextPart = buildUrlContextFallbackPart(urls, activeCaps);
             return {
-              contents: [...contents, { text: promptText }, ...urlContextPart],
+              contents: [
+                ...contents,
+                { text: promptText },
+                ...(urlContextPart ? [urlContextPart] : []),
+              ],
               systemInstruction,
             };
           },
@@ -178,6 +189,7 @@ interface AnalyzeMultiExtra {
   safetySettings?: AnalyzeInput['safetySettings'];
   thinkingBudget?: AnalyzeInput['thinkingBudget'];
   urls?: readonly string[] | undefined;
+  fileSearch?: AnalyzeInput['fileSearch'] | undefined;
 }
 
 async function analyzeMultiFileWork(
@@ -189,7 +201,7 @@ async function analyzeMultiFileWork(
   ctx: ServerContext,
   extra: AnalyzeMultiExtra = {},
 ): Promise<CallToolResult> {
-  const { maxOutputTokens, safetySettings, googleSearch, urls, thinkingBudget } = extra;
+  const { maxOutputTokens, safetySettings, googleSearch, urls, thinkingBudget, fileSearch } = extra;
   const progress = new ProgressReporter(ctx, TOOL_LABELS.analyze);
 
   return await withUploadsAndPipeline(
@@ -204,8 +216,11 @@ async function analyzeMultiFileWork(
       return await executor.executeGeminiPipeline(ctx, {
         toolName: 'analyze',
         label: TOOL_LABELS.analyze,
-        googleSearch,
-        urls,
+        commonInputs: {
+          googleSearch,
+          urls,
+          ...(fileSearch ? { fileSearch } : {}),
+        },
         workspaceCacheManager,
         buildContents: (activeCaps) => {
           const prompt = buildFileAnalysisPrompt({
@@ -214,8 +229,9 @@ async function analyzeMultiFileWork(
             kind: 'multi',
           });
           const finalParts = [...prompt.promptParts];
-          if (urls && urls.length > 0 && !activeCaps.has('urlContext')) {
-            finalParts.push({ text: `Context URLs:\n${urls.join('\n')}` });
+          const urlContextPart = buildUrlContextFallbackPart(urls, activeCaps);
+          if (urlContextPart) {
+            finalParts.push(urlContextPart);
           }
           return { contents: finalParts, systemInstruction: prompt.systemInstruction };
         },
@@ -287,14 +303,18 @@ async function analyzeDiagramWork(
       await mcpLog(ctx, 'info', `Generating ${args.diagramType} diagram`);
 
       const diagramBuiltInTools = pickDiagramBuiltInTools(args);
+      const diagramSpecs: BuiltInToolSpec[] = diagramBuiltInTools.map(
+        (kind) => ({ kind }) as BuiltInToolSpec,
+      );
 
       return await executor.executeGeminiPipeline(ctx, {
         toolName: 'analyze_diagram',
         label: TOOL_LABELS.analyzeDiagram,
-        urls: args.targetKind === 'url' ? args.urls : undefined,
-        serverSideToolInvocations: (diagramBuiltInTools.length > 0
-          ? 'auto'
-          : 'never') satisfies ServerSideToolInvocationsPolicy,
+        commonInputs: {
+          urls: args.targetKind === 'url' ? args.urls : undefined,
+          ...(args.fileSearch ? { fileSearch: args.fileSearch } : {}),
+        },
+        builtInToolSpecs: diagramSpecs,
         workspaceCacheManager,
         buildContents: () => {
           const prompt = buildDiagramGenerationPrompt({
@@ -383,6 +403,7 @@ async function runAnalyzeTarget(
         safetySettings: args.safetySettings,
         googleSearch: args.googleSearch,
         urls: args.urls,
+        fileSearch: args.fileSearch,
       },
       ctx,
     );
@@ -397,6 +418,7 @@ async function runAnalyzeTarget(
         thinkingBudget: args.thinkingBudget,
         maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
+        ...(args.fileSearch ? { fileSearch: args.fileSearch } : {}),
       },
       ctx,
       workspaceCacheManager,
@@ -416,6 +438,7 @@ async function runAnalyzeTarget(
       safetySettings: args.safetySettings,
       googleSearch: args.googleSearch,
       urls: args.urls,
+      fileSearch: args.fileSearch,
     },
   );
 }

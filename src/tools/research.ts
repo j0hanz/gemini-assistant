@@ -718,9 +718,11 @@ async function searchWork(
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'research',
     label: TOOL_LABELS.search,
-    googleSearch: true,
-    urls,
-    fileSearch,
+    commonInputs: {
+      googleSearch: true,
+      urls,
+      ...(fileSearch ? { fileSearch } : {}),
+    },
     workspaceCacheManager,
     buildContents: () => ({
       contents: [prompt.promptText],
@@ -764,8 +766,10 @@ export async function analyzeUrlWork(
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'analyze_url',
     label: TOOL_LABELS.analyzeUrl,
-    urls,
-    fileSearch,
+    commonInputs: {
+      urls,
+      ...(fileSearch ? { fileSearch } : {}),
+    },
     workspaceCacheManager,
     buildContents: () => ({
       contents: [prompt.promptText],

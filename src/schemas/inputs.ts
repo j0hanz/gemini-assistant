@@ -302,6 +302,10 @@ const AnalyzeInputBaseSchema = z.strictObject({
     z.boolean().optional(),
     'Enable Google Search grounding. Optional; additive. Extra tokens when enabled.',
   ),
+  fileSearch: withFieldMetadata(
+    OptionalFileSearchSpecSchema,
+    'Enable Gemini File Search over named stores during file/url/multi analysis.',
+  ),
   mediaResolution: mediaResolution(
     'Resolution for image/video processing. Higher = more detail, more tokens.',
   ),
@@ -365,6 +369,10 @@ const ReviewInputBaseSchema = z.strictObject({
   googleSearch: withFieldMetadata(
     z.boolean().optional(),
     'Enable Google Search when subjectKind=comparison or subjectKind=failure.',
+  ),
+  fileSearch: withFieldMetadata(
+    OptionalFileSearchSpecSchema,
+    'Enable Gemini File Search over named stores during comparison or failure review. Ignored for subjectKind=diff.',
   ),
   ...createUrlContextFields({
     itemDescription: 'Public URL to include via URL Context',

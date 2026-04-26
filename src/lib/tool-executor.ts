@@ -14,10 +14,11 @@ import { getExposeThoughts, getGeminiModel } from '../config.js';
 import { AppError } from './errors.js';
 import { logContext, logger, maybeSummarizePayload, mcpLog, type ScopedLogger } from './logger.js';
 import {
+  buildOrchestrationRequestFromInputs,
   type BuiltInToolSpec,
+  type CommonToolInputs,
   type OrchestrationRequest,
   resolveOrchestration,
-  selectSearchAndUrlContextTools,
 } from './orchestration.js';
 import { ProgressReporter, reportCompletion, reportFailure } from './progress.js';
 import { buildSharedStructuredMetadata, extractTextContent } from './response.js';
@@ -55,11 +56,8 @@ interface GeminiStreamRequest<T extends Record<string, unknown>> {
 export interface GeminiPipelineRequest<T extends Record<string, unknown>> {
   toolName: string;
   label: string;
-  googleSearch?: boolean | undefined;
-  urls?: readonly string[] | undefined;
-  fileSearch?: { fileSearchStoreNames: readonly string[]; metadataFilter?: unknown } | undefined;
+  commonInputs?: CommonToolInputs | undefined;
   builtInToolSpecs?: readonly BuiltInToolSpec[] | undefined;
-  serverSideToolInvocations?: OrchestrationRequest['serverSideToolInvocations'];
   workspaceCacheManager: WorkspaceCacheManagerImpl;
   buildContents: (activeCapabilities: Set<string>) => {
     contents: ContentListUnion;
@@ -324,32 +322,21 @@ export class ToolExecutor {
   ): Promise<CallToolResult> {
     const cacheName = await getWorkspaceCacheName(ctx, request.workspaceCacheManager);
 
-    const specs: BuiltInToolSpec[] = [
-      ...selectSearchAndUrlContextTools(request.googleSearch, request.urls).map(
-        (kind) => ({ kind }) as BuiltInToolSpec,
-      ),
-      ...(request.fileSearch
-        ? [
-            {
-              kind: 'fileSearch' as const,
-              fileSearchStoreNames: request.fileSearch.fileSearchStoreNames,
-              metadataFilter: request.fileSearch.metadataFilter,
-            },
-          ]
-        : []),
+    const baseOrchestration = buildOrchestrationRequestFromInputs(request.commonInputs ?? {});
+    const mergedSpecs: BuiltInToolSpec[] = [
+      ...(baseOrchestration.builtInToolSpecs ?? []),
       ...(request.builtInToolSpecs ?? []),
     ];
+
+    const orchestration: OrchestrationRequest = {
+      ...baseOrchestration,
+      builtInToolSpecs: mergedSpecs,
+    };
 
     return await this.runGeminiStream(ctx, {
       toolName: request.toolName,
       label: request.label,
-      orchestration: {
-        builtInToolSpecs: specs,
-        urls: request.urls,
-        ...(request.serverSideToolInvocations !== undefined
-          ? { serverSideToolInvocations: request.serverSideToolInvocations }
-          : {}),
-      },
+      orchestration,
       buildContents: request.buildContents,
       config: {
         ...request.config,

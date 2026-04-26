@@ -204,6 +204,7 @@ export const DISCOVERY_ENTRIES = [
       'maxOutputTokens?',
       'safetySettings?',
       'googleSearch?',
+      'fileSearch?',
       'mediaResolution?',
     ],
     returns:
@@ -233,6 +234,7 @@ export const DISCOVERY_ENTRIES = [
       'error?',
       'codeContext?',
       'googleSearch?',
+      'fileSearch?',
       'urls?',
       'focus?',
       'thinkingLevel?',

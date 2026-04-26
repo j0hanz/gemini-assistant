@@ -239,10 +239,12 @@ function createCompareFileWork(
       urls,
       maxOutputTokens,
       safetySettings,
+      fileSearch,
     }: CompareFilesInput & {
       maxOutputTokens?: ReviewInput['maxOutputTokens'];
       safetySettings?: ReviewInput['safetySettings'];
       thinkingBudget?: ReviewInput['thinkingBudget'];
+      fileSearch?: ReviewInput['fileSearch'] | undefined;
     },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
@@ -264,8 +266,11 @@ function createCompareFileWork(
         return await executor.executeGeminiPipeline(ctx, {
           toolName: 'compare_files',
           label: TOOL_LABELS.compareFiles,
-          googleSearch,
-          urls,
+          commonInputs: {
+            googleSearch,
+            urls,
+            ...(fileSearch ? { fileSearch } : {}),
+          },
           workspaceCacheManager,
           buildContents: () => {
             const prompt = buildDiffReviewPrompt({
@@ -305,6 +310,7 @@ function createCompareFileWork(
 interface FailureReviewSubject {
   codeContext?: string | undefined;
   error: string;
+  fileSearch?: ReviewInput['fileSearch'] | undefined;
   googleSearch?: boolean | undefined;
   kind: 'failure';
   language?: string | undefined;
@@ -330,6 +336,7 @@ async function diagnoseFailureWork(
     maxOutputTokens,
     safetySettings,
     thinkingBudget,
+    fileSearch,
   } = subject;
 
   const prompt = buildErrorDiagnosisPrompt({
@@ -348,8 +355,11 @@ async function diagnoseFailureWork(
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'review_failure',
     label: TOOL_LABELS.reviewFailure,
-    googleSearch,
-    urls,
+    commonInputs: {
+      googleSearch,
+      urls,
+      ...(fileSearch ? { fileSearch } : {}),
+    },
     workspaceCacheManager,
     buildContents: () => ({
       contents: [prompt.promptText],
@@ -1271,6 +1281,7 @@ async function reviewWork(
         urls: args.urls,
         maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
+        ...(args.fileSearch ? { fileSearch: args.fileSearch } : {}),
       },
       ctx,
     );
@@ -1288,6 +1299,7 @@ async function reviewWork(
         thinkingBudget: args.thinkingBudget,
         safetySettings: args.safetySettings,
         urls: args.urls,
+        ...(args.fileSearch ? { fileSearch: args.fileSearch } : {}),
       },
       args.focus,
       args.thinkingLevel,

@@ -20,7 +20,7 @@ import { logger, mcpLog } from '../lib/logger.js';
 import { appendFunctionCallingInstruction } from '../lib/model-prompts.js';
 import {
   buildOrchestrationConfig,
-  type BuiltInToolSpec,
+  buildOrchestrationRequestFromInputs,
   resolveOrchestration,
 } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
@@ -350,26 +350,20 @@ function toFunctionCallingConfigMode(
 
 function buildChatOrchestrationRequest(args: AskArgs) {
   const urls = getAskUrls(args);
-  const builtInToolSpecs: BuiltInToolSpec[] = [];
-  if (args.googleSearch) builtInToolSpecs.push({ kind: 'googleSearch' });
-  if ((urls?.length ?? 0) > 0) builtInToolSpecs.push({ kind: 'urlContext' });
-  if (args.codeExecution) builtInToolSpecs.push({ kind: 'codeExecution' });
-  if (args.fileSearch) {
-    builtInToolSpecs.push({
-      kind: 'fileSearch',
-      fileSearchStoreNames: args.fileSearch.fileSearchStoreNames,
-      ...(args.fileSearch.metadataFilter !== undefined
-        ? { metadataFilter: args.fileSearch.metadataFilter }
-        : {}),
-    });
-  }
-  return {
-    builtInToolSpecs,
-    functionDeclarations: buildFunctionDeclarations(args),
-    functionCallingMode: toFunctionCallingConfigMode(args.functions?.mode),
-    serverSideToolInvocations: args.serverSideToolInvocations,
-    ...(urls ? { urls } : {}),
-  } as const;
+  const functionDeclarations = buildFunctionDeclarations(args);
+  return buildOrchestrationRequestFromInputs({
+    googleSearch: args.googleSearch,
+    urls,
+    codeExecution: args.codeExecution,
+    ...(args.fileSearch ? { fileSearch: args.fileSearch } : {}),
+    ...(functionDeclarations ? { functionDeclarations } : {}),
+    ...(args.functions?.mode !== undefined
+      ? { functionCallingMode: toFunctionCallingConfigMode(args.functions.mode) }
+      : {}),
+    ...(args.serverSideToolInvocations !== undefined
+      ? { serverSideToolInvocations: args.serverSideToolInvocations }
+      : {}),
+  });
 }
 
 function validateAskRequest(

@@ -205,7 +205,7 @@ function nodeRateLimitKey(req: IncomingMessage, sessionId: string | undefined): 
 }
 
 function webRateLimitKey(req: Request, sessionId: string | undefined): string {
-  return sessionId ?? req.headers.get('x-forwarded-for') ?? 'unknown';
+  return sessionId ?? 'anonymous';
 }
 
 function takeRateLimit(rateLimiter: RateLimiter, key: string): boolean {

@@ -131,6 +131,31 @@ describe('transport HTTP protection', () => {
     }
   });
 
+  it('does not trust x-forwarded-for to bypass web-standard rate limiting', async () => {
+    const token = 'x'.repeat(32);
+    process.env.HOST = '0.0.0.0';
+    process.env.MCP_HTTP_TOKEN = token;
+    process.env.MCP_HTTP_RATE_LIMIT_RPS = '1';
+    process.env.MCP_HTTP_RATE_LIMIT_BURST = '1';
+    const transport = await startWebStandardTransport(() => createNoopServerInstance());
+    try {
+      await transport.handler(
+        request({ authorization: `Bearer ${token}`, 'x-forwarded-for': '192.0.2.1' }),
+      );
+      const response = await transport.handler(
+        request({ authorization: `Bearer ${token}`, 'x-forwarded-for': '192.0.2.2' }),
+      );
+      assert.strictEqual(response.status, 429);
+      assert.strictEqual(response.headers.get('retry-after'), '1');
+    } finally {
+      await transport.close();
+      delete process.env.HOST;
+      delete process.env.MCP_HTTP_TOKEN;
+      delete process.env.MCP_HTTP_RATE_LIMIT_RPS;
+      delete process.env.MCP_HTTP_RATE_LIMIT_BURST;
+    }
+  });
+
   it('allows loopback binds without MCP_HTTP_TOKEN', async () => {
     process.env.HOST = '127.0.0.1';
     const transport = await startWebStandardTransport(() => createNoopServerInstance());

@@ -48,7 +48,8 @@ interface ToolTaskHandlers<TArgs> {
 }
 
 type RegisterToolTask = McpServer['experimental']['tasks']['registerToolTask'];
-type TaskToolConfig = Omit<Parameters<RegisterToolTask>[1], 'execution'>;
+type TaskRegistrationConfig = Parameters<RegisterToolTask>[1];
+type TaskToolConfig = Omit<TaskRegistrationConfig, 'execution'>;
 type TaskToolHandler = Parameters<RegisterToolTask>[2];
 interface SafeParseSchema {
   safeParse: (
@@ -64,6 +65,8 @@ interface JsonSchemaProvider {
 }
 interface StandardSchemaLike {
   '~standard': {
+    vendor: string;
+    version: number;
     jsonSchema: JsonSchemaProvider;
     validate: (value: unknown) => { value: unknown };
   };
@@ -97,17 +100,28 @@ function hasStandardSchema(schema: unknown): schema is StandardSchemaLike {
   );
 }
 
-function createSdkPassthroughInputSchema(schema: unknown): unknown {
+function createSdkPassthroughInputSchema(
+  schema: TaskToolConfig['inputSchema'],
+): TaskRegistrationConfig['inputSchema'] {
   if (!hasStandardSchema(schema)) {
     return schema;
   }
 
+  const standard = schema['~standard'];
   return {
     '~standard': {
-      jsonSchema: schema['~standard'].jsonSchema,
+      ...standard,
       validate: (value: unknown) => ({ value }),
     },
   } satisfies StandardSchemaLike;
+}
+
+function createTaskRegistrationConfig(config: TaskToolConfig): TaskRegistrationConfig {
+  return {
+    ...config,
+    inputSchema: createSdkPassthroughInputSchema(config.inputSchema),
+    execution: TASK_EXECUTION,
+  };
 }
 
 function parseTaskInput(schema: unknown, args: unknown): unknown {
@@ -380,7 +394,7 @@ export function registerTaskTool<TArgs>(
   work: TaskWork<TArgs>,
 ): void {
   const toolLabel = config.title ?? name;
-  const handler = createToolTaskHandlers(
+  const handler: TaskToolHandler = createToolTaskHandlers(
     name,
     wrapTaskSafeWork(name, async (args: TArgs, ctx: ExtendedServerContext) =>
       validateStructuredToolResult(
@@ -400,15 +414,7 @@ export function registerTaskTool<TArgs>(
     config.inputSchema,
   ) as TaskToolHandler;
 
-  server.experimental.tasks.registerToolTask(
-    name,
-    {
-      ...config,
-      inputSchema: createSdkPassthroughInputSchema(config.inputSchema),
-      execution: TASK_EXECUTION,
-    } as Parameters<RegisterToolTask>[1],
-    handler,
-  );
+  server.experimental.tasks.registerToolTask(name, createTaskRegistrationConfig(config), handler);
 }
 
 interface RegisterWorkToolParams<TArgs> {

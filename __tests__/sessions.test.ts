@@ -637,6 +637,33 @@ describe('sessions', () => {
         },
       ]);
     });
+
+    it('redacts free-text secrets in request fields when cloning session events', () => {
+      const store = createStore();
+      store.setSession('sess-redacted-events', mockChat('redacted-events') as never);
+
+      store.appendSessionEvent('sess-redacted-events', {
+        request: {
+          message: 'Authorization: topsecret and Bearer abc.def-ghi=',
+          sentMessage: 'api_key=xyz123',
+          toolProfile: 'token: hidden',
+        },
+        response: { text: 'ok' },
+        timestamp: 1,
+      });
+
+      assert.deepStrictEqual(store.listSessionEventEntries('sess-redacted-events'), [
+        {
+          request: {
+            message: '[REDACTED] and [REDACTED]',
+            sentMessage: '[REDACTED]',
+            toolProfile: '[REDACTED]',
+          },
+          response: { text: 'ok' },
+          timestamp: 1,
+        },
+      ]);
+    });
   });
 
   describe('isEvicted', () => {

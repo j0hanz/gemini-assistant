@@ -13,7 +13,7 @@ import {
 } from '@modelcontextprotocol/server';
 
 import { Buffer } from 'node:buffer';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 
 import { AppError } from './lib/errors.js';
@@ -173,6 +173,7 @@ export interface WebStandardTransportResult {
 const log = logger.child('transport');
 
 const APPLICATION_JSON = 'application/json' as const;
+const BROAD_BIND_HOSTS = new Set(['0.0.0.0', '::', '']);
 
 function isLoopbackBindHost(host: string): boolean {
   return host === '127.0.0.1' || host === '::1' || host === 'localhost';
@@ -183,6 +184,16 @@ function assertHttpBindIsProtected(host: string, token: string | undefined): voi
     throw new AppError(
       'transport',
       `HTTP transport bound to ${host} requires MCP_HTTP_TOKEN.`,
+      'server',
+    );
+  }
+}
+
+function assertHostValidationIsConfigured(host: string, allowedHosts: string[] | undefined): void {
+  if (BROAD_BIND_HOSTS.has(host) && !allowedHosts) {
+    throw new AppError(
+      'transport',
+      `HTTP transport bound to ${host} requires ALLOWED_HOSTS for Host header validation.`,
       'server',
     );
   }
@@ -279,12 +290,16 @@ function logListening(host: string, port: number, runtime?: string): void {
   log.info(`listening on http://${host}:${port}/mcp${suffix}`);
 }
 
+function sessionRef(sessionId: string): string {
+  return createHash('sha256').update(sessionId).digest('hex').slice(0, 12);
+}
+
 function logSessionEvent(label: 'open' | 'closed', sessionId: string): void {
-  log.info(`session ${label}: ${sessionId}`);
+  log.info('transport session event', { event: label, sessionRef: sessionRef(sessionId) });
 }
 
 function logTransportSessionEviction(reason: 'capacity' | 'expired', sessionId: string): void {
-  log.info(`transport session ${reason}: ${sessionId}`);
+  log.info('transport session eviction', { reason, sessionRef: sessionRef(sessionId) });
 }
 
 function now(): number {
@@ -333,6 +348,12 @@ function responseError(status: number, message: string): Response {
     status,
     headers: { 'content-type': APPLICATION_JSON },
   });
+}
+
+function webMethodNotAllowedResponse(corsOrigin: string): Response {
+  const response = responseError(405, 'Method Not Allowed');
+  response.headers.set('Allow', 'POST, OPTIONS');
+  return withCors(response, corsOrigin);
 }
 
 function getNodeSessionId(req: IncomingMessage): string | undefined {
@@ -766,6 +787,7 @@ export async function startHttpTransport(
     token,
   } = resolveTransportRuntimeConfig();
   assertHttpBindIsProtected(host, token);
+  assertHostValidationIsConfigured(host, allowedHosts);
   const rateLimiter = createRateLimiter({ rps: rateLimitRps, burst: rateLimitBurst });
 
   const app = createMcpExpressApp({
@@ -929,6 +951,7 @@ export function startWebStandardTransport(
     token,
   } = resolveTransportRuntimeConfig();
   assertHttpBindIsProtected(host, token);
+  assertHostValidationIsConfigured(host, allowedHosts);
   const rateLimiter = createRateLimiter({ rps: rateLimitRps, burst: rateLimitBurst });
 
   if (isStateless) {
@@ -963,6 +986,10 @@ export function startWebStandardTransport(
 
     if (corsOrigin && req.method === 'OPTIONS') {
       return corsPreflightResponse(corsOrigin);
+    }
+
+    if (isStateless && req.method !== 'POST' && req.method !== 'OPTIONS') {
+      return webMethodNotAllowedResponse(corsOrigin);
     }
 
     const sessionId = getRequestSessionId(req);

@@ -194,6 +194,22 @@ describe('buildUntrackedFilePatch', () => {
   });
 });
 
+describe('buildUntrackedPatch', () => {
+  it('skips paths that resolve outside the git root', async () => {
+    const repoRoot = await createTempRepo();
+
+    try {
+      const result = await buildUntrackedPatch(repoRoot, '../../etc/passwd');
+      assert.deepStrictEqual(result, {
+        path: '../../etc/passwd',
+        skipReason: 'sensitive',
+      });
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('splitDiffUnits', () => {
   it('splits a multi-file diff into whole-file units', () => {
     const diff = [

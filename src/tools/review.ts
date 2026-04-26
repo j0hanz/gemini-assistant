@@ -19,7 +19,7 @@ import {
 } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
-import type { RootsFetcher } from '../lib/validation.js';
+import { isPathWithinRoot, type RootsFetcher } from '../lib/validation.js';
 import type { WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import { SCAN_FILE_NAMES } from '../lib/workspace-context.js';
 import {
@@ -652,11 +652,15 @@ export async function buildUntrackedPatch(
   signal?: AbortSignal,
 ): Promise<UntrackedPatchResult> {
   signal?.throwIfAborted();
+  const absolutePath = join(gitRoot, relativePath);
+  if (!isPathWithinRoot(absolutePath, gitRoot)) {
+    return { path: relativePath, skipReason: 'sensitive' };
+  }
+
   if (isSensitiveUntrackedPath(relativePath)) {
     return { path: relativePath, skipReason: 'sensitive' };
   }
 
-  const absolutePath = join(gitRoot, relativePath);
   const fileStats = await lstat(absolutePath).catch(() => null);
 
   if (!fileStats?.isFile()) {

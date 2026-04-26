@@ -15,6 +15,8 @@ import { startHttpTransport, startWebStandardTransport } from '../src/transport.
 
 const originalScopedLoggerError = Object.getOwnPropertyDescriptor(ScopedLogger.prototype, 'error')
   ?.value as typeof ScopedLogger.prototype.error;
+const originalScopedLoggerInfo = Object.getOwnPropertyDescriptor(ScopedLogger.prototype, 'info')
+  ?.value as typeof ScopedLogger.prototype.info;
 const originalScopedLoggerWarn = Object.getOwnPropertyDescriptor(ScopedLogger.prototype, 'warn')
   ?.value as typeof ScopedLogger.prototype.warn;
 const originalWebHandleRequest = Object.getOwnPropertyDescriptor(
@@ -72,10 +74,16 @@ function createServerInstance(options: ServerInstanceOptions = {}) {
 function createRequest(
   body: unknown,
   sessionId?: string,
-  options: { authorization?: string; hostHeader?: string; requestUrl?: string } = {},
+  options: {
+    authorization?: string;
+    hostHeader?: string;
+    method?: 'DELETE' | 'GET' | 'OPTIONS' | 'POST' | 'PUT';
+    requestUrl?: string;
+  } = {},
 ): Request {
+  const method = options.method ?? 'POST';
   return new Request(options.requestUrl ?? 'http://127.0.0.1:3000/mcp', {
-    method: 'POST',
+    method,
     headers: {
       host: options.hostHeader ?? '127.0.0.1:3000',
       accept: 'application/json, text/event-stream',
@@ -83,7 +91,7 @@ function createRequest(
       ...(options.authorization ? { authorization: options.authorization } : {}),
       ...(sessionId ? { 'mcp-session-id': sessionId } : {}),
     },
-    body: JSON.stringify(body),
+    ...(method === 'GET' || method === 'HEAD' ? {} : { body: JSON.stringify(body) }),
   });
 }
 
@@ -227,6 +235,7 @@ afterEach(() => {
   delete (globalThis as Record<string, unknown>).Bun;
   delete process.env.HOST;
   delete process.env.PORT;
+  delete process.env.CORS_ORIGIN;
   delete process.env.STATELESS;
   delete process.env.ALLOWED_HOSTS;
   delete process.env.MAX_TRANSPORT_SESSIONS;
@@ -234,6 +243,7 @@ afterEach(() => {
   delete process.env.MCP_HTTP_RATE_LIMIT_RPS;
   delete process.env.MCP_HTTP_RATE_LIMIT_BURST;
   ScopedLogger.prototype.error = originalScopedLoggerError;
+  ScopedLogger.prototype.info = originalScopedLoggerInfo;
   ScopedLogger.prototype.warn = originalScopedLoggerWarn;
   WebStandardStreamableHTTPServerTransport.prototype.handleRequest = originalWebHandleRequest;
 });
@@ -352,6 +362,68 @@ describe('startWebStandardTransport', () => {
       );
 
       assert.strictEqual(response.status, 200);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('returns 405 with Allow header for non-POST methods in stateless mode', async () => {
+    process.env.STATELESS = 'true';
+    process.env.CORS_ORIGIN = 'https://example.test';
+    const transport = await startWebStandardTransport(() => createServerInstance());
+
+    try {
+      for (const method of ['GET', 'DELETE', 'PUT'] as const) {
+        const response = await transport.handler(
+          createRequest({ jsonrpc: '2.0', id: 1, method: 'ping' }, undefined, { method }),
+        );
+
+        assert.strictEqual(response.status, 405);
+        assert.strictEqual(response.headers.get('Allow'), 'POST, OPTIONS');
+      }
+
+      const optionsResponse = await transport.handler(
+        createRequest({}, undefined, { method: 'OPTIONS' }),
+      );
+      assert.strictEqual(optionsResponse.status, 204);
+
+      const postResponse = await transport.handler(
+        createRequest({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            capabilities: { roots: {} },
+            clientInfo: { name: 'transport-test', version: '0.0.1' },
+            protocolVersion: LATEST_PROTOCOL_VERSION,
+          },
+        }),
+      );
+      assert.strictEqual(postResponse.status, 200);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('logs session events with hashed sessionRef instead of raw session ids', async () => {
+    const logged: { data?: unknown; message: string }[] = [];
+    ScopedLogger.prototype.info = function mockInfo(message: string, data?: unknown) {
+      logged.push({ message, data });
+    };
+
+    const transport = await startWebStandardTransport(() => createServerInstance());
+
+    try {
+      const sessionId = await initializeSession(transport);
+      const sessionEvent = logged.find((entry) => entry.message === 'transport session event');
+
+      assert.ok(sessionEvent);
+      assert.deepStrictEqual(sessionEvent.data, {
+        event: 'open',
+        sessionRef: (sessionEvent.data as { sessionRef: string }).sessionRef,
+      });
+      assert.match((sessionEvent.data as { sessionRef: string }).sessionRef, /^[a-f0-9]{12}$/);
+      assert.doesNotMatch(JSON.stringify(sessionEvent.data), new RegExp(sessionId, 'u'));
     } finally {
       await transport.close();
     }

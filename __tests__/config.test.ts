@@ -193,6 +193,22 @@ describe('config parsing', () => {
     assert.strictEqual(getTransportConfig().corsOrigin, '*');
   });
 
+  it('accepts a strict bare http(s) origin', () => {
+    process.env.CORS_ORIGIN = 'https://example.com';
+    assert.strictEqual(getTransportConfig().corsOrigin, 'https://example.com');
+  });
+
+  it('rejects CORS origins with paths, credentials, or non-http schemes', () => {
+    process.env.CORS_ORIGIN = 'https://example.com/path';
+    assert.throws(() => getTransportConfig(), /CORS_ORIGIN/);
+
+    process.env.CORS_ORIGIN = 'https://user:pass@example.com';
+    assert.throws(() => getTransportConfig(), /CORS_ORIGIN/);
+
+    process.env.CORS_ORIGIN = 'ftp://example.com';
+    assert.throws(() => getTransportConfig(), /CORS_ORIGIN/);
+  });
+
   it('rejects invalid transport option env values', () => {
     process.env.CORS_ORIGIN = 'https://a.test,https://b.test';
     assert.throws(() => getTransportConfig(), /CORS_ORIGIN/);

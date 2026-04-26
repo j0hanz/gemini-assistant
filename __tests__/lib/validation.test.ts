@@ -454,4 +454,22 @@ describe('validateUrls', () => {
     assert.match(firstTextContent(localhost), /Private, loopback, and localhost URLs/);
     assert.match(firstTextContent(privateNet), /Private, loopback, and localhost URLs/);
   });
+
+  it('rejects expanded special-use IPv4 and IPv6 literal ranges', () => {
+    const rejectedUrls = [
+      'http://0.0.0.0',
+      'http://100.64.0.1',
+      'http://198.18.0.1',
+      'http://198.51.100.1',
+      'http://203.0.113.1',
+      'http://224.0.0.1',
+      'http://[ff02::1]',
+    ];
+
+    for (const url of rejectedUrls) {
+      const result = validateUrls([url]);
+      assert.strictEqual(result?.isError, true, url);
+      assert.match(firstTextContent(result), /Private, loopback, and localhost URLs/);
+    }
+  });
 });

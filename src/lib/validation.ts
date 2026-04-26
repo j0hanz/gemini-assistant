@@ -398,28 +398,51 @@ export function buildServerRootsFetcher(server: McpServer): RootsFetcher {
 
 function isPrivateIpv4(hostname: string): boolean {
   const parts = hostname.split('.').map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) {
+  if (
+    parts.length !== 4 ||
+    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+  ) {
     return false;
   }
 
-  const [a, b] = parts;
+  const [a, b, c] = parts as [number, number, number, number];
 
-  if (a === 10 || a === 127) {
+  if (a === 0 || a === 10 || a === 127 || a >= 224) {
     return true;
   }
 
+  if (a === 100) {
+    return b >= 64 && b <= 127;
+  }
+
+  if (a === 169) {
+    return b === 254;
+  }
+
   if (a === 172) {
-    return b !== undefined && b >= 16 && b <= 31;
+    return b >= 16 && b <= 31;
   }
 
   if (a === 192) {
-    return b === 168;
+    if (b === 168) {
+      return true;
+    }
+
+    return b === 0 && c <= 2;
   }
 
-  return a === 169 && b === 254;
+  if (a === 198) {
+    if (b === 18 || b === 19) {
+      return true;
+    }
+
+    return b === 51 && c === 100;
+  }
+
+  return a === 203 && b === 0 && c === 113;
 }
 
-const PRIVATE_IPV6_PREFIXES = ['fc', 'fd', 'fe8', 'fe9', 'fea', 'feb', '::ffff:'];
+const PRIVATE_IPV6_PREFIXES = ['fc', 'fd', 'fe8', 'fe9', 'fea', 'feb', 'ff', '::ffff:'];
 
 function isPrivateIpv6(hostname: string): boolean {
   const normalized = hostname.toLowerCase();

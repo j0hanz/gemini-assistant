@@ -32,10 +32,10 @@ function createNoopServerInstance() {
 }
 
 function request(headers: Record<string, string> = {}): Request {
-  return new Request('http://0.0.0.0:3000/mcp', {
-    method: 'POST',
+  return new Request(headers['x-request-url'] ?? 'http://0.0.0.0:3000/mcp', {
+    method: headers['x-request-method'] ?? 'POST',
     headers: {
-      host: '0.0.0.0:3000',
+      host: headers.host ?? '0.0.0.0:3000',
       accept: 'application/json, text/event-stream',
       'content-type': 'application/json',
       ...headers,
@@ -98,6 +98,7 @@ describe('transport HTTP protection', () => {
 
   it('returns 401 for missing bearer token on protected binds', async () => {
     process.env.HOST = '0.0.0.0';
+    process.env.ALLOWED_HOSTS = '0.0.0.0';
     process.env.MCP_HTTP_TOKEN = 'x'.repeat(32);
     const transport = await startWebStandardTransport(() => createNoopServerInstance());
     try {
@@ -106,6 +107,43 @@ describe('transport HTTP protection', () => {
     } finally {
       await transport.close();
       delete process.env.HOST;
+      delete process.env.ALLOWED_HOSTS;
+      delete process.env.MCP_HTTP_TOKEN;
+    }
+  });
+
+  it('throws for broad binds without ALLOWED_HOSTS even when MCP_HTTP_TOKEN is set', () => {
+    process.env.HOST = '0.0.0.0';
+    process.env.MCP_HTTP_TOKEN = 'x'.repeat(32);
+    try {
+      assert.throws(
+        () => startWebStandardTransport(() => createNoopServerInstance()),
+        /requires ALLOWED_HOSTS/,
+      );
+    } finally {
+      delete process.env.HOST;
+      delete process.env.MCP_HTTP_TOKEN;
+    }
+  });
+
+  it('allows broad binds with explicit ALLOWED_HOSTS', async () => {
+    process.env.HOST = '0.0.0.0';
+    process.env.ALLOWED_HOSTS = 'example.test';
+    process.env.MCP_HTTP_TOKEN = 'x'.repeat(32);
+    const transport = await startWebStandardTransport(() => createNoopServerInstance());
+    try {
+      const response = await transport.handler(
+        request({
+          authorization: `Bearer ${'x'.repeat(32)}`,
+          host: 'example.test:3000',
+          'x-request-url': 'http://example.test:3000/not-found',
+        }),
+      );
+      assert.strictEqual(response.status, 404);
+    } finally {
+      await transport.close();
+      delete process.env.HOST;
+      delete process.env.ALLOWED_HOSTS;
       delete process.env.MCP_HTTP_TOKEN;
     }
   });
@@ -113,6 +151,7 @@ describe('transport HTTP protection', () => {
   it('returns 429 with Retry-After when the burst is exhausted', async () => {
     const token = 'x'.repeat(32);
     process.env.HOST = '0.0.0.0';
+    process.env.ALLOWED_HOSTS = '0.0.0.0';
     process.env.MCP_HTTP_TOKEN = token;
     process.env.MCP_HTTP_RATE_LIMIT_RPS = '1';
     process.env.MCP_HTTP_RATE_LIMIT_BURST = '1';
@@ -125,6 +164,7 @@ describe('transport HTTP protection', () => {
     } finally {
       await transport.close();
       delete process.env.HOST;
+      delete process.env.ALLOWED_HOSTS;
       delete process.env.MCP_HTTP_TOKEN;
       delete process.env.MCP_HTTP_RATE_LIMIT_RPS;
       delete process.env.MCP_HTTP_RATE_LIMIT_BURST;
@@ -134,6 +174,7 @@ describe('transport HTTP protection', () => {
   it('does not trust x-forwarded-for to bypass web-standard rate limiting', async () => {
     const token = 'x'.repeat(32);
     process.env.HOST = '0.0.0.0';
+    process.env.ALLOWED_HOSTS = '0.0.0.0';
     process.env.MCP_HTTP_TOKEN = token;
     process.env.MCP_HTTP_RATE_LIMIT_RPS = '1';
     process.env.MCP_HTTP_RATE_LIMIT_BURST = '1';
@@ -150,6 +191,7 @@ describe('transport HTTP protection', () => {
     } finally {
       await transport.close();
       delete process.env.HOST;
+      delete process.env.ALLOWED_HOSTS;
       delete process.env.MCP_HTTP_TOKEN;
       delete process.env.MCP_HTTP_RATE_LIMIT_RPS;
       delete process.env.MCP_HTTP_RATE_LIMIT_BURST;

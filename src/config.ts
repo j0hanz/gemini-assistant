@@ -110,10 +110,31 @@ function parseCorsOriginEnv(): string {
   if (raw === undefined) return '';
   const trimmed = raw.trim();
   if (!trimmed) return '';
-  if (trimmed === '*' || /^https?:\/\/[^\s,]+$/.test(trimmed)) {
+  if (trimmed === '*') {
     return trimmed;
   }
-  throw new Error('CORS_ORIGIN must be "*" or a single http(s) origin when set.');
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(
+      'CORS_ORIGIN must be "*" or a single http(s) origin without path, query, or credentials when set.',
+    );
+  }
+
+  if (
+    (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+    parsed.origin === trimmed &&
+    parsed.username === '' &&
+    parsed.password === ''
+  ) {
+    return trimmed;
+  }
+
+  throw new Error(
+    'CORS_ORIGIN must be "*" or a single http(s) origin without path, query, or credentials when set.',
+  );
 }
 
 function parseTransportModeEnv(): TransportMode {

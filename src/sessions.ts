@@ -145,6 +145,11 @@ const TOOL_EVENT_FIELD_RULES: readonly SessionFieldRule[] = [
   { key: 'text', shouldSanitize: (value) => value !== undefined },
 ];
 
+const SESSION_FREE_TEXT_SECRET_PATTERNS: readonly RegExp[] = [
+  /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi,
+  /\b(?:api[_-]?key|authorization|password|secret|token)\s*[:=]\s*[^\s,;]+/gi,
+];
+
 function shouldRedactSessionValue(keyContext?: string): boolean {
   if (!keyContext) return false;
   return getSessionRedactionPatterns().some((pattern) => pattern.test(keyContext));
@@ -204,6 +209,17 @@ export function sanitizeFunctionCalls(functionCalls: FunctionCallEntry[]): Funct
 
 export function sanitizeToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
   return toolEvents.map((toolEvent) => applySessionFieldRules(toolEvent, TOOL_EVENT_FIELD_RULES));
+}
+
+function sanitizeSessionText(text: string | undefined): string | undefined {
+  if (text === undefined) {
+    return undefined;
+  }
+
+  return SESSION_FREE_TEXT_SECRET_PATTERNS.reduce(
+    (current, pattern) => current.replace(pattern, '[REDACTED]'),
+    text,
+  );
 }
 
 export function buildRebuiltChatContents(contents: ContentEntry[], maxBytes: number): Content[] {
@@ -338,6 +354,13 @@ function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
     ...item,
     request: {
       ...item.request,
+      message: sanitizeSessionText(item.request.message) ?? item.request.message,
+      ...(item.request.sentMessage !== undefined
+        ? { sentMessage: sanitizeSessionText(item.request.sentMessage) ?? item.request.sentMessage }
+        : {}),
+      ...(item.request.toolProfile !== undefined
+        ? { toolProfile: sanitizeSessionText(item.request.toolProfile) ?? item.request.toolProfile }
+        : {}),
       ...(item.request.urls ? { urls: [...item.request.urls] } : {}),
     },
     response,

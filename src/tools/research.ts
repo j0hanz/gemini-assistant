@@ -13,7 +13,7 @@ import type {
 } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
-import { logger, maybeSummarizePayload } from '../lib/logger.js';
+import { logger, maybeSummarizePayload, mcpLog } from '../lib/logger.js';
 import {
   buildAgenticResearchPrompt,
   buildFileAnalysisPrompt,
@@ -126,7 +126,7 @@ async function runToolStream<T extends Record<string, unknown>>(
 ): Promise<CallToolResult> {
   const progress = new ProgressReporter(ctx, label);
   await progress.send(0, undefined, initialMsg);
-  await ctx.mcpReq.log('info', logMessage);
+  await mcpLog(ctx, 'info', logMessage);
   log.info(logMessage, maybeSummarizePayload(logData, log.getVerbosePayloads()));
   return executor.runStream(ctx, toolKey, label, startFn, resultFn);
 }
@@ -240,11 +240,11 @@ async function enrichTopicWithSampling(
       return topic;
     }
 
-    await ctx.mcpReq.log('info', 'Sampling provided research angles');
+    await mcpLog(ctx, 'info', 'Sampling provided research angles');
     log.debug('Sampling provided research angles', { sampledTextLength: sampledText.length });
     return `${topic}\n\n<planning_leads priority="low" evidence="false">\n${sampledText.slice(0, 200)}\n</planning_leads>\n<task>Research the topic above. Do not cite planning_leads as evidence.</task>`;
   } catch (error) {
-    await ctx.mcpReq.log('debug', 'Sampling unavailable; continuing without extra angles');
+    await mcpLog(ctx, 'debug', 'Sampling unavailable; continuing without extra angles');
     log.debug('requestSampling encountered an issue', {
       error: AppError.formatMessage(error),
     });
@@ -273,27 +273,25 @@ function emitDeepResearchToolBudgetLogs(
   };
 
   log.info('deep research tool budget observed', payload);
-  void ctx.mcpReq
-    .log('info', `deep research tool budget observed at depth ${String(searchDepth)}`)
-    .catch(() => undefined);
+  void mcpLog(
+    ctx,
+    'info',
+    `deep research tool budget observed at depth ${String(searchDepth)}`,
+  );
 
   const warnings: string[] = [];
 
   if (searchDepth >= 3 && retrievalTurnsRan !== undefined && retrievalTurnsRan < searchDepth - 1) {
     const warning = `deep research ran ${String(retrievalTurnsRan)} retrieval turn(s), fewer than requested budget ${String(searchDepth - 1)}`;
     log.warn('deep research retrieval turn budget underused', { ...payload, retrievalTurnsRan });
-    void ctx.mcpReq
-      .log('warning', 'deep research retrieval turn budget underused')
-      .catch(() => undefined);
+    void mcpLog(ctx, 'warning', 'deep research retrieval turn budget underused');
     warnings.push(warning);
   }
 
   if (searchDepth >= 4 && !('codeExecution' in toolsUsedOccurrences)) {
     const warning = `deep research did not invoke Code Execution at depth ${String(searchDepth)}`;
     log.warn('deep research did not invoke Code Execution', payload);
-    void ctx.mcpReq
-      .log('warning', 'deep research did not invoke Code Execution')
-      .catch(() => undefined);
+    void mcpLog(ctx, 'warning', 'deep research did not invoke Code Execution');
     warnings.push(warning);
   }
 
@@ -649,7 +647,7 @@ async function runDeepResearchPlan(
   const results: StreamResult[] = [];
   const progress = new ProgressReporter(ctx, AGENTIC_SEARCH_TOOL_LABEL);
   await progress.send(0, undefined, 'Planning deep research');
-  await ctx.mcpReq.log('info', 'Agentic search requested');
+  await mcpLog(ctx, 'info', 'Agentic search requested');
   log.info('Agentic search requested', {
     searchDepth: args.searchDepth,
     urlCount: args.urls?.length ?? 0,
@@ -820,7 +818,7 @@ async function searchWork(
 
   const progress = new ProgressReporter(ctx, SEARCH_TOOL_LABEL);
   await progress.send(0, undefined, 'Starting');
-  await ctx.mcpReq.log('info', 'Search requested');
+  await mcpLog(ctx, 'info', 'Search requested');
 
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'research',
@@ -866,7 +864,7 @@ export async function analyzeUrlWork(
 
   const progress = new ProgressReporter(ctx, ANALYZE_URL_TOOL_LABEL);
   await progress.send(0, undefined, 'Fetching');
-  await ctx.mcpReq.log('info', `Analyze URL requested for ${urls.length} urls`);
+  await mcpLog(ctx, 'info', `Analyze URL requested for ${urls.length} urls`);
 
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'analyze_url',
@@ -920,7 +918,7 @@ async function agenticSearchWork(
         topic = `${topic}\n\nAdditional User Constraint: ${constraint}`;
       }
     } catch (err) {
-      await ctx.mcpReq.log('warning', 'Elicitation skipped; continuing without extra constraints');
+      await mcpLog(ctx, 'warning', 'Elicitation skipped; continuing without extra constraints');
       log.warn('Elicitation skipped or failed', { error: AppError.formatMessage(err) });
     }
   }

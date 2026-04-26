@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/server';
+import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
@@ -360,3 +360,11 @@ export class ScopedLogger {
 }
 
 export const logger = new Logger();
+
+export async function mcpLog(
+  ctx: ServerContext,
+  level: 'debug' | 'info' | 'warning' | 'error',
+  message: string,
+): Promise<void> {
+  await ctx.mcpReq.log(level, message).catch(() => undefined);
+}

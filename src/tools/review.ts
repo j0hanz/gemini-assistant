@@ -13,7 +13,7 @@ import { promisify } from 'node:util';
 import type { z } from 'zod/v4';
 
 import { withUploadsAndPipeline } from '../lib/file.js';
-import { logger, type ScopedLogger } from '../lib/logger.js';
+import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
 import { buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { buildDiffReviewPrompt } from '../lib/model-prompts.js';
 import { ProgressReporter } from '../lib/progress.js';
@@ -260,7 +260,7 @@ function createCompareFileWork(
         const fileA = contents[0];
         const fileB = contents[1];
 
-        await ctx.mcpReq.log('info', `Comparing: ${filePathA} vs ${filePathB}`);
+        await mcpLog(ctx, 'info', `Comparing: ${filePathA} vs ${filePathB}`);
         await progress.step(2, 3, 'Analyzing differences');
 
         return await executor.executeGeminiPipeline(ctx, {
@@ -345,7 +345,7 @@ async function diagnoseFailureWork(
 
   const progress = new ProgressReporter(ctx, 'Review Failure');
   await progress.send(0, undefined, 'Diagnosing');
-  await ctx.mcpReq.log('info', `Review failure: ${error.length} chars`);
+  await mcpLog(ctx, 'info', `Review failure: ${error.length} chars`);
 
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'review_failure',
@@ -982,7 +982,8 @@ async function logSnapshotStats(
   snapshot: LocalDiffSnapshot,
   truncated: boolean,
 ): Promise<void> {
-  await ctx.mcpReq.log(
+  await mcpLog(
+    ctx,
     'info',
     `analyze_pr: ${String(snapshot.stats.files)} files, +${String(snapshot.stats.additions)}/-${String(snapshot.stats.deletions)}${truncated ? ' (truncated)' : ''}`,
   );

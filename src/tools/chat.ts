@@ -16,7 +16,7 @@ import type {
 } from '@google/genai';
 
 import { AppError, assertNever } from '../lib/errors.js';
-import { logger } from '../lib/logger.js';
+import { logger, mcpLog } from '../lib/logger.js';
 import { appendFunctionCallingInstruction } from '../lib/model-prompts.js';
 import {
   buildOrchestrationConfig,
@@ -1009,7 +1009,7 @@ async function askExistingSession(
         })
       : contextUsed;
 
-  await ctx.mcpReq.log('debug', `Resuming session ${args.sessionId}`);
+  await mcpLog(ctx, 'debug', `Resuming session ${args.sessionId}`);
   const progress = new ProgressReporter(ctx, ASK_TOOL_LABEL);
   await progress.send(0, undefined, 'Resuming session');
   const askResult = await deps.runWithoutSession(resumedArgs, ctx, chat);
@@ -1031,7 +1031,7 @@ async function askNewSession(
   deps: AskDependencies,
   contextUsed?: ContextUsed,
 ): Promise<CallToolResult> {
-  await ctx.mcpReq.log('debug', `Creating session ${args.sessionId}`);
+  await mcpLog(ctx, 'debug', `Creating session ${args.sessionId}`);
   const { chat, contract } = deps.createChat(args);
 
   const askResult = await deps.runWithoutSession(args, ctx, chat);
@@ -1044,7 +1044,7 @@ async function askNewSession(
     const turnIndex = (deps.listSessionContentEntries(args.sessionId)?.length ?? 0) - 1;
     appendSessionResource(askResult.result, args.sessionId, turnIndex, ctx.task?.id);
   } else {
-    await ctx.mcpReq.log('debug', `Session ${args.sessionId} not stored due to stream error`);
+    await mcpLog(ctx, 'debug', `Session ${args.sessionId} not stored due to stream error`);
   }
 
   return askResult.result;

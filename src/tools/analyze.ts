@@ -9,6 +9,7 @@ import type { Part } from '@google/genai';
 import type { z } from 'zod/v4';
 
 import { withUploadsAndPipeline } from '../lib/file.js';
+import { mcpLog } from '../lib/logger.js';
 import { buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
 import {
@@ -163,7 +164,7 @@ function createAnalyzeFileWork(
       progress,
       (fp) => `Uploading ${fp.split(/[\\/]/).pop() ?? fp}`,
       async (contents) => {
-        await ctx.mcpReq.log('info', `Analyzing file content`);
+        await mcpLog(ctx, 'info', `Analyzing file content`);
         await progress.step(1, 2, 'Analyzing content');
 
         return await executor.executeGeminiPipeline(ctx, {
@@ -318,7 +319,7 @@ async function analyzeDiagramWork(
 
       const totalSteps = uploadedCount > 0 ? uploadedCount + 1 : 1;
       await progress.step(uploadedCount, totalSteps, `Generating ${args.diagramType} diagram`);
-      await ctx.mcpReq.log('info', `Generating ${args.diagramType} diagram`);
+      await mcpLog(ctx, 'info', `Generating ${args.diagramType} diagram`);
 
       const diagramBuiltInTools = pickDiagramBuiltInTools(args);
 

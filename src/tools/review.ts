@@ -1,9 +1,4 @@
-import type {
-  CallToolResult,
-  McpServer,
-  ServerContext,
-  TaskMessageQueue,
-} from '@modelcontextprotocol/server';
+import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { execFile } from 'node:child_process';
 import { lstat, readFile } from 'node:fs/promises';
@@ -1323,7 +1318,6 @@ async function reviewWork(
 
 export function registerReviewTool(
   server: McpServer,
-  taskMessageQueue: TaskMessageQueue,
   workspaceCacheManager: WorkspaceCacheManagerImpl,
   rootsFetcher: RootsFetcher,
 ): void {
@@ -1339,7 +1333,6 @@ export function registerReviewTool(
       outputSchema: ReviewOutputSchema,
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
-    queue: taskMessageQueue,
     work: (args, ctx) => reviewWork(compareWork, rootsFetcher, workspaceCacheManager, args, ctx),
   });
 }

@@ -276,7 +276,7 @@ describe('public MCP task lifecycle', () => {
     }
   });
 
-  it('defaults task ttl to 300000 when omitted', async () => {
+  it('defaults task ttl to the research tool override (900000) when omitted', async () => {
     const harness = await createHarness();
 
     try {
@@ -294,7 +294,7 @@ describe('public MCP task lifecycle', () => {
       await getTaskResult(harness.client, taskId);
 
       const task = await harness.client.request('tasks/get', { taskId });
-      assert.equal(task.result.ttl, 300_000);
+      assert.equal(task.result.ttl, 900_000);
       assert.equal(task.result.pollInterval, 1000);
     } finally {
       await harness.close();

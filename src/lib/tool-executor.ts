@@ -25,6 +25,12 @@ import { buildSharedStructuredMetadata, extractTextContent } from './response.js
 import { executeToolStream, extractUsage, type StreamResult } from './streaming.js';
 import { getWorkspaceCacheName, type WorkspaceCacheManagerImpl } from './workspace-context.js';
 
+// Local copy of `getWorkSignal` from `task-utils.js` to avoid an import cycle.
+function workSignal(ctx: ServerContext): AbortSignal {
+  const task = ctx.task as { cancellationSignal?: AbortSignal } | undefined;
+  return task?.cancellationSignal ?? ctx.mcpReq.signal;
+}
+
 type StreamResponseBuilder<T extends Record<string, unknown>> = (
   streamResult: StreamResult,
   text: string,
@@ -309,7 +315,7 @@ export class ToolExecutor {
               tools: resolved.config.tools,
               toolConfig: resolved.config.toolConfig,
             },
-            ctx.mcpReq.signal,
+            workSignal(ctx),
           ),
         }),
       request.responseBuilder,

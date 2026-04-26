@@ -38,33 +38,28 @@ function createServer(): McpServer {
   );
 }
 
-const queue = new InMemoryTaskMessageQueue();
 const sessionStore = createSessionStore();
 const workspaceCacheManager = createWorkspaceCacheManager();
 
 describe('tool registration', () => {
   it('registers chat without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerChatTool(server, sessionStore, queue, workspaceCacheManager));
+    assert.doesNotThrow(() => registerChatTool(server, sessionStore, workspaceCacheManager));
   });
 
   it('registers research without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerResearchTool(server, queue, workspaceCacheManager));
+    assert.doesNotThrow(() => registerResearchTool(server, workspaceCacheManager));
   });
 
   it('registers analyze without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() =>
-      registerAnalyzeTool(server, queue, workspaceCacheManager, rootsFetcher),
-    );
+    assert.doesNotThrow(() => registerAnalyzeTool(server, workspaceCacheManager, rootsFetcher));
   });
 
   it('registers review without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() =>
-      registerReviewTool(server, queue, workspaceCacheManager, rootsFetcher),
-    );
+    assert.doesNotThrow(() => registerReviewTool(server, workspaceCacheManager, rootsFetcher));
   });
 
   it('registers resources without error', () => {
@@ -80,10 +75,10 @@ describe('tool registration', () => {
   it('registers all public tools, prompts, and resources on the same server', () => {
     const server = createServer();
     assert.doesNotThrow(() => {
-      registerChatTool(server, sessionStore, queue, workspaceCacheManager);
-      registerResearchTool(server, queue, workspaceCacheManager);
-      registerAnalyzeTool(server, queue, workspaceCacheManager, rootsFetcher);
-      registerReviewTool(server, queue, workspaceCacheManager, rootsFetcher);
+      registerChatTool(server, sessionStore, workspaceCacheManager);
+      registerResearchTool(server, workspaceCacheManager);
+      registerAnalyzeTool(server, workspaceCacheManager, rootsFetcher);
+      registerReviewTool(server, workspaceCacheManager, rootsFetcher);
       registerPrompts(server);
       registerResources(server, sessionStore, workspaceCacheManager);
     });

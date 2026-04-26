@@ -1,6 +1,5 @@
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import type { RequestTaskStore, ServerContext, Task } from '@modelcontextprotocol/server';
-import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
@@ -471,7 +470,6 @@ describe('ToolExecutor', () => {
   });
 
   it('registerTaskTool emits a single terminal completion from the inner stream executor', async () => {
-    const queue = new InMemoryTaskMessageQueue();
     const store = makeMockTaskStore();
     const { ctx, progressCalls } = makeMockTaskContext(store);
     const { server, getHandler } = makeMockTaskToolServer();
@@ -487,7 +485,6 @@ describe('ToolExecutor', () => {
         outputSchema: z.strictObject({ answer: z.string() }),
         annotations: {},
       },
-      queue,
       async (_args, taskCtx) =>
         executor.runStream(
           taskCtx,
@@ -518,7 +515,6 @@ describe('ToolExecutor', () => {
   });
 
   it('registerTaskTool emits a single terminal failure from the inner stream executor', async () => {
-    const queue = new InMemoryTaskMessageQueue();
     const store = makeMockTaskStore();
     const { ctx, progressCalls } = makeMockTaskContext(store);
     const { server, getHandler } = makeMockTaskToolServer();
@@ -534,7 +530,6 @@ describe('ToolExecutor', () => {
         outputSchema: z.strictObject({ answer: z.string() }),
         annotations: {},
       },
-      queue,
       async (_args, taskCtx) =>
         executor.runStream(taskCtx, 'inner_stream', 'Inner Stream', async () => {
           throw new Error('boom');

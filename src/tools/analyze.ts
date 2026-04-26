@@ -1,9 +1,4 @@
-import type {
-  CallToolResult,
-  McpServer,
-  ServerContext,
-  TaskMessageQueue,
-} from '@modelcontextprotocol/server';
+import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import type { Part } from '@google/genai';
 import type { z } from 'zod/v4';
@@ -511,7 +506,6 @@ function buildAnalyzeStructuredContent(
 
 export function registerAnalyzeTool(
   server: McpServer,
-  taskMessageQueue: TaskMessageQueue,
   workspaceCacheManager: WorkspaceCacheManagerImpl,
   rootsFetcher: RootsFetcher,
 ): void {
@@ -528,7 +522,6 @@ export function registerAnalyzeTool(
       outputSchema: AnalyzeOutputSchema,
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
-    queue: taskMessageQueue,
     work: (args, ctx) => analyzeWork(rootsFetcher, workspaceCacheManager, fileWork, args, ctx),
   });
 }

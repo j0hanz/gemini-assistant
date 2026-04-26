@@ -1,8 +1,4 @@
-import {
-  InMemoryTaskMessageQueue,
-  InMemoryTaskStore,
-  McpServer,
-} from '@modelcontextprotocol/server';
+import { McpServer } from '@modelcontextprotocol/server';
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -10,9 +6,11 @@ import { join } from 'node:path';
 import { AppError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
+import { createSharedTaskInfra, type SharedTaskInfra } from './lib/task-infra.js';
 import { buildServerRootsFetcher, type RootsFetcher } from './lib/validation.js';
 import { createWorkspaceCacheManager } from './lib/workspace-context.js';
 
+import { getStatelessTransportFlag } from './config.js';
 import { registerPrompts } from './prompts.js';
 import { PUBLIC_STATIC_RESOURCE_URIS, PUBLIC_TOOL_NAMES } from './public-contract.js';
 import { registerResources, SESSIONS_LIST_URI } from './resources.js';
@@ -30,7 +28,6 @@ const { version } = JSON.parse(
 const log = logger.child('server');
 interface ServerServices {
   sessionStore: SessionStore;
-  taskMessageQueue: InMemoryTaskMessageQueue;
   workspaceCacheManager: ReturnType<typeof createWorkspaceCacheManager>;
   rootsFetcher: RootsFetcher;
 }
@@ -39,31 +36,16 @@ type ServerRegistrar = (server: McpServer, services: ServerServices) => void;
 
 const SERVER_TOOL_REGISTRARS = [
   (server, services) => {
-    registerChatTool(
-      server,
-      services.sessionStore,
-      services.taskMessageQueue,
-      services.workspaceCacheManager,
-    );
+    registerChatTool(server, services.sessionStore, services.workspaceCacheManager);
   },
   (server, services) => {
-    registerResearchTool(server, services.taskMessageQueue, services.workspaceCacheManager);
+    registerResearchTool(server, services.workspaceCacheManager);
   },
   (server, services) => {
-    registerAnalyzeTool(
-      server,
-      services.taskMessageQueue,
-      services.workspaceCacheManager,
-      services.rootsFetcher,
-    );
+    registerAnalyzeTool(server, services.workspaceCacheManager, services.rootsFetcher);
   },
   (server, services) => {
-    registerReviewTool(
-      server,
-      services.taskMessageQueue,
-      services.workspaceCacheManager,
-      services.rootsFetcher,
-    );
+    registerReviewTool(server, services.workspaceCacheManager, services.rootsFetcher);
   },
 ] as const satisfies readonly ServerRegistrar[];
 
@@ -74,6 +56,8 @@ export const SERVER_INSTRUCTIONS =
   'research (explicit quick or deep grounded research), ' +
   'analyze (file, URL, small file-set analysis, or diagram generation), ' +
   'review (diff review, file comparison, or failure diagnosis). ' +
+  'Tasks (the tools/call task-aware path) are process-local and lost across restarts; ' +
+  'deep research tasks may take several minutes — poll tasks/get until terminal. ' +
   'Use discover://catalog and discover://workflows for the canonical public surface.';
 
 const STATIC_RESOURCE_URIS = new Set<string>(PUBLIC_STATIC_RESOURCE_URIS);
@@ -142,11 +126,16 @@ function throwCloseErrors(closeErrors: Error[]): void {
   }
 }
 
-export function createServerInstance(): ServerInstance {
+export { createSharedTaskInfra };
+export type { SharedTaskInfra };
+
+export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerInstance {
   const sessionStore = createSessionStore();
-  const taskStore = new InMemoryTaskStore();
-  const taskMessageQueue = new InMemoryTaskMessageQueue();
+  const taskInfra = sharedTaskInfra ?? createSharedTaskInfra();
+  const ownTaskInfra = sharedTaskInfra ? undefined : taskInfra;
+  const { taskStore, taskMessageQueue } = taskInfra;
   const workspaceCacheManager = createWorkspaceCacheManager();
+  const isStateless = getStatelessTransportFlag();
   const server = new McpServer(
     {
       name: 'gemini-assistant',
@@ -160,11 +149,15 @@ export function createServerInstance(): ServerInstance {
         prompts: {},
         resources: { listChanged: true },
         tools: {},
-        tasks: {
-          requests: { tools: { call: {} } },
-          taskStore,
-          taskMessageQueue,
-        },
+        ...(isStateless
+          ? {}
+          : {
+              tasks: {
+                requests: { tools: { call: {} } },
+                taskStore,
+                taskMessageQueue,
+              },
+            }),
       },
       instructions: SERVER_INSTRUCTIONS,
     },
@@ -179,7 +172,6 @@ export function createServerInstance(): ServerInstance {
 
   registerServerTools(server, {
     sessionStore,
-    taskMessageQueue,
     workspaceCacheManager,
     rootsFetcher,
   });
@@ -201,9 +193,11 @@ export function createServerInstance(): ServerInstance {
         sessionStore.close();
       });
       runCloseStep(closeErrors, 'detachLogger', detachLogger);
-      runCloseStep(closeErrors, 'taskStore.cleanup', () => {
-        taskStore.cleanup();
-      });
+      if (ownTaskInfra) {
+        runCloseStep(closeErrors, 'taskStore.cleanup', () => {
+          ownTaskInfra.close();
+        });
+      }
       try {
         await server.close();
       } catch (err) {

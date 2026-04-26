@@ -152,6 +152,8 @@ export const DISCOVERY_ENTRIES = [
     limitations: [
       'Sessions, task state, and task message queues are process-local memory state; restarts or stateless deployments lose continuity.',
       'Sessions require a stateful server connection path. Stateless transport rejects chat calls that include sessionId.',
+      'Stateless transport (STATELESS=true) does not advertise the tasks capability — task-aware tools/call requests are unavailable; clients must rely on the synchronous return path.',
+      'Progress notifications truncate streamed text to ~80 characters per update; full text is delivered in the final response only.',
       'Sessions started before raw `Part[]` capture cannot serve `gemini://sessions/.../parts`.',
       'Structured output is intended for single-turn calls and new sessions, not resumed sessions.',
       'Declared functions are executed by the MCP client, not by this server; return results through functionResponses on the same sessionId.',

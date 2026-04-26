@@ -1,9 +1,4 @@
-import type {
-  CallToolResult,
-  McpServer,
-  ServerContext,
-  TaskMessageQueue,
-} from '@modelcontextprotocol/server';
+import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import type {
   GroundingChunk,
@@ -58,6 +53,7 @@ import {
 } from '../lib/streaming.js';
 import {
   elicitTaskInput,
+  getWorkSignal,
   READONLY_NON_IDEMPOTENT_ANNOTATIONS,
   registerWorkTool,
 } from '../lib/task-utils.js';
@@ -518,7 +514,7 @@ async function runDeepResearchTurn(
     getAI().models.generateContentStream({
       model: getGeminiModel(),
       contents,
-      config: buildGenerateContentConfig(config, ctx.mcpReq.signal),
+      config: buildGenerateContentConfig(config, getWorkSignal(ctx)),
     }),
   );
 }
@@ -590,7 +586,7 @@ async function runDeepResearchPlan(
   if (resolvedRetrieval.error) return resolvedRetrieval.error;
 
   for (const [index, query] of subQueries.slice(0, maxRetrievalTurns).entries()) {
-    if (ctx.mcpReq.signal.aborted) {
+    if (getWorkSignal(ctx).aborted) {
       warnings.push('deep research aborted; returning partial aggregated result');
       break;
     }
@@ -886,7 +882,7 @@ async function agenticSearchWork(
             tools,
             toolConfig,
           },
-          ctx.mcpReq.signal,
+          getWorkSignal(ctx),
         ),
       }),
     responseBuilder: (streamResult, textContent) =>
@@ -1009,7 +1005,6 @@ async function researchWork(
 
 export function registerResearchTool(
   server: McpServer,
-  taskMessageQueue: TaskMessageQueue,
   workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): void {
   registerWorkTool<ResearchInput>({
@@ -1022,7 +1017,7 @@ export function registerResearchTool(
       outputSchema: ResearchOutputSchema,
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
-    queue: taskMessageQueue,
+    overrides: { defaultTtlMs: 900_000 },
     work: (args, ctx) => researchWork(args, ctx, workspaceCacheManager),
   });
 }

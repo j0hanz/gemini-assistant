@@ -6,16 +6,16 @@ import type {
   RequestTaskStore,
   ServerContext,
   Task,
-  TaskMessageQueue,
 } from '@modelcontextprotocol/server';
 
+import { getStatelessTransportFlag } from '../config.js';
 import { AppError } from './errors.js';
 import { logger, maybeSummarizePayload } from './logger.js';
 import { hasTerminalProgress, reportCompletion, reportFailure } from './progress.js';
 import { extractTextContent, validateStructuredToolResult } from './response.js';
 import { executor } from './tool-executor.js';
 
-const DEFAULT_TTL = 300_000;
+const DEFAULT_TTL = 600_000;
 
 export const READONLY_NON_IDEMPOTENT_ANNOTATIONS = {
   readOnlyHint: true,
@@ -31,15 +31,38 @@ export const MUTABLE_ANNOTATIONS = {
   openWorldHint: true,
 } as const;
 
+export const READ_ONLY_SESSION_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true,
+} as const;
+
 const TASK_EXECUTION = { taskSupport: 'optional' } as const;
 const taskLog = logger.child('task-utils');
 
 type TaskContext = NonNullable<ServerContext['task']>;
-type ExtendedTaskContext = TaskContext & { queue: TaskMessageQueue };
+type ExtendedTaskContext = TaskContext & {
+  cancellationSignal?: AbortSignal;
+};
 type ExtendedServerContext = ServerContext & { task?: ExtendedTaskContext };
+
+export function getWorkSignal(ctx: ServerContext): AbortSignal {
+  const task = ctx.task as ExtendedTaskContext | undefined;
+  return task?.cancellationSignal ?? ctx.mcpReq.signal;
+}
+
+function isTerminalStatusError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.message.includes('terminal status');
+}
 
 export type TaskWork<TArgs> = (args: TArgs, ctx: ExtendedServerContext) => Promise<CallToolResult>;
 export type { TaskToolConfig };
+
+export interface TaskToolOverrides {
+  defaultTtlMs?: number;
+}
 
 interface ToolTaskHandlers<TArgs> {
   createTask: (args: TArgs, ctx: ServerContext) => Promise<CreateTaskResult>;
@@ -100,14 +123,8 @@ function hasStandardSchema(schema: unknown): schema is StandardSchemaLike {
   );
 }
 
-/**
- * The MCP SDK normally validates `inputSchema` before reaching the tool handler.
- * For task-aware tools we deliberately bypass that validation here so that
- * schema-invalid arguments still create a task and surface as a `failed` task
- * result via `materializeTaskFailure`, rather than being rejected as a
- * `tools/call` protocol error before the task is ever recorded. The real
- * validation happens inside the task via `parseTaskInput`.
- */
+// Bypass SDK input-schema validation so schema-invalid args still record a
+// `failed` task result rather than rejecting at the `tools/call` boundary.
 function createSdkPassthroughInputSchema(
   schema: TaskToolConfig['inputSchema'],
 ): TaskRegistrationConfig['inputSchema'] {
@@ -155,11 +172,6 @@ export async function elicitTaskInput(
   await taskContext.store.updateTaskStatus(taskContext.id, 'input_required', statusMessage);
 
   try {
-    // The SDK does not expose peer capabilities through ServerContext. If the
-    // connected client does not declare elicitation, elicitInput will reject
-    // (method not found / not supported). Surface that as a typed AppError so
-    // the surrounding task path records a clean `failed` result via
-    // materializeTaskFailure rather than an opaque transport rejection.
     let result;
     try {
       result = await ctx.mcpReq.elicitInput({
@@ -193,13 +205,69 @@ export async function elicitTaskInput(
     const text = typeof result.content?.text === 'string' ? result.content.text.trim() : '';
     return text ? text : undefined;
   } catch (error) {
-    try {
-      await taskContext.store.updateTaskStatus(taskContext.id, 'working');
-    } catch {
-      // Ignore if the task is already terminal or the transport is gone.
+    if (!(await isTaskCancelled(taskContext.store, taskContext.id))) {
+      try {
+        await taskContext.store.updateTaskStatus(taskContext.id, 'working');
+      } catch {
+        // Task is already terminal or transport is gone.
+      }
     }
     throw error;
   }
+}
+
+export function bridgeTaskCancellationToSignal(
+  baseSignal: AbortSignal,
+  taskId: string,
+  store: RequestTaskStore,
+  pollIntervalMs?: number,
+): AbortSignal {
+  const controller = new AbortController();
+
+  if (baseSignal.aborted) {
+    controller.abort(baseSignal.reason);
+    return controller.signal;
+  }
+
+  const intervalMs = Math.min(Math.max(pollIntervalMs ?? 1000, 100), 2000);
+  let cleaned = false;
+
+  const cleanup = (): void => {
+    if (cleaned) return;
+    cleaned = true;
+    clearInterval(timer);
+    baseSignal.removeEventListener('abort', onBaseAbort);
+  };
+
+  const onBaseAbort = (): void => {
+    cleanup();
+    if (!controller.signal.aborted) controller.abort(baseSignal.reason);
+  };
+  baseSignal.addEventListener('abort', onBaseAbort, { once: true });
+
+  const timer = setInterval(() => {
+    void (async () => {
+      try {
+        const current = await store.getTask(taskId);
+        if (
+          current.status === 'cancelled' ||
+          current.status === 'completed' ||
+          current.status === 'failed'
+        ) {
+          cleanup();
+          if (current.status === 'cancelled' && !controller.signal.aborted) {
+            controller.abort(new Error(`Task ${taskId} cancelled`));
+          }
+        }
+      } catch {
+        // baseSignal still controls abort on poll errors.
+      }
+    })();
+  }, intervalMs);
+  (timer as { unref?: () => void }).unref?.();
+
+  controller.signal.addEventListener('abort', cleanup, { once: true });
+  return controller.signal;
 }
 
 function requireTaskContext(ctx: ServerContext | ExtendedServerContext): TaskContext {
@@ -227,11 +295,6 @@ function assertCallToolResult(
   }
 }
 
-/**
- * Runs tool work in the background and stores the result in the task store.
- * Maps `isError: true` results to `'failed'` task status.
- * Skips storing if the task has been cancelled.
- */
 export function runToolAsTask(
   store: RequestTaskStore,
   task: Task,
@@ -246,10 +309,12 @@ export function runToolAsTask(
         isError: true,
       });
     } catch (storeErr) {
+      if (isTerminalStatusError(storeErr)) return;
       onStoreError?.(task.taskId, storeErr);
       try {
         await store.updateTaskStatus(task.taskId, 'failed', errorMessage);
       } catch (statusErr) {
+        if (isTerminalStatusError(statusErr)) return;
         onStoreError?.(task.taskId, statusErr);
       }
     }
@@ -263,6 +328,8 @@ export function runToolAsTask(
       try {
         await store.storeTaskResult(task.taskId, status, result);
       } catch (storeErr) {
+        // Terminal-status writes are no-ops: the result was already recorded.
+        if (isTerminalStatusError(storeErr)) return;
         onStoreError?.(task.taskId, storeErr);
         if (await isTaskCancelled(store, task.taskId)) return;
         await storeFailedResult(storeErr, 'Failed to store task result: ');
@@ -275,15 +342,18 @@ export function runToolAsTask(
     });
 }
 
-export function taskTtl(requestedTtl: number | undefined): number {
-  return requestedTtl ?? DEFAULT_TTL;
+export function taskTtl(requestedTtl: number | undefined, defaultTtlMs?: number): number {
+  return requestedTtl ?? defaultTtlMs ?? DEFAULT_TTL;
 }
 
 async function createTaskOrFail(
   ctx: ServerContext | ExtendedServerContext,
+  defaultTtlMs?: number,
 ): Promise<{ task: Task; taskContext: TaskContext }> {
   const taskContext = requireTaskContext(ctx);
-  const task = await taskContext.store.createTask({ ttl: taskTtl(taskContext.requestedTtl) });
+  const task = await taskContext.store.createTask({
+    ttl: taskTtl(taskContext.requestedTtl, defaultTtlMs),
+  });
   return { task, taskContext };
 }
 
@@ -311,11 +381,22 @@ async function materializeTaskFailure(
   await store.storeTaskResult(task.taskId, 'failed', appError.toToolResult());
 }
 
-function wrapTaskSafeWork<TArgs>(toolName: string, work: TaskWork<TArgs>): TaskWork<TArgs> {
+function wrapTaskSafeWork<TArgs>(
+  toolName: string,
+  toolLabel: string,
+  work: TaskWork<TArgs>,
+): TaskWork<TArgs> {
   return async (args, ctx) => {
     try {
       return await work(args, ctx);
     } catch (err) {
+      if (!hasTerminalProgress(ctx)) {
+        try {
+          await reportFailure(ctx, toolLabel, err);
+        } catch {
+          // Progress emission errors are non-fatal during failure path.
+        }
+      }
       return taskFailureResult(toolName, err);
     }
   };
@@ -342,29 +423,45 @@ async function ensureTerminalTaskProgress(
 export function createToolTaskHandlers<TArgs>(
   toolName: string,
   work: TaskWork<TArgs>,
-  taskMessageQueue: TaskMessageQueue,
   toolLabel = toolName,
   inputSchema?: unknown,
+  overrides?: TaskToolOverrides,
 ): ToolTaskHandlers<TArgs> {
   return {
     createTask: async (rawArgs, ctx) => {
-      const { task, taskContext } = await createTaskOrFail(ctx);
-      let args: TArgs;
-      try {
-        args = parseTaskInput(inputSchema, rawArgs) as TArgs;
-      } catch (err) {
-        await materializeTaskFailure(toolName, taskContext.store, task, err, rawArgs);
-        return { task };
-      }
+      const { task, taskContext } = await createTaskOrFail(ctx, overrides?.defaultTtlMs);
+
+      const cancellationSignal = bridgeTaskCancellationToSignal(
+        ctx.mcpReq.signal,
+        task.taskId,
+        taskContext.store,
+        task.pollInterval,
+      );
 
       const taskExecutionContext: ExtendedServerContext = {
         ...ctx,
         task: {
           ...taskContext,
           id: task.taskId,
-          queue: taskMessageQueue,
+          cancellationSignal,
         },
       };
+
+      let args: TArgs;
+      try {
+        args = parseTaskInput(inputSchema, rawArgs) as TArgs;
+      } catch (err) {
+        if (!hasTerminalProgress(taskExecutionContext)) {
+          try {
+            await reportFailure(taskExecutionContext, toolLabel, err);
+          } catch {
+            // Progress emission errors are non-fatal during failure path.
+          }
+        }
+        await materializeTaskFailure(toolName, taskContext.store, task, err, rawArgs);
+        return { task };
+      }
+
       try {
         const taskWork = work(args, taskExecutionContext)
           .then((result) => ensureTerminalTaskProgress(taskExecutionContext, toolLabel, result))
@@ -412,46 +509,67 @@ export function registerTaskTool<TArgs>(
   server: McpServer,
   name: string,
   config: TaskToolConfig,
-  taskMessageQueue: TaskMessageQueue,
   work: TaskWork<TArgs>,
+  overrides?: TaskToolOverrides,
 ): void {
   const toolLabel = config.title ?? name;
   const handler: TaskToolHandler = createToolTaskHandlers(
     name,
-    wrapTaskSafeWork(name, async (args: TArgs, ctx: ExtendedServerContext) =>
+    wrapTaskSafeWork(name, toolLabel, async (args: TArgs, ctx: ExtendedServerContext) =>
       validateStructuredToolResult(
         name,
         config.outputSchema,
-        await executor.runSilent(
-          ctx,
-          name,
-          toolLabel,
-          args,
-          work as (args: TArgs, ctx: ServerContext) => Promise<CallToolResult>,
-        ),
+        await executor.runSilent(ctx, name, toolLabel, args, work),
       ),
     ),
-    taskMessageQueue,
     toolLabel,
     config.inputSchema,
+    overrides,
   ) as TaskToolHandler;
 
   server.experimental.tasks.registerToolTask(name, createTaskRegistrationConfig(config), handler);
 }
 
+// Stateless transports register as plain tools since task results cannot
+// be polled across request boundaries.
+function registerWorkToolStateless<TArgs>(
+  server: McpServer,
+  name: string,
+  config: TaskToolConfig,
+  work: TaskWork<TArgs>,
+): void {
+  const toolLabel = config.title ?? name;
+  server.registerTool(
+    name,
+    {
+      ...(config.title ? { title: config.title } : {}),
+      ...(config.description ? { description: config.description } : {}),
+      inputSchema: config.inputSchema,
+      ...(config.outputSchema ? { outputSchema: config.outputSchema } : {}),
+      ...(config.annotations ? { annotations: config.annotations } : {}),
+    },
+    async (args, ctx) =>
+      validateStructuredToolResult(
+        name,
+        config.outputSchema,
+        await executor.run(ctx, name, toolLabel, args as TArgs, work),
+      ),
+  );
+}
+
 interface RegisterWorkToolParams<TArgs> {
   server: McpServer;
   tool: { name: string } & TaskToolConfig;
-  queue: TaskMessageQueue;
   work: TaskWork<TArgs>;
+  overrides?: TaskToolOverrides;
 }
 
-export function registerWorkTool<TArgs>({
-  server,
-  tool,
-  queue,
-  work,
-}: RegisterWorkToolParams<TArgs>): void {
+export function registerWorkTool<TArgs>(params: RegisterWorkToolParams<TArgs>): void {
+  const { server, tool, work, overrides } = params;
   const { name, ...config } = tool;
-  registerTaskTool<TArgs>(server, name, config, queue, work);
+  if (getStatelessTransportFlag()) {
+    registerWorkToolStateless<TArgs>(server, name, config, work);
+    return;
+  }
+  registerTaskTool<TArgs>(server, name, config, work, overrides);
 }

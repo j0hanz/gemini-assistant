@@ -1,9 +1,4 @@
-import type {
-  CallToolResult,
-  McpServer,
-  ServerContext,
-  TaskMessageQueue,
-} from '@modelcontextprotocol/server';
+import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { Validator } from '@cfworker/json-schema';
 import { FinishReason, FunctionCallingConfigMode } from '@google/genai';
@@ -41,7 +36,7 @@ import {
   type StreamResult,
   type ToolEvent,
 } from '../lib/streaming.js';
-import { MUTABLE_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
+import { READ_ONLY_SESSION_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { getAllowedRoots, validateGeminiRequest, validateUrls } from '../lib/validation.js';
 import {
@@ -1306,7 +1301,6 @@ export async function chatWork(
 export function registerChatTool(
   server: McpServer,
   sessionStore: SessionStore,
-  taskMessageQueue: TaskMessageQueue,
   workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
 ): void {
   const askWork = createAskWork(
@@ -1323,9 +1317,8 @@ export function registerChatTool(
         'Direct Gemini chat with optional server-managed sessions and reusable cache memory.',
       inputSchema: createChatInputSchema(sessionStore.completeSessionIds.bind(sessionStore)),
       outputSchema: ChatOutputSchema,
-      annotations: MUTABLE_ANNOTATIONS,
+      annotations: READ_ONLY_SESSION_ANNOTATIONS,
     },
-    queue: taskMessageQueue,
     work: (args, ctx) => chatWork(askWork, args, ctx),
   });
 }

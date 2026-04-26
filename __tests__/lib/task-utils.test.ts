@@ -4,7 +4,6 @@ import type {
   ServerContext,
   Task,
 } from '@modelcontextprotocol/server';
-import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
@@ -98,7 +97,11 @@ function makeMockContext(opts?: {
 
 describe('taskTtl', () => {
   it('returns the default TTL when undefined', () => {
-    assert.strictEqual(taskTtl(undefined), 300_000);
+    assert.strictEqual(taskTtl(undefined), 600_000);
+  });
+
+  it('honors a per-tool default override when provided', () => {
+    assert.strictEqual(taskTtl(undefined, 900_000), 900_000);
   });
 
   it('returns the requested TTL when provided', () => {
@@ -276,7 +279,6 @@ describe('createToolTaskHandlers', () => {
   it('createTask creates a task and schedules work', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store });
-    const queue = new InMemoryTaskMessageQueue();
     let observedTaskId: string | undefined;
 
     const work = async (args: { msg: string }, workCtx: ServerContext) => {
@@ -286,7 +288,7 @@ describe('createToolTaskHandlers', () => {
       };
     };
 
-    const handlers = createToolTaskHandlers('test-tool', work, queue);
+    const handlers = createToolTaskHandlers('test-tool', work);
     const result = await handlers.createTask({ msg: 'hello' }, ctx);
 
     assert.ok(result.task);
@@ -304,15 +306,10 @@ describe('createToolTaskHandlers', () => {
   it('createTask stores a failed result when work throws synchronously', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store });
-    const queue = new InMemoryTaskMessageQueue();
 
-    const handlers = createToolTaskHandlers(
-      'test-tool',
-      () => {
-        throw new Error('sync explode');
-      },
-      queue,
-    );
+    const handlers = createToolTaskHandlers('test-tool', () => {
+      throw new Error('sync explode');
+    });
 
     const result = await handlers.createTask({}, ctx);
     assert.ok(result.task);
@@ -345,14 +342,12 @@ describe('createToolTaskHandlers', () => {
         ...(n.params.message ? { message: n.params.message } : {}),
       });
     };
-    const queue = new InMemoryTaskMessageQueue();
 
     const handlers = createToolTaskHandlers(
       'test-tool',
       async () => ({
         content: [{ type: 'text' as const, text: 'ok' }],
       }),
-      queue,
       'Test Tool',
     );
 
@@ -384,15 +379,10 @@ describe('createToolTaskHandlers', () => {
         ...(n.params.message ? { message: n.params.message } : {}),
       });
     };
-    const queue = new InMemoryTaskMessageQueue();
 
-    const handlers = createToolTaskHandlers(
-      'test-tool',
-      async () => {
-        throw new Error('outputSchema mismatch');
-      },
-      queue,
-    );
+    const handlers = createToolTaskHandlers('test-tool', async () => {
+      throw new Error('outputSchema mismatch');
+    });
 
     const result = await handlers.createTask({}, ctx);
     assert.ok(result.task);
@@ -421,15 +411,10 @@ describe('createToolTaskHandlers', () => {
       },
     });
     const ctx = makeMockContext({ taskStore: store, requestedTtl: 120_000 });
-    const queue = new InMemoryTaskMessageQueue();
 
-    const handlers = createToolTaskHandlers(
-      'test-tool',
-      async () => ({
-        content: [{ type: 'text' as const, text: 'ok' }],
-      }),
-      queue,
-    );
+    const handlers = createToolTaskHandlers('test-tool', async () => ({
+      content: [{ type: 'text' as const, text: 'ok' }],
+    }));
 
     await handlers.createTask({}, ctx);
     assert.strictEqual(capturedTtl, 120_000);
@@ -437,15 +422,10 @@ describe('createToolTaskHandlers', () => {
 
   it('throws when task context is missing', async () => {
     const ctx = makeMockContext(); // no taskStore
-    const queue = new InMemoryTaskMessageQueue();
 
-    const handlers = createToolTaskHandlers(
-      'test-tool',
-      async () => ({
-        content: [{ type: 'text' as const, text: 'ok' }],
-      }),
-      queue,
-    );
+    const handlers = createToolTaskHandlers('test-tool', async () => ({
+      content: [{ type: 'text' as const, text: 'ok' }],
+    }));
 
     await assert.rejects(() => handlers.createTask({}, ctx), {
       message: /Task context is unavailable/,
@@ -455,15 +435,10 @@ describe('createToolTaskHandlers', () => {
   it('getTask retrieves task from store', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store, taskId: 'task-42' });
-    const queue = new InMemoryTaskMessageQueue();
 
-    const handlers = createToolTaskHandlers(
-      'test-tool',
-      async () => ({
-        content: [{ type: 'text' as const, text: 'ok' }],
-      }),
-      queue,
-    );
+    const handlers = createToolTaskHandlers('test-tool', async () => ({
+      content: [{ type: 'text' as const, text: 'ok' }],
+    }));
 
     const result = await handlers.getTask({}, ctx);
     assert.equal('task' in result, false);
@@ -473,15 +448,10 @@ describe('createToolTaskHandlers', () => {
   it('getTask throws when task ID is missing', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store }); // no taskId
-    const queue = new InMemoryTaskMessageQueue();
 
-    const handlers = createToolTaskHandlers(
-      'test-tool',
-      async () => ({
-        content: [{ type: 'text' as const, text: 'ok' }],
-      }),
-      queue,
-    );
+    const handlers = createToolTaskHandlers('test-tool', async () => ({
+      content: [{ type: 'text' as const, text: 'ok' }],
+    }));
 
     await assert.rejects(() => handlers.getTask({}, ctx), {
       message: /Task ID is unavailable/,
@@ -491,15 +461,10 @@ describe('createToolTaskHandlers', () => {
   it('getTaskResult retrieves result from store', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store, taskId: 'task-42' });
-    const queue = new InMemoryTaskMessageQueue();
 
-    const handlers = createToolTaskHandlers(
-      'test-tool',
-      async () => ({
-        content: [{ type: 'text' as const, text: 'ok' }],
-      }),
-      queue,
-    );
+    const handlers = createToolTaskHandlers('test-tool', async () => ({
+      content: [{ type: 'text' as const, text: 'ok' }],
+    }));
 
     const result = await handlers.getTaskResult({}, ctx);
     assert.deepStrictEqual(result.content, [{ type: 'text', text: 'ok' }]);
@@ -652,7 +617,6 @@ describe('registerTaskTool', () => {
   it('stores failed status when central validation rejects structured content', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store });
-    const queue = new InMemoryTaskMessageQueue();
     const { server, getHandler } = makeMockServer();
 
     registerTaskTool(
@@ -668,7 +632,6 @@ describe('registerTaskTool', () => {
         }),
         annotations: {},
       },
-      queue,
       async ({ msg }: { msg: string }) => ({
         content: [{ type: 'text', text: msg }],
         structuredContent: { status: 'completed', explanation: 'wrong field' },
@@ -690,7 +653,6 @@ describe('registerTaskTool', () => {
   it('stores completed status when central validation accepts structured content', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store });
-    const queue = new InMemoryTaskMessageQueue();
     const { server, getHandler } = makeMockServer();
 
     registerTaskTool(
@@ -706,7 +668,6 @@ describe('registerTaskTool', () => {
         }),
         annotations: {},
       },
-      queue,
       async ({ msg }: { msg: string }) => ({
         content: [{ type: 'text', text: msg }],
         structuredContent: { status: 'completed', summary: 'ok' },
@@ -730,7 +691,6 @@ describe('registerTaskTool', () => {
   it('stores failed status when input validation rejects task args', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store });
-    const queue = new InMemoryTaskMessageQueue();
     const { server, getHandler } = makeMockServer();
     let workCalled = false;
 
@@ -744,7 +704,6 @@ describe('registerTaskTool', () => {
         outputSchema: z.strictObject({ summary: z.string() }),
         annotations: {},
       },
-      queue,
       async () => {
         workCalled = true;
         return {

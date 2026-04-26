@@ -1,5 +1,4 @@
 import type { RequestTaskStore, ServerContext, Task } from '@modelcontextprotocol/server';
-import { InMemoryTaskMessageQueue } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { basename } from 'node:path';
@@ -123,7 +122,7 @@ function getHandlers() {
     },
   } as never;
 
-  registerAnalyzeTool(server, new InMemoryTaskMessageQueue());
+  registerAnalyzeTool(server);
 
   const analyze = handlers.analyze;
   assert.ok(analyze);

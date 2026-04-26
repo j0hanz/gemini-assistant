@@ -19,6 +19,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
 import { createRateLimiter, type RateLimiter } from './lib/rate-limit.js';
+import { createSharedTaskInfra, type SharedTaskInfra } from './lib/task-infra.js';
 import { resolveAllowedHosts, validateHostHeader } from './lib/validation.js';
 
 import { getTransportConfig } from './config.js';
@@ -60,7 +61,9 @@ export interface ServerInstance {
   close: () => Promise<void>;
 }
 
-type ServerFactory = () => Promise<ServerInstance> | ServerInstance;
+type ServerFactory = (
+  sharedTaskInfra?: SharedTaskInfra,
+) => Promise<ServerInstance> | ServerInstance;
 type EventStoreFactory = () => CleanupEventStore;
 type ServerTransport = Parameters<McpServer['connect']>[0];
 
@@ -782,6 +785,16 @@ export async function startHttpTransport(
 
   applyCors(app, corsOrigin);
 
+  if (isStateless) {
+    log.warn(
+      'Stateless HTTP transport: tasks/* requests are intentionally disabled because task results are not pollable across request boundaries.',
+    );
+  }
+
+  // Shared task infra is created once per transport so HTTP request
+  // boundaries do not lose task state. See lib/task-infra.ts.
+  const sharedTaskInfra = createSharedTaskInfra();
+
   const statefulPairs = new Map<string, ManagedPair<NodeStreamableHTTPServerTransport>>();
   const acquireStatefulCreationLock = createAsyncLock();
   let reservedStatefulSlots = 0;
@@ -810,7 +823,7 @@ export async function startHttpTransport(
     }
     await handleManagedRequest({
       createPair: (isStatelessTransport) =>
-        createNodePair(createServer, isStatelessTransport, createEventStore),
+        createNodePair(() => createServer(sharedTaskInfra), isStatelessTransport, createEventStore),
       getSessionId: (transport) => transport.sessionId,
       handlePair: async (pair) => {
         await pair.transport.handleRequest(req, res, req.body);
@@ -860,6 +873,7 @@ export async function startHttpTransport(
   const close = async () => {
     stopIdleSweep();
     await closeStatefulPairs(statefulPairs);
+    sharedTaskInfra.close();
     try {
       httpServer.closeIdleConnections();
     } catch (err) {
@@ -907,6 +921,14 @@ export function startWebStandardTransport(
   assertHttpBindIsProtected(host, token);
   const rateLimiter = createRateLimiter({ rps: rateLimitRps, burst: rateLimitBurst });
 
+  if (isStateless) {
+    log.warn(
+      'Stateless web-standard transport: tasks/* requests are intentionally disabled because task results are not pollable across request boundaries.',
+    );
+  }
+
+  const sharedTaskInfra = createSharedTaskInfra();
+
   const statefulPairs = new Map<string, ManagedPair<WebStandardStreamableHTTPServerTransport>>();
   const acquireStatefulCreationLock = createAsyncLock();
   let reservedStatefulSlots = 0;
@@ -945,7 +967,7 @@ export function startWebStandardTransport(
     }
     const response = await handleManagedRequest({
       createPair: (isStatelessTransport) =>
-        createWebPair(createServer, isStatelessTransport, createEventStore),
+        createWebPair(() => createServer(sharedTaskInfra), isStatelessTransport, createEventStore),
       getSessionId: (transport) => transport.sessionId,
       handlePair: (pair) => pair.transport.handleRequest(req),
       isStateless,
@@ -971,6 +993,7 @@ export function startWebStandardTransport(
   const close = async () => {
     stopIdleSweep();
     await closeStatefulPairs(statefulPairs);
+    sharedTaskInfra.close();
     await runtimeClose?.();
   };
 

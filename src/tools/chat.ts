@@ -55,6 +55,7 @@ import {
   type ChatInput,
   createChatInputSchema,
   parseResponseSchemaJsonValue,
+  type WithChatDefaults,
 } from '../schemas/inputs.js';
 import { type GeminiResponseSchema } from '../schemas/inputs.js';
 import { ChatOutputSchema, type ContextUsed, type UsageMetadata } from '../schemas/outputs.js';
@@ -91,18 +92,8 @@ import {
 
 export { appendToolResponseTurn, buildRebuiltChatContents } from '../sessions.js';
 
-type WithOptionalTemperature<T> = T extends { temperature: infer Temperature }
-  ? Omit<T, 'temperature'> & { temperature?: Temperature | undefined }
-  : T;
-type WithOptionalChatDefaults<T extends { serverSideToolInvocations?: unknown }> = Omit<
-  T,
-  'serverSideToolInvocations' | 'urls'
-> & {
-  serverSideToolInvocations?: T['serverSideToolInvocations'] | undefined;
-  urls?: string[] | undefined;
-};
-type ChatWorkInput = WithOptionalTemperature<WithOptionalChatDefaults<ChatInput>>;
-export type AskArgs = WithOptionalTemperature<WithOptionalChatDefaults<AskInput>> & {
+type ChatWorkInput = WithChatDefaults<ChatInput>;
+export type AskArgs = WithChatDefaults<AskInput> & {
   cacheName?: string;
 };
 

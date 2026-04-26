@@ -230,6 +230,14 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
 export const ChatInputSchema = createChatInputSchema();
 export type ChatInput = z.infer<typeof ChatInputSchema>;
 
+export type WithChatDefaults<
+  T extends { temperature?: unknown; serverSideToolInvocations?: unknown; urls?: unknown },
+> = Omit<T, 'temperature' | 'serverSideToolInvocations' | 'urls'> & {
+  temperature?: T['temperature'] | undefined;
+  serverSideToolInvocations?: T['serverSideToolInvocations'] | undefined;
+  urls?: string[] | undefined;
+};
+
 const ResearchInputBaseSchema = z.strictObject({
   mode: researchMode(),
   goal: goalText('Question or research goal to answer quickly'),

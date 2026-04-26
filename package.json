@@ -33,7 +33,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "type-check": "tsc -p tsconfig.test.json --noEmit",
+    "type-check": "tsc -p tsconfig.json --noEmit",
     "knip": "knip",
     "check": "npm run build && npm run type-check && eslint . && prettier --check . && knip",
     "test": "node --import tsx/esm --env-file=.env --test --no-warnings __tests__/**/*.test.ts __tests__/**/**/*.test.ts",

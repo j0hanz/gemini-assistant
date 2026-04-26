@@ -13,7 +13,7 @@ import type {
 } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
-import { logger, maybeSummarizePayload, mcpLog } from '../lib/logger.js';
+import { logger, mcpLog } from '../lib/logger.js';
 import {
   buildAgenticResearchPrompt,
   buildFileAnalysisPrompt,
@@ -71,12 +71,6 @@ import { TOOL_LABELS } from '../public-contract.js';
 const MAX_DEEP_RESEARCH_TURNS = 4;
 const log = logger.child('research');
 
-type StreamGenerator = () => Promise<
-  AsyncGenerator<import('@google/genai').GenerateContentResponse>
->;
-type StreamResponseBuilder<T extends Record<string, unknown>> = Parameters<
-  typeof executor.runStream<T>
->[4];
 type GenerationConfigFields = Pick<
   ResearchInput,
   'maxOutputTokens' | 'safetySettings' | 'thinkingBudget' | 'fileSearch'
@@ -110,23 +104,6 @@ function buildResearchSpecs(options: ResearchSpecsOptions): BuiltInToolSpec[] {
     });
   }
   return specs;
-}
-
-async function runToolStream<T extends Record<string, unknown>>(
-  ctx: ServerContext,
-  toolKey: string,
-  label: string,
-  initialMsg: string,
-  logMessage: string,
-  logData: unknown,
-  startFn: StreamGenerator,
-  resultFn?: StreamResponseBuilder<T>,
-): Promise<CallToolResult> {
-  const progress = new ProgressReporter(ctx, label);
-  await progress.send(0, undefined, initialMsg);
-  await mcpLog(ctx, 'info', logMessage);
-  log.info(logMessage, maybeSummarizePayload(logData, log.getVerbosePayloads()));
-  return executor.runStream(ctx, toolKey, label, startFn, resultFn);
 }
 
 function buildSourceReportMessage(sourceCount: number): string {
@@ -964,14 +941,13 @@ async function agenticSearchWork(
   if (resolved.error) return resolved.error;
   const { tools, toolConfig } = resolved.config;
 
-  return runToolStream(
-    ctx,
-    'research',
-    TOOL_LABELS.agenticSearch,
-    'Starting deep research',
-    'Agentic search requested',
-    { topic, searchDepth, urlCount: urls?.length ?? 0 },
-    () =>
+  return executor.runWithProgress(ctx, {
+    toolKey: 'research',
+    label: TOOL_LABELS.agenticSearch,
+    initialMsg: 'Starting deep research',
+    logMessage: 'Agentic search requested',
+    logData: { topic, searchDepth, urlCount: urls?.length ?? 0 },
+    generator: () =>
       getAI().models.generateContentStream({
         model: getGeminiModel(),
         contents: prompt.promptText,
@@ -989,9 +965,9 @@ async function agenticSearchWork(
           ctx.mcpReq.signal,
         ),
       }),
-    (streamResult, textContent) =>
+    responseBuilder: (streamResult, textContent) =>
       buildAgenticSearchResult(streamResult, textContent, ctx, searchDepth),
-  );
+  });
 }
 
 async function runQuickResearch(

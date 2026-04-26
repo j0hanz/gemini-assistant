@@ -539,16 +539,13 @@ async function runAskStream(
   jsonMode = false,
   responseSchema?: GeminiResponseSchema,
 ): Promise<AskExecutionResult> {
-  const progress = new ProgressReporter(ctx, TOOL_LABELS.chat);
-  await progress.send(0, undefined, 'Preparing');
-
   let capturedStreamResult: StreamResult | undefined;
-  const result = await executor.runStream(
-    ctx,
-    'chat',
-    TOOL_LABELS.chat,
-    streamGenerator,
-    (streamResult) => {
+  const result = await executor.runWithProgress(ctx, {
+    toolKey: 'chat',
+    label: TOOL_LABELS.chat,
+    initialMsg: 'Preparing',
+    generator: streamGenerator,
+    responseBuilder: (streamResult) => {
       capturedStreamResult = streamResult;
       const hasThoughts = streamResult.thoughtText.length > 0;
 
@@ -568,7 +565,7 @@ async function runAskStream(
         reportMessage: hasThoughts ? 'completed with reasoning' : 'completed',
       };
     },
-  );
+  });
 
   const streamResult =
     capturedStreamResult ??

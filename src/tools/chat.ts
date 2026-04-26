@@ -61,13 +61,13 @@ import { type GeminiResponseSchema } from '../schemas/inputs.js';
 import { ChatOutputSchema, type ContextUsed, type UsageMetadata } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, DEFAULT_TEMPERATURE, getAI } from '../client.js';
-import { TOOL_LABELS } from '../public-contract.js';
 import {
   getExposeThoughts,
   getGeminiModel,
   getSessionLimits,
   getWorkspaceCacheEnabled,
 } from '../config.js';
+import { TOOL_LABELS } from '../public-contract.js';
 import {
   sessionDetailUri,
   sessionEventsUri,

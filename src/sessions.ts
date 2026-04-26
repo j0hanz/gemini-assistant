@@ -238,11 +238,7 @@ function cloneValue<T>(value: T): T {
 }
 
 type ResponseField = SessionEventEntry['response'];
-type ResponseCloneStrategy =
-  | 'direct'
-  | 'structuredClone'
-  | 'shallowSpread'
-  | 'arrayShallow';
+type ResponseCloneStrategy = 'direct' | 'structuredClone' | 'shallowSpread' | 'arrayShallow';
 interface ResponseFieldRule {
   key: keyof ResponseField;
   slimOnly: boolean;

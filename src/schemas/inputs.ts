@@ -308,10 +308,7 @@ const AnalyzeInputBaseSchema = z.strictObject({
 });
 export const AnalyzeInputSchema = AnalyzeInputBaseSchema.superRefine(validateFlatAnalyzeInput);
 type AnalyzeInputFlat = z.infer<typeof AnalyzeInputSchema>;
-type AnalyzeInputCommon = Omit<
-  AnalyzeInputFlat,
-  'targetKind' | 'filePath' | 'urls' | 'filePaths'
->;
+type AnalyzeInputCommon = Omit<AnalyzeInputFlat, 'targetKind' | 'filePath' | 'urls' | 'filePaths'>;
 /**
  * Discriminated union over `targetKind`. The runtime schema is a single strict
  * object (preserving exact validator wording); this type alias narrows variant

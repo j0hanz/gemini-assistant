@@ -172,11 +172,7 @@ function emitDeepResearchToolBudgetLogs(
   };
 
   log.info('deep research tool budget observed', payload);
-  void mcpLog(
-    ctx,
-    'info',
-    `deep research tool budget observed at depth ${String(searchDepth)}`,
-  );
+  void mcpLog(ctx, 'info', `deep research tool budget observed at depth ${String(searchDepth)}`);
 
   const warnings: string[] = [];
 

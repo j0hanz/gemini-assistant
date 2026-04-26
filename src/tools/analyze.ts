@@ -29,9 +29,8 @@ import { type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 
-import { analyzeUrlWork } from './research.js';
-
 import { TOOL_LABELS } from '../public-contract.js';
+import { analyzeUrlWork } from './research.js';
 
 interface AnalyzeDiagramInput {
   goal: string;

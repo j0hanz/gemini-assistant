@@ -19,6 +19,7 @@ import type {
 
 import { finishReasonToError, SafetyError } from './errors.js';
 import { logger } from './logger.js';
+import type { ToolEvent } from './streaming.js';
 import { isPublicHttpUrl } from './validation.js';
 
 type PickDefined<T> = {
@@ -38,7 +39,7 @@ export interface CollectedItems<T> {
   droppedNonPublic: number;
 }
 
-const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
+export const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
 
 export function tryParseJsonResponse(text: string): unknown {
   const candidates = [text.trim()];
@@ -235,6 +236,43 @@ export function deriveFindingsFromCitations(citations: readonly GroundingCitatio
   }
 
   return [...findings.values()];
+}
+
+export function deriveDiagramSyntaxValidation(toolEvents: readonly ToolEvent[]): {
+  syntaxValid?: boolean;
+  syntaxErrors?: string[];
+} {
+  const result = [...toolEvents].reverse().find((event) => event.kind === 'code_execution_result');
+  if (!result) {
+    return {};
+  }
+
+  if (result.outcome === 'OUTCOME_OK') {
+    return { syntaxValid: true };
+  }
+
+  return {
+    syntaxValid: false,
+    syntaxErrors: [result.output ?? result.outcome ?? 'unknown error'],
+  };
+}
+
+export function auditClaimedToolUsage(text: string, toolsUsed: readonly string[]): string[] {
+  const toolsUsedSet = new Set(toolsUsed);
+  const capabilityMatchers = new Map<string, RegExp>([
+    ['googleSearch', /\b(searched|google search|found via search)\b/i],
+    ['codeExecution', /\b(i (?:ran|executed)|computed|verified by running)\b/i],
+    ['urlContext', /\b(i retrieved|fetched the page|from the url)\b/i],
+  ]);
+
+  const warnings: string[] = [];
+  for (const [capability, pattern] of capabilityMatchers) {
+    if (pattern.test(text) && !toolsUsedSet.has(capability)) {
+      warnings.push(`prose claims ${capability} but it was not invoked this turn`);
+    }
+  }
+
+  return warnings;
 }
 
 export function computeGroundingSignals(

@@ -3,10 +3,7 @@ import { describe, it } from 'node:test';
 
 import { z } from 'zod/v4';
 
-import {
-  ChatInputSchema,
-  ReviewInputSchema,
-} from '../../src/schemas/inputs.js';
+import { ChatInputSchema, ReviewInputSchema } from '../../src/schemas/inputs.js';
 import { GeminiResponseSchema } from '../../src/schemas/inputs.js';
 
 function jsonSchemaProperty(

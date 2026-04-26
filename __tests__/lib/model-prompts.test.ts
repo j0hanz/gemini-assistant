@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  appendFunctionCallingInstruction,
   buildAgenticResearchPrompt,
   buildDiagramGenerationPrompt,
   buildDiffReviewPrompt,
@@ -11,13 +12,71 @@ import {
 } from '../../src/lib/model-prompts.js';
 
 describe('model-prompts', () => {
+  it('keeps function-calling instructions unchanged when mode is omitted, NONE, or names are missing', () => {
+    assert.strictEqual(appendFunctionCallingInstruction('Base', {}), 'Base');
+    assert.strictEqual(
+      appendFunctionCallingInstruction('Base', {
+        declaredNames: ['lookup'],
+        mode: 'NONE',
+      }),
+      'Base',
+    );
+    assert.strictEqual(
+      appendFunctionCallingInstruction('Base', {
+        declaredNames: [],
+        mode: 'AUTO',
+      }),
+      'Base',
+    );
+  });
+
+  it('builds mode-aware function-calling instructions', () => {
+    assert.strictEqual(
+      appendFunctionCallingInstruction('Base', {
+        declaredNames: ['lookup', 'search'],
+        mode: 'AUTO',
+      }),
+      [
+        'Base',
+        "Available functions: lookup, search. Call only when the user's request requires it.",
+        'After issuing a call, stop and wait for the client to return the function response. Do not invent results.',
+      ].join('\n\n'),
+    );
+
+    assert.strictEqual(
+      appendFunctionCallingInstruction('Base', {
+        declaredNames: ['lookup'],
+        mode: 'ANY',
+      }),
+      [
+        'Base',
+        'You must call exactly one of these declared functions: lookup.',
+        'After issuing a call, stop and wait for the client to return the function response. Do not invent results.',
+      ].join('\n\n'),
+    );
+
+    assert.strictEqual(
+      appendFunctionCallingInstruction('Base', {
+        declaredNames: ['lookup'],
+        mode: 'VALIDATED',
+        serverSideToolInvocations: true,
+      }),
+      [
+        'Base',
+        'Available functions: lookup. Calls are validated server-side; arguments that fail the schema are rejected.',
+        'The server may execute the call. Do not fabricate function results.',
+      ].join('\n\n'),
+    );
+  });
+
   it('builds deterministic grounded-answer prompts', () => {
     const first = buildGroundedAnswerPrompt('latest release', ['https://example.com']);
     const second = buildGroundedAnswerPrompt('latest release', ['https://example.com']);
 
     assert.deepStrictEqual(first, second);
     assert.ok(first.systemInstruction);
-    assert.ok(first.systemInstruction.includes('retrieved sources'));
+    assert.ok(first.systemInstruction.includes('sources retrieved this turn'));
+    assert.ok(!first.systemInstruction.includes('## Findings'));
     assert.ok(first.promptText.includes('latest release'));
     assert.ok(first.promptText.includes('Primary URLs:'));
     assert.ok(first.promptText.includes('https://example.com'));
@@ -30,7 +89,7 @@ describe('model-prompts', () => {
       'cachedContents/workspace-1',
     );
 
-    assert.ok(prompt.systemInstruction?.includes('retrieved sources'));
+    assert.ok(prompt.systemInstruction?.includes('sources retrieved this turn'));
     assert.ok(prompt.promptText.includes('latest release'));
   });
 
@@ -61,6 +120,7 @@ describe('model-prompts', () => {
     assert.ok(single.systemInstruction?.includes('attached file'));
     assert.ok(multi.systemInstruction?.includes('attached files'));
     assert.ok(url.systemInstruction?.includes('listed URLs'));
+    assert.ok(!url.systemInstruction?.includes('Unretrieved'));
     assert.deepStrictEqual(multi.promptParts, [
       { text: 'File: src/index.ts' },
       { text: 'Goal: Compare these files' },
@@ -107,6 +167,7 @@ describe('model-prompts', () => {
       cacheName: 'cachedContents/workspace-1',
       codeContext: 'throw new Error("boom")',
       error: 'boom',
+      googleSearchEnabled: true,
       language: 'ts',
       urls: ['https://example.com/error'],
     });
@@ -118,6 +179,23 @@ describe('model-prompts', () => {
     assert.ok(prompt.promptText.includes('## URLs'));
   });
 
+  it('builds error-diagnosis prompts that match search availability', () => {
+    const searchable = buildErrorDiagnosisPrompt({
+      error: 'boom',
+      googleSearchEnabled: true,
+    });
+    const localOnly = buildErrorDiagnosisPrompt({
+      error: 'boom',
+      googleSearchEnabled: false,
+    });
+
+    assert.ok(
+      searchable.systemInstruction?.includes('Search the error message and key identifiers'),
+    );
+    assert.ok(localOnly.systemInstruction?.includes('No web search is available'));
+    assert.ok(localOnly.systemInstruction?.includes('(unverified)'));
+  });
+
   it('builds diagram prompts with one live task part and a short stable instruction', () => {
     const prompt = buildDiagramGenerationPrompt({
       attachedParts: [{ text: 'Source file: src/index.ts' }],
@@ -127,6 +205,7 @@ describe('model-prompts', () => {
     });
 
     assert.ok(prompt.systemInstruction?.includes('Return exactly one fenced'));
+    assert.ok(prompt.systemInstruction?.includes('Do not narrate the result'));
     assert.deepStrictEqual(prompt.promptParts, [
       { text: 'Source file: src/index.ts' },
       { text: 'Task: Show the request flow' },
@@ -149,20 +228,33 @@ describe('model-prompts', () => {
 
   it('builds agentic-research prompts without duplicating process instructions in cache mode', () => {
     const prompt = buildAgenticResearchPrompt({
+      capabilities: {
+        codeExecution: true,
+        fileSearch: false,
+        googleSearch: true,
+        multiTurnRetrieval: true,
+        urlContext: false,
+      },
       cacheName: 'cachedContents/workspace-1',
-      searchDepth: 4,
       topic: 'MCP adoption',
     });
 
     assert.ok(prompt.systemInstruction?.includes('Research with Google Search'));
     assert.ok(prompt.systemInstruction?.includes('Code Execution'));
+    assert.ok(prompt.systemInstruction?.includes('multiple searches'));
     assert.ok(prompt.promptText.includes('Topic: MCP adoption'));
   });
 
   it('builds agentic-research prompts with primary URLs and output shape', () => {
     const prompt = buildAgenticResearchPrompt({
+      capabilities: {
+        codeExecution: false,
+        fileSearch: false,
+        googleSearch: true,
+        multiTurnRetrieval: false,
+        urlContext: true,
+      },
       deliverable: 'a decision memo',
-      searchDepth: 3,
       topic: 'MCP adoption',
       urls: ['https://example.com/report'],
     });
@@ -171,5 +263,8 @@ describe('model-prompts', () => {
     assert.ok(prompt.promptText.includes('https://example.com/report'));
     assert.ok(prompt.systemInstruction?.includes('Preferred shape:'));
     assert.ok(prompt.systemInstruction?.includes('a decision memo'));
+    assert.ok(!prompt.systemInstruction?.includes('## Findings'));
+    assert.ok(!prompt.systemInstruction?.includes('multiple searches'));
+    assert.ok(!prompt.systemInstruction?.includes('Code Execution'));
   });
 });

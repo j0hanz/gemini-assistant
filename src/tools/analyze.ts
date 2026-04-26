@@ -14,6 +14,7 @@ import {
 import { ProgressReporter } from '../lib/progress.js';
 import {
   buildSuccessfulStructuredContent,
+  deriveDiagramSyntaxValidation,
   pickDefined,
   safeValidateStructuredContent,
 } from '../lib/response.js';
@@ -327,10 +328,19 @@ async function analyzeDiagramWork(
           maxOutputTokens: args.maxOutputTokens,
           safetySettings: args.safetySettings,
         },
-        responseBuilder: (_streamResult, textContent: string) => {
+        responseBuilder: (streamResult, textContent: string) => {
           const { diagram, explanation } = extractDiagram(textContent, args.diagramType, ctx);
           const diagramType = args.diagramType;
           const formatted = formatAnalyzeDiagramMarkdown(diagram, diagramType, explanation);
+          const syntaxValidation =
+            args.validateSyntax === true
+              ? deriveDiagramSyntaxValidation(streamResult.toolEvents)
+              : {};
+          const warnings =
+            args.validateSyntax === true &&
+            !streamResult.toolEvents.some((event) => event.kind === 'code_execution_result')
+              ? ['diagram syntax validation requested but Code Execution was not invoked']
+              : [];
 
           return {
             resultMod: () => ({
@@ -340,6 +350,8 @@ async function analyzeDiagramWork(
               diagram,
               diagramType,
               ...(explanation ? { explanation } : {}),
+              ...syntaxValidation,
+              ...(warnings.length > 0 ? { warnings } : {}),
             },
           };
         },
@@ -457,6 +469,9 @@ function buildAnalyzeStructuredContent(
   ctx: ServerContext,
   structured: Record<string, unknown>,
 ): z.infer<typeof AnalyzeOutputSchema> {
+  const warnings = Array.isArray(structured.warnings)
+    ? structured.warnings.filter((warning): warning is string => typeof warning === 'string')
+    : undefined;
   const base = {
     functionCalls: structured.functionCalls,
     safetyRatings: structured.safetyRatings,
@@ -475,12 +490,18 @@ function buildAnalyzeStructuredContent(
     return pickDefined({
       ...buildSuccessfulStructuredContent({
         requestId: ctx.task?.id,
+        warnings,
         domain: {
           kind: 'diagram' as const,
           targetKind: args.targetKind,
           diagramType,
           diagram: getDiagramString(structured.diagram),
           explanation: getExplanationString(structured.explanation),
+          syntaxErrors: Array.isArray(structured.syntaxErrors)
+            ? structured.syntaxErrors.filter((value): value is string => typeof value === 'string')
+            : undefined,
+          syntaxValid:
+            typeof structured.syntaxValid === 'boolean' ? structured.syntaxValid : undefined,
           urlMetadata: structured.urlMetadata,
           analyzedPaths: getAnalyzedPaths(args),
         },
@@ -492,6 +513,7 @@ function buildAnalyzeStructuredContent(
   return pickDefined({
     ...buildSuccessfulStructuredContent({
       requestId: ctx.task?.id,
+      warnings,
       domain: {
         status: typeof structured.status === 'string' ? structured.status : 'completed',
         kind: 'summary' as const,

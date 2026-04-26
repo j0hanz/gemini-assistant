@@ -13,6 +13,7 @@ import {
   buildAgenticResearchPrompt,
   buildFileAnalysisPrompt,
   buildGroundedAnswerPrompt,
+  type Capabilities,
 } from '../lib/model-prompts.js';
 import {
   type BuiltInToolName,
@@ -25,6 +26,7 @@ import {
   appendSearchEntryPointContent,
   appendSources,
   appendUrlStatus,
+  auditClaimedToolUsage,
   buildDroppedSupportWarnings,
   buildSourceReportMessage,
   buildSuccessfulStructuredContent,
@@ -237,6 +239,19 @@ function computeResearchContext(streamResult: StreamResult) {
   };
 }
 
+function buildPromptCapabilities(
+  activeCapabilities: ReadonlySet<string>,
+  multiTurnRetrieval = false,
+): Capabilities {
+  return {
+    googleSearch: activeCapabilities.has('googleSearch'),
+    urlContext: activeCapabilities.has('urlContext'),
+    codeExecution: activeCapabilities.has('codeExecution'),
+    fileSearch: activeCapabilities.has('fileSearch'),
+    ...(multiTurnRetrieval ? { multiTurnRetrieval: true } : {}),
+  };
+}
+
 function buildAgenticSearchResult(
   streamResult: StreamResult,
   textContent: string,
@@ -253,7 +268,12 @@ function buildAgenticSearchResult(
   );
 
   const context = computeResearchContext(streamResult);
-  const warnings = [...context.warnings, ...deepResearchWarnings, ...extraWarnings];
+  const warnings = [
+    ...context.warnings,
+    ...auditClaimedToolUsage(textContent, streamResult.toolsUsed),
+    ...deepResearchWarnings,
+    ...extraWarnings,
+  ];
   const contentAdditions: CallToolResult['content'] = [];
 
   appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
@@ -289,6 +309,10 @@ function buildAgenticSearchResult(
 
 function buildSearchResult(streamResult: StreamResult, textContent: string) {
   const context = computeResearchContext(streamResult);
+  const warnings = [
+    ...context.warnings,
+    ...auditClaimedToolUsage(textContent, streamResult.toolsUsed),
+  ];
   const contentAdditions: CallToolResult['content'] = [];
 
   appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
@@ -327,7 +351,7 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
       findings: context.findings.length > 0 ? context.findings : undefined,
       citations: context.citations.length > 0 ? context.citations : undefined,
       computations: context.computations.length > 0 ? context.computations : undefined,
-      warnings: context.warnings.length > 0 ? context.warnings : undefined,
+      warnings: warnings.length > 0 ? warnings : undefined,
     }),
     reportMessage: buildSourceReportMessage(context.groundedSources.length),
   };
@@ -601,7 +625,12 @@ async function runDeepResearchPlan(
       undefined,
       `Retrieving source set ${String(index + 1)}`,
     );
-    const prompt = buildGroundedAnswerPrompt(query, args.urls);
+    const prompt = buildGroundedAnswerPrompt(
+      query,
+      args.urls,
+      undefined,
+      buildPromptCapabilities(resolvedRetrieval.config.activeCapabilities, false),
+    );
     const turn = await runDeepResearchTurn(
       ctx,
       `Research retrieval ${String(index + 1)}`,
@@ -638,8 +667,8 @@ async function runDeepResearchPlan(
   const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
 
   const synthesisPrompt = buildAgenticResearchPrompt({
+    capabilities: buildPromptCapabilities(resolvedSynthesis.config.activeCapabilities, true),
     deliverable: args.deliverable,
-    searchDepth: args.searchDepth,
     topic: `${args.topic}\n\nRetrieved evidence summaries:\n${retrievalSummaries}`,
     urls: args.urls,
   });
@@ -711,8 +740,6 @@ async function searchWork(
   ctx: ServerContext,
   workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
-  const prompt = buildGroundedAnswerPrompt(query, urls);
-
   const progress = new ProgressReporter(ctx, TOOL_LABELS.search);
   await progress.send(0, undefined, 'Starting');
   await mcpLog(ctx, 'info', 'Search requested');
@@ -726,10 +753,18 @@ async function searchWork(
       ...(fileSearch ? { fileSearch } : {}),
     },
     workspaceCacheManager,
-    buildContents: () => ({
-      contents: [prompt.promptText],
-      systemInstruction: systemInstruction ?? prompt.systemInstruction,
-    }),
+    buildContents: (activeCapabilities) => {
+      const prompt = buildGroundedAnswerPrompt(
+        query,
+        urls,
+        undefined,
+        buildPromptCapabilities(activeCapabilities, false),
+      );
+      return {
+        contents: [prompt.promptText],
+        systemInstruction: systemInstruction ?? prompt.systemInstruction,
+      };
+    },
     config: {
       costProfile: 'research.quick',
       thinkingLevel,
@@ -844,13 +879,6 @@ async function agenticSearchWork(
     );
   }
 
-  const prompt = buildAgenticResearchPrompt({
-    deliverable,
-    searchDepth,
-    topic: enrichedTopic,
-    urls,
-  });
-
   const resolved = await resolveOrchestration(
     {
       builtInToolSpecs: buildResearchSpecs({
@@ -865,6 +893,12 @@ async function agenticSearchWork(
   );
   if (resolved.error) return resolved.error;
   const { tools, toolConfig } = resolved.config;
+  const prompt = buildAgenticResearchPrompt({
+    capabilities: buildPromptCapabilities(resolved.config.activeCapabilities, false),
+    deliverable,
+    topic: enrichedTopic,
+    urls,
+  });
 
   return executor.runWithProgress(ctx, {
     toolKey: 'research',

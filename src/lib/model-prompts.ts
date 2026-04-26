@@ -22,6 +22,20 @@ interface PartPromptPolicy {
   systemInstruction: string;
 }
 
+export interface Capabilities {
+  googleSearch: boolean;
+  urlContext: boolean;
+  codeExecution: boolean;
+  fileSearch: boolean;
+  multiTurnRetrieval?: boolean;
+}
+
+interface FunctionCallingInstructionOptions {
+  mode?: 'AUTO' | 'ANY' | 'NONE' | 'VALIDATED';
+  declaredNames?: readonly string[];
+  serverSideToolInvocations?: boolean;
+}
+
 function resolveTextPrompt(policy: TextPromptPolicy, cacheName?: string): ResolvedTextPrompt {
   const useCacheText = Boolean(cacheName && policy.cacheText);
   return {
@@ -54,12 +68,27 @@ function joinNonEmpty(sections: readonly (string | undefined)[]): string {
 
 export function appendFunctionCallingInstruction(
   systemInstruction: string | undefined,
-  functionsActive: boolean,
+  opts: FunctionCallingInstructionOptions,
 ): string | undefined {
-  if (!functionsActive) return systemInstruction;
+  const declaredNames = opts.declaredNames?.filter((name) => name.trim().length > 0) ?? [];
+  if (opts.mode === undefined || opts.mode === 'NONE' || declaredNames.length === 0) {
+    return systemInstruction;
+  }
+
+  const names = declaredNames.join(', ');
+  const modeInstruction =
+    opts.mode === 'ANY'
+      ? `You must call exactly one of these declared functions: ${names}.`
+      : opts.mode === 'VALIDATED'
+        ? `Available functions: ${names}. Calls are validated server-side; arguments that fail the schema are rejected.`
+        : `Available functions: ${names}. Call only when the user's request requires it.`;
+
   return joinNonEmpty([
     systemInstruction,
-    'When you call a declared function, wait for the MCP client to provide the function response. Do not invent function results.',
+    modeInstruction,
+    opts.serverSideToolInvocations === true
+      ? 'The server may execute the call. Do not fabricate function results.'
+      : 'After issuing a call, stop and wait for the client to return the function response. Do not invent results.',
   ]);
 }
 
@@ -71,15 +100,23 @@ export function buildGroundedAnswerPrompt(
   query: string,
   urls?: readonly string[],
   cacheName?: string,
+  capabilities?: Capabilities,
 ): ResolvedTextPrompt {
   const promptText =
     !urls || urls.length === 0 ? query : `${query}\n\nPrimary URLs:\n${urls.join('\n')}`;
+  const retrievalUnavailable =
+    capabilities !== undefined &&
+    !capabilities.googleSearch &&
+    !capabilities.urlContext &&
+    !capabilities.fileSearch;
 
   return resolveTextPrompt(
     {
       promptText,
-      systemInstruction:
-        'Answer using retrieved sources from this turn. Prefer referencing sources by their URL when directly supported by retrieved content. If no sources were retrieved, say so and label the answer as unverified. Output order: 1) ## Findings - one bullet per claim formatted `- claim - [URL1, URL2]`; 2) ## Synthesis - prose derived only from Findings; 3) ## Open Questions - unverified leads.',
+      systemInstruction: joinNonEmpty([
+        retrievalUnavailable ? 'No retrieval tools are available this turn.' : undefined,
+        "Answer using sources retrieved this turn. If no source supports a claim, mark it '(unverified)'. If retrieval returned nothing, reply with exactly: 'No sources retrieved.' Do not invent URLs.",
+      ]),
     },
     cacheName,
   );
@@ -133,7 +170,7 @@ export function buildFileAnalysisPrompt(
           `Task: ${args.goal}`,
         ]),
         systemInstruction:
-          'Answer the goal using content retrieved from the listed URLs. Cite the URL each claim comes from. If a URL fails to retrieve, list it under "Unretrieved" and do not guess its contents. If no URL retrieved successfully, respond with exactly: "No URLs retrieved; cannot answer."',
+          'Answer the goal using content retrieved from the listed URLs. Do not guess content for URLs that did not retrieve. If none retrieved, reply with exactly: "No URLs retrieved; cannot answer."',
       },
       args.cacheName,
     );
@@ -191,6 +228,7 @@ export function buildDiffReviewPrompt(
   }
 
   const hasDocs = args.docContexts && args.docContexts.length > 0;
+  // The trailing documentationDrift JSON block is validated against Zod at runtime.
   const docInstruction = hasDocs
     ? ' Cross-reference the diff against the documentation context. If the diff makes the docs factually incorrect or misleading, emit a `documentationDrift` array inside a JSON block at the end of your response (```json\\n{ "documentationDrift": [...] }\\n```). CRITICAL: If docs are still accurate, omit the `documentationDrift` JSON completely. Do not emit an empty array.'
     : '';
@@ -209,7 +247,7 @@ export function buildDiffReviewPrompt(
       promptText: args.promptText + docContent,
       systemInstruction: buildOutputInstruction(
         `Review the unified diff for bugs, regressions, and behavior risk. Ignore formatting-only changes. Cite file paths and hunk context. Do not invent line numbers. If the diff looks clean, say so briefly.${docInstruction}`,
-        ['Output:', '## Findings', '## Fixes'],
+        ['Output:', 'Findings', 'Fixes'],
       ),
     },
     args.cacheName,
@@ -220,6 +258,7 @@ export function buildErrorDiagnosisPrompt(args: {
   cacheName?: string | undefined;
   codeContext?: string | undefined;
   error: string;
+  googleSearchEnabled: boolean;
   language?: string | undefined;
   urls?: readonly string[] | undefined;
 }): ResolvedTextPrompt {
@@ -244,7 +283,9 @@ export function buildErrorDiagnosisPrompt(args: {
       cacheText: 'Diagnose the error. Output: Cause, Fix, Notes.',
       promptText: sections.join('\n\n'),
       systemInstruction: buildOutputInstruction(
-        'Diagnose the error. Base the cause and fix on the given context; if search is available, search the error message and key identifiers. Cite sources for retrieved claims; otherwise mark the answer as unverified.',
+        args.googleSearchEnabled
+          ? 'Diagnose the error. Base the cause and fix on the given context. Search the error message and key identifiers; cite retrieved sources.'
+          : "Diagnose the error. Base the cause and fix on the given context. No web search is available. Mark anything not derivable from the given context as '(unverified)'.",
         ['Output:', '## Cause', '## Fix', '## Notes'],
       ),
     },
@@ -267,7 +308,7 @@ export function buildDiagramGenerationPrompt(args: {
         `Generate a ${args.diagramType} diagram from the description and files.`,
         `Return exactly one fenced \`\`\`${args.diagramType} block with clear node and edge labels.`,
         args.validateSyntax
-          ? 'If syntax validation is requested, run Code Execution as a best-effort check and state uncertainty.'
+          ? 'You may run Code Execution once to parse the diagram. Do not narrate the result.'
           : undefined,
       ]),
     },
@@ -276,14 +317,12 @@ export function buildDiagramGenerationPrompt(args: {
 }
 
 export function buildAgenticResearchPrompt(args: {
-  searchDepth: number;
   topic: string;
+  capabilities: Capabilities;
   deliverable?: string | undefined;
   urls?: readonly string[] | undefined;
   cacheName?: string | undefined;
 }): ResolvedTextPrompt {
-  const deepMode = args.searchDepth >= 3;
-
   return resolveTextPrompt(
     {
       promptText: joinNonEmpty([
@@ -292,14 +331,19 @@ export function buildAgenticResearchPrompt(args: {
         'Research the topic and produce a grounded Markdown report.',
       ]),
       systemInstruction: joinNonEmpty([
-        'Research with Google Search, then write a grounded Markdown report.',
-        deepMode
-          ? 'You MAY issue multiple searches and MAY use Code Execution when the deliverable requires arithmetic, ranking, or consistency checks. If you did not use a capability, do not imply that you did.'
+        args.capabilities.googleSearch
+          ? 'Research with Google Search, then write a grounded Markdown report.'
+          : 'Write a grounded Markdown report using retrieved evidence from this turn.',
+        args.capabilities.multiTurnRetrieval === true
+          ? 'You may issue multiple searches when needed.'
+          : undefined,
+        args.capabilities.codeExecution
+          ? 'Use Code Execution only for arithmetic, ranking, or consistency checks.'
           : undefined,
         args.deliverable
           ? `Preferred shape: ${args.deliverable}. If the evidence does not support it, use the best-supported structure and say why.`
           : undefined,
-        'Cite source URLs inline for retrieved claims. Treat planning notes as leads, not evidence. Flag unverified claims explicitly. Include dates for time-sensitive facts. Output order: 1) ## Findings - one bullet per claim formatted `- claim - [URL1, URL2]`; 2) ## Synthesis - prose derived only from Findings; 3) ## Open Questions - unverified leads.',
+        'Cite source URLs inline for retrieved claims. Treat planning notes as leads, not evidence. Flag unverified claims explicitly. Include dates for time-sensitive facts.',
       ]),
     },
     args.cacheName,

@@ -161,7 +161,7 @@ export const AnalyzeOutputSchema = z.discriminatedUnion('kind', [
   AnalyzeDiagramOutputSchema,
 ]);
 
-const DocumentationDriftSchema = z.strictObject({
+export const DocumentationDriftSchema = z.strictObject({
   file: z.string().describe('The path of the documentation file.'),
   driftDescription: z.string().describe('Why the diff makes the current docs outdated/misleading.'),
   suggestedUpdate: z.string().describe('Brief suggestion of what needs to be changed in the doc.'),
@@ -171,6 +171,7 @@ export const ReviewOutputSchema = z.strictObject({
   ...publicBaseOutputFields,
   subjectKind: enumField(REVIEW_SUBJECT_OPTIONS, 'Review subject discriminator'),
   summary: z.string().describe('Review result summary'),
+  schemaWarnings: z.array(z.string()).optional().describe('Schema-level review warnings.'),
   stats: z
     .strictObject(diffStatsFields)
     .optional()

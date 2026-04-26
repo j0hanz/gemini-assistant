@@ -345,6 +345,38 @@ describe('research tool contracts', () => {
     }
   });
 
+  it('adds warnings when the prose claims search that was not invoked this turn', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'I searched and found nothing conclusive.' }] },
+              finishReason: 'STOP',
+            },
+          ],
+        },
+      ]);
+
+    try {
+      await research.createTask({ goal: 'latest release', mode: 'quick' }, makeMockContext(store));
+      await flushTaskWork();
+
+      const structured = store.stored[0]?.result.structuredContent as Record<string, unknown>;
+      assert.deepStrictEqual(structured.warnings, [
+        'prose claims googleSearch but it was not invoked this turn',
+      ]);
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
   it('separates URL Context-only success from Google Search grounding', async () => {
     const { research } = getHandlers();
     const store = makeMockStore();

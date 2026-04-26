@@ -17,6 +17,7 @@ import {
   buildOrchestrationConfig,
   buildOrchestrationRequestFromInputs,
   resolveOrchestration,
+  resolveServerSideToolInvocations,
 } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import {
@@ -468,6 +469,11 @@ async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
     tools,
     toolConfig,
     functionCallingMode,
+    serverSideToolInvocations:
+      resolveServerSideToolInvocations(
+        args.serverSideToolInvocations,
+        resolved.config.activeCapabilities,
+      ) === true,
   } as const;
 }
 
@@ -515,13 +521,15 @@ function buildAskGenerationOptions(
   toolConfig: GenerateContentConfig['toolConfig'],
   tools: GenerateContentConfig['tools'],
   functionCallingMode: FunctionCallingConfigMode | undefined,
+  serverSideToolInvocations: boolean,
 ) {
   return {
     ...args,
-    systemInstruction: appendFunctionCallingInstruction(
-      args.systemInstruction,
-      args.functions?.declarations.length ? true : false,
-    ),
+    systemInstruction: appendFunctionCallingInstruction(args.systemInstruction, {
+      ...(args.functions?.mode !== undefined ? { mode: args.functions.mode } : {}),
+      declaredNames: args.functions?.declarations.map((declaration) => declaration.name) ?? [],
+      serverSideToolInvocations,
+    }),
     toolConfig,
     tools,
     ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
@@ -654,7 +662,13 @@ export async function askWithoutSession(
   const jsonMode = Boolean(args.responseSchema);
   const config = buildGenerateContentConfig(
     {
-      ...buildAskGenerationOptions(args, toolConfig, tools, functionCallingMode),
+      ...buildAskGenerationOptions(
+        args,
+        toolConfig,
+        tools,
+        functionCallingMode,
+        resolved.serverSideToolInvocations,
+      ),
       costProfile: 'chat',
     },
     ctx.mcpReq.signal,
@@ -670,7 +684,13 @@ export async function askWithoutSession(
         ? config
         : buildGenerateContentConfig(
             {
-              ...buildAskGenerationOptions(args, toolConfig, tools, functionCallingMode),
+              ...buildAskGenerationOptions(
+                args,
+                toolConfig,
+                tools,
+                functionCallingMode,
+                resolved.serverSideToolInvocations,
+              ),
               costProfile: 'chat.jsonRepair',
               thinkingLevel: 'MINIMAL',
               maxOutputTokens: 2_048,
@@ -890,6 +910,11 @@ function buildAskToolingConfig(args: AskArgs) {
     tools: orchestration.tools,
     toolConfig: orchestration.toolConfig,
     functionCallingMode: orchestration.functionCallingMode,
+    serverSideToolInvocations:
+      resolveServerSideToolInvocations(
+        args.serverSideToolInvocations,
+        orchestration.activeCapabilities,
+      ) === true,
   };
 }
 
@@ -902,9 +927,16 @@ export function createDefaultAskDependencies(
     appendSessionEvent: sessionStore.appendSessionEvent.bind(sessionStore),
     appendSessionTranscript: sessionStore.appendSessionTranscript.bind(sessionStore),
     createChat: (args) => {
-      const { toolConfig, tools, functionCallingMode } = buildAskToolingConfig(args);
+      const { toolConfig, tools, functionCallingMode, serverSideToolInvocations } =
+        buildAskToolingConfig(args);
       const config = buildGenerateContentConfig({
-        ...buildAskGenerationOptions(args, toolConfig, tools, functionCallingMode),
+        ...buildAskGenerationOptions(
+          args,
+          toolConfig,
+          tools,
+          functionCallingMode,
+          serverSideToolInvocations,
+        ),
         costProfile: 'chat',
       });
       const chat = getAI().chats.create({
@@ -947,9 +979,16 @@ export function createDefaultAskDependencies(
             cacheName && cacheName === activeCacheName ? cacheName : undefined,
           )
         : (() => {
-            const { toolConfig, tools, functionCallingMode } = buildAskToolingConfig(args);
+            const { toolConfig, tools, functionCallingMode, serverSideToolInvocations } =
+              buildAskToolingConfig(args);
             return buildGenerateContentConfig({
-              ...buildAskGenerationOptions(rebuildArgs, toolConfig, tools, functionCallingMode),
+              ...buildAskGenerationOptions(
+                rebuildArgs,
+                toolConfig,
+                tools,
+                functionCallingMode,
+                serverSideToolInvocations,
+              ),
               costProfile: 'chat',
             });
           })();

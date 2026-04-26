@@ -36,3 +36,7 @@ The `analyze`, `review`, and `research` tools will be stripped of their repetiti
 - **Behavior Preserved**: No observable semantic changes (per `refactor` skill rules).
 - **Reduced LOC**: Less repetitive scaffolding.
 - **Consistency**: All Gemini tools will go through identical progress reporting and orchestration validation phases.
+
+## Prompt Runtime Alignment Note
+
+Prompt instructions now track the runtime contract more tightly: function-calling guidance is mode-aware, research and grounded-answer prompts only mention capabilities that the resolved orchestration actually enabled, and the runtime validates or derives structured fields instead of asking the model to narrate them in prose. In particular, diagram outputs now populate `syntaxValid` and `syntaxErrors` from streamed code-execution events, and review outputs validate `documentationDrift` against the exported Zod schema before attaching it to structured content.

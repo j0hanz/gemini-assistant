@@ -623,6 +623,111 @@ describe('analyzePrWork diff budgeting metadata', () => {
       await rm(repoRoot, { recursive: true, force: true });
     }
   });
+
+  it('validates documentation drift payloads and strips the JSON tail from the summary', async () => {
+    const repoRoot = await createTempRepo();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream(
+        [
+          'Review summary',
+          '```json',
+          JSON.stringify({
+            documentationDrift: [
+              {
+                file: 'README.md',
+                driftDescription: 'README no longer matches the new behavior.',
+                suggestedUpdate: 'Document the updated behavior.',
+              },
+            ],
+          }),
+          '```',
+        ].join('\n'),
+      );
+
+    try {
+      await writeFile(join(repoRoot, 'tracked.txt'), 'before\n');
+      runGit(repoRoot, ['add', '.']);
+      runGit(repoRoot, ['commit', '-m', 'initial']);
+      await writeFile(join(repoRoot, 'tracked.txt'), 'after\n');
+
+      const result = await analyzePrWork({}, makeContext(), workspaceCacheManager, async () => [
+        repoRoot,
+      ]);
+      const structured = result.structuredContent as Record<string, unknown>;
+
+      assert.deepStrictEqual(structured.documentationDrift, [
+        {
+          file: 'README.md',
+          driftDescription: 'README no longer matches the new behavior.',
+          suggestedUpdate: 'Document the updated behavior.',
+        },
+      ]);
+      assert.doesNotMatch(
+        typeof structured.summary === 'string' ? structured.summary : '',
+        /```json/,
+      );
+      assert.doesNotMatch(String(result.content[0]?.text ?? ''), /```json/);
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('surfaces schemaWarnings when documentation drift JSON fails validation', async () => {
+    const repoRoot = await createTempRepo();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream(
+        [
+          'Review summary',
+          '```json',
+          JSON.stringify({
+            documentationDrift: [
+              {
+                file: 'README.md',
+                driftDescription: 'README no longer matches the new behavior.',
+              },
+            ],
+          }),
+          '```',
+        ].join('\n'),
+      );
+
+    try {
+      await writeFile(join(repoRoot, 'tracked.txt'), 'before\n');
+      runGit(repoRoot, ['add', '.']);
+      runGit(repoRoot, ['commit', '-m', 'initial']);
+      await writeFile(join(repoRoot, 'tracked.txt'), 'after\n');
+
+      const result = await analyzePrWork({}, makeContext(), workspaceCacheManager, async () => [
+        repoRoot,
+      ]);
+      const structured = result.structuredContent as Record<string, unknown>;
+      const schemaWarnings = Array.isArray(structured.schemaWarnings)
+        ? structured.schemaWarnings.filter(
+            (warning): warning is string => typeof warning === 'string',
+          )
+        : [];
+
+      assert.strictEqual(structured.documentationDrift, undefined);
+      assert.ok(schemaWarnings.length > 0);
+      assert.match(schemaWarnings[0] ?? '', /documentationDrift JSON failed schema validation/);
+      assert.doesNotMatch(
+        typeof structured.summary === 'string' ? structured.summary : '',
+        /```json/,
+      );
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('analyzePrWork roots handling', () => {

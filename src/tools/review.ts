@@ -5,7 +5,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import type { z } from 'zod/v4';
+import { z } from 'zod/v4';
 
 import { withUploadsAndPipeline } from '../lib/file.js';
 import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
@@ -13,6 +13,7 @@ import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-p
 import { ProgressReporter } from '../lib/progress.js';
 import {
   buildSuccessfulStructuredContent,
+  JSON_CODE_BLOCK_PATTERN,
   safeValidateStructuredContent,
   tryParseJsonResponse,
 } from '../lib/response.js';
@@ -27,7 +28,7 @@ import {
   type ReviewInput,
   ReviewInputSchema,
 } from '../schemas/inputs.js';
-import { ReviewOutputSchema } from '../schemas/outputs.js';
+import { DocumentationDriftSchema, ReviewOutputSchema } from '../schemas/outputs.js';
 
 import { getReviewDocs } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
@@ -186,6 +187,7 @@ interface UntrackedPatchResult {
 
 type AnalyzePrStructuredContent = Record<string, unknown> & {
   summary: string;
+  schemaWarnings?: string[];
   stats: DiffStats;
   reviewedPaths: string[];
   includedUntracked: string[];
@@ -339,6 +341,7 @@ async function diagnoseFailureWork(
       ? [codeContext, 'Review focus: ' + focus].filter(Boolean).join('\n\n')
       : codeContext,
     error,
+    googleSearchEnabled: googleSearch === true,
     language,
     urls,
   });
@@ -912,9 +915,11 @@ function buildStructuredContent(
   omittedPaths: string[] = [],
   truncated?: boolean,
   documentationDrift?: { file: string; driftDescription: string; suggestedUpdate: string }[],
+  schemaWarnings?: string[],
 ): AnalyzePrStructuredContent {
   return {
     summary,
+    ...(schemaWarnings && schemaWarnings.length > 0 ? { schemaWarnings } : {}),
     stats: snapshot.stats,
     reviewedPaths,
     includedUntracked: snapshot.includedUntracked,
@@ -1171,6 +1176,7 @@ export async function analyzePrWork(
     },
     responseBuilder: (_streamResult, textContent: string) => {
       let finalSummary = textContent || '';
+      const schemaWarnings: string[] = [];
       let documentationDrift:
         | { file: string; driftDescription: string; suggestedUpdate: string }[]
         | undefined;
@@ -1178,14 +1184,22 @@ export async function analyzePrWork(
       const parsedData = tryParseJsonResponse(finalSummary) as
         | { documentationDrift?: unknown }
         | undefined;
-      if (
-        parsedData?.documentationDrift &&
-        Array.isArray(parsedData.documentationDrift) &&
-        parsedData.documentationDrift.length > 0
-      ) {
-        documentationDrift = parsedData.documentationDrift as NonNullable<
-          typeof documentationDrift
-        >;
+      if (parsedData?.documentationDrift !== undefined) {
+        const parsedDocumentationDrift = z
+          .array(DocumentationDriftSchema)
+          .safeParse(parsedData.documentationDrift);
+        if (parsedDocumentationDrift.success && parsedDocumentationDrift.data.length > 0) {
+          documentationDrift = parsedDocumentationDrift.data;
+        } else if (!parsedDocumentationDrift.success) {
+          schemaWarnings.push(
+            `documentationDrift JSON failed schema validation: ${z.prettifyError(parsedDocumentationDrift.error)}`,
+          );
+        }
+      }
+
+      finalSummary = finalSummary.replace(JSON_CODE_BLOCK_PATTERN, '').trim();
+
+      if (documentationDrift && documentationDrift.length > 0) {
         finalSummary = `⚠️ **Documentation Drift Detected**\n\nThe following documentation files may need updates based on this diff:\n${documentationDrift.map((d) => `- **${d.file}**: ${d.driftDescription} (Suggestion: ${d.suggestedUpdate})`).join('\n')}\n\n---\n\n${finalSummary}`;
       }
 
@@ -1200,6 +1214,7 @@ export async function analyzePrWork(
           budgetedDiff.omittedPaths,
           budgetedDiff.truncated,
           documentationDrift,
+          schemaWarnings,
         ),
         reportMessage: `${String(snapshot.stats.files)} files reviewed (+${String(snapshot.stats.additions)}, -${String(snapshot.stats.deletions)})`,
       };
@@ -1217,6 +1232,11 @@ function buildReviewStructuredContent(
     domain: {
       subjectKind,
       summary: typeof structured.summary === 'string' ? structured.summary : '',
+      schemaWarnings: Array.isArray(structured.schemaWarnings)
+        ? structured.schemaWarnings.filter(
+            (warning): warning is string => typeof warning === 'string',
+          )
+        : undefined,
       stats: structured.stats,
       reviewedPaths: structured.reviewedPaths,
       includedUntracked: structured.includedUntracked,

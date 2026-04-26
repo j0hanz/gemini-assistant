@@ -8,6 +8,7 @@ import { z } from 'zod/v4';
 import {
   appendSources,
   appendUrlStatus,
+  auditClaimedToolUsage,
   buildSharedStructuredMetadata,
   buildSuccessfulStructuredContent,
   collectGroundedSourceDetails,
@@ -17,6 +18,7 @@ import {
   collectUrlMetadata,
   computeGroundingSignals,
   createResourceLink,
+  deriveDiagramSyntaxValidation,
   deriveFindingsFromCitations,
   deriveOverallStatus,
   extractTextOrError,
@@ -227,6 +229,53 @@ describe('buildSharedStructuredMetadata', () => {
         finishMessage: 'max tokens',
       },
     );
+  });
+});
+
+describe('deriveDiagramSyntaxValidation', () => {
+  it('returns empty metadata when no code execution result was emitted', () => {
+    assert.deepStrictEqual(deriveDiagramSyntaxValidation([]), {});
+  });
+
+  it('marks syntax as valid for OUTCOME_OK', () => {
+    assert.deepStrictEqual(
+      deriveDiagramSyntaxValidation([{ kind: 'code_execution_result', outcome: 'OUTCOME_OK' }]),
+      { syntaxValid: true },
+    );
+  });
+
+  it('returns syntax errors for non-success outcomes', () => {
+    assert.deepStrictEqual(
+      deriveDiagramSyntaxValidation([
+        {
+          kind: 'code_execution_result',
+          outcome: 'OUTCOME_ERROR',
+          output: 'Parse error on line 1',
+        },
+      ]),
+      { syntaxErrors: ['Parse error on line 1'], syntaxValid: false },
+    );
+  });
+});
+
+describe('auditClaimedToolUsage', () => {
+  it('warns when prose claims search without search tool usage', () => {
+    assert.deepStrictEqual(auditClaimedToolUsage('I searched and found a source.', []), [
+      'prose claims googleSearch but it was not invoked this turn',
+    ]);
+  });
+
+  it('does not warn when claimed capability matches actual tool usage', () => {
+    assert.deepStrictEqual(
+      auditClaimedToolUsage('I computed the result and verified by running code.', [
+        'codeExecution',
+      ]),
+      [],
+    );
+  });
+
+  it('returns no warnings when no claim pattern is present', () => {
+    assert.deepStrictEqual(auditClaimedToolUsage('Here is the answer.', []), []);
   });
 });
 

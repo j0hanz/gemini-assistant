@@ -119,8 +119,9 @@ async function withAvailablePort<T>(run: (port: number) => Promise<T>): Promise<
 async function sendHttpRequest(options: {
   body?: string;
   headers?: Record<string, string>;
-  method: 'OPTIONS' | 'POST';
+  method: 'DELETE' | 'GET' | 'OPTIONS' | 'POST';
   port: number;
+  readBody?: boolean;
 }): Promise<{
   body: string;
   headers: Record<string, string | string[] | undefined>;
@@ -136,6 +137,17 @@ async function sendHttpRequest(options: {
         headers: options.headers,
       },
       (response) => {
+        if (options.readBody === false) {
+          response.resume();
+          response.destroy();
+          resolve({
+            body: '',
+            headers: response.headers,
+            status: response.statusCode ?? 0,
+          });
+          return;
+        }
+
         let body = '';
         response.setEncoding('utf8');
         response.on('data', (chunk: string) => {
@@ -157,6 +169,37 @@ async function sendHttpRequest(options: {
     }
     request.end();
   });
+}
+
+function createInitializeBody(): string {
+  return JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      capabilities: { roots: {} },
+      clientInfo: { name: 'transport-test', version: '0.0.1' },
+      protocolVersion: LATEST_PROTOCOL_VERSION,
+    },
+  });
+}
+
+async function initializeHttpSession(port: number): Promise<string> {
+  const response = await sendHttpRequest({
+    method: 'POST',
+    port,
+    headers: {
+      host: `127.0.0.1:${String(port)}`,
+      accept: 'application/json, text/event-stream',
+      'content-type': 'application/json',
+    },
+    body: createInitializeBody(),
+  });
+
+  assert.strictEqual(response.status, 200);
+  const sessionId = firstHeaderValue(response.headers['mcp-session-id']);
+  assert.ok(sessionId);
+  return sessionId;
 }
 
 async function initializeSession(
@@ -460,21 +503,121 @@ describe('startHttpTransport', () => {
             accept: 'application/json, text/event-stream',
             'content-type': 'application/json',
           },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'initialize',
-            params: {
-              capabilities: { roots: {} },
-              clientInfo: { name: 'transport-test', version: '0.0.1' },
-              protocolVersion: LATEST_PROTOCOL_VERSION,
-            },
-          }),
+          body: createInitializeBody(),
         });
 
         assert.strictEqual(response.status, 200);
         assert.match(response.body, /"result"/);
         assert.strictEqual(firstHeaderValue(response.headers['access-control-allow-origin']), null);
+      } finally {
+        await transport.close();
+      }
+    });
+  });
+
+  it('rejects stateless GET requests with 405 and Allow header', async () => {
+    await withAvailablePort(async (port) => {
+      process.env.HOST = '127.0.0.1';
+      process.env.PORT = String(port);
+      process.env.STATELESS = 'true';
+
+      const transport = await startHttpTransport(() => createServerInstance());
+
+      try {
+        const response = await sendHttpRequest({
+          method: 'GET',
+          port,
+          headers: {
+            host: `127.0.0.1:${String(port)}`,
+            accept: 'application/json, text/event-stream',
+          },
+        });
+
+        assert.strictEqual(response.status, 405);
+        assert.strictEqual(firstHeaderValue(response.headers.allow), 'POST, OPTIONS');
+        assert.match(response.body, /Method Not Allowed/);
+      } finally {
+        await transport.close();
+      }
+    });
+  });
+
+  it('rejects stateless DELETE requests with 405', async () => {
+    await withAvailablePort(async (port) => {
+      process.env.HOST = '127.0.0.1';
+      process.env.PORT = String(port);
+      process.env.STATELESS = 'true';
+
+      const transport = await startHttpTransport(() => createServerInstance());
+
+      try {
+        const response = await sendHttpRequest({
+          method: 'DELETE',
+          port,
+          headers: {
+            host: `127.0.0.1:${String(port)}`,
+            accept: 'application/json, text/event-stream',
+          },
+        });
+
+        assert.strictEqual(response.status, 405);
+        assert.strictEqual(firstHeaderValue(response.headers.allow), 'POST, OPTIONS');
+        assert.match(response.body, /Method Not Allowed/);
+      } finally {
+        await transport.close();
+      }
+    });
+  });
+
+  it('accepts stateless POST initialize requests', async () => {
+    await withAvailablePort(async (port) => {
+      process.env.HOST = '127.0.0.1';
+      process.env.PORT = String(port);
+      process.env.STATELESS = 'true';
+
+      const transport = await startHttpTransport(() => createServerInstance());
+
+      try {
+        const response = await sendHttpRequest({
+          method: 'POST',
+          port,
+          headers: {
+            host: `127.0.0.1:${String(port)}`,
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+          },
+          body: createInitializeBody(),
+        });
+
+        assert.strictEqual(response.status, 200);
+        assert.match(response.body, /"result"/);
+      } finally {
+        await transport.close();
+      }
+    });
+  });
+
+  it('keeps stateful GET requests available', async () => {
+    await withAvailablePort(async (port) => {
+      process.env.HOST = '127.0.0.1';
+      process.env.PORT = String(port);
+
+      const transport = await startHttpTransport(() => createServerInstance());
+
+      try {
+        const sessionId = await initializeHttpSession(port);
+        const response = await sendHttpRequest({
+          method: 'GET',
+          port,
+          readBody: false,
+          headers: {
+            host: `127.0.0.1:${String(port)}`,
+            accept: 'text/event-stream',
+            'mcp-session-id': sessionId,
+          },
+        });
+
+        assert.notStrictEqual(response.status, 405);
       } finally {
         await transport.close();
       }

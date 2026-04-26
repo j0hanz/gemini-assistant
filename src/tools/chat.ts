@@ -381,10 +381,12 @@ function validateAskRequest(
     return invalidUrlResult;
   }
 
-  const hasExistingSession = sessionId ? deps.getSessionEntry(sessionId) !== undefined : false;
+  const sessionEntry = sessionId ? deps.getSessionEntry(sessionId) : undefined;
+  const hasExistingSession = sessionEntry !== undefined;
   const hasFunctionResponses = (args.functionResponses?.length ?? 0) > 0;
   const orchestration = buildOrchestrationConfig(buildChatOrchestrationRequest(args));
   const preflightResult = validateGeminiRequest({
+    allowExistingSessionSchema: sessionEntry?.contract !== undefined,
     hasExistingSession,
     jsonMode: responseSchema !== undefined,
     responseSchema,
@@ -414,6 +416,17 @@ function validateAskRequest(
     if (conflict) {
       return conflict;
     }
+  }
+
+  if (
+    hasExistingSession &&
+    sessionEntry.contract &&
+    !isCompatibleSessionContract(sessionEntry.contract, buildRequestedSessionContract(args))
+  ) {
+    return new AppError(
+      'chat',
+      'chat: session contract mismatch: this sessionId was created with different model, tools, system instruction, or response schema settings. Start a new session.',
+    ).toToolResult();
   }
 
   return undefined;
@@ -918,6 +931,60 @@ function buildAskToolingConfig(args: AskArgs) {
   };
 }
 
+function canonicalizeSessionContractValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalizeSessionContractValue(item));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, canonicalizeSessionContractValue(nested)]),
+    );
+  }
+  return value;
+}
+
+function sameSessionContractValue(left: unknown, right: unknown): boolean {
+  // SessionGenerationContract is persisted as plain JSON-shaped data.
+  return (
+    JSON.stringify(canonicalizeSessionContractValue(left)) ===
+    JSON.stringify(canonicalizeSessionContractValue(right))
+  );
+}
+
+function isCompatibleSessionContract(
+  stored: SessionGenerationContract,
+  requested: SessionGenerationContract,
+): boolean {
+  return (
+    sameSessionContractValue(stored.model, requested.model) &&
+    sameSessionContractValue(stored.systemInstruction, requested.systemInstruction) &&
+    sameSessionContractValue(stored.tools, requested.tools) &&
+    sameSessionContractValue(stored.toolConfig, requested.toolConfig) &&
+    sameSessionContractValue(stored.functionCallingMode, requested.functionCallingMode) &&
+    sameSessionContractValue(stored.responseMimeType, requested.responseMimeType) &&
+    sameSessionContractValue(stored.responseJsonSchema, requested.responseJsonSchema)
+  );
+}
+
+function buildRequestedSessionContract(args: AskArgs): SessionGenerationContract {
+  const { toolConfig, tools, functionCallingMode, serverSideToolInvocations } =
+    buildAskToolingConfig(args);
+  const config = buildGenerateContentConfig({
+    ...buildAskGenerationOptions(
+      args,
+      toolConfig,
+      tools,
+      functionCallingMode,
+      serverSideToolInvocations,
+    ),
+    costProfile: 'chat',
+  });
+
+  return buildSessionGenerationContract(getGeminiModel(), config, functionCallingMode);
+}
+
 export function createDefaultAskDependencies(
   sessionStore: SessionStore,
   workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
@@ -945,7 +1012,7 @@ export function createDefaultAskDependencies(
       });
       return {
         chat,
-        contract: buildSessionGenerationContract(getGeminiModel(), config, functionCallingMode),
+        contract: buildRequestedSessionContract(args),
       };
     },
     getSession: sessionStore.getSession.bind(sessionStore),

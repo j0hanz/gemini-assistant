@@ -10,8 +10,13 @@ import { FinishReason, HarmCategory } from '@google/genai';
 
 import { getAI } from '../../src/client.js';
 import { createWorkspaceCacheManager } from '../../src/lib/workspace-context.js';
-import { createSessionStore } from '../../src/sessions.js';
 import {
+  createSessionStore,
+  type SessionGenerationContract,
+  type SessionSummary,
+} from '../../src/sessions.js';
+import {
+  type AskArgs,
   askWithoutSession,
   buildRebuiltChatContents,
   chatWork,
@@ -122,6 +127,47 @@ function createDeps(overrides: Partial<Parameters<typeof createAskWork>[0]> = {}
   };
 }
 
+function createStoredSessionSummary(
+  sessionId: string,
+  contract?: SessionGenerationContract,
+): SessionSummary {
+  return {
+    id: sessionId,
+    lastAccess: 1,
+    transcriptCount: 0,
+    eventCount: 0,
+    ...(contract ? { contract } : {}),
+  };
+}
+
+function createSessionContract(args: AskArgs): SessionGenerationContract {
+  process.env.API_KEY ??= 'test-key-for-ask';
+  const store = createSessionStore();
+  const deps = createDefaultAskDependencies(store, workspaceCacheManager);
+
+  try {
+    const created = deps.createChat(args);
+    assert.ok(created.contract);
+    return created.contract;
+  } finally {
+    store.close();
+  }
+}
+
+function createExistingSessionDeps(
+  sessionId: string,
+  contract: SessionGenerationContract,
+  overrides: Partial<Parameters<typeof createAskWork>[0]> = {},
+) {
+  return createDeps({
+    getSession: (candidate?: string) =>
+      candidate === sessionId ? ({ kind: 'chat' } as never) : undefined,
+    getSessionEntry: (candidate?: string) =>
+      candidate === sessionId ? createStoredSessionSummary(sessionId, contract) : undefined,
+    ...overrides,
+  });
+}
+
 describe('ask contract', () => {
   it('rejects sessionId under stateless transport', async () => {
     const previousTransport = process.env.TRANSPORT;
@@ -209,6 +255,249 @@ describe('ask contract', () => {
       ],
       isError: true,
     });
+  });
+
+  it('resumes an existing session when the requested contract matches', async () => {
+    const sessionId = 'sess-contract-same';
+    const requestArgs: AskArgs = {
+      message: 'hello',
+      sessionId,
+      googleSearch: true,
+      systemInstruction: 'same system',
+    };
+    const askWork = createAskWork(
+      createExistingSessionDeps(sessionId, createSessionContract(requestArgs)),
+    );
+
+    const result = await askWork(requestArgs, createContext());
+
+    assert.strictEqual(result.isError, undefined);
+  });
+
+  it('rejects reused sessions when response schema drifts', async () => {
+    const sessionId = 'sess-contract-schema';
+    const storedArgs: AskArgs = {
+      message: 'hello',
+      sessionId,
+      responseSchema: {
+        type: 'object',
+        properties: { answer: { type: 'string' } },
+      },
+    };
+    const askWork = createAskWork(
+      createExistingSessionDeps(sessionId, createSessionContract(storedArgs)),
+    );
+
+    const result = await askWork(
+      {
+        ...storedArgs,
+        responseSchema: {
+          type: 'object',
+          properties: { value: { type: 'string' } },
+        },
+      },
+      createContext(),
+    );
+
+    assert.deepStrictEqual(result, {
+      content: [
+        {
+          type: 'text',
+          text: 'chat: session contract mismatch: this sessionId was created with different model, tools, system instruction, or response schema settings. Start a new session.',
+        },
+      ],
+      isError: true,
+    });
+  });
+
+  it('rejects reused sessions when functions are added later', async () => {
+    const sessionId = 'sess-contract-functions';
+    const storedArgs: AskArgs = {
+      message: 'hello',
+      sessionId,
+    };
+    const askWork = createAskWork(
+      createExistingSessionDeps(sessionId, createSessionContract(storedArgs)),
+    );
+
+    const result = await askWork(
+      {
+        ...storedArgs,
+        functions: {
+          declarations: [
+            {
+              name: 'lookup_doc',
+              description: 'Lookup a document',
+              parametersJsonSchema: { type: 'object' },
+            },
+          ],
+          mode: 'AUTO',
+        },
+      },
+      createContext(),
+    );
+
+    assert.strictEqual(result.isError, true);
+    assert.match(
+      result.content[0]?.type === 'text' ? result.content[0].text : '',
+      /session contract mismatch/,
+    );
+  });
+
+  it('ignores thinking config drift for existing sessions', async () => {
+    const sessionId = 'sess-contract-thinking';
+    const storedArgs: AskArgs = {
+      message: 'hello',
+      sessionId,
+      thinkingLevel: 'LOW',
+      googleSearch: true,
+    };
+    const askWork = createAskWork(
+      createExistingSessionDeps(sessionId, createSessionContract(storedArgs)),
+    );
+
+    const result = await askWork(
+      {
+        ...storedArgs,
+        thinkingLevel: 'HIGH',
+      },
+      createContext(),
+    );
+
+    assert.strictEqual(result.isError, undefined);
+  });
+
+  it('treats key-order differences in stored contracts as compatible', async () => {
+    const sessionId = 'sess-contract-order';
+    const requestArgs: AskArgs = {
+      message: 'hello',
+      sessionId,
+      responseSchema: {
+        type: 'object',
+        properties: {
+          answer: { type: 'string' },
+          details: {
+            type: 'object',
+            properties: {
+              summary: { type: 'string' },
+              count: { type: 'number' },
+            },
+            required: ['summary', 'count'],
+          },
+        },
+        required: ['answer', 'details'],
+      },
+    };
+    const storedContract = createSessionContract(requestArgs);
+    storedContract.responseJsonSchema = {
+      required: ['answer', 'details'],
+      properties: {
+        details: {
+          required: ['summary', 'count'],
+          properties: {
+            count: { type: 'number' },
+            summary: { type: 'string' },
+          },
+          type: 'object',
+        },
+        answer: { type: 'string' },
+      },
+      type: 'object',
+    };
+    const askWork = createAskWork(createExistingSessionDeps(sessionId, storedContract));
+
+    const result = await askWork(requestArgs, createContext());
+
+    assert.strictEqual(result.isError, undefined);
+  });
+
+  it('rejects reused sessions when tool configuration drifts', async () => {
+    const sessionId = 'sess-contract-tools';
+    const storedArgs: AskArgs = {
+      message: 'hello',
+      sessionId,
+    };
+    const askWork = createAskWork(
+      createExistingSessionDeps(sessionId, createSessionContract(storedArgs)),
+    );
+
+    const result = await askWork(
+      {
+        ...storedArgs,
+        googleSearch: true,
+      },
+      createContext(),
+    );
+
+    assert.strictEqual(result.isError, true);
+    assert.match(
+      result.content[0]?.type === 'text' ? result.content[0].text : '',
+      /session contract mismatch/,
+    );
+  });
+
+  it('rejects reused sessions when system instructions drift', async () => {
+    const sessionId = 'sess-contract-system';
+    const storedArgs: AskArgs = {
+      message: 'hello',
+      sessionId,
+      systemInstruction: 'original system',
+    };
+    const askWork = createAskWork(
+      createExistingSessionDeps(sessionId, createSessionContract(storedArgs)),
+    );
+
+    const result = await askWork(
+      {
+        ...storedArgs,
+        systemInstruction: 'mutated system',
+      },
+      createContext(),
+    );
+
+    assert.strictEqual(result.isError, true);
+    assert.match(
+      result.content[0]?.type === 'text' ? result.content[0].text : '',
+      /session contract mismatch/,
+    );
+  });
+
+  it('rejects reused sessions when function calling mode drifts', async () => {
+    const sessionId = 'sess-contract-mode';
+    const storedArgs: AskArgs = {
+      message: 'hello',
+      sessionId,
+      functions: {
+        declarations: [
+          {
+            name: 'lookup_doc',
+            description: 'Lookup a document',
+            parametersJsonSchema: { type: 'object' },
+          },
+        ],
+        mode: 'AUTO',
+      },
+    };
+    const askWork = createAskWork(
+      createExistingSessionDeps(sessionId, createSessionContract(storedArgs)),
+    );
+
+    const result = await askWork(
+      {
+        ...storedArgs,
+        functions: {
+          declarations: storedArgs.functions?.declarations ?? [],
+          mode: 'ANY',
+        },
+      },
+      createContext(),
+    );
+
+    assert.strictEqual(result.isError, true);
+    assert.match(
+      result.content[0]?.type === 'text' ? result.content[0].text : '',
+      /session contract mismatch/,
+    );
   });
 
   it('returns the exact validation error for functionResponses without a session', async () => {

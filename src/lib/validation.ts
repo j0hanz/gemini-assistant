@@ -502,6 +502,7 @@ type PreflightCapability =
   | 'functions';
 
 export interface GeminiRequestPreflight {
+  allowExistingSessionSchema?: boolean | undefined;
   hasExistingSession?: boolean | undefined;
   jsonMode?: boolean | undefined;
   responseSchema?: unknown;
@@ -537,7 +538,12 @@ const disallowEmptyFileSearchStore: PreflightCheck = (req) => {
 };
 
 const disallowSchemaInExistingSession: PreflightCheck = (req) => {
-  if (req.responseSchema && req.sessionId && req.hasExistingSession) {
+  if (
+    req.responseSchema &&
+    req.sessionId &&
+    req.hasExistingSession &&
+    req.allowExistingSessionSchema !== true
+  ) {
     return new AppError(
       'chat',
       'chat: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',

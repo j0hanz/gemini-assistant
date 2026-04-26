@@ -323,6 +323,11 @@ function nodeErrorResponse(res: ServerResponse, status: number, message: string)
   res.end(JSON.stringify(rpcErrorPayload(message)));
 }
 
+function nodeMethodNotAllowedResponse(res: ServerResponse): void {
+  res.setHeader('Allow', 'POST, OPTIONS');
+  nodeErrorResponse(res, 405, 'Method Not Allowed');
+}
+
 function responseError(status: number, message: string): Response {
   return new Response(JSON.stringify(rpcErrorPayload(message)), {
     status,
@@ -815,6 +820,11 @@ export async function startHttpTransport(
     }
     if (!takeRateLimit(rateLimiter, nodeRateLimitKey(req, sessionId))) {
       nodeRateLimitedResponse(res);
+      return;
+    }
+    // Express routes OPTIONS to app.options('/mcp') before app.all('/mcp').
+    if (isStateless && req.method !== 'POST' && req.method !== 'OPTIONS') {
+      nodeMethodNotAllowedResponse(res);
       return;
     }
     if (rejectDeleteWithoutSession(req.method, sessionId, isStateless)) {

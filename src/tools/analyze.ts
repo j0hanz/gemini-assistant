@@ -31,9 +31,7 @@ import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 
 import { analyzeUrlWork } from './research.js';
 
-const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
-const ANALYZE_TOOL_LABEL = 'Analyze';
-const ANALYZE_DIAGRAM_TOOL_LABEL = 'Analyze Diagram';
+import { TOOL_LABELS } from '../public-contract.js';
 
 interface AnalyzeDiagramInput {
   goal: string;
@@ -155,7 +153,7 @@ function createAnalyzeFileWork(
     },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
-    const progress = new ProgressReporter(ctx, ANALYZE_FILE_TOOL_LABEL);
+    const progress = new ProgressReporter(ctx, TOOL_LABELS.analyzeFile);
 
     return await withUploadsAndPipeline(
       ctx,
@@ -169,7 +167,7 @@ function createAnalyzeFileWork(
 
         return await executor.executeGeminiPipeline(ctx, {
           toolName: 'analyze_file',
-          label: ANALYZE_FILE_TOOL_LABEL,
+          label: TOOL_LABELS.analyzeFile,
           googleSearch,
           urls,
           workspaceCacheManager,
@@ -225,7 +223,7 @@ async function analyzeMultiFileWork(
   extra: AnalyzeMultiExtra = {},
 ): Promise<CallToolResult> {
   const { maxOutputTokens, safetySettings, googleSearch, urls, thinkingBudget } = extra;
-  const progress = new ProgressReporter(ctx, ANALYZE_TOOL_LABEL);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.analyze);
 
   return await withUploadsAndPipeline(
     ctx,
@@ -238,7 +236,7 @@ async function analyzeMultiFileWork(
 
       return await executor.executeGeminiPipeline(ctx, {
         toolName: 'analyze',
-        label: ANALYZE_TOOL_LABEL,
+        label: TOOL_LABELS.analyze,
         googleSearch,
         urls,
         workspaceCacheManager,
@@ -287,7 +285,7 @@ async function analyzeDiagramWork(
   args: AnalyzeDiagramInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const progress = new ProgressReporter(ctx, ANALYZE_DIAGRAM_TOOL_LABEL);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.analyzeDiagram);
 
   const filesToUpload =
     args.targetKind === 'file' || args.targetKind === 'multi'
@@ -325,7 +323,7 @@ async function analyzeDiagramWork(
 
       return await executor.executeGeminiPipeline(ctx, {
         toolName: 'analyze_diagram',
-        label: ANALYZE_DIAGRAM_TOOL_LABEL,
+        label: TOOL_LABELS.analyzeDiagram,
         urls: args.targetKind === 'url' ? args.urls : undefined,
         serverSideToolInvocations: (diagramBuiltInTools.length > 0
           ? 'auto'

@@ -60,6 +60,7 @@ import { type GeminiResponseSchema } from '../schemas/inputs.js';
 import { ChatOutputSchema, type ContextUsed, type UsageMetadata } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, DEFAULT_TEMPERATURE, getAI } from '../client.js';
+import { TOOL_LABELS } from '../public-contract.js';
 import {
   getExposeThoughts,
   getGeminiModel,
@@ -158,7 +159,6 @@ export interface AskExecutionResult {
   urls?: string[];
 }
 
-const ASK_TOOL_LABEL = 'Chat';
 const JSON_REPAIR_MAX_RETRIES = 1;
 const JSON_REPAIR_WARNING_TEXT_LIMIT = 2_000;
 
@@ -548,14 +548,14 @@ async function runAskStream(
   jsonMode = false,
   responseSchema?: GeminiResponseSchema,
 ): Promise<AskExecutionResult> {
-  const progress = new ProgressReporter(ctx, ASK_TOOL_LABEL);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.chat);
   await progress.send(0, undefined, 'Preparing');
 
   let capturedStreamResult: StreamResult | undefined;
   const result = await executor.runStream(
     ctx,
     'chat',
-    ASK_TOOL_LABEL,
+    TOOL_LABELS.chat,
     streamGenerator,
     (streamResult) => {
       capturedStreamResult = streamResult;
@@ -1010,7 +1010,7 @@ async function askExistingSession(
       : contextUsed;
 
   await mcpLog(ctx, 'debug', `Resuming session ${args.sessionId}`);
-  const progress = new ProgressReporter(ctx, ASK_TOOL_LABEL);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.chat);
   await progress.send(0, undefined, 'Resuming session');
   const askResult = await deps.runWithoutSession(resumedArgs, ctx, chat);
   askResult.result = attachContextUsed(askResult.result, effectiveContextUsed);

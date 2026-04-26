@@ -36,11 +36,10 @@ import {
 import { ReviewOutputSchema } from '../schemas/outputs.js';
 
 import { getReviewDocs } from '../config.js';
+import { TOOL_LABELS } from '../public-contract.js';
 
 const execFileAsync = promisify(execFile);
 
-const COMPARE_FILE_TOOL_LABEL = 'Compare Files';
-const REVIEW_DIFF_TOOL_LABEL = 'Review Diff';
 const GIT_TIMEOUT_MS = 30_000;
 const GIT_MAX_BUFFER = 10 * 1024 * 1024;
 const MAX_DIFF_CHARS = 500_000;
@@ -248,7 +247,7 @@ function createCompareFileWork(
     },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
-    const progress = new ProgressReporter(ctx, COMPARE_FILE_TOOL_LABEL);
+    const progress = new ProgressReporter(ctx, TOOL_LABELS.compareFiles);
 
     return await withUploadsAndPipeline(
       ctx,
@@ -265,7 +264,7 @@ function createCompareFileWork(
 
         return await executor.executeGeminiPipeline(ctx, {
           toolName: 'compare_files',
-          label: COMPARE_FILE_TOOL_LABEL,
+          label: TOOL_LABELS.compareFiles,
           googleSearch,
           urls,
           workspaceCacheManager,
@@ -343,13 +342,13 @@ async function diagnoseFailureWork(
     urls,
   });
 
-  const progress = new ProgressReporter(ctx, 'Review Failure');
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.reviewFailure);
   await progress.send(0, undefined, 'Diagnosing');
   await mcpLog(ctx, 'info', `Review failure: ${error.length} chars`);
 
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'review_failure',
-    label: 'Review Failure',
+    label: TOOL_LABELS.reviewFailure,
     googleSearch,
     urls,
     workspaceCacheManager,
@@ -972,7 +971,7 @@ function buildTextResult(
 
 function buildAnalyzePrErrorResult(err: unknown): CallToolResult {
   return {
-    content: [{ type: 'text', text: `${REVIEW_DIFF_TOOL_LABEL}: ${formatAnalyzePrError(err)}` }],
+    content: [{ type: 'text', text: `${TOOL_LABELS.review}: ${formatAnalyzePrError(err)}` }],
     isError: true,
   };
 }
@@ -1080,7 +1079,7 @@ export async function analyzePrWork(
   workspaceCacheManager: WorkspaceCacheManagerImpl,
   rootsFetcher: RootsFetcher = () => Promise.resolve([]),
 ): Promise<CallToolResult> {
-  const progress = new ProgressReporter(ctx, REVIEW_DIFF_TOOL_LABEL);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.review);
   await progress.step(0, 3, 'Inspecting local changes');
   const log = logger.child('review');
 
@@ -1153,7 +1152,7 @@ export async function analyzePrWork(
 
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'analyze_pr',
-    label: REVIEW_DIFF_TOOL_LABEL,
+    label: TOOL_LABELS.review,
     workspaceCacheManager,
     buildContents: () => ({
       contents: [modelPrompt.promptText],

@@ -476,3 +476,17 @@ export const WORKFLOW_ENTRIES = [
     relatedResources: ['discover://workflows', 'session://'],
   },
 ] as const satisfies readonly WorkflowEntry[];
+
+export const TOOL_LABELS = {
+  chat: 'Chat',
+  research: 'Research',
+  search: 'Web Search',
+  analyzeUrl: 'Analyze URL',
+  agenticSearch: 'Agentic Search',
+  analyze: 'Analyze',
+  analyzeFile: 'Analyze File',
+  analyzeDiagram: 'Analyze Diagram',
+  review: 'Review Diff',
+  compareFiles: 'Compare Files',
+  reviewFailure: 'Review Failure',
+} as const;

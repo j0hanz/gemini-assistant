@@ -66,10 +66,8 @@ import { ResearchOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getGeminiModel } from '../config.js';
+import { TOOL_LABELS } from '../public-contract.js';
 
-const SEARCH_TOOL_LABEL = 'Web Search';
-const ANALYZE_URL_TOOL_LABEL = 'Analyze URL';
-const AGENTIC_SEARCH_TOOL_LABEL = 'Agentic Search';
 const MAX_DEEP_RESEARCH_TURNS = 4;
 const log = logger.child('research');
 
@@ -645,7 +643,7 @@ async function runDeepResearchPlan(
 ): Promise<CallToolResult> {
   const warnings: string[] = [];
   const results: StreamResult[] = [];
-  const progress = new ProgressReporter(ctx, AGENTIC_SEARCH_TOOL_LABEL);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.agenticSearch);
   await progress.send(0, undefined, 'Planning deep research');
   await mcpLog(ctx, 'info', 'Agentic search requested');
   log.info('Agentic search requested', {
@@ -816,13 +814,13 @@ async function searchWork(
 ): Promise<CallToolResult> {
   const prompt = buildGroundedAnswerPrompt(query, urls);
 
-  const progress = new ProgressReporter(ctx, SEARCH_TOOL_LABEL);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.search);
   await progress.send(0, undefined, 'Starting');
   await mcpLog(ctx, 'info', 'Search requested');
 
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'research',
-    label: SEARCH_TOOL_LABEL,
+    label: TOOL_LABELS.search,
     googleSearch: true,
     urls,
     fileSearch,
@@ -862,13 +860,13 @@ export async function analyzeUrlWork(
     urls,
   });
 
-  const progress = new ProgressReporter(ctx, ANALYZE_URL_TOOL_LABEL);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.analyzeUrl);
   await progress.send(0, undefined, 'Fetching');
   await mcpLog(ctx, 'info', `Analyze URL requested for ${urls.length} urls`);
 
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'analyze_url',
-    label: ANALYZE_URL_TOOL_LABEL,
+    label: TOOL_LABELS.analyzeUrl,
     urls,
     fileSearch,
     workspaceCacheManager,
@@ -969,7 +967,7 @@ async function agenticSearchWork(
   return runToolStream(
     ctx,
     'research',
-    AGENTIC_SEARCH_TOOL_LABEL,
+    TOOL_LABELS.agenticSearch,
     'Starting deep research',
     'Agentic search requested',
     { topic, searchDepth, urlCount: urls?.length ?? 0 },

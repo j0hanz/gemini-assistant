@@ -16,7 +16,7 @@ import type {
 } from '@google/genai';
 
 import { AppError, assertNever } from '../lib/errors.js';
-import { logger } from '../lib/logger.js';
+import { logger, mcpLog } from '../lib/logger.js';
 import { appendFunctionCallingInstruction } from '../lib/model-prompts.js';
 import {
   buildOrchestrationConfig,
@@ -55,6 +55,7 @@ import {
   type ChatInput,
   createChatInputSchema,
   parseResponseSchemaJsonValue,
+  type WithChatDefaults,
 } from '../schemas/inputs.js';
 import { type GeminiResponseSchema } from '../schemas/inputs.js';
 import { ChatOutputSchema, type ContextUsed, type UsageMetadata } from '../schemas/outputs.js';
@@ -66,6 +67,7 @@ import {
   getSessionLimits,
   getWorkspaceCacheEnabled,
 } from '../config.js';
+import { TOOL_LABELS } from '../public-contract.js';
 import {
   sessionDetailUri,
   sessionEventsUri,
@@ -90,18 +92,8 @@ import {
 
 export { appendToolResponseTurn, buildRebuiltChatContents } from '../sessions.js';
 
-type WithOptionalTemperature<T> = T extends { temperature: infer Temperature }
-  ? Omit<T, 'temperature'> & { temperature?: Temperature | undefined }
-  : T;
-type WithOptionalChatDefaults<T extends { serverSideToolInvocations?: unknown }> = Omit<
-  T,
-  'serverSideToolInvocations' | 'urls'
-> & {
-  serverSideToolInvocations?: T['serverSideToolInvocations'] | undefined;
-  urls?: string[] | undefined;
-};
-type ChatWorkInput = WithOptionalTemperature<WithOptionalChatDefaults<ChatInput>>;
-export type AskArgs = WithOptionalTemperature<WithOptionalChatDefaults<AskInput>> & {
+type ChatWorkInput = WithChatDefaults<ChatInput>;
+export type AskArgs = WithChatDefaults<AskInput> & {
   cacheName?: string;
 };
 
@@ -158,7 +150,6 @@ export interface AskExecutionResult {
   urls?: string[];
 }
 
-const ASK_TOOL_LABEL = 'Chat';
 const JSON_REPAIR_MAX_RETRIES = 1;
 const JSON_REPAIR_WARNING_TEXT_LIMIT = 2_000;
 
@@ -548,16 +539,13 @@ async function runAskStream(
   jsonMode = false,
   responseSchema?: GeminiResponseSchema,
 ): Promise<AskExecutionResult> {
-  const progress = new ProgressReporter(ctx, ASK_TOOL_LABEL);
-  await progress.send(0, undefined, 'Preparing');
-
   let capturedStreamResult: StreamResult | undefined;
-  const result = await executor.runStream(
-    ctx,
-    'chat',
-    ASK_TOOL_LABEL,
-    streamGenerator,
-    (streamResult) => {
+  const result = await executor.runWithProgress(ctx, {
+    toolKey: 'chat',
+    label: TOOL_LABELS.chat,
+    initialMsg: 'Preparing',
+    generator: streamGenerator,
+    responseBuilder: (streamResult) => {
       capturedStreamResult = streamResult;
       const hasThoughts = streamResult.thoughtText.length > 0;
 
@@ -577,7 +565,7 @@ async function runAskStream(
         reportMessage: hasThoughts ? 'completed with reasoning' : 'completed',
       };
     },
-  );
+  });
 
   const streamResult =
     capturedStreamResult ??
@@ -1009,8 +997,8 @@ async function askExistingSession(
         })
       : contextUsed;
 
-  await ctx.mcpReq.log('debug', `Resuming session ${args.sessionId}`);
-  const progress = new ProgressReporter(ctx, ASK_TOOL_LABEL);
+  await mcpLog(ctx, 'debug', `Resuming session ${args.sessionId}`);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.chat);
   await progress.send(0, undefined, 'Resuming session');
   const askResult = await deps.runWithoutSession(resumedArgs, ctx, chat);
   askResult.result = attachContextUsed(askResult.result, effectiveContextUsed);
@@ -1031,7 +1019,7 @@ async function askNewSession(
   deps: AskDependencies,
   contextUsed?: ContextUsed,
 ): Promise<CallToolResult> {
-  await ctx.mcpReq.log('debug', `Creating session ${args.sessionId}`);
+  await mcpLog(ctx, 'debug', `Creating session ${args.sessionId}`);
   const { chat, contract } = deps.createChat(args);
 
   const askResult = await deps.runWithoutSession(args, ctx, chat);
@@ -1044,7 +1032,7 @@ async function askNewSession(
     const turnIndex = (deps.listSessionContentEntries(args.sessionId)?.length ?? 0) - 1;
     appendSessionResource(askResult.result, args.sessionId, turnIndex, ctx.task?.id);
   } else {
-    await ctx.mcpReq.log('debug', `Session ${args.sessionId} not stored due to stream error`);
+    await mcpLog(ctx, 'debug', `Session ${args.sessionId} not stored due to stream error`);
   }
 
   return askResult.result;

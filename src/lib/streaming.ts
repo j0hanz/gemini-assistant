@@ -12,6 +12,7 @@ import type {
 } from '@google/genai';
 
 import { AppError, finishReasonToError, withRetry } from './errors.js';
+import { mcpLog } from './logger.js';
 import { advanceProgress, PROGRESS_TOTAL, sendProgress } from './progress.js';
 import { pickDefined, promptBlockedError } from './response.js';
 
@@ -374,7 +375,7 @@ async function handleFunctionCallPart(
   }
 
   if (!functionCall.name) {
-    await ctx.mcpReq.log('debug', 'Received functionCall with missing name');
+    await mcpLog(ctx, 'debug', 'Received functionCall with missing name');
     state.namelessFunctionCallCount += 1;
   }
 
@@ -872,7 +873,8 @@ export async function consumeStreamWithProgress(
   }
 
   if (state.namelessFunctionCallCount > 0) {
-    await ctx.mcpReq.log(
+    await mcpLog(
+      ctx,
       'warning',
       `Received ${String(state.namelessFunctionCallCount)} functionCall part(s) with missing name`,
     );

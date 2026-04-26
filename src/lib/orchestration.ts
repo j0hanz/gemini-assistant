@@ -8,7 +8,7 @@ import type {
 } from '@google/genai';
 
 import { AppError } from './errors.js';
-import { logger } from './logger.js';
+import { logger, mcpLog } from './logger.js';
 import { validateUrls } from './validation.js';
 
 export const BUILT_IN_TOOL_NAMES = [
@@ -198,11 +198,12 @@ export async function resolveOrchestration(
     urlCount,
   };
 
-  await ctx.mcpReq.log('info', `orchestration resolved: ${toolKey} -> ${config.toolProfile}`);
+  await mcpLog(ctx, 'info', `orchestration resolved: ${toolKey} -> ${config.toolProfile}`);
   logger.child(toolKey).info('orchestration resolved', payload);
 
   if (urlCount > 0 && !config.activeCapabilities.has('urlContext')) {
-    await ctx.mcpReq.log(
+    await mcpLog(
+      ctx,
       'warning',
       `orchestration: ${toolKey} received ${String(urlCount)} URL(s) but resolved profile '${config.toolProfile}' does not expose URL Context`,
     );
@@ -216,7 +217,8 @@ export async function resolveOrchestration(
     fileSearchSpec?.kind === 'fileSearch' &&
     fileSearchSpec.fileSearchStoreNames.length === 0
   ) {
-    await ctx.mcpReq.log(
+    await mcpLog(
+      ctx,
       'warning',
       `orchestration: ${toolKey} resolved File Search without fileSearchStoreNames`,
     );

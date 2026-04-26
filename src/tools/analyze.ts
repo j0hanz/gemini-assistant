@@ -9,6 +9,7 @@ import type { Part } from '@google/genai';
 import type { z } from 'zod/v4';
 
 import { withUploadsAndPipeline } from '../lib/file.js';
+import { mcpLog } from '../lib/logger.js';
 import { buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
 import {
@@ -28,11 +29,8 @@ import { type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 
+import { TOOL_LABELS } from '../public-contract.js';
 import { analyzeUrlWork } from './research.js';
-
-const ANALYZE_FILE_TOOL_LABEL = 'Analyze File';
-const ANALYZE_TOOL_LABEL = 'Analyze';
-const ANALYZE_DIAGRAM_TOOL_LABEL = 'Analyze Diagram';
 
 interface AnalyzeDiagramInput {
   goal: string;
@@ -47,34 +45,6 @@ interface AnalyzeDiagramInput {
   thinkingLevel?: AnalyzeInput['thinkingLevel'];
   urls?: string[] | undefined;
   validateSyntax?: boolean | undefined;
-}
-
-function requireAnalyzeField<T>(
-  value: T | undefined,
-  field: string,
-  discriminator: string,
-  kind: string,
-): T {
-  if (value === undefined) {
-    throw new Error(`AnalyzeInput validation requires ${field} when ${discriminator}=${kind}.`);
-  }
-  return value;
-}
-
-function requireAnalyzeFilePath(args: AnalyzeInput): string {
-  return requireAnalyzeField(args.filePath, 'filePath', 'targetKind', 'file');
-}
-
-function requireAnalyzeUrls(args: AnalyzeInput): string[] {
-  return requireAnalyzeField(args.urls, 'urls', 'targetKind', 'url');
-}
-
-function requireAnalyzeFilePaths(args: AnalyzeInput): string[] {
-  return requireAnalyzeField(args.filePaths, 'filePaths', 'targetKind', 'multi');
-}
-
-function requireAnalyzeDiagramType(args: AnalyzeInput): 'mermaid' | 'plantuml' {
-  return requireAnalyzeField(args.diagramType, 'diagramType', 'outputKind', 'diagram');
 }
 
 const UNLABELED_DIAGRAM_FENCED_PATTERN = /```\s*\n([\s\S]*?)```/;
@@ -154,7 +124,7 @@ function createAnalyzeFileWork(
     },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
-    const progress = new ProgressReporter(ctx, ANALYZE_FILE_TOOL_LABEL);
+    const progress = new ProgressReporter(ctx, TOOL_LABELS.analyzeFile);
 
     return await withUploadsAndPipeline(
       ctx,
@@ -163,12 +133,12 @@ function createAnalyzeFileWork(
       progress,
       (fp) => `Uploading ${fp.split(/[\\/]/).pop() ?? fp}`,
       async (contents) => {
-        await ctx.mcpReq.log('info', `Analyzing file content`);
+        await mcpLog(ctx, 'info', `Analyzing file content`);
         await progress.step(1, 2, 'Analyzing content');
 
         return await executor.executeGeminiPipeline(ctx, {
           toolName: 'analyze_file',
-          label: ANALYZE_FILE_TOOL_LABEL,
+          label: TOOL_LABELS.analyzeFile,
           googleSearch,
           urls,
           workspaceCacheManager,
@@ -224,7 +194,7 @@ async function analyzeMultiFileWork(
   extra: AnalyzeMultiExtra = {},
 ): Promise<CallToolResult> {
   const { maxOutputTokens, safetySettings, googleSearch, urls, thinkingBudget } = extra;
-  const progress = new ProgressReporter(ctx, ANALYZE_TOOL_LABEL);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.analyze);
 
   return await withUploadsAndPipeline(
     ctx,
@@ -237,7 +207,7 @@ async function analyzeMultiFileWork(
 
       return await executor.executeGeminiPipeline(ctx, {
         toolName: 'analyze',
-        label: ANALYZE_TOOL_LABEL,
+        label: TOOL_LABELS.analyze,
         googleSearch,
         urls,
         workspaceCacheManager,
@@ -286,7 +256,7 @@ async function analyzeDiagramWork(
   args: AnalyzeDiagramInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const progress = new ProgressReporter(ctx, ANALYZE_DIAGRAM_TOOL_LABEL);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.analyzeDiagram);
 
   const filesToUpload =
     args.targetKind === 'file' || args.targetKind === 'multi'
@@ -318,13 +288,13 @@ async function analyzeDiagramWork(
 
       const totalSteps = uploadedCount > 0 ? uploadedCount + 1 : 1;
       await progress.step(uploadedCount, totalSteps, `Generating ${args.diagramType} diagram`);
-      await ctx.mcpReq.log('info', `Generating ${args.diagramType} diagram`);
+      await mcpLog(ctx, 'info', `Generating ${args.diagramType} diagram`);
 
       const diagramBuiltInTools = pickDiagramBuiltInTools(args);
 
       return await executor.executeGeminiPipeline(ctx, {
         toolName: 'analyze_diagram',
-        label: ANALYZE_DIAGRAM_TOOL_LABEL,
+        label: TOOL_LABELS.analyzeDiagram,
         urls: args.targetKind === 'url' ? args.urls : undefined,
         serverSideToolInvocations: (diagramBuiltInTools.length > 0
           ? 'auto'
@@ -408,7 +378,7 @@ async function runAnalyzeTarget(
   if (args.targetKind === 'file') {
     return await fileWork(
       {
-        filePath: requireAnalyzeFilePath(args),
+        filePath: args.filePath,
         question: args.goal,
         thinkingLevel: args.thinkingLevel,
         thinkingBudget: args.thinkingBudget,
@@ -425,7 +395,7 @@ async function runAnalyzeTarget(
   if (args.targetKind === 'url') {
     return await analyzeUrlWork(
       {
-        urls: requireAnalyzeUrls(args),
+        urls: args.urls,
         question: args.goal,
         thinkingLevel: args.thinkingLevel,
         thinkingBudget: args.thinkingBudget,
@@ -440,7 +410,7 @@ async function runAnalyzeTarget(
   return await analyzeMultiFileWork(
     rootsFetcher,
     workspaceCacheManager,
-    requireAnalyzeFilePaths(args),
+    args.filePaths,
     args.goal,
     args.thinkingLevel,
     ctx,
@@ -463,8 +433,8 @@ function getExplanationString(explanation: unknown): string | undefined {
 }
 
 function getAnalyzedPaths(args: AnalyzeInput): string[] | undefined {
-  if (args.targetKind === 'file') return [requireAnalyzeFilePath(args)];
-  if (args.targetKind === 'multi') return requireAnalyzeFilePaths(args);
+  if (args.targetKind === 'file') return [args.filePath];
+  if (args.targetKind === 'multi') return args.filePaths;
   return undefined;
 }
 
@@ -484,7 +454,7 @@ function buildAnalyzeStructuredContent(
   };
 
   if (args.outputKind === 'diagram') {
-    const diagramType = requireAnalyzeDiagramType(args);
+    const diagramType = args.diagramType ?? 'mermaid';
 
     return pickDefined({
       ...buildSuccessfulStructuredContent({
@@ -513,7 +483,7 @@ function buildAnalyzeStructuredContent(
         summary: typeof structured.summary === 'string' ? structured.summary : '',
         groundingSignals: structured.groundingSignals,
         urlMetadata: structured.urlMetadata,
-        analyzedPaths: args.targetKind === 'multi' ? requireAnalyzeFilePaths(args) : undefined,
+        analyzedPaths: args.targetKind === 'multi' ? args.filePaths : undefined,
       },
       shared: base,
     }),

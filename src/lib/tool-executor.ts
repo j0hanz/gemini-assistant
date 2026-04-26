@@ -8,14 +8,14 @@ import type { ContentListUnion, GenerateContentConfig } from '@google/genai';
 import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getExposeThoughts, getGeminiModel } from '../config.js';
 import { AppError } from './errors.js';
-import { logContext, logger, maybeSummarizePayload, type ScopedLogger } from './logger.js';
+import { logContext, logger, maybeSummarizePayload, mcpLog, type ScopedLogger } from './logger.js';
 import {
   type BuiltInToolSpec,
   type OrchestrationRequest,
   resolveOrchestration,
   selectSearchAndUrlContextTools,
 } from './orchestration.js';
-import { reportCompletion, reportFailure } from './progress.js';
+import { ProgressReporter, reportCompletion, reportFailure } from './progress.js';
 import { buildSharedStructuredMetadata, extractTextContent } from './response.js';
 import { executeToolStream, extractUsage, type StreamResult } from './streaming.js';
 import { getWorkspaceCacheName, type WorkspaceCacheManagerImpl } from './workspace-context.js';
@@ -176,6 +176,36 @@ export class ToolExecutor {
         return { result };
       },
       reportTerminalProgress,
+    );
+  }
+
+  async runWithProgress<T extends Record<string, unknown>>(
+    ctx: ServerContext,
+    options: {
+      toolKey: string;
+      label: string;
+      initialMsg: string;
+      logMessage?: string;
+      logData?: unknown;
+      generator: () => Promise<AsyncGenerator<import('@google/genai').GenerateContentResponse>>;
+      responseBuilder?: StreamResponseBuilder<T>;
+    },
+  ): Promise<CallToolResult> {
+    const progress = new ProgressReporter(ctx, options.label);
+    await progress.send(0, undefined, options.initialMsg);
+    if (options.logMessage !== undefined) {
+      await mcpLog(ctx, 'info', options.logMessage);
+      this.scopedLogger.info(
+        options.logMessage,
+        maybeSummarizePayload(options.logData, this.scopedLogger.getVerbosePayloads()),
+      );
+    }
+    return this.runStream(
+      ctx,
+      options.toolKey,
+      options.label,
+      options.generator,
+      options.responseBuilder,
     );
   }
 

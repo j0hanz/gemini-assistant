@@ -230,6 +230,14 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
 export const ChatInputSchema = createChatInputSchema();
 export type ChatInput = z.infer<typeof ChatInputSchema>;
 
+export type WithChatDefaults<
+  T extends { temperature?: unknown; serverSideToolInvocations?: unknown; urls?: unknown },
+> = Omit<T, 'temperature' | 'serverSideToolInvocations' | 'urls'> & {
+  temperature?: T['temperature'] | undefined;
+  serverSideToolInvocations?: T['serverSideToolInvocations'] | undefined;
+  urls?: string[] | undefined;
+};
+
 const ResearchInputBaseSchema = z.strictObject({
   mode: researchMode(),
   goal: goalText('Question or research goal to answer quickly'),
@@ -299,7 +307,32 @@ const AnalyzeInputBaseSchema = z.strictObject({
   ),
 });
 export const AnalyzeInputSchema = AnalyzeInputBaseSchema.superRefine(validateFlatAnalyzeInput);
-export type AnalyzeInput = z.infer<typeof AnalyzeInputSchema>;
+type AnalyzeInputFlat = z.infer<typeof AnalyzeInputSchema>;
+type AnalyzeInputCommon = Omit<AnalyzeInputFlat, 'targetKind' | 'filePath' | 'urls' | 'filePaths'>;
+/**
+ * Discriminated union over `targetKind`. The runtime schema is a single strict
+ * object (preserving exact validator wording); this type alias narrows variant
+ * fields after a `targetKind` check so call sites need no runtime guards.
+ */
+export type AnalyzeInput =
+  | (AnalyzeInputCommon & {
+      targetKind: 'file';
+      filePath: string;
+      urls?: string[] | undefined;
+      filePaths?: undefined;
+    })
+  | (AnalyzeInputCommon & {
+      targetKind: 'url';
+      urls: string[];
+      filePath?: undefined;
+      filePaths?: undefined;
+    })
+  | (AnalyzeInputCommon & {
+      targetKind: 'multi';
+      filePaths: string[];
+      urls?: string[] | undefined;
+      filePath?: undefined;
+    });
 const reviewCommonShape = {
   focus: optionalField(textField('Review priorities (e.g. regressions, security, performance).')),
   thinkingLevel: thinkingLevelField,

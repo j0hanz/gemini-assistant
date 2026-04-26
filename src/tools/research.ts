@@ -13,7 +13,7 @@ import type {
 } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
-import { logger, maybeSummarizePayload } from '../lib/logger.js';
+import { logger, mcpLog } from '../lib/logger.js';
 import {
   buildAgenticResearchPrompt,
   buildFileAnalysisPrompt,
@@ -28,18 +28,26 @@ import {
 import { ProgressReporter } from '../lib/progress.js';
 import { pickDefined } from '../lib/response.js';
 import {
+  appendSearchEntryPointContent,
   appendSources,
   appendUrlStatus,
+  buildDroppedSupportWarnings,
+  buildSourceReportMessage,
   buildSuccessfulStructuredContent,
+  buildUrlContextSourceDetails,
   collectGroundedSourceDetailsWithCounts,
   collectGroundedSourcesWithCounts,
   collectGroundingCitations,
   collectSearchEntryPoint,
+  collectUrlContextSources,
   collectUrlMetadataWithCounts,
   computeGroundingSignals,
+  countOccurrences,
   deriveFindingsFromCitations,
   deriveOverallStatus,
+  extractSampledText,
   formatCountLabel,
+  formatSourceLabels,
   mergeSourceDetails,
   safeValidateStructuredContent,
 } from '../lib/response.js';
@@ -66,19 +74,11 @@ import { ResearchOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getGeminiModel } from '../config.js';
+import { TOOL_LABELS } from '../public-contract.js';
 
-const SEARCH_TOOL_LABEL = 'Web Search';
-const ANALYZE_URL_TOOL_LABEL = 'Analyze URL';
-const AGENTIC_SEARCH_TOOL_LABEL = 'Agentic Search';
 const MAX_DEEP_RESEARCH_TURNS = 4;
 const log = logger.child('research');
 
-type StreamGenerator = () => Promise<
-  AsyncGenerator<import('@google/genai').GenerateContentResponse>
->;
-type StreamResponseBuilder<T extends Record<string, unknown>> = Parameters<
-  typeof executor.runStream<T>
->[4];
 type GenerationConfigFields = Pick<
   ResearchInput,
   'maxOutputTokens' | 'safetySettings' | 'thinkingBudget' | 'fileSearch'
@@ -114,100 +114,6 @@ function buildResearchSpecs(options: ResearchSpecsOptions): BuiltInToolSpec[] {
   return specs;
 }
 
-async function runToolStream<T extends Record<string, unknown>>(
-  ctx: ServerContext,
-  toolKey: string,
-  label: string,
-  initialMsg: string,
-  logMessage: string,
-  logData: unknown,
-  startFn: StreamGenerator,
-  resultFn?: StreamResponseBuilder<T>,
-): Promise<CallToolResult> {
-  const progress = new ProgressReporter(ctx, label);
-  await progress.send(0, undefined, initialMsg);
-  await ctx.mcpReq.log('info', logMessage);
-  log.info(logMessage, maybeSummarizePayload(logData, log.getVerbosePayloads()));
-  return executor.runStream(ctx, toolKey, label, startFn, resultFn);
-}
-
-function buildSourceReportMessage(sourceCount: number): string {
-  return sourceCount > 0
-    ? `${formatCountLabel(sourceCount, 'source')} found`
-    : 'completed with no grounded sources surfaced';
-}
-
-function formatSourceLabels(
-  sourceDetails: readonly { title?: string | undefined; url: string }[],
-): string[] {
-  return sourceDetails.map((source) =>
-    source.title ? `${source.title}: ${source.url}` : source.url,
-  );
-}
-
-function collectUrlContextSources(
-  urlMetadata: readonly { status: string; url: string }[],
-): string[] {
-  return urlMetadata
-    .filter((entry) => entry.status === 'URL_RETRIEVAL_STATUS_SUCCESS')
-    .map((entry) => entry.url);
-}
-
-function buildUrlContextSourceDetails(
-  urls: readonly string[],
-): { domain?: string; origin: 'urlContext'; url: string }[] {
-  return urls.map((url) =>
-    pickDefined({ domain: new URL(url).hostname, origin: 'urlContext' as const, url }),
-  );
-}
-
-function appendSearchEntryPointContent(
-  content: CallToolResult['content'],
-  renderedContent?: string,
-): void {
-  if (!renderedContent) return;
-  content.push({
-    type: 'text',
-    text: `Google Search Suggestions:\n${renderedContent}`,
-  });
-}
-
-function buildDroppedSupportWarnings({
-  droppedChunkCount,
-  droppedSupportCount,
-  droppedUrlCount,
-}: {
-  droppedChunkCount: number;
-  droppedSupportCount: number;
-  droppedUrlCount: number;
-}): string[] {
-  return [
-    ...(droppedSupportCount > 0
-      ? [`dropped ${String(droppedSupportCount)} non-public grounding supports`]
-      : []),
-    ...(droppedChunkCount > 0
-      ? [`dropped ${String(droppedChunkCount)} non-public grounding chunks`]
-      : []),
-    ...(droppedUrlCount > 0
-      ? [`dropped ${String(droppedUrlCount)} non-public URL metadata entries`]
-      : []),
-  ];
-}
-
-function extractSampledText(content: unknown): string {
-  if (Array.isArray(content)) {
-    return content
-      .map((entry: unknown) =>
-        typeof entry === 'object' && entry !== null && 'text' in entry ? String(entry.text) : '',
-      )
-      .join('\n');
-  }
-
-  return typeof content === 'object' && content !== null && 'text' in content
-    ? String(content.text)
-    : '';
-}
-
 async function enrichTopicWithSampling(
   topic: string,
   searchDepth: number,
@@ -240,23 +146,16 @@ async function enrichTopicWithSampling(
       return topic;
     }
 
-    await ctx.mcpReq.log('info', 'Sampling provided research angles');
+    await mcpLog(ctx, 'info', 'Sampling provided research angles');
     log.debug('Sampling provided research angles', { sampledTextLength: sampledText.length });
     return `${topic}\n\n<planning_leads priority="low" evidence="false">\n${sampledText.slice(0, 200)}\n</planning_leads>\n<task>Research the topic above. Do not cite planning_leads as evidence.</task>`;
   } catch (error) {
-    await ctx.mcpReq.log('debug', 'Sampling unavailable; continuing without extra angles');
+    await mcpLog(ctx, 'debug', 'Sampling unavailable; continuing without extra angles');
     log.debug('requestSampling encountered an issue', {
       error: AppError.formatMessage(error),
     });
     return topic;
   }
-}
-
-function countOccurrences(values: readonly string[]): Record<string, number> {
-  return values.reduce<Record<string, number>>((acc, value) => {
-    acc[value] = (acc[value] ?? 0) + 1;
-    return acc;
-  }, {});
 }
 
 function emitDeepResearchToolBudgetLogs(
@@ -273,27 +172,21 @@ function emitDeepResearchToolBudgetLogs(
   };
 
   log.info('deep research tool budget observed', payload);
-  void ctx.mcpReq
-    .log('info', `deep research tool budget observed at depth ${String(searchDepth)}`)
-    .catch(() => undefined);
+  void mcpLog(ctx, 'info', `deep research tool budget observed at depth ${String(searchDepth)}`);
 
   const warnings: string[] = [];
 
   if (searchDepth >= 3 && retrievalTurnsRan !== undefined && retrievalTurnsRan < searchDepth - 1) {
     const warning = `deep research ran ${String(retrievalTurnsRan)} retrieval turn(s), fewer than requested budget ${String(searchDepth - 1)}`;
     log.warn('deep research retrieval turn budget underused', { ...payload, retrievalTurnsRan });
-    void ctx.mcpReq
-      .log('warning', 'deep research retrieval turn budget underused')
-      .catch(() => undefined);
+    void mcpLog(ctx, 'warning', 'deep research retrieval turn budget underused');
     warnings.push(warning);
   }
 
   if (searchDepth >= 4 && !('codeExecution' in toolsUsedOccurrences)) {
     const warning = `deep research did not invoke Code Execution at depth ${String(searchDepth)}`;
     log.warn('deep research did not invoke Code Execution', payload);
-    void ctx.mcpReq
-      .log('warning', 'deep research did not invoke Code Execution')
-      .catch(() => undefined);
+    void mcpLog(ctx, 'warning', 'deep research did not invoke Code Execution');
     warnings.push(warning);
   }
 
@@ -647,9 +540,9 @@ async function runDeepResearchPlan(
 ): Promise<CallToolResult> {
   const warnings: string[] = [];
   const results: StreamResult[] = [];
-  const progress = new ProgressReporter(ctx, AGENTIC_SEARCH_TOOL_LABEL);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.agenticSearch);
   await progress.send(0, undefined, 'Planning deep research');
-  await ctx.mcpReq.log('info', 'Agentic search requested');
+  await mcpLog(ctx, 'info', 'Agentic search requested');
   log.info('Agentic search requested', {
     searchDepth: args.searchDepth,
     urlCount: args.urls?.length ?? 0,
@@ -818,13 +711,13 @@ async function searchWork(
 ): Promise<CallToolResult> {
   const prompt = buildGroundedAnswerPrompt(query, urls);
 
-  const progress = new ProgressReporter(ctx, SEARCH_TOOL_LABEL);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.search);
   await progress.send(0, undefined, 'Starting');
-  await ctx.mcpReq.log('info', 'Search requested');
+  await mcpLog(ctx, 'info', 'Search requested');
 
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'research',
-    label: SEARCH_TOOL_LABEL,
+    label: TOOL_LABELS.search,
     googleSearch: true,
     urls,
     fileSearch,
@@ -864,13 +757,13 @@ export async function analyzeUrlWork(
     urls,
   });
 
-  const progress = new ProgressReporter(ctx, ANALYZE_URL_TOOL_LABEL);
+  const progress = new ProgressReporter(ctx, TOOL_LABELS.analyzeUrl);
   await progress.send(0, undefined, 'Fetching');
-  await ctx.mcpReq.log('info', `Analyze URL requested for ${urls.length} urls`);
+  await mcpLog(ctx, 'info', `Analyze URL requested for ${urls.length} urls`);
 
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'analyze_url',
-    label: ANALYZE_URL_TOOL_LABEL,
+    label: TOOL_LABELS.analyzeUrl,
     urls,
     fileSearch,
     workspaceCacheManager,
@@ -920,7 +813,7 @@ async function agenticSearchWork(
         topic = `${topic}\n\nAdditional User Constraint: ${constraint}`;
       }
     } catch (err) {
-      await ctx.mcpReq.log('warning', 'Elicitation skipped; continuing without extra constraints');
+      await mcpLog(ctx, 'warning', 'Elicitation skipped; continuing without extra constraints');
       log.warn('Elicitation skipped or failed', { error: AppError.formatMessage(err) });
     }
   }
@@ -968,14 +861,13 @@ async function agenticSearchWork(
   if (resolved.error) return resolved.error;
   const { tools, toolConfig } = resolved.config;
 
-  return runToolStream(
-    ctx,
-    'research',
-    AGENTIC_SEARCH_TOOL_LABEL,
-    'Starting deep research',
-    'Agentic search requested',
-    { topic, searchDepth, urlCount: urls?.length ?? 0 },
-    () =>
+  return executor.runWithProgress(ctx, {
+    toolKey: 'research',
+    label: TOOL_LABELS.agenticSearch,
+    initialMsg: 'Starting deep research',
+    logMessage: 'Agentic search requested',
+    logData: { topic, searchDepth, urlCount: urls?.length ?? 0 },
+    generator: () =>
       getAI().models.generateContentStream({
         model: getGeminiModel(),
         contents: prompt.promptText,
@@ -993,9 +885,9 @@ async function agenticSearchWork(
           ctx.mcpReq.signal,
         ),
       }),
-    (streamResult, textContent) =>
+    responseBuilder: (streamResult, textContent) =>
       buildAgenticSearchResult(streamResult, textContent, ctx, searchDepth),
-  );
+  });
 }
 
 async function runQuickResearch(

@@ -603,3 +603,88 @@ export function extractTextContent(
     .map((c) => c.text)
     .join('');
 }
+
+// ── Grounding Presentation ───
+export function buildSourceReportMessage(sourceCount: number): string {
+  return sourceCount > 0
+    ? `${formatCountLabel(sourceCount, 'source')} found`
+    : 'completed with no grounded sources surfaced';
+}
+
+export function formatSourceLabels(
+  sourceDetails: readonly { title?: string | undefined; url: string }[],
+): string[] {
+  return sourceDetails.map((source) =>
+    source.title ? `${source.title}: ${source.url}` : source.url,
+  );
+}
+
+export function collectUrlContextSources(
+  urlMetadata: readonly { status: string; url: string }[],
+): string[] {
+  return urlMetadata
+    .filter((entry) => entry.status === 'URL_RETRIEVAL_STATUS_SUCCESS')
+    .map((entry) => entry.url);
+}
+
+export function buildUrlContextSourceDetails(
+  urls: readonly string[],
+): { domain?: string; origin: 'urlContext'; url: string }[] {
+  return urls.map((url) =>
+    pickDefined({ domain: new URL(url).hostname, origin: 'urlContext' as const, url }),
+  );
+}
+
+export function appendSearchEntryPointContent(
+  content: CallToolResult['content'],
+  renderedContent?: string,
+): void {
+  if (!renderedContent) return;
+  content.push({
+    type: 'text',
+    text: `Google Search Suggestions:\n${renderedContent}`,
+  });
+}
+
+export function buildDroppedSupportWarnings({
+  droppedChunkCount,
+  droppedSupportCount,
+  droppedUrlCount,
+}: {
+  droppedChunkCount: number;
+  droppedSupportCount: number;
+  droppedUrlCount: number;
+}): string[] {
+  return [
+    ...(droppedSupportCount > 0
+      ? [`dropped ${String(droppedSupportCount)} non-public grounding supports`]
+      : []),
+    ...(droppedChunkCount > 0
+      ? [`dropped ${String(droppedChunkCount)} non-public grounding chunks`]
+      : []),
+    ...(droppedUrlCount > 0
+      ? [`dropped ${String(droppedUrlCount)} non-public URL metadata entries`]
+      : []),
+  ];
+}
+
+export function extractSampledText(content: unknown): string {
+  if (Array.isArray(content)) {
+    return content
+      .map((entry: unknown) =>
+        typeof entry === 'object' && entry !== null && 'text' in entry ? String(entry.text) : '',
+      )
+      .join('\n');
+  }
+
+  return typeof content === 'object' && content !== null && 'text' in content
+    ? String(content.text)
+    : '';
+}
+
+export function countOccurrences(values: readonly string[]): Record<string, number> {
+  return values.reduce<Record<string, number>>((acc, value) => {
+    acc[value] = (acc[value] ?? 0) + 1;
+    return acc;
+  }, {});
+}

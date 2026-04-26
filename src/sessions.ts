@@ -233,6 +233,52 @@ export function appendToolResponseTurn(
   });
 }
 
+export function getPendingFunctionCalls(entry: {
+  contents: readonly ContentEntry[];
+}): FunctionCallEntry[] {
+  for (let index = entry.contents.length - 1; index >= 0; index -= 1) {
+    const content = entry.contents[index];
+    if (content?.role !== 'model') {
+      continue;
+    }
+
+    const seenIds = new Set<string>();
+    const functionCalls = content.parts.flatMap((part) => {
+      const functionCall = part.functionCall;
+      if (!functionCall) {
+        return [];
+      }
+
+      const id = typeof functionCall.id === 'string' ? functionCall.id : undefined;
+      if (id && seenIds.has(id)) {
+        return [];
+      }
+      if (id) {
+        seenIds.add(id);
+      }
+
+      return [
+        {
+          ...(id ? { id } : {}),
+          ...(typeof functionCall.name === 'string' ? { name: functionCall.name } : {}),
+          ...(functionCall.args && typeof functionCall.args === 'object'
+            ? { args: functionCall.args }
+            : {}),
+          ...(typeof part.thoughtSignature === 'string'
+            ? { thoughtSignature: part.thoughtSignature }
+            : {}),
+        } satisfies FunctionCallEntry,
+      ];
+    });
+
+    if (functionCalls.length > 0) {
+      return functionCalls;
+    }
+  }
+
+  return [];
+}
+
 function cloneValue<T>(value: T): T {
   return structuredClone(value);
 }

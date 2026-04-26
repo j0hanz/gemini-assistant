@@ -255,6 +255,7 @@ describe('ChatInputSchema', () => {
       },
       functionResponses: [
         {
+          id: 'call-1',
           name: 'lookup_doc',
           response: { output: { title: 'Doc' } },
         },
@@ -321,7 +322,7 @@ describe('ChatInputSchema', () => {
     assert.strictEqual(
       ChatInputSchema.safeParse({
         goal: 'bad function response',
-        functionResponses: [{ name: 'lookup_doc', response: 'not an object' }],
+        functionResponses: [{ id: 'call-1', name: 'lookup_doc', response: 'not an object' }],
       }).success,
       false,
     );
@@ -335,21 +336,35 @@ describe('ChatInputSchema', () => {
     assert.strictEqual(
       ChatInputSchema.safeParse({
         goal: 'missing function response name',
-        functionResponses: [{ response: { output: 'ok' } }],
+        functionResponses: [{ id: 'call-1', response: { output: 'ok' } }],
       }).success,
       false,
     );
     assert.strictEqual(
       ChatInputSchema.safeParse({
         goal: 'missing function response payload',
-        functionResponses: [{ name: 'lookup_doc' }],
+        functionResponses: [{ id: 'call-1', name: 'lookup_doc' }],
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'missing function response id',
+        functionResponses: [{ name: 'lookup_doc', response: { output: 'ok' } }],
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'blank function response id',
+        functionResponses: [{ id: '   ', name: 'lookup_doc', response: { output: 'ok' } }],
       }).success,
       false,
     );
     assert.strictEqual(
       ChatInputSchema.safeParse({
         goal: 'unknown function response key',
-        functionResponses: [{ name: 'lookup_doc', response: {}, extra: true }],
+        functionResponses: [{ id: 'call-1', name: 'lookup_doc', response: {}, extra: true }],
       }).success,
       false,
     );
@@ -360,6 +375,72 @@ describe('ChatInputSchema', () => {
       }).success,
       false,
     );
+  });
+
+  it('requires Gemini-compatible object schemas for function parameters', () => {
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'missing schema type',
+        functions: {
+          declarations: [{ name: 'lookup_doc', description: 'Lookup', parametersJsonSchema: {} }],
+        },
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'wrong schema type',
+        functions: {
+          declarations: [
+            {
+              name: 'lookup_doc',
+              description: 'Lookup',
+              parametersJsonSchema: { type: 'string' },
+            },
+          ],
+        },
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'unsupported gemini keyword',
+        functions: {
+          declarations: [
+            {
+              name: 'lookup_doc',
+              description: 'Lookup',
+              parametersJsonSchema: {
+                type: 'object',
+                oneOf: [{ type: 'object' }],
+              },
+            },
+          ],
+        },
+      }).success,
+      false,
+    );
+
+    const result = ChatInputSchema.safeParse({
+      goal: 'valid schema',
+      functions: {
+        declarations: [
+          {
+            name: 'lookup_doc',
+            description: 'Lookup',
+            parametersJsonSchema: {
+              type: 'object',
+              properties: {
+                orderId: { type: 'string' },
+              },
+              required: ['orderId'],
+            },
+          },
+        ],
+      },
+    });
+
+    assert.ok(result.success);
   });
 
   it('treats empty fileSearch.fileSearchStoreNames and functions.declarations as unset', () => {

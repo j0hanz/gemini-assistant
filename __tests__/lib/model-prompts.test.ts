@@ -50,7 +50,7 @@ describe('model-prompts', () => {
       }),
       [
         'Base',
-        'You must call exactly one of these declared functions: lookup.',
+        'You must call one or more of these declared functions when needed to complete the request: lookup. Parallel calls are allowed.',
         'After issuing a call, stop and wait for the client to return the function response. Do not invent results.',
       ].join('\n\n'),
     );
@@ -63,7 +63,7 @@ describe('model-prompts', () => {
       }),
       [
         'Base',
-        'Available functions: lookup. Calls are validated server-side; arguments that fail the schema are rejected.',
+        'Available functions: lookup. Function calls are schema-constrained by Gemini; the MCP client must still validate arguments before executing side effects.',
         'The server may execute the call. Do not fabricate function results.',
       ].join('\n\n'),
     );

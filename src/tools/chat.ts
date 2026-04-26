@@ -78,6 +78,7 @@ import {
   buildReplayHistoryParts,
   capRawParts,
   type ContentEntry,
+  getPendingFunctionCalls,
   sanitizeFunctionCalls,
   sanitizeSessionValue,
   sanitizeToolEvents,
@@ -304,6 +305,36 @@ function validateAskConflict(condition: boolean, message: string): CallToolResul
   return condition ? new AppError('chat', message).toToolResult() : undefined;
 }
 
+function validateFunctionResponsesAgainstPending(
+  pending: FunctionCallEntry[],
+  responses: NonNullable<AskArgs['functionResponses']>,
+): string | undefined {
+  const seenIds = new Set<string>();
+  const pendingById = new Map(
+    pending.flatMap((call) =>
+      typeof call.id === 'string' && call.id.length > 0 ? [[call.id, call] as const] : [],
+    ),
+  );
+
+  for (const response of responses) {
+    if (seenIds.has(response.id)) {
+      return `chat: duplicate functionResponse id '${response.id}'.`;
+    }
+    seenIds.add(response.id);
+
+    const pendingCall = pendingById.get(response.id);
+    if (!pendingCall) {
+      return `chat: functionResponse id '${response.id}' does not match a pending functionCall.`;
+    }
+
+    if (pendingCall.name !== response.name) {
+      return `chat: functionResponse id '${response.id}' has name '${response.name}', expected '${pendingCall.name ?? ''}'.`;
+    }
+  }
+
+  return undefined;
+}
+
 function hasExpiredSession(
   sessionId: string | undefined,
   deps: Pick<AskDependencies, 'isEvicted'>,
@@ -366,7 +397,7 @@ function buildChatOrchestrationRequest(args: AskArgs) {
 
 function validateAskRequest(
   args: AskArgs,
-  deps: Pick<AskDependencies, 'getSessionEntry' | 'isEvicted'>,
+  deps: Pick<AskDependencies, 'getSessionEntry' | 'isEvicted' | 'listSessionContentEntries'>,
 ): CallToolResult | undefined {
   const { responseSchema, sessionId } = args;
   if (sessionId !== undefined && getStatelessTransportFlag()) {
@@ -418,6 +449,19 @@ function validateAskRequest(
     }
   }
 
+  if (hasFunctionResponses && sessionId && sessionEntry) {
+    const pending = getPendingFunctionCalls({
+      contents: deps.listSessionContentEntries(sessionId) ?? [],
+    });
+    const validationMessage = validateFunctionResponsesAgainstPending(
+      pending,
+      args.functionResponses ?? [],
+    );
+    if (validationMessage) {
+      return new AppError('chat', validationMessage).toToolResult();
+    }
+  }
+
   if (
     hasExistingSession &&
     sessionEntry.contract &&
@@ -456,7 +500,7 @@ function normalizeFunctionResponses(
   }
 
   return responses.map((response) => ({
-    ...(response.id !== undefined ? { id: response.id } : {}),
+    id: response.id,
     name: response.name,
     response: response.response,
   }));

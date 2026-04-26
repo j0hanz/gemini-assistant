@@ -6,6 +6,7 @@ import { z } from 'zod/v4';
 import { isPublicHttpUrl } from '../lib/validation.js';
 
 import { DEFAULT_TEMPERATURE, PUBLIC_TOOL_NAMES, THINKING_LEVELS } from '../public-contract.js';
+import { validateGeminiJsonSchema } from './validators.js';
 
 const WINDOWS_DRIVE_RELATIVE_PATH_PATTERN = /^[A-Za-z]:(?![\\/])/;
 const PUBLIC_HTTP_URL_ERROR = 'URL must be a valid public http:// or https:// URL';
@@ -230,8 +231,29 @@ const FunctionDeclarationSchema = z.strictObject({
     'Function purpose. The MCP client owns execution and returns function responses.',
   ),
   parametersJsonSchema: withFieldMetadata(
-    z.record(z.string(), z.unknown()).optional(),
-    'Optional JSON Schema object for function parameters.',
+    z
+      .record(z.string(), z.unknown())
+      .superRefine((value, ctx) => {
+        if (value.type !== 'object') {
+          ctx.addIssue({
+            code: 'custom',
+            message: 'Function parameters JSON Schema must declare type "object".',
+            path: [],
+            input: value,
+          });
+        }
+
+        for (const error of validateGeminiJsonSchema(value)) {
+          ctx.addIssue({
+            code: 'custom',
+            message: error,
+            path: [],
+            input: value,
+          });
+        }
+      })
+      .optional(),
+    'Optional JSON Schema object for function parameters. Must be type: "object" and Gemini-compatible.',
   ),
 });
 
@@ -248,8 +270,8 @@ const FunctionsSpecSchema = z.strictObject({
 
 const FunctionResponseSchema = z.strictObject({
   id: withFieldMetadata(
-    z.string().trim().min(1).optional(),
-    'Optional Gemini function call ID this response answers.',
+    z.string().trim().min(1),
+    'Gemini functionCall id this response answers. Required for Gemini 3+.',
   ),
   name: withFieldMetadata(
     z.string().trim().min(1).max(64),

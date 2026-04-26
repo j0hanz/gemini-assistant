@@ -151,7 +151,7 @@ describe('public MCP error taxonomy', () => {
       const response = await harness.client.requestRaw('tools/call', {
         arguments: {
           goal: 'Continue after a tool result',
-          functionResponses: [{ name: 'lookup_order', response: { output: 'ok' } }],
+          functionResponses: [{ id: 'call-1', name: 'lookup_order', response: { output: 'ok' } }],
         },
         name: 'chat',
       });

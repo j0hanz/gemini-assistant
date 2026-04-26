@@ -423,7 +423,7 @@ export interface AskInput {
     | {
         name: string;
         response: Record<string, unknown>;
-        id?: string | undefined;
+        id: string;
       }[]
     | undefined;
   serverSideToolInvocations?: 'auto' | 'always' | 'never' | undefined;

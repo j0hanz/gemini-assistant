@@ -78,9 +78,9 @@ export function appendFunctionCallingInstruction(
   const names = declaredNames.join(', ');
   const modeInstruction =
     opts.mode === 'ANY'
-      ? `You must call exactly one of these declared functions: ${names}.`
+      ? `You must call one or more of these declared functions when needed to complete the request: ${names}. Parallel calls are allowed.`
       : opts.mode === 'VALIDATED'
-        ? `Available functions: ${names}. Calls are validated server-side; arguments that fail the schema are rejected.`
+        ? `Available functions: ${names}. Function calls are schema-constrained by Gemini; the MCP client must still validate arguments before executing side effects.`
         : `Available functions: ${names}. Call only when the user's request requires it.`;
 
   return joinNonEmpty([

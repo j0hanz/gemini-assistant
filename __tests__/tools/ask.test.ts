@@ -140,6 +140,18 @@ function createStoredSessionSummary(
   };
 }
 
+function createPendingCallEntries(
+  functionCalls: { id?: string; name?: string; args?: Record<string, unknown> }[],
+) {
+  return [
+    {
+      role: 'model' as const,
+      parts: functionCalls.map((functionCall) => ({ functionCall })),
+      timestamp: 1,
+    },
+  ];
+}
+
 function createSessionContract(args: AskArgs): SessionGenerationContract {
   process.env.API_KEY ??= 'test-key-for-ask';
   const store = createSessionStore();
@@ -506,7 +518,7 @@ describe('ask contract', () => {
     const result = await askWork(
       {
         message: 'continue',
-        functionResponses: [{ name: 'lookup_order', response: { output: 'ok' } }],
+        functionResponses: [{ id: 'call-1', name: 'lookup_order', response: { output: 'ok' } }],
       },
       createContext(),
     );
@@ -524,7 +536,7 @@ describe('ask contract', () => {
       {
         message: 'continue',
         sessionId: 'missing',
-        functionResponses: [{ name: 'lookup_order', response: { output: 'ok' } }],
+        functionResponses: [{ id: 'call-1', name: 'lookup_order', response: { output: 'ok' } }],
       },
       createContext(),
     );
@@ -547,6 +559,10 @@ describe('ask contract', () => {
           sessionId === 'sess-1' ? ({ kind: 'chat' } as never) : undefined,
         getSessionEntry: (sessionId?: string) =>
           sessionId === 'sess-1' ? ({ id: 'sess-1' } as never) : undefined,
+        listSessionContentEntries: (sessionId?: string) =>
+          sessionId === 'sess-1'
+            ? createPendingCallEntries([{ id: 'call-1', name: 'lookup_order' }])
+            : undefined,
       }),
     );
 
@@ -574,6 +590,103 @@ describe('ask contract', () => {
         },
       ],
       timestamp: 1,
+    });
+  });
+
+  it('rejects functionResponses whose id does not match a pending functionCall', async () => {
+    const askWork = createAskWork(
+      createDeps({
+        getSessionEntry: (sessionId?: string) =>
+          sessionId === 'sess-1' ? ({ id: 'sess-1' } as never) : undefined,
+        listSessionContentEntries: (sessionId?: string) =>
+          sessionId === 'sess-1'
+            ? createPendingCallEntries([{ id: 'call-1', name: 'lookup_order' }])
+            : undefined,
+      }),
+    );
+
+    const result = await askWork(
+      {
+        message: 'continue',
+        sessionId: 'sess-1',
+        functionResponses: [{ id: 'call-2', name: 'lookup_order', response: { output: 'ok' } }],
+      },
+      createContext(),
+    );
+
+    assert.deepStrictEqual(result, {
+      content: [
+        {
+          type: 'text',
+          text: "chat: functionResponse id 'call-2' does not match a pending functionCall.",
+        },
+      ],
+      isError: true,
+    });
+  });
+
+  it('rejects duplicate functionResponse ids in a single request', async () => {
+    const askWork = createAskWork(
+      createDeps({
+        getSessionEntry: (sessionId?: string) =>
+          sessionId === 'sess-1' ? ({ id: 'sess-1' } as never) : undefined,
+        listSessionContentEntries: (sessionId?: string) =>
+          sessionId === 'sess-1'
+            ? createPendingCallEntries([
+                { id: 'call-1', name: 'lookup_order' },
+                { id: 'call-2', name: 'lookup_invoice' },
+              ])
+            : undefined,
+      }),
+    );
+
+    const result = await askWork(
+      {
+        message: 'continue',
+        sessionId: 'sess-1',
+        functionResponses: [
+          { id: 'call-1', name: 'lookup_order', response: { output: 'ok' } },
+          { id: 'call-1', name: 'lookup_order', response: { output: 'again' } },
+        ],
+      },
+      createContext(),
+    );
+
+    assert.deepStrictEqual(result, {
+      content: [{ type: 'text', text: "chat: duplicate functionResponse id 'call-1'." }],
+      isError: true,
+    });
+  });
+
+  it('rejects functionResponses whose name does not match the pending functionCall', async () => {
+    const askWork = createAskWork(
+      createDeps({
+        getSessionEntry: (sessionId?: string) =>
+          sessionId === 'sess-1' ? ({ id: 'sess-1' } as never) : undefined,
+        listSessionContentEntries: (sessionId?: string) =>
+          sessionId === 'sess-1'
+            ? createPendingCallEntries([{ id: 'call-1', name: 'lookup_order' }])
+            : undefined,
+      }),
+    );
+
+    const result = await askWork(
+      {
+        message: 'continue',
+        sessionId: 'sess-1',
+        functionResponses: [{ id: 'call-1', name: 'lookup_invoice', response: { output: 'ok' } }],
+      },
+      createContext(),
+    );
+
+    assert.deepStrictEqual(result, {
+      content: [
+        {
+          type: 'text',
+          text: "chat: functionResponse id 'call-1' has name 'lookup_invoice', expected 'lookup_order'.",
+        },
+      ],
+      isError: true,
     });
   });
 

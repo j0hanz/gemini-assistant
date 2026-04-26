@@ -269,6 +269,8 @@ export class Logger {
 
   private broadcastToServers(level: LogLevel, context: string, entry: LogEntry): void {
     if (this.attachedServers.size === 0) return;
+    // Traced log lines are ALS-scoped internals tied to in-flight request IDs;
+    // keep them local so we do not leak request/trace identifiers to peer MCP clients.
     if (entry.traceId) return;
 
     const connectedServers: McpServer[] = [];

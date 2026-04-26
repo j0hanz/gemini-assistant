@@ -65,6 +65,7 @@ import {
   getExposeThoughts,
   getGeminiModel,
   getSessionLimits,
+  getStatelessTransportFlag,
   getWorkspaceCacheEnabled,
 } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
@@ -371,6 +372,12 @@ function validateAskRequest(
   deps: Pick<AskDependencies, 'getSessionEntry' | 'isEvicted'>,
 ): CallToolResult | undefined {
   const { responseSchema, sessionId } = args;
+  if (sessionId !== undefined && getStatelessTransportFlag()) {
+    return new AppError(
+      'chat',
+      'sessionId is unsupported under stateless transport. Omit sessionId or run with TRANSPORT=stdio or STATELESS=false.',
+    ).toToolResult();
+  }
   const urls = getAskUrls(args);
   const invalidUrlResult = validateUrls(urls);
   if (invalidUrlResult) {

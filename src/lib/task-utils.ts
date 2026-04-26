@@ -100,6 +100,14 @@ function hasStandardSchema(schema: unknown): schema is StandardSchemaLike {
   );
 }
 
+/**
+ * The MCP SDK normally validates `inputSchema` before reaching the tool handler.
+ * For task-aware tools we deliberately bypass that validation here so that
+ * schema-invalid arguments still create a task and surface as a `failed` task
+ * result via `materializeTaskFailure`, rather than being rejected as a
+ * `tools/call` protocol error before the task is ever recorded. The real
+ * validation happens inside the task via `parseTaskInput`.
+ */
 function createSdkPassthroughInputSchema(
   schema: TaskToolConfig['inputSchema'],
 ): TaskRegistrationConfig['inputSchema'] {
@@ -147,20 +155,34 @@ export async function elicitTaskInput(
   await taskContext.store.updateTaskStatus(taskContext.id, 'input_required', statusMessage);
 
   try {
-    const result = await ctx.mcpReq.elicitInput({
-      mode: 'form',
-      message: prompt,
-      requestedSchema: {
-        type: 'object',
-        properties: {
-          text: {
-            type: 'string',
-            title: 'Response',
+    // The SDK does not expose peer capabilities through ServerContext. If the
+    // connected client does not declare elicitation, elicitInput will reject
+    // (method not found / not supported). Surface that as a typed AppError so
+    // the surrounding task path records a clean `failed` result via
+    // materializeTaskFailure rather than an opaque transport rejection.
+    let result;
+    try {
+      result = await ctx.mcpReq.elicitInput({
+        mode: 'form',
+        message: prompt,
+        requestedSchema: {
+          type: 'object',
+          properties: {
+            text: {
+              type: 'string',
+              title: 'Response',
+            },
           },
+          required: ['text'],
         },
-        required: ['text'],
-      },
-    });
+      });
+    } catch (elicitError) {
+      const message = elicitError instanceof Error ? elicitError.message : String(elicitError);
+      if (/client does not support elicitation/i.test(message)) {
+        throw new AppError('chat', 'Elicitation is not supported by the connected client.');
+      }
+      throw elicitError;
+    }
 
     await taskContext.store.updateTaskStatus(taskContext.id, 'working');
 

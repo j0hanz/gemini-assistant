@@ -114,6 +114,37 @@ function createDeps(overrides: Partial<Parameters<typeof createAskWork>[0]> = {}
 }
 
 describe('ask contract', () => {
+  it('rejects sessionId under stateless transport', async () => {
+    const previousTransport = process.env.TRANSPORT;
+    const previousStateless = process.env.STATELESS;
+    process.env.TRANSPORT = 'http';
+    process.env.STATELESS = 'true';
+    try {
+      const askWork = createAskWork(createDeps());
+      const result = await askWork(
+        {
+          message: 'hello',
+          sessionId: 'sess-1',
+        },
+        createContext(),
+      );
+      assert.deepStrictEqual(result, {
+        content: [
+          {
+            type: 'text',
+            text: 'sessionId is unsupported under stateless transport. Omit sessionId or run with TRANSPORT=stdio or STATELESS=false.',
+          },
+        ],
+        isError: true,
+      });
+    } finally {
+      if (previousTransport === undefined) delete process.env.TRANSPORT;
+      else process.env.TRANSPORT = previousTransport;
+      if (previousStateless === undefined) delete process.env.STATELESS;
+      else process.env.STATELESS = previousStateless;
+    }
+  });
+
   it('returns the exact validation error for expired sessions', async () => {
     const askWork = createAskWork(
       createDeps({

@@ -23,7 +23,7 @@ import {
 } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
-import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
+import type { RootsFetcher } from '../lib/validation.js';
 import type { WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import { SCAN_FILE_NAMES } from '../lib/workspace-context.js';
 import {
@@ -1325,8 +1325,8 @@ export function registerReviewTool(
   server: McpServer,
   taskMessageQueue: TaskMessageQueue,
   workspaceCacheManager: WorkspaceCacheManagerImpl,
+  rootsFetcher: RootsFetcher,
 ): void {
-  const rootsFetcher = buildServerRootsFetcher(server);
   const compareWork = createCompareFileWork(rootsFetcher, workspaceCacheManager);
 
   registerWorkTool<ReviewInput>({

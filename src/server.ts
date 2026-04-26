@@ -10,11 +10,11 @@ import { join } from 'node:path';
 import { AppError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
-import { buildServerRootsFetcher } from './lib/validation.js';
+import { buildServerRootsFetcher, type RootsFetcher } from './lib/validation.js';
 import { createWorkspaceCacheManager } from './lib/workspace-context.js';
 
 import { registerPrompts } from './prompts.js';
-import { PUBLIC_RESOURCE_URIS, PUBLIC_TOOL_NAMES } from './public-contract.js';
+import { PUBLIC_STATIC_RESOURCE_URIS, PUBLIC_TOOL_NAMES } from './public-contract.js';
 import { registerResources, SESSIONS_LIST_URI } from './resources.js';
 import { createSessionStore, type SessionChangeEvent, type SessionStore } from './sessions.js';
 import { registerAnalyzeTool } from './tools/analyze.js';
@@ -32,6 +32,7 @@ interface ServerServices {
   sessionStore: SessionStore;
   taskMessageQueue: InMemoryTaskMessageQueue;
   workspaceCacheManager: ReturnType<typeof createWorkspaceCacheManager>;
+  rootsFetcher: RootsFetcher;
 }
 
 type ServerRegistrar = (server: McpServer, services: ServerServices) => void;
@@ -49,15 +50,22 @@ const SERVER_TOOL_REGISTRARS = [
     registerResearchTool(server, services.taskMessageQueue, services.workspaceCacheManager);
   },
   (server, services) => {
-    registerAnalyzeTool(server, services.taskMessageQueue, services.workspaceCacheManager);
+    registerAnalyzeTool(
+      server,
+      services.taskMessageQueue,
+      services.workspaceCacheManager,
+      services.rootsFetcher,
+    );
   },
   (server, services) => {
-    registerReviewTool(server, services.taskMessageQueue, services.workspaceCacheManager);
+    registerReviewTool(
+      server,
+      services.taskMessageQueue,
+      services.workspaceCacheManager,
+      services.rootsFetcher,
+    );
   },
 ] as const satisfies readonly ServerRegistrar[];
-
-const SERVER_DESCRIPTION =
-  'Gemini AI assistant with four job-first public tools: chat, research, analyze, and review.';
 
 export const SERVER_INSTRUCTIONS =
   `Public tools: ${PUBLIC_TOOL_NAMES.join(', ')}. ` +
@@ -68,9 +76,7 @@ export const SERVER_INSTRUCTIONS =
   'review (diff review, file comparison, or failure diagnosis). ' +
   'Use discover://catalog and discover://workflows for the canonical public surface.';
 
-const STATIC_RESOURCE_URIS = new Set<string>(
-  PUBLIC_RESOURCE_URIS.filter((uri) => !uri.includes('{')),
-);
+const STATIC_RESOURCE_URIS = new Set<string>(PUBLIC_STATIC_RESOURCE_URIS);
 const SESSION_DETAIL_URI_PATTERN = /^session:\/\/[^/]+$/;
 const SESSION_TRANSCRIPT_URI_PATTERN = /^session:\/\/[^/]+\/transcript$/;
 const SESSION_EVENTS_URI_PATTERN = /^session:\/\/[^/]+\/events$/;
@@ -144,9 +150,8 @@ export function createServerInstance(): ServerInstance {
   const server = new McpServer(
     {
       name: 'gemini-assistant',
+      title: 'Gemini Assistant',
       version,
-      description: SERVER_DESCRIPTION,
-      websiteUrl: 'https://github.com/j0hanz/gemini-assistant',
     },
     {
       capabilities: {
@@ -154,7 +159,7 @@ export function createServerInstance(): ServerInstance {
         completions: {},
         prompts: {},
         resources: { listChanged: true },
-        tools: { listChanged: false },
+        tools: {},
         tasks: {
           requests: { tools: { call: {} } },
           taskStore,
@@ -170,9 +175,15 @@ export function createServerInstance(): ServerInstance {
     sendResourceChangedForServer(server, listChanged ? SESSIONS_LIST_URI : undefined);
   });
 
-  registerServerTools(server, { sessionStore, taskMessageQueue, workspaceCacheManager });
-
   const rootsFetcher = buildServerRootsFetcher(server);
+
+  registerServerTools(server, {
+    sessionStore,
+    taskMessageQueue,
+    workspaceCacheManager,
+    rootsFetcher,
+  });
+
   registerPrompts(server);
   registerResources(server, sessionStore, workspaceCacheManager, rootsFetcher);
 

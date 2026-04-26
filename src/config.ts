@@ -148,6 +148,12 @@ export function getTransportMode(): TransportMode {
   return parseTransportModeEnv();
 }
 
+export function getStatelessTransportFlag(): boolean {
+  const mode = parseTransportModeEnv();
+  if (mode !== 'http' && mode !== 'web-standard') return false;
+  return parseBooleanEnv('STATELESS', false);
+}
+
 export function getTransportConfig(): TransportConfig {
   const host = parseNonEmptyStringEnv('HOST', DEFAULT_HTTP_HOST);
   const token = parseOptionalTokenEnv('MCP_HTTP_TOKEN');

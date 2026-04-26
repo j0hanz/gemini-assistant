@@ -66,17 +66,25 @@ export const PUBLIC_PROMPT_NAMES = [
   'review',
 ] as const satisfies readonly PublicPromptName[];
 
-export const PUBLIC_RESOURCE_URIS = [
+export const PUBLIC_STATIC_RESOURCE_URIS = [
   'discover://catalog',
   'discover://context',
   'discover://workflows',
   'session://',
+  'workspace://context',
+  'workspace://cache',
+] as const satisfies readonly PublicResourceUri[];
+
+export const PUBLIC_RESOURCE_TEMPLATES = [
   'session://{sessionId}',
   'session://{sessionId}/transcript',
   'session://{sessionId}/events',
   'gemini://sessions/{sessionId}/turns/{turnIndex}/parts',
-  'workspace://context',
-  'workspace://cache',
+] as const satisfies readonly PublicResourceUri[];
+
+export const PUBLIC_RESOURCE_URIS = [
+  ...PUBLIC_STATIC_RESOURCE_URIS,
+  ...PUBLIC_RESOURCE_TEMPLATES,
 ] as const satisfies readonly PublicResourceUri[];
 
 export const PUBLIC_WORKFLOW_NAMES = [
@@ -140,10 +148,11 @@ export const DISCOVERY_ENTRIES = [
       'serverSideToolInvocations?',
     ],
     returns:
-      'A direct answer, optional structured data, usage/safety/citation metadata, and session resource links. When sessions are active, raw Gemini `Part[]` are persisted for replay-safe orchestration via the session-turn-parts resource.',
+      'A direct answer, optional structured data, usage/safety/citation metadata, and session resource links. When sessions are active, raw Gemini `Part[]` are persisted for replay-safe orchestration via the session-turn-parts resource (available only when sessions persist `Part[]`).',
     limitations: [
       'Sessions, task state, and task message queues are process-local memory state; restarts or stateless deployments lose continuity.',
-      'Sessions require a stateful server connection path; stateless transport mode does not preserve chat continuity across requests.',
+      'Sessions require a stateful server connection path. Stateless transport rejects chat calls that include sessionId.',
+      'Sessions started before raw `Part[]` capture cannot serve `gemini://sessions/.../parts`.',
       'Structured output is intended for single-turn calls and new sessions, not resumed sessions.',
       'Declared functions are executed by the MCP client, not by this server; return results through functionResponses on the same sessionId.',
     ],

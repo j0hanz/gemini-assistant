@@ -589,6 +589,37 @@ describe('elicitTaskInput', () => {
       { status: 'working' },
     ]);
   });
+
+  it('rewraps capability-missing errors as a typed AppError', async () => {
+    const updates: { status: string; statusMessage?: string }[] = [];
+    const store = makeMockStore({
+      updateTaskStatus: async (_taskId, status, statusMessage) => {
+        updates.push({ status, ...(statusMessage ? { statusMessage } : {}) });
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        elicitTaskInput(
+          makeMockContext({
+            taskStore: store,
+            taskId: 'task-elicit',
+            elicitInput: async () => {
+              throw new Error(
+                'Client does not support elicitation (required for elicitation/create)',
+              );
+            },
+          }),
+          'Question?',
+        ),
+      /Elicitation is not supported by the connected client/,
+    );
+
+    assert.deepStrictEqual(updates, [
+      { status: 'input_required', statusMessage: 'Waiting for user input' },
+      { status: 'working' },
+    ]);
+  });
 });
 
 describe('registerTaskTool', () => {

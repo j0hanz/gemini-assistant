@@ -287,6 +287,9 @@ export async function reportFailure(
   error: unknown,
 ): Promise<void> {
   const raw = error instanceof Error ? error.message : String(error);
+  // The 80-char truncation only affects this human-readable progress notification.
+  // The full, untruncated error message is preserved in the failed task result by
+  // runToolAsTask via storeFailedResult / materializeTaskFailure in task-utils.
   const short = raw.length > 80 ? raw.substring(0, 77) : raw;
   await sendProgress(ctx, 100, 100, `${toolLabel}: failed — ${short}`);
 }

@@ -20,6 +20,8 @@ const { createSessionStore } = await import('../../src/sessions.js');
 const { PUBLIC_TOOL_NAMES } = await import('../../src/public-contract.js');
 const { createWorkspaceCacheManager } = await import('../../src/lib/workspace-context.js');
 
+const rootsFetcher = async (): Promise<string[]> => [];
+
 function createServer(): McpServer {
   return new McpServer(
     { name: 'test-server', version: '0.0.1' },
@@ -53,12 +55,16 @@ describe('tool registration', () => {
 
   it('registers analyze without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerAnalyzeTool(server, queue, workspaceCacheManager));
+    assert.doesNotThrow(() =>
+      registerAnalyzeTool(server, queue, workspaceCacheManager, rootsFetcher),
+    );
   });
 
   it('registers review without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerReviewTool(server, queue, workspaceCacheManager));
+    assert.doesNotThrow(() =>
+      registerReviewTool(server, queue, workspaceCacheManager, rootsFetcher),
+    );
   });
 
   it('registers resources without error', () => {
@@ -76,8 +82,8 @@ describe('tool registration', () => {
     assert.doesNotThrow(() => {
       registerChatTool(server, sessionStore, queue, workspaceCacheManager);
       registerResearchTool(server, queue, workspaceCacheManager);
-      registerAnalyzeTool(server, queue, workspaceCacheManager);
-      registerReviewTool(server, queue, workspaceCacheManager);
+      registerAnalyzeTool(server, queue, workspaceCacheManager, rootsFetcher);
+      registerReviewTool(server, queue, workspaceCacheManager, rootsFetcher);
       registerPrompts(server);
       registerResources(server, sessionStore, workspaceCacheManager);
     });
@@ -95,12 +101,12 @@ describe('tool registration', () => {
         'discover://context',
         'discover://workflows',
         'session://',
+        'workspace://context',
+        'workspace://cache',
         'session://{sessionId}',
         'session://{sessionId}/transcript',
         'session://{sessionId}/events',
         'gemini://sessions/{sessionId}/turns/{turnIndex}/parts',
-        'workspace://context',
-        'workspace://cache',
       ],
     );
     assert.deepStrictEqual([...PUBLIC_TOOL_NAMES], ['chat', 'research', 'analyze', 'review']);

@@ -24,7 +24,7 @@ import {
 } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
-import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
+import type { RootsFetcher } from '../lib/validation.js';
 import type { WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
@@ -513,8 +513,8 @@ export function registerAnalyzeTool(
   server: McpServer,
   taskMessageQueue: TaskMessageQueue,
   workspaceCacheManager: WorkspaceCacheManagerImpl,
+  rootsFetcher: RootsFetcher,
 ): void {
-  const rootsFetcher = buildServerRootsFetcher(server);
   const fileWork = createAnalyzeFileWork(rootsFetcher, workspaceCacheManager);
 
   registerWorkTool<AnalyzeInput>({

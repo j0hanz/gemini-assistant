@@ -7,7 +7,9 @@ import {
   DISCOVERY_ENTRIES,
   JOB_METADATA,
   PUBLIC_PROMPT_NAMES,
+  PUBLIC_RESOURCE_TEMPLATES,
   PUBLIC_RESOURCE_URIS,
+  PUBLIC_STATIC_RESOURCE_URIS,
   PUBLIC_TOOL_NAMES,
   PUBLIC_WORKFLOW_NAMES,
 } from '../src/public-contract.js';
@@ -116,6 +118,34 @@ describe('contract surface invariants', () => {
     assert.strictEqual(
       (review?.inputs as readonly string[] | undefined)?.includes('functions?'),
       false,
+    );
+  });
+
+  it('partitions PUBLIC_RESOURCE_URIS into static and template tuples without overlap', () => {
+    const staticSet = new Set<string>(PUBLIC_STATIC_RESOURCE_URIS);
+    const templateSet = new Set<string>(PUBLIC_RESOURCE_TEMPLATES);
+    for (const uri of PUBLIC_STATIC_RESOURCE_URIS) {
+      assert.strictEqual(templateSet.has(uri), false, `static URI ${uri} must not be templated`);
+    }
+    for (const uri of PUBLIC_RESOURCE_TEMPLATES) {
+      assert.strictEqual(staticSet.has(uri), false, `template URI ${uri} must not be static`);
+      assert.ok(uri.includes('{'), `template URI ${uri} must contain placeholder`);
+    }
+    assert.deepStrictEqual(
+      [...PUBLIC_RESOURCE_URIS].sort(),
+      [...PUBLIC_STATIC_RESOURCE_URIS, ...PUBLIC_RESOURCE_TEMPLATES].sort(),
+    );
+  });
+
+  it('softens the chat turnParts promise to reflect conditional availability', () => {
+    const chat = DISCOVERY_ENTRIES.find((entry) => entry.kind === 'tool' && entry.name === 'chat');
+    assert.ok(chat);
+    assert.match(chat.returns, /available only when sessions persist/);
+    assert.ok(
+      chat.limitations?.some((limit) =>
+        limit.includes('Stateless transport rejects chat calls that include sessionId'),
+      ),
+      'chat limitations must mention stateless rejection',
     );
   });
 

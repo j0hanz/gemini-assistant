@@ -1,3 +1,5 @@
+import { builtinModules } from 'node:module';
+
 import eslint from '@eslint/js';
 import eslintConfigPrettier from 'eslint-config-prettier/flat';
 import tseslint from 'typescript-eslint';
@@ -6,49 +8,17 @@ const sourceFiles = ['src/**/*.ts'];
 const testFiles = ['__tests__/**/*.ts'];
 const jsConfigFiles = ['**/*.js', '**/*.mjs'];
 
-const nodeBuiltins = [
-  'assert',
-  'buffer',
-  'child_process',
-  'cluster',
-  'console',
-  'crypto',
-  'dns',
-  'events',
-  'fs',
-  'fs/promises',
-  'http',
-  'http2',
-  'https',
-  'module',
-  'net',
-  'os',
-  'path',
-  'perf_hooks',
-  'process',
-  'querystring',
-  'readline',
-  'stream',
-  'stream/promises',
-  'string_decoder',
-  'timers',
-  'timers/promises',
-  'tls',
-  'tty',
-  'url',
-  'util',
-  'v8',
-  'vm',
-  'worker_threads',
-  'zlib',
-];
+// Dynamically filter builtin modules instead of hardcoding a massive array
+const nodeBuiltins = builtinModules.filter((m) => !m.startsWith('node:') && !m.startsWith('_'));
 
 export default tseslint.config(
   {
+    name: 'project/global-ignores',
     ignores: ['dist/**', 'dist-test/**', 'coverage/**', 'node_modules/**', '.agents/**', 'logs/**'],
   },
 
   {
+    name: 'project/linter-options',
     linterOptions: {
       reportUnusedDisableDirectives: 'error',
       reportUnusedInlineConfigs: 'error',
@@ -56,6 +26,7 @@ export default tseslint.config(
   },
 
   {
+    name: 'project/language-options',
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: 'module',
@@ -68,6 +39,7 @@ export default tseslint.config(
 
   // Project-wide rule defaults applied to both src and tests.
   {
+    name: 'project/common-rules',
     rules: {
       // Catch blocks frequently use `unknown`; numbers are safe to interpolate.
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
@@ -86,6 +58,7 @@ export default tseslint.config(
   },
 
   {
+    name: 'project/source',
     files: sourceFiles,
     languageOptions: {
       parserOptions: {
@@ -129,6 +102,9 @@ export default tseslint.config(
       'object-shorthand': ['error', 'always'],
       'prefer-const': ['error', { destructuring: 'all' }],
       'prefer-object-has-own': 'error',
+      'no-useless-assignment': 'error',
+      'no-promise-executor-return': 'error',
+      'preserve-caught-error': 'error',
 
       // TypeScript-specific discipline.
       '@typescript-eslint/consistent-type-imports': [
@@ -168,6 +144,7 @@ export default tseslint.config(
   },
 
   {
+    name: 'project/tests',
     files: testFiles,
     languageOptions: {
       parserOptions: {
@@ -192,6 +169,7 @@ export default tseslint.config(
   },
 
   {
+    name: 'project/js-configs',
     files: jsConfigFiles,
     ...tseslint.configs.disableTypeChecked,
     rules: {

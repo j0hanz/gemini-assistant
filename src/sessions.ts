@@ -237,8 +237,60 @@ function cloneValue<T>(value: T): T {
   return structuredClone(value);
 }
 
+type ResponseField = SessionEventEntry['response'];
+type ResponseCloneStrategy =
+  | 'direct'
+  | 'structuredClone'
+  | 'shallowSpread'
+  | 'arrayShallow';
+interface ResponseFieldRule {
+  key: keyof ResponseField;
+  slimOnly: boolean;
+  clone: ResponseCloneStrategy;
+}
+
+const RESPONSE_FIELD_RULES: readonly ResponseFieldRule[] = [
+  { key: 'finishReason', slimOnly: false, clone: 'direct' },
+  { key: 'promptBlockReason', slimOnly: false, clone: 'direct' },
+  { key: 'data', slimOnly: false, clone: 'structuredClone' },
+  { key: 'functionCalls', slimOnly: false, clone: 'arrayShallow' },
+  { key: 'citationMetadata', slimOnly: true, clone: 'structuredClone' },
+  { key: 'safetyRatings', slimOnly: true, clone: 'structuredClone' },
+  { key: 'finishMessage', slimOnly: false, clone: 'direct' },
+  { key: 'schemaWarnings', slimOnly: false, clone: 'arrayShallow' },
+  { key: 'thoughts', slimOnly: true, clone: 'direct' },
+  { key: 'toolEvents', slimOnly: true, clone: 'arrayShallow' },
+  { key: 'usage', slimOnly: false, clone: 'shallowSpread' },
+  { key: 'groundingMetadata', slimOnly: true, clone: 'structuredClone' },
+  { key: 'urlContextMetadata', slimOnly: true, clone: 'structuredClone' },
+  { key: 'promptFeedback', slimOnly: true, clone: 'structuredClone' },
+  { key: 'anomalies', slimOnly: false, clone: 'shallowSpread' },
+];
+
+function applyResponseClone(value: unknown, strategy: ResponseCloneStrategy): unknown {
+  switch (strategy) {
+    case 'direct':
+      return value;
+    case 'structuredClone':
+      return cloneValue(value);
+    case 'shallowSpread':
+      return { ...(value as object) };
+    case 'arrayShallow':
+      return (value as readonly unknown[]).map((entry) =>
+        entry !== null && typeof entry === 'object' ? { ...entry } : entry,
+      );
+  }
+}
+
 function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
   const slim = getSlimSessionEvents();
+  const response: ResponseField = { text: item.response.text };
+  for (const rule of RESPONSE_FIELD_RULES) {
+    if (rule.slimOnly && slim) continue;
+    const value = item.response[rule.key];
+    if (value === undefined) continue;
+    (response as Record<string, unknown>)[rule.key] = applyResponseClone(value, rule.clone);
+  }
 
   return {
     ...item,
@@ -246,50 +298,7 @@ function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
       ...item.request,
       ...(item.request.urls ? { urls: [...item.request.urls] } : {}),
     },
-    response: {
-      text: item.response.text,
-      ...(item.response.finishReason !== undefined
-        ? { finishReason: item.response.finishReason }
-        : {}),
-      ...(item.response.promptBlockReason !== undefined
-        ? { promptBlockReason: item.response.promptBlockReason }
-        : {}),
-      ...(item.response.data !== undefined ? { data: cloneValue(item.response.data) } : {}),
-      ...(item.response.functionCalls
-        ? {
-            functionCalls: item.response.functionCalls.map((functionCall) => ({ ...functionCall })),
-          }
-        : {}),
-      ...(!slim && item.response.citationMetadata !== undefined
-        ? { citationMetadata: cloneValue(item.response.citationMetadata) }
-        : {}),
-      ...(!slim && item.response.safetyRatings !== undefined
-        ? { safetyRatings: cloneValue(item.response.safetyRatings) }
-        : {}),
-      ...(item.response.finishMessage !== undefined
-        ? { finishMessage: item.response.finishMessage }
-        : {}),
-      ...(item.response.schemaWarnings
-        ? { schemaWarnings: [...item.response.schemaWarnings] }
-        : {}),
-      ...(!slim && item.response.thoughts ? { thoughts: item.response.thoughts } : {}),
-      ...(!slim && item.response.toolEvents
-        ? { toolEvents: item.response.toolEvents.map((toolEvent) => ({ ...toolEvent })) }
-        : {}),
-      ...(item.response.usage ? { usage: { ...item.response.usage } } : {}),
-      ...(!slim && item.response.groundingMetadata !== undefined
-        ? { groundingMetadata: cloneValue(item.response.groundingMetadata) }
-        : {}),
-      ...(!slim && item.response.urlContextMetadata !== undefined
-        ? { urlContextMetadata: cloneValue(item.response.urlContextMetadata) }
-        : {}),
-      ...(!slim && item.response.promptFeedback !== undefined
-        ? { promptFeedback: cloneValue(item.response.promptFeedback) }
-        : {}),
-      ...(item.response.anomalies !== undefined
-        ? { anomalies: { ...item.response.anomalies } }
-        : {}),
-    },
+    response,
   };
 }
 

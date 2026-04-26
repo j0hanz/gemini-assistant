@@ -9,10 +9,16 @@ import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getExposeThoughts, getGeminiModel } from '../config.js';
 import { AppError } from './errors.js';
 import { logContext, logger, maybeSummarizePayload, type ScopedLogger } from './logger.js';
-import { type OrchestrationRequest, resolveOrchestration } from './orchestration.js';
+import {
+  type BuiltInToolSpec,
+  type OrchestrationRequest,
+  resolveOrchestration,
+  selectSearchAndUrlContextTools,
+} from './orchestration.js';
 import { reportCompletion, reportFailure } from './progress.js';
 import { buildSharedStructuredMetadata, extractTextContent } from './response.js';
 import { executeToolStream, extractUsage, type StreamResult } from './streaming.js';
+import { getWorkspaceCacheName, type WorkspaceCacheManagerImpl } from './workspace-context.js';
 
 type StreamResponseBuilder<T extends Record<string, unknown>> = (
   streamResult: StreamResult,
@@ -40,6 +46,23 @@ interface GeminiStreamRequest<T extends Record<string, unknown>> {
   orchestration: OrchestrationRequest;
   responseBuilder?: StreamResponseBuilder<T>;
   toolName: string;
+}
+
+export interface GeminiPipelineRequest<T extends Record<string, unknown>> {
+  toolName: string;
+  label: string;
+  googleSearch?: boolean | undefined;
+  urls?: readonly string[] | undefined;
+  fileSearch?: { fileSearchStoreNames: readonly string[]; metadataFilter?: unknown } | undefined;
+  builtInToolSpecs?: readonly BuiltInToolSpec[] | undefined;
+  serverSideToolInvocations?: OrchestrationRequest['serverSideToolInvocations'];
+  workspaceCacheManager: WorkspaceCacheManagerImpl;
+  buildContents: (activeCapabilities: Set<string>) => {
+    contents: ContentListUnion;
+    systemInstruction?: string | undefined;
+  };
+  config: Omit<GeminiStreamRequest<T>['config'], 'cacheName'>;
+  responseBuilder?: StreamResponseBuilder<T>;
 }
 
 export class ToolExecutor {
@@ -259,6 +282,47 @@ export class ToolExecutor {
         }),
       request.responseBuilder,
     );
+  }
+
+  async executeGeminiPipeline<T extends Record<string, unknown>>(
+    ctx: ServerContext,
+    request: GeminiPipelineRequest<T>,
+  ): Promise<CallToolResult> {
+    const cacheName = await getWorkspaceCacheName(ctx, request.workspaceCacheManager);
+
+    const specs: BuiltInToolSpec[] = [
+      ...selectSearchAndUrlContextTools(request.googleSearch, request.urls).map(
+        (kind) => ({ kind }) as BuiltInToolSpec,
+      ),
+      ...(request.fileSearch
+        ? [
+            {
+              kind: 'fileSearch' as const,
+              fileSearchStoreNames: request.fileSearch.fileSearchStoreNames,
+              metadataFilter: request.fileSearch.metadataFilter,
+            },
+          ]
+        : []),
+      ...(request.builtInToolSpecs ?? []),
+    ];
+
+    return await this.runGeminiStream(ctx, {
+      toolName: request.toolName,
+      label: request.label,
+      orchestration: {
+        builtInToolSpecs: specs,
+        urls: request.urls,
+        ...(request.serverSideToolInvocations !== undefined
+          ? { serverSideToolInvocations: request.serverSideToolInvocations }
+          : {}),
+      },
+      buildContents: request.buildContents,
+      config: {
+        ...request.config,
+        cacheName,
+      },
+      ...(request.responseBuilder ? { responseBuilder: request.responseBuilder } : {}),
+    });
   }
 }
 

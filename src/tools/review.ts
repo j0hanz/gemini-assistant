@@ -10,14 +10,12 @@ import { lstat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { createPartFromUri } from '@google/genai';
 import type { z } from 'zod/v4';
 
-import { uploadFile, withUploadedFilesCleanup } from '../lib/file.js';
+import { withUploadsAndPipeline } from '../lib/file.js';
 import { logger, type ScopedLogger } from '../lib/logger.js';
 import { buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { buildDiffReviewPrompt } from '../lib/model-prompts.js';
-import { selectSearchAndUrlContextTools } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
 import {
   buildSuccessfulStructuredContent,
@@ -27,7 +25,7 @@ import {
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
-import { getWorkspaceCacheName, type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
+import { type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import { SCAN_FILE_NAMES } from '../lib/workspace-context.js';
 import {
   type AnalyzePrInput,
@@ -252,57 +250,57 @@ function createCompareFileWork(
   ): Promise<CallToolResult> {
     const progress = new ProgressReporter(ctx, COMPARE_FILE_TOOL_LABEL);
 
-    return await withUploadedFilesCleanup(ctx, async (uploadedFiles) => {
-      await progress.step(0, 4, 'Uploading file A');
-      const fileA = await uploadFile(filePathA, ctx.mcpReq.signal, rootsFetcher);
-      uploadedFiles.addUploadedFile(fileA);
+    return await withUploadsAndPipeline(
+      ctx,
+      rootsFetcher,
+      [filePathA, filePathB],
+      progress,
+      (filePath, index) => `Uploading file ${index === 0 ? 'A' : 'B'}`,
+      async (contents) => {
+        const fileA = contents[0];
+        const fileB = contents[1];
 
-      await progress.step(1, 4, 'Uploading file B');
-      const fileB = await uploadFile(filePathB, ctx.mcpReq.signal, rootsFetcher);
-      uploadedFiles.addUploadedFile(fileB);
+        await ctx.mcpReq.log('info', `Comparing: ${filePathA} vs ${filePathB}`);
+        await progress.step(2, 3, 'Analyzing differences');
 
-      await ctx.mcpReq.log('info', `Comparing: ${fileA.displayPath} vs ${fileB.displayPath}`);
-      await progress.step(2, 4, 'Analyzing differences');
-
-      const prompt = buildDiffReviewPrompt({
-        focus: question,
-        mode: 'compare',
-        promptParts: [
-          { text: `File A: ${fileA.displayPath}` },
-          createPartFromUri(fileA.uri, fileA.mimeType),
-          { text: `File B: ${fileB.displayPath}` },
-          createPartFromUri(fileB.uri, fileB.mimeType),
-        ],
-      });
-
-      const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
-      return await executor.runGeminiStream(ctx, {
-        toolName: 'compare_files',
-        label: COMPARE_FILE_TOOL_LABEL,
-        orchestration: {
-          builtInToolNames: selectSearchAndUrlContextTools(googleSearch, urls),
+        return await executor.executeGeminiPipeline(ctx, {
+          toolName: 'compare_files',
+          label: COMPARE_FILE_TOOL_LABEL,
+          googleSearch,
           urls,
-          // Built-in tools only; no function-calling mix. Default 'auto' policy.
-        },
-        buildContents: () => ({
-          contents: prompt.promptParts,
-          systemInstruction: prompt.systemInstruction,
-        }),
-        config: {
-          costProfile: 'review.comparison',
-          thinkingLevel,
-          thinkingBudget,
-          maxOutputTokens,
-          safetySettings,
-          cacheName,
-        },
-        responseBuilder: (_streamResult, textContent: string) => ({
-          structuredContent: {
-            summary: textContent || '',
+          workspaceCacheManager,
+          buildContents: () => {
+            const prompt = buildDiffReviewPrompt({
+              focus: question,
+              mode: 'compare',
+              promptParts: [
+                { text: `File A: ${filePathA}` },
+                fileA ?? { text: '' },
+                { text: `File B: ${filePathB}` },
+                fileB ?? { text: '' },
+              ],
+            });
+            return {
+              contents: prompt.promptParts,
+              systemInstruction: prompt.systemInstruction,
+            };
           },
-        }),
-      });
-    });
+          config: {
+            costProfile: 'review.comparison',
+            thinkingLevel,
+            thinkingBudget,
+            maxOutputTokens,
+            safetySettings,
+          },
+          responseBuilder: (_streamResult, textContent: string) => ({
+            structuredContent: {
+              summary: textContent || '',
+            },
+          }),
+        });
+      },
+      0,
+    );
   };
 }
 
@@ -349,15 +347,12 @@ async function diagnoseFailureWork(
   await progress.send(0, undefined, 'Diagnosing');
   await ctx.mcpReq.log('info', `Review failure: ${error.length} chars`);
 
-  const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
-  return await executor.runGeminiStream(ctx, {
+  return await executor.executeGeminiPipeline(ctx, {
     toolName: 'review_failure',
     label: 'Review Failure',
-    orchestration: {
-      builtInToolNames: selectSearchAndUrlContextTools(googleSearch, urls),
-      urls,
-      // Built-in tools only; no function-calling mix. Default 'auto' policy.
-    },
+    googleSearch,
+    urls,
+    workspaceCacheManager,
     buildContents: () => ({
       contents: [prompt.promptText],
       systemInstruction: prompt.systemInstruction,
@@ -368,7 +363,6 @@ async function diagnoseFailureWork(
       thinkingBudget,
       maxOutputTokens,
       safetySettings,
-      cacheName,
     },
     responseBuilder: (_streamResult, textContent: string) => ({
       structuredContent: {
@@ -1156,14 +1150,10 @@ export async function analyzePrWork(
     docContexts,
   });
 
-  const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
-  return await executor.runGeminiStream(ctx, {
+  return await executor.executeGeminiPipeline(ctx, {
     toolName: 'analyze_pr',
     label: REVIEW_DIFF_TOOL_LABEL,
-    orchestration: {
-      builtInToolNames: [],
-      // No built-in tools and no function-calling mix. Default 'auto' policy.
-    },
+    workspaceCacheManager,
     buildContents: () => ({
       contents: [modelPrompt.promptText],
       systemInstruction: modelPrompt.systemInstruction,
@@ -1174,7 +1164,6 @@ export async function analyzePrWork(
       thinkingBudget,
       maxOutputTokens,
       safetySettings,
-      cacheName,
     },
     responseBuilder: (_streamResult, textContent: string) => {
       let finalSummary = textContent || '';

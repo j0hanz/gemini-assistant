@@ -814,46 +814,34 @@ async function searchWork(
     fileSearch,
   }: SearchInput & GenerationConfigFields,
   ctx: ServerContext,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
-  const resolved = await resolveOrchestration(
-    {
-      builtInToolSpecs: buildResearchSpecs({ grounded: true, urls, fileSearch }),
-      urls,
-    },
-    ctx,
-    'search',
-  );
-  if (resolved.error) return resolved.error;
-  const { tools, toolConfig } = resolved.config;
   const prompt = buildGroundedAnswerPrompt(query, urls);
 
-  return runToolStream(
-    ctx,
-    'research',
-    SEARCH_TOOL_LABEL,
-    'Starting',
-    'Search requested',
-    { query, urlCount: urls?.length ?? 0 },
-    () =>
-      getAI().models.generateContentStream({
-        model: getGeminiModel(),
-        contents: prompt.promptText,
-        config: buildGenerateContentConfig(
-          {
-            systemInstruction: systemInstruction ?? prompt.systemInstruction,
-            costProfile: 'research.quick',
-            thinkingLevel,
-            thinkingBudget,
-            maxOutputTokens,
-            safetySettings,
-            tools,
-            toolConfig,
-          },
-          ctx.mcpReq.signal,
-        ),
-      }),
-    buildSearchResult,
-  );
+  const progress = new ProgressReporter(ctx, SEARCH_TOOL_LABEL);
+  await progress.send(0, undefined, 'Starting');
+  await ctx.mcpReq.log('info', 'Search requested');
+
+  return await executor.executeGeminiPipeline(ctx, {
+    toolName: 'research',
+    label: SEARCH_TOOL_LABEL,
+    googleSearch: true,
+    urls,
+    fileSearch,
+    workspaceCacheManager,
+    buildContents: () => ({
+      contents: [prompt.promptText],
+      systemInstruction: systemInstruction ?? prompt.systemInstruction,
+    }),
+    config: {
+      costProfile: 'research.quick',
+      thinkingLevel,
+      thinkingBudget,
+      maxOutputTokens,
+      safetySettings,
+    },
+    responseBuilder: buildSearchResult,
+  });
 }
 
 export async function analyzeUrlWork(
@@ -868,55 +856,37 @@ export async function analyzeUrlWork(
     fileSearch,
   }: AnalyzeUrlInput & GenerationConfigFields,
   ctx: ServerContext,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
-  const resolved = await resolveOrchestration(
-    {
-      builtInToolSpecs: buildResearchSpecs({
-        grounded: false,
-        names: ['urlContext'] as const,
-        fileSearch,
-      }),
-      urls,
-    },
-    ctx,
-    'analyze_url',
-  );
-  if (resolved.error) return resolved.error;
-  const { tools, toolConfig } = resolved.config;
-
   const prompt = buildFileAnalysisPrompt({
     goal: question,
     kind: 'url',
     urls,
   });
 
-  return runToolStream(
-    ctx,
-    'analyze_url',
-    ANALYZE_URL_TOOL_LABEL,
-    'Fetching',
-    'Analyze URL requested',
-    { question, urlCount: urls.length },
-    () =>
-      getAI().models.generateContentStream({
-        model: getGeminiModel(),
-        contents: prompt.promptText,
-        config: buildGenerateContentConfig(
-          {
-            systemInstruction: systemInstruction ?? prompt.systemInstruction,
-            costProfile: 'analyze.summary',
-            thinkingLevel,
-            thinkingBudget,
-            maxOutputTokens,
-            safetySettings,
-            tools,
-            toolConfig,
-          },
-          ctx.mcpReq.signal,
-        ),
-      }),
-    buildAnalyzeUrlResult,
-  );
+  const progress = new ProgressReporter(ctx, ANALYZE_URL_TOOL_LABEL);
+  await progress.send(0, undefined, 'Fetching');
+  await ctx.mcpReq.log('info', `Analyze URL requested for ${urls.length} urls`);
+
+  return await executor.executeGeminiPipeline(ctx, {
+    toolName: 'analyze_url',
+    label: ANALYZE_URL_TOOL_LABEL,
+    urls,
+    fileSearch,
+    workspaceCacheManager,
+    buildContents: () => ({
+      contents: [prompt.promptText],
+      systemInstruction: systemInstruction ?? prompt.systemInstruction,
+    }),
+    config: {
+      costProfile: 'analyze.summary',
+      thinkingLevel,
+      thinkingBudget,
+      maxOutputTokens,
+      safetySettings,
+    },
+    responseBuilder: buildAnalyzeUrlResult,
+  });
 }
 
 async function agenticSearchWork(
@@ -1033,6 +1003,7 @@ async function runQuickResearch(
     mode: 'quick';
   },
   ctx: ServerContext,
+  workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
   return await searchWork(
     {
@@ -1046,6 +1017,7 @@ async function runQuickResearch(
       fileSearch: args.fileSearch,
     },
     ctx,
+    workspaceCacheManager,
   );
 }
 
@@ -1123,7 +1095,7 @@ async function researchWork(
   workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
   const result = isQuickResearchInput(args)
-    ? await runQuickResearch(args, ctx)
+    ? await runQuickResearch(args, ctx, workspaceCacheManager)
     : await runDeepResearch(args, ctx, workspaceCacheManager);
 
   if (result.isError) {

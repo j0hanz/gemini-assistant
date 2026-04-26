@@ -5,20 +5,14 @@ import type {
   TaskMessageQueue,
 } from '@modelcontextprotocol/server';
 
-import { createPartFromUri } from '@google/genai';
 import type { Part } from '@google/genai';
 import type { z } from 'zod/v4';
 
-import {
-  type UploadedFilesCleanupTracker,
-  uploadFile,
-  withUploadedFilesCleanup,
-} from '../lib/file.js';
+import { withUploadsAndPipeline } from '../lib/file.js';
 import { buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
 import {
   type BuiltInToolName,
-  selectSearchAndUrlContextTools,
   type ServerSideToolInvocationsPolicy,
 } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
@@ -30,7 +24,7 @@ import {
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
-import { getWorkspaceCacheName, type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
+import { type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 
@@ -137,40 +131,6 @@ function collectDiagramSourceFiles(
   return [...(sourceFilePath ? [sourceFilePath] : []), ...(sourceFilePaths ?? [])];
 }
 
-async function uploadFilesBatch(
-  filePaths: string[],
-  ctx: ServerContext,
-  rootsFetcher: RootsFetcher,
-  progress: ProgressReporter,
-  labelTemplate: (filePath: string, index: number, total: number) => string,
-  uploadedFiles: UploadedFilesCleanupTracker,
-  indexOffset = 1,
-): Promise<{ parts: Part[]; uploadedCount: number }> {
-  const parts: Part[] = [];
-  const totalSteps = filePaths.length + 1;
-  let uploadedCount = 0;
-
-  for (let index = 0; index < filePaths.length; index++) {
-    if (ctx.mcpReq.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-    const filePath = filePaths[index];
-    if (!filePath) continue;
-
-    await progress.step(
-      index + indexOffset,
-      totalSteps,
-      labelTemplate(filePath, index, filePaths.length),
-    );
-
-    const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
-    uploadedCount += 1;
-    uploadedFiles.addUploadedFile(uploaded);
-    parts.push({ text: `File: ${uploaded.displayPath}` });
-    parts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
-  }
-
-  return { parts, uploadedCount };
-}
-
 function createAnalyzeFileWork(
   rootsFetcher: RootsFetcher,
   workspaceCacheManager: WorkspaceCacheManagerImpl,
@@ -196,57 +156,53 @@ function createAnalyzeFileWork(
   ): Promise<CallToolResult> {
     const progress = new ProgressReporter(ctx, ANALYZE_FILE_TOOL_LABEL);
 
-    return await withUploadedFilesCleanup(ctx, async (uploadedFiles) => {
-      await progress.step(0, 3, 'Uploading to Gemini');
-      const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
-      uploadedFiles.addUploadedFile(uploaded);
+    return await withUploadsAndPipeline(
+      ctx,
+      rootsFetcher,
+      [filePath],
+      progress,
+      (fp) => `Uploading ${fp.split(/[\\/]/).pop() ?? fp}`,
+      async (contents) => {
+        await ctx.mcpReq.log('info', `Analyzing file content`);
+        await progress.step(1, 2, 'Analyzing content');
 
-      await ctx.mcpReq.log('info', `Analyzing ${uploaded.displayPath} (${uploaded.mimeType})`);
-      await progress.step(1, 3, 'Analyzing content');
-
-      const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
-      return await executor.runGeminiStream(ctx, {
-        toolName: 'analyze_file',
-        label: ANALYZE_FILE_TOOL_LABEL,
-        orchestration: {
-          builtInToolNames: selectSearchAndUrlContextTools(googleSearch, urls),
+        return await executor.executeGeminiPipeline(ctx, {
+          toolName: 'analyze_file',
+          label: ANALYZE_FILE_TOOL_LABEL,
+          googleSearch,
           urls,
-          // Built-in tools only; no function-calling mix. Default 'auto' policy.
-        },
-        buildContents: (activeCaps) => {
-          const { promptText, systemInstruction } = buildFileAnalysisPrompt({
-            goal: question,
-            kind: 'single',
-          });
-          const urlContextPart =
-            urls && urls.length > 0 && !activeCaps.has('urlContext')
-              ? [{ text: `Context URLs:\n${urls.join('\n')}` }]
-              : [];
-          return {
-            contents: [
-              createPartFromUri(uploaded.uri, uploaded.mimeType),
-              { text: promptText },
-              ...urlContextPart,
-            ],
-            systemInstruction,
-          };
-        },
-        config: {
-          costProfile: 'analyze.summary',
-          thinkingLevel,
-          thinkingBudget,
-          mediaResolution,
-          maxOutputTokens,
-          safetySettings,
-          cacheName,
-        },
-        responseBuilder: (_streamResult, textContent: string) => ({
-          structuredContent: {
-            summary: textContent || '',
+          workspaceCacheManager,
+          buildContents: (activeCaps) => {
+            const { promptText, systemInstruction } = buildFileAnalysisPrompt({
+              goal: question,
+              kind: 'single',
+            });
+            const urlContextPart =
+              urls && urls.length > 0 && !activeCaps.has('urlContext')
+                ? [{ text: `Context URLs:\n${urls.join('\n')}` }]
+                : [];
+            return {
+              contents: [...contents, { text: promptText }, ...urlContextPart],
+              systemInstruction,
+            };
           },
-        }),
-      });
-    });
+          config: {
+            costProfile: 'analyze.summary',
+            thinkingLevel,
+            thinkingBudget,
+            mediaResolution,
+            maxOutputTokens,
+            safetySettings,
+          },
+          responseBuilder: (_streamResult, textContent: string) => ({
+            structuredContent: {
+              summary: textContent || '',
+            },
+          }),
+        });
+      },
+      0, // indexOffset
+    );
   };
 }
 
@@ -267,61 +223,54 @@ async function analyzeMultiFileWork(
   ctx: ServerContext,
   extra: AnalyzeMultiExtra = {},
 ): Promise<CallToolResult> {
-  const { maxOutputTokens, safetySettings, googleSearch, urls } = extra;
-  const { thinkingBudget } = extra;
+  const { maxOutputTokens, safetySettings, googleSearch, urls, thinkingBudget } = extra;
   const progress = new ProgressReporter(ctx, ANALYZE_TOOL_LABEL);
 
-  return await withUploadedFilesCleanup(ctx, async (uploadedFiles) => {
-    const { parts: contents } = await uploadFilesBatch(
-      filePaths,
-      ctx,
-      rootsFetcher,
-      progress,
-      (filePath) => `Uploading ${filePath.split(/[\\/]/).pop() ?? filePath}`,
-      uploadedFiles,
-      0, // indexOffset
-    );
+  return await withUploadsAndPipeline(
+    ctx,
+    rootsFetcher,
+    filePaths,
+    progress,
+    (filePath) => `Uploading ${filePath.split(/[\\/]/).pop() ?? filePath}`,
+    async (contents) => {
+      await progress.step(filePaths.length, filePaths.length + 1, 'Analyzing content');
 
-    await progress.step(filePaths.length, filePaths.length + 1, 'Analyzing content');
-
-    const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
-    return await executor.runGeminiStream(ctx, {
-      toolName: 'analyze',
-      label: ANALYZE_TOOL_LABEL,
-      orchestration: {
-        builtInToolNames: selectSearchAndUrlContextTools(googleSearch, urls),
+      return await executor.executeGeminiPipeline(ctx, {
+        toolName: 'analyze',
+        label: ANALYZE_TOOL_LABEL,
+        googleSearch,
         urls,
-        // Built-in tools only; no function-calling mix. Default 'auto' policy.
-      },
-      buildContents: (activeCaps) => {
-        const prompt = buildFileAnalysisPrompt({
-          attachedParts: contents,
-          goal,
-          kind: 'multi',
-        });
-        const finalParts = [...prompt.promptParts];
-        if (urls && urls.length > 0 && !activeCaps.has('urlContext')) {
-          finalParts.push({ text: `Context URLs:\n${urls.join('\n')}` });
-        }
-        return { contents: finalParts, systemInstruction: prompt.systemInstruction };
-      },
-      config: {
-        costProfile: 'analyze.summary',
-        thinkingLevel,
-        thinkingBudget,
-        maxOutputTokens,
-        safetySettings,
-        cacheName,
-      },
-      responseBuilder: (_streamResult, textContent: string) => ({
-        structuredContent: {
-          summary: textContent || '',
-          targetKind: 'multi',
-          analyzedPaths: filePaths,
+        workspaceCacheManager,
+        buildContents: (activeCaps) => {
+          const prompt = buildFileAnalysisPrompt({
+            attachedParts: contents,
+            goal,
+            kind: 'multi',
+          });
+          const finalParts = [...prompt.promptParts];
+          if (urls && urls.length > 0 && !activeCaps.has('urlContext')) {
+            finalParts.push({ text: `Context URLs:\n${urls.join('\n')}` });
+          }
+          return { contents: finalParts, systemInstruction: prompt.systemInstruction };
         },
-      }),
-    });
-  });
+        config: {
+          costProfile: 'analyze.summary',
+          thinkingLevel,
+          thinkingBudget,
+          maxOutputTokens,
+          safetySettings,
+        },
+        responseBuilder: (_streamResult, textContent: string) => ({
+          structuredContent: {
+            summary: textContent || '',
+            targetKind: 'multi',
+            analyzedPaths: filePaths,
+          },
+        }),
+      });
+    },
+    0, // indexOffset
+  );
 }
 
 function pickDiagramBuiltInTools(args: AnalyzeDiagramInput): BuiltInToolName[] {
@@ -339,88 +288,84 @@ async function analyzeDiagramWork(
 ): Promise<CallToolResult> {
   const progress = new ProgressReporter(ctx, ANALYZE_DIAGRAM_TOOL_LABEL);
 
-  return await withUploadedFilesCleanup(ctx, async (uploadedFiles) => {
-    let attachedParts: Part[] = [];
-    let uploadedCount = 0;
+  const filesToUpload =
+    args.targetKind === 'file' || args.targetKind === 'multi'
+      ? collectDiagramSourceFiles(
+          args.targetKind === 'file' ? args.filePath : undefined,
+          args.targetKind === 'multi' ? args.filePaths : undefined,
+        )
+      : [];
 
-    if (args.targetKind === 'file' || args.targetKind === 'multi') {
-      const filesToUpload = collectDiagramSourceFiles(
-        args.targetKind === 'file' ? args.filePath : undefined,
-        args.targetKind === 'multi' ? args.filePaths : undefined,
-      );
-      const batchResult = await uploadFilesBatch(
-        filesToUpload,
-        ctx,
-        rootsFetcher,
-        progress,
-        (filePath, index, total) =>
-          `Uploaded ${filePath.split(/[\\/]/).pop() ?? filePath} (${index + 1}/${total})`,
-        uploadedFiles,
-        1, // indexOffset
-      );
-      attachedParts = batchResult.parts;
-      uploadedCount = batchResult.uploadedCount;
-    } else {
-      attachedParts = [
-        {
-          text: `URLs:\n${args.urls?.join('\n') ?? ''}`,
-        },
-      ];
-    }
+  return await withUploadsAndPipeline(
+    ctx,
+    rootsFetcher,
+    filesToUpload,
+    progress,
+    (filePath, index, total) =>
+      `Uploaded ${filePath.split(/[\\/]/).pop() ?? filePath} (${index + 1}/${total})`,
+    async (uploadedParts, uploadedCount) => {
+      let attachedParts: Part[] = [];
 
-    const totalSteps = uploadedCount > 0 ? uploadedCount + 1 : 1;
-    await progress.step(uploadedCount, totalSteps, `Generating ${args.diagramType} diagram`);
-    await ctx.mcpReq.log('info', `Generating ${args.diagramType} diagram`);
+      if (args.targetKind === 'file' || args.targetKind === 'multi') {
+        attachedParts = uploadedParts;
+      } else {
+        attachedParts = [
+          {
+            text: `URLs:\n${args.urls?.join('\n') ?? ''}`,
+          },
+        ];
+      }
 
-    const diagramBuiltInTools = pickDiagramBuiltInTools(args);
+      const totalSteps = uploadedCount > 0 ? uploadedCount + 1 : 1;
+      await progress.step(uploadedCount, totalSteps, `Generating ${args.diagramType} diagram`);
+      await ctx.mcpReq.log('info', `Generating ${args.diagramType} diagram`);
 
-    const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
-    return await executor.runGeminiStream(ctx, {
-      toolName: 'analyze_diagram',
-      label: ANALYZE_DIAGRAM_TOOL_LABEL,
-      orchestration: {
-        builtInToolNames: diagramBuiltInTools,
-        ...(args.targetKind === 'url' ? { urls: args.urls } : {}),
-        // Built-in tools only when present; no function-calling mix. Suppress traces when no built-ins.
+      const diagramBuiltInTools = pickDiagramBuiltInTools(args);
+
+      return await executor.executeGeminiPipeline(ctx, {
+        toolName: 'analyze_diagram',
+        label: ANALYZE_DIAGRAM_TOOL_LABEL,
+        urls: args.targetKind === 'url' ? args.urls : undefined,
         serverSideToolInvocations: (diagramBuiltInTools.length > 0
           ? 'auto'
           : 'never') satisfies ServerSideToolInvocationsPolicy,
-      },
-      buildContents: () => {
-        const prompt = buildDiagramGenerationPrompt({
-          attachedParts,
-          description: args.goal,
-          diagramType: args.diagramType,
-          validateSyntax: args.validateSyntax,
-        });
-        return { contents: prompt.promptParts, systemInstruction: prompt.systemInstruction };
-      },
-      config: {
-        costProfile: 'analyze.diagram',
-        thinkingLevel: args.thinkingLevel,
-        thinkingBudget: args.thinkingBudget,
-        maxOutputTokens: args.maxOutputTokens,
-        safetySettings: args.safetySettings,
-        cacheName,
-      },
-      responseBuilder: (_streamResult, textContent: string) => {
-        const { diagram, explanation } = extractDiagram(textContent, args.diagramType, ctx);
-        const diagramType = args.diagramType;
-        const formatted = formatAnalyzeDiagramMarkdown(diagram, diagramType, explanation);
+        workspaceCacheManager,
+        buildContents: () => {
+          const prompt = buildDiagramGenerationPrompt({
+            attachedParts,
+            description: args.goal,
+            diagramType: args.diagramType,
+            validateSyntax: args.validateSyntax,
+          });
+          return { contents: prompt.promptParts, systemInstruction: prompt.systemInstruction };
+        },
+        config: {
+          costProfile: 'analyze.diagram',
+          thinkingLevel: args.thinkingLevel,
+          thinkingBudget: args.thinkingBudget,
+          maxOutputTokens: args.maxOutputTokens,
+          safetySettings: args.safetySettings,
+        },
+        responseBuilder: (_streamResult, textContent: string) => {
+          const { diagram, explanation } = extractDiagram(textContent, args.diagramType, ctx);
+          const diagramType = args.diagramType;
+          const formatted = formatAnalyzeDiagramMarkdown(diagram, diagramType, explanation);
 
-        return {
-          resultMod: () => ({
-            content: [{ type: 'text' as const, text: formatted }],
-          }),
-          structuredContent: {
-            diagram,
-            diagramType,
-            ...(explanation ? { explanation } : {}),
-          },
-        };
-      },
-    });
-  });
+          return {
+            resultMod: () => ({
+              content: [{ type: 'text' as const, text: formatted }],
+            }),
+            structuredContent: {
+              diagram,
+              diagramType,
+              ...(explanation ? { explanation } : {}),
+            },
+          };
+        },
+      });
+    },
+    1, // indexOffset
+  );
 }
 
 async function analyzeWork(
@@ -488,6 +433,7 @@ async function runAnalyzeTarget(
         safetySettings: args.safetySettings,
       },
       ctx,
+      workspaceCacheManager,
     );
   }
 

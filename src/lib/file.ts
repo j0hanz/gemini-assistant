@@ -3,9 +3,12 @@ import type { ServerContext } from '@modelcontextprotocol/server';
 import { stat } from 'node:fs/promises';
 import { extname } from 'node:path';
 
+import { createPartFromUri, type Part } from '@google/genai';
+
 import { getAI } from '../client.js';
 import { cleanupErrorLogger } from './errors.js';
 import { withRetry } from './errors.js';
+import { ProgressReporter } from './progress.js';
 import type { RootsFetcher } from './validation.js';
 import { resolveWorkspacePath } from './validation.js';
 
@@ -166,4 +169,61 @@ export async function withUploadedFilesCleanup<T>(
   } finally {
     await deleteUploadedFiles(uploadedNames, cleanupErrorLogger(ctx));
   }
+}
+
+export async function uploadFilesBatch(
+  filePaths: string[],
+  ctx: ServerContext,
+  rootsFetcher: RootsFetcher,
+  progress: ProgressReporter,
+  labelTemplate: (filePath: string, index: number, total: number) => string,
+  uploadedFiles: UploadedFilesCleanupTracker,
+  indexOffset = 1,
+): Promise<{ parts: Part[]; uploadedCount: number }> {
+  const parts: Part[] = [];
+  const totalSteps = filePaths.length + 1;
+  let uploadedCount = 0;
+
+  for (let index = 0; index < filePaths.length; index++) {
+    if (ctx.mcpReq.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    const filePath = filePaths[index];
+    if (!filePath) continue;
+
+    await progress.step(
+      index + indexOffset,
+      totalSteps,
+      labelTemplate(filePath, index, filePaths.length),
+    );
+
+    const uploaded = await uploadFile(filePath, ctx.mcpReq.signal, rootsFetcher);
+    uploadedCount += 1;
+    uploadedFiles.addUploadedFile(uploaded);
+    parts.push({ text: `File: ${uploaded.displayPath}` });
+    parts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
+  }
+
+  return { parts, uploadedCount };
+}
+
+export async function withUploadsAndPipeline<T>(
+  ctx: ServerContext,
+  rootsFetcher: RootsFetcher,
+  filePaths: string[],
+  progress: ProgressReporter,
+  labelTemplate: (filePath: string, index: number, total: number) => string,
+  operation: (parts: Part[], uploadedCount: number) => Promise<T>,
+  indexOffset = 1,
+): Promise<T> {
+  return await withUploadedFilesCleanup(ctx, async (uploadedFiles) => {
+    const { parts, uploadedCount } = await uploadFilesBatch(
+      filePaths,
+      ctx,
+      rootsFetcher,
+      progress,
+      labelTemplate,
+      uploadedFiles,
+      indexOffset,
+    );
+    return await operation(parts, uploadedCount);
+  });
 }

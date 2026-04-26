@@ -78,6 +78,16 @@ describe('client config', () => {
     assert.strictEqual(config.maxOutputTokens, 6_144);
   });
 
+  it('preserves systemInstruction when cachedContent is used', () => {
+    const config = buildGenerateContentConfig({
+      cacheName: 'cachedContents/abc',
+      systemInstruction: 'Use the current review rubric.',
+    });
+
+    assert.strictEqual(config.cachedContent, 'cachedContents/abc');
+    assert.strictEqual(config.systemInstruction, 'Use the current review rubric.');
+  });
+
   it('lets explicit args override cost profiles', () => {
     const config = buildGenerateContentConfig({
       costProfile: 'review.diff',

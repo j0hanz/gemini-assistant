@@ -1,19 +1,39 @@
 import type { ServerContext } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 
+import { getAI } from '../../src/client.js';
 import { createWorkspaceCacheManager } from '../../src/lib/workspace-context.js';
-import { createAskWork as createBaseAskWork } from '../../src/tools/chat.js';
+import { createSessionStore } from '../../src/sessions.js';
+import {
+  createAskWork as createBaseAskWork,
+  createDefaultAskDependencies,
+} from '../../src/tools/chat.js';
 
 const workspaceCacheManager = createWorkspaceCacheManager();
 
 function createAskWork(
   deps: Parameters<typeof createBaseAskWork>[0],
-  _workspaceCacheManager = workspaceCacheManager,
+  manager = workspaceCacheManager,
 ) {
-  return createBaseAskWork(deps, workspaceCacheManager);
+  return createBaseAskWork(deps, manager);
 }
+
+let previousCacheEnv: string | undefined;
+
+beforeEach(() => {
+  previousCacheEnv = process.env.CACHE;
+  process.env.CACHE = 'false';
+});
+
+afterEach(() => {
+  if (previousCacheEnv === undefined) {
+    delete process.env.CACHE;
+  } else {
+    process.env.CACHE = previousCacheEnv;
+  }
+});
 
 function createContext(taskId?: string): ServerContext {
   return {
@@ -25,6 +45,20 @@ function createContext(taskId?: string): ServerContext {
     },
     ...(taskId ? { task: { id: taskId } } : {}),
   } as unknown as ServerContext;
+}
+
+async function withSessionResourcesExposed<T>(fn: () => T | Promise<T>): Promise<T> {
+  const original = process.env.MCP_EXPOSE_SESSION_RESOURCES;
+  process.env.MCP_EXPOSE_SESSION_RESOURCES = 'true';
+  try {
+    return await fn();
+  } finally {
+    if (original === undefined) {
+      delete process.env.MCP_EXPOSE_SESSION_RESOURCES;
+    } else {
+      process.env.MCP_EXPOSE_SESSION_RESOURCES = original;
+    }
+  }
 }
 
 function createHarness() {
@@ -125,16 +159,52 @@ describe('ask transcript capture', () => {
       ),
     );
     assert.ok(
-      result.content.some(
+      !result.content.some(
         (item) => item.type === 'resource_link' && item.uri === 'session://sess-new/events',
       ),
     );
     assert.ok(
-      result.content.some(
+      !result.content.some(
         (item) =>
           item.type === 'resource_link' && item.uri === 'gemini://sessions/sess-new/turns/1/parts',
       ),
     );
+  });
+
+  it('adds sensitive session resource links only when explicitly enabled', async () => {
+    await withSessionResourcesExposed(async () => {
+      const harness = createHarness();
+      const askWork = createAskWork(harness.deps as never, workspaceCacheManager);
+
+      const result = await askWork(
+        { message: 'Hello', sessionId: 'sess-new' },
+        createContext('task-new'),
+      );
+
+      assert.strictEqual(result.isError, undefined);
+      assert.ok(
+        result.content.some(
+          (item) => item.type === 'resource_link' && item.uri === 'session://sess-new',
+        ),
+      );
+      assert.ok(
+        result.content.some(
+          (item) => item.type === 'resource_link' && item.uri === 'session://sess-new/transcript',
+        ),
+      );
+      assert.ok(
+        result.content.some(
+          (item) => item.type === 'resource_link' && item.uri === 'session://sess-new/events',
+        ),
+      );
+      assert.ok(
+        result.content.some(
+          (item) =>
+            item.type === 'resource_link' &&
+            item.uri === 'gemini://sessions/sess-new/turns/1/parts',
+        ),
+      );
+    });
   });
 
   it('encodes session resource links for session IDs with spaces, %, /, and #', async () => {
@@ -152,13 +222,13 @@ describe('ask transcript capture', () => {
       ),
     );
     assert.ok(
-      result.content.some(
+      !result.content.some(
         (item) =>
           item.type === 'resource_link' && item.uri === `session://${encodedSessionId}/events`,
       ),
     );
     assert.ok(
-      result.content.some(
+      !result.content.some(
         (item) =>
           item.type === 'resource_link' &&
           item.uri === `gemini://sessions/${encodedSessionId}/turns/1/parts`,
@@ -390,6 +460,63 @@ describe('ask transcript capture', () => {
     } finally {
       process.env.CACHE = originalEnabled;
       workspaceCacheManager.getOrCreateCache = originalGetOrCreateCache;
+    }
+  });
+
+  it('preserves stored system instructions when rebuilding a cached session', async () => {
+    process.env.API_KEY ??= 'test-key-for-rebuild';
+    const sessionStore = createSessionStore();
+    const manager = createWorkspaceCacheManager();
+    const originalGetCacheStatus = manager.getCacheStatus.bind(manager);
+    const ai = getAI();
+    const originalCreateChat = ai.chats.create.bind(ai.chats);
+    let capturedConfig: Record<string, unknown> | undefined;
+
+    manager.getCacheStatus = () => ({
+      cacheName: 'cachedContents/workspace-1',
+      contentHash: 'hash',
+      enabled: true,
+      estimatedTokens: 0,
+      sources: [],
+      createdAt: Date.now(),
+      ttl: '3600s',
+    });
+    ai.chats.create = ((options: { config?: Record<string, unknown> }) => {
+      capturedConfig = options.config;
+      return { kind: 'rebuilt-chat' };
+    }) as typeof ai.chats.create;
+
+    try {
+      sessionStore.setSession(
+        'sess-rebuild-cache',
+        { kind: 'old-chat' } as never,
+        undefined,
+        'cachedContents/workspace-1',
+        {
+          model: 'gemini-3-flash-preview',
+          systemInstruction: 'Preserve this instruction',
+        },
+      );
+      sessionStore.appendSessionContent('sess-rebuild-cache', {
+        role: 'user',
+        parts: [{ text: 'Hello' }],
+        timestamp: 1,
+      });
+
+      const deps = createDefaultAskDependencies(sessionStore, manager);
+      const rebuilt = deps.rebuildChat('sess-rebuild-cache', {
+        message: 'Follow up',
+        sessionId: 'sess-rebuild-cache',
+      });
+
+      assert.deepStrictEqual(rebuilt, { kind: 'rebuilt-chat' });
+      assert.strictEqual(capturedConfig?.cachedContent, 'cachedContents/workspace-1');
+      assert.strictEqual(capturedConfig?.systemInstruction, 'Preserve this instruction');
+    } finally {
+      ai.chats.create = originalCreateChat;
+      manager.getCacheStatus = originalGetCacheStatus;
+      sessionStore.close();
+      await manager.close();
     }
   });
 });

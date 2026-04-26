@@ -155,6 +155,7 @@ export const DISCOVERY_ENTRIES = [
       'Stateless transport (STATELESS=true) does not advertise the tasks capability — task-aware tools/call requests are unavailable; clients must rely on the synchronous return path.',
       'Progress notifications truncate streamed text to ~80 characters per update; full text is delivered in the final response only.',
       'Sessions started before raw `Part[]` capture cannot serve `gemini://sessions/.../parts`.',
+      'Transcript, events, and raw turn-parts resources require MCP_EXPOSE_SESSION_RESOURCES=true.',
       'Structured output is intended for single-turn calls and new sessions, not resumed sessions.',
       'Declared functions are executed by the MCP client, not by this server; return results through functionResponses on the same sessionId.',
     ],
@@ -368,6 +369,7 @@ export const DISCOVERY_ENTRIES = [
     whenToUse: 'Use for read-only visibility into recent turns.',
     inputs: ['sessionId'],
     returns: 'JSON and Markdown transcript entries.',
+    limitations: ['Transcript access requires MCP_EXPOSE_SESSION_RESOURCES=true.'],
     related: [{ kind: 'resource', name: 'session://{sessionId}' }],
   },
   {
@@ -378,6 +380,7 @@ export const DISCOVERY_ENTRIES = [
     whenToUse: 'Use to get the server-managed inspection summary.',
     inputs: ['sessionId'],
     returns: 'JSON and Markdown event summaries.',
+    limitations: ['Events access requires MCP_EXPOSE_SESSION_RESOURCES=true.'],
     related: [{ kind: 'resource', name: 'session://{sessionId}' }],
   },
   {
@@ -389,6 +392,7 @@ export const DISCOVERY_ENTRIES = [
     inputs: ['sessionId', 'turnIndex'],
     returns:
       'JSON array of Gemini `Part` objects for the selected persisted turn. Oversized `inlineData` payloads are elided but all other parts — including `thought` and `thoughtSignature` — are served verbatim.',
+    limitations: ['Raw turn-parts access requires MCP_EXPOSE_SESSION_RESOURCES=true.'],
     related: [{ kind: 'resource', name: 'session://{sessionId}' }],
   },
   {
@@ -436,8 +440,8 @@ export const WORKFLOW_ENTRIES = [
       'Call chat with a goal and optional sessionId.',
       'If Gemini returns functionCalls, execute them in the MCP client and call chat again with the same sessionId plus functionResponses.',
       'Inspect session:// if you need to find an active session.',
-      'Inspect session://{sessionId}/transcript or /events when you need read-only inspection.',
-      'Use gemini://sessions/{sessionId}/turns/{turnIndex}/parts when an orchestrator needs replay-safe raw turn parts.',
+      'When MCP_EXPOSE_SESSION_RESOURCES=true, inspect session://{sessionId}/transcript or /events when you need read-only inspection.',
+      'When MCP_EXPOSE_SESSION_RESOURCES=true, use gemini://sessions/{sessionId}/turns/{turnIndex}/parts when an orchestrator needs replay-safe raw turn parts.',
     ],
     recommendedTools: ['chat'],
     recommendedPrompts: ['discover'],

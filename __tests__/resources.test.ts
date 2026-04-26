@@ -46,6 +46,20 @@ function createStore(): SessionStore {
   return createSessionStore();
 }
 
+function withSessionResourcesExposed<T>(fn: () => T): T {
+  const original = process.env.MCP_EXPOSE_SESSION_RESOURCES;
+  process.env.MCP_EXPOSE_SESSION_RESOURCES = 'true';
+  try {
+    return fn();
+  } finally {
+    if (original === undefined) {
+      delete process.env.MCP_EXPOSE_SESSION_RESOURCES;
+    } else {
+      process.env.MCP_EXPOSE_SESSION_RESOURCES = original;
+    }
+  }
+}
+
 describe('discovery resources', () => {
   it('reads discover://catalog with deterministic catalog contents and markdown rendering', () => {
     const result = readDiscoverCatalogResource('discover://catalog');
@@ -305,195 +319,265 @@ describe('workspace context resource', () => {
 
 describe('session transcript resource', () => {
   it('reads transcript entries for an active session', () => {
-    const store = createStore();
-    store.setSession('sess-resource-transcript', mockChat('resource-transcript'));
-    store.appendSessionTranscript('sess-resource-transcript', {
-      role: 'user',
-      text: 'Hello',
-      timestamp: 1,
-    });
-    store.appendSessionTranscript('sess-resource-transcript', {
-      role: 'assistant',
-      text: 'Hi there',
-      timestamp: 2,
-    });
+    withSessionResourcesExposed(() => {
+      const store = createStore();
+      store.setSession('sess-resource-transcript', mockChat('resource-transcript'));
+      store.appendSessionTranscript('sess-resource-transcript', {
+        role: 'user',
+        text: 'Hello',
+        timestamp: 1,
+      });
+      store.appendSessionTranscript('sess-resource-transcript', {
+        role: 'assistant',
+        text: 'Hi there',
+        timestamp: 2,
+      });
 
-    const result = readSessionTranscriptResource(
-      store,
-      'session://sess-resource-transcript/transcript',
-      'sess-resource-transcript',
-    );
-    assert.strictEqual(result.contents.length, 2);
-    assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
-    assert.deepStrictEqual(
-      parseResourceText(result),
-      store.listSessionTranscriptEntries('sess-resource-transcript'),
-    );
-    assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
-    assert.match(result.contents[1]?.text ?? '', /# Session Transcript `sess-resource-transcript`/);
-    assert.match(result.contents[1]?.text ?? '', /## user/);
-    assert.match(result.contents[1]?.text ?? '', /## assistant/);
+      const result = readSessionTranscriptResource(
+        store,
+        'session://sess-resource-transcript/transcript',
+        'sess-resource-transcript',
+      );
+      assert.strictEqual(result.contents.length, 2);
+      assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
+      assert.deepStrictEqual(
+        parseResourceText(result),
+        store.listSessionTranscriptEntries('sess-resource-transcript'),
+      );
+      assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
+      assert.match(
+        result.contents[1]?.text ?? '',
+        /# Session Transcript `sess-resource-transcript`/,
+      );
+      assert.match(result.contents[1]?.text ?? '', /## user/);
+      assert.match(result.contents[1]?.text ?? '', /## assistant/);
+    });
   });
 
   it('reads transcript entries for a session ID whose resource URI must be encoded', () => {
-    const store = createStore();
-    const sessionId = 'sess resource%/#';
-    const encodedSessionId = encodeURIComponent(sessionId);
-    store.setSession(sessionId, mockChat('resource-transcript-encoded'));
-    store.appendSessionTranscript(sessionId, {
-      role: 'user',
-      text: 'Hello',
-      timestamp: 1,
+    withSessionResourcesExposed(() => {
+      const store = createStore();
+      const sessionId = 'sess resource%/#';
+      const encodedSessionId = encodeURIComponent(sessionId);
+      store.setSession(sessionId, mockChat('resource-transcript-encoded'));
+      store.appendSessionTranscript(sessionId, {
+        role: 'user',
+        text: 'Hello',
+        timestamp: 1,
+      });
+
+      const result = readSessionTranscriptResource(
+        store,
+        `session://${encodedSessionId}/transcript`,
+        encodedSessionId,
+      );
+
+      assert.strictEqual(result.contents[0]?.uri, `session://${encodedSessionId}/transcript`);
+      assert.match(result.contents[1]?.text ?? '', /# Session Transcript `sess resource%\/#`/);
     });
-
-    const result = readSessionTranscriptResource(
-      store,
-      `session://${encodedSessionId}/transcript`,
-      encodedSessionId,
-    );
-
-    assert.strictEqual(result.contents[0]?.uri, `session://${encodedSessionId}/transcript`);
-    assert.match(result.contents[1]?.text ?? '', /# Session Transcript `sess resource%\/#`/);
   });
 
   it('renders a not-found error for a missing session transcript', () => {
-    const store = createStore();
-    assert.throws(
-      () => readSessionTranscriptResource(store, 'session://missing/transcript', 'missing'),
-      { message: /not found/i },
-    );
-  });
-
-  it('throws ProtocolError for a missing session transcript', () => {
-    const store = createStore();
-    assert.throws(() => getSessionTranscriptResourceData(store, 'missing-session'), {
-      message: /not found/i,
+    withSessionResourcesExposed(() => {
+      const store = createStore();
+      assert.throws(
+        () => readSessionTranscriptResource(store, 'session://missing/transcript', 'missing'),
+        { message: /not found/i },
+      );
     });
   });
 
-  it('maps malformed transcript URI encoding to InvalidParams', () => {
+  it('throws ProtocolError for a missing session transcript', () => {
+    withSessionResourcesExposed(() => {
+      const store = createStore();
+      assert.throws(() => getSessionTranscriptResourceData(store, 'missing-session'), {
+        message: /not found/i,
+      });
+    });
+  });
+
+  it('is disabled by default', () => {
     const store = createStore();
-    store.setSession('sess-resource-transcript', mockChat('resource-transcript'));
+    store.setSession('sess-disabled-transcript', mockChat('disabled-transcript'));
 
     assert.throws(
-      () => readSessionTranscriptResource(store, 'session://%E0%A4/transcript', '%E0%A4'),
-      (error) => error instanceof ProtocolError && /percent-encoding/i.test(error.message),
+      () =>
+        readSessionTranscriptResource(
+          store,
+          'session://sess-disabled-transcript/transcript',
+          'sess-disabled-transcript',
+        ),
+      (error) =>
+        error instanceof ProtocolError && error.message.includes('Session resources are disabled'),
     );
+  });
+
+  it('maps malformed transcript URI encoding to InvalidParams', () => {
+    withSessionResourcesExposed(() => {
+      const store = createStore();
+      store.setSession('sess-resource-transcript', mockChat('resource-transcript'));
+
+      assert.throws(
+        () => readSessionTranscriptResource(store, 'session://%E0%A4/transcript', '%E0%A4'),
+        (error) => error instanceof ProtocolError && /percent-encoding/i.test(error.message),
+      );
+    });
   });
 });
 
 describe('session events resource', () => {
   it('reads event entries for an active session with JSON and markdown renderings', () => {
-    const store = createStore();
-    store.setSession('sess-resource-events', mockChat('resource-events'));
-    store.appendSessionEvent('sess-resource-events', {
-      request: { message: 'Hello', toolProfile: 'search' },
-      response: {
-        text: 'Hi there',
-        data: { status: 'ok' },
-        schemaWarnings: ['normalized inspection summary'],
-        thoughts: 'Reasoning summary',
-        toolEvents: [{ kind: 'tool_call', id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
-        usage: { totalTokenCount: 12 },
-      },
-      timestamp: 1,
-    });
+    withSessionResourcesExposed(() => {
+      const store = createStore();
+      store.setSession('sess-resource-events', mockChat('resource-events'));
+      store.appendSessionEvent('sess-resource-events', {
+        request: { message: 'Hello', toolProfile: 'search' },
+        response: {
+          text: 'Hi there',
+          data: { status: 'ok' },
+          schemaWarnings: ['normalized inspection summary'],
+          thoughts: 'Reasoning summary',
+          toolEvents: [{ kind: 'tool_call', id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
+          usage: { totalTokenCount: 12 },
+        },
+        timestamp: 1,
+      });
 
-    const result = readSessionEventsResource(
-      store,
-      'session://sess-resource-events/events',
-      'sess-resource-events',
-    );
-    assert.strictEqual(result.contents.length, 2);
-    assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
-    assert.deepStrictEqual(
-      parseResourceText(result),
-      store.listSessionEventEntries('sess-resource-events'),
-    );
-    assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
-    assert.match(result.contents[1]?.text ?? '', /# Session Events `sess-resource-events`/);
-    assert.match(result.contents[1]?.text ?? '', /- Message: Hello/);
-    assert.match(result.contents[1]?.text ?? '', /### Response/);
-    assert.doesNotMatch(result.contents[1]?.text ?? '', /- tool_call \(GOOGLE_SEARCH_WEB\)/);
+      const result = readSessionEventsResource(
+        store,
+        'session://sess-resource-events/events',
+        'sess-resource-events',
+      );
+      assert.strictEqual(result.contents.length, 2);
+      assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
+      assert.deepStrictEqual(
+        parseResourceText(result),
+        store.listSessionEventEntries('sess-resource-events'),
+      );
+      assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
+      assert.match(result.contents[1]?.text ?? '', /# Session Events `sess-resource-events`/);
+      assert.match(result.contents[1]?.text ?? '', /- Message: Hello/);
+      assert.match(result.contents[1]?.text ?? '', /### Response/);
+      assert.doesNotMatch(result.contents[1]?.text ?? '', /- tool_call \(GOOGLE_SEARCH_WEB\)/);
+    });
   });
 
   it('reads event entries for a session ID whose resource URI must be encoded', () => {
-    const store = createStore();
-    const sessionId = 'sess resource%/#';
-    const encodedSessionId = encodeURIComponent(sessionId);
-    store.setSession(sessionId, mockChat('resource-events-encoded'));
-    store.appendSessionEvent(sessionId, {
-      request: { message: 'Hello' },
-      response: { text: 'Hi there' },
-      timestamp: 1,
+    withSessionResourcesExposed(() => {
+      const store = createStore();
+      const sessionId = 'sess resource%/#';
+      const encodedSessionId = encodeURIComponent(sessionId);
+      store.setSession(sessionId, mockChat('resource-events-encoded'));
+      store.appendSessionEvent(sessionId, {
+        request: { message: 'Hello' },
+        response: { text: 'Hi there' },
+        timestamp: 1,
+      });
+
+      const result = readSessionEventsResource(
+        store,
+        `session://${encodedSessionId}/events`,
+        encodedSessionId,
+      );
+
+      assert.strictEqual(result.contents[0]?.uri, `session://${encodedSessionId}/events`);
+      assert.match(result.contents[1]?.text ?? '', /# Session Events `sess resource%\/#`/);
     });
-
-    const result = readSessionEventsResource(
-      store,
-      `session://${encodedSessionId}/events`,
-      encodedSessionId,
-    );
-
-    assert.strictEqual(result.contents[0]?.uri, `session://${encodedSessionId}/events`);
-    assert.match(result.contents[1]?.text ?? '', /# Session Events `sess resource%\/#`/);
   });
 
   it('throws ProtocolError for a missing session events resource', () => {
-    const store = createStore();
-    assert.throws(() => readSessionEventsResource(store, 'session://missing/events', 'missing'), {
-      message: /not found/i,
+    withSessionResourcesExposed(() => {
+      const store = createStore();
+      assert.throws(() => readSessionEventsResource(store, 'session://missing/events', 'missing'), {
+        message: /not found/i,
+      });
     });
   });
 
   it('throws ProtocolError for a missing session events data', () => {
-    const store = createStore();
-    assert.throws(() => getSessionEventsResourceData(store, 'missing-session'), {
-      message: /not found/i,
+    withSessionResourcesExposed(() => {
+      const store = createStore();
+      assert.throws(() => getSessionEventsResourceData(store, 'missing-session'), {
+        message: /not found/i,
+      });
     });
+  });
+
+  it('is disabled by default', () => {
+    const store = createStore();
+    store.setSession('sess-disabled-events', mockChat('disabled-events'));
+
+    assert.throws(
+      () =>
+        readSessionEventsResource(
+          store,
+          'session://sess-disabled-events/events',
+          'sess-disabled-events',
+        ),
+      (error) =>
+        error instanceof ProtocolError && error.message.includes('Session resources are disabled'),
+    );
   });
 });
 
 describe('session turn parts resource', () => {
   it('reads raw persisted parts for a session turn', () => {
-    const store = createStore();
-    store.setSession('sess-resource-parts', mockChat('resource-parts'));
-    store.appendSessionContent('sess-resource-parts', {
-      role: 'user',
-      parts: [{ text: 'Hello' }],
-      timestamp: 1,
-    });
-    store.appendSessionContent('sess-resource-parts', {
-      role: 'model',
-      parts: [{ text: 'Hi', thoughtSignature: 'sig-1' }],
-      timestamp: 2,
-    });
+    withSessionResourcesExposed(() => {
+      const store = createStore();
+      store.setSession('sess-resource-parts', mockChat('resource-parts'));
+      store.appendSessionContent('sess-resource-parts', {
+        role: 'user',
+        parts: [{ text: 'Hello' }],
+        timestamp: 1,
+      });
+      store.appendSessionContent('sess-resource-parts', {
+        role: 'model',
+        parts: [{ text: 'Hi', thoughtSignature: 'sig-1' }],
+        timestamp: 2,
+      });
 
-    const uri = sessionTurnPartsUri('sess-resource-parts', 1);
-    const result = readSessionTurnPartsResource(store, uri, 'sess-resource-parts', '1');
+      const uri = sessionTurnPartsUri('sess-resource-parts', 1);
+      const result = readSessionTurnPartsResource(store, uri, 'sess-resource-parts', '1');
 
-    assert.strictEqual(result.contents.length, 1);
-    assert.strictEqual(result.contents[0]?.uri, uri);
-    assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
-    assert.deepStrictEqual(parseResourceText(result), [{ text: 'Hi', thoughtSignature: 'sig-1' }]);
+      assert.strictEqual(result.contents.length, 1);
+      assert.strictEqual(result.contents[0]?.uri, uri);
+      assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
+      assert.deepStrictEqual(parseResourceText(result), [
+        { text: 'Hi', thoughtSignature: 'sig-1' },
+      ]);
+    });
   });
 
   it('throws ResourceNotFound for missing session turn parts', () => {
+    withSessionResourcesExposed(() => {
+      const store = createStore();
+      store.setSession('sess-resource-parts', mockChat('resource-parts'));
+
+      assert.throws(
+        () => getSessionTurnPartsResourceData(store, 'sess-resource-parts', '9'),
+        (error) => error instanceof ProtocolError && /turn 9 not found/i.test(error.message),
+      );
+      assert.throws(
+        () =>
+          readSessionTurnPartsResource(
+            store,
+            'gemini://sessions/missing/turns/0/parts',
+            'missing',
+            '0',
+          ),
+        (error) => error instanceof ProtocolError && /not found/i.test(error.message),
+      );
+    });
+  });
+
+  it('is disabled by default', () => {
     const store = createStore();
-    store.setSession('sess-resource-parts', mockChat('resource-parts'));
+    store.setSession('sess-disabled-parts', mockChat('disabled-parts'));
 
     assert.throws(
-      () => getSessionTurnPartsResourceData(store, 'sess-resource-parts', '9'),
-      (error) => error instanceof ProtocolError && /turn 9 not found/i.test(error.message),
-    );
-    assert.throws(
-      () =>
-        readSessionTurnPartsResource(
-          store,
-          'gemini://sessions/missing/turns/0/parts',
-          'missing',
-          '0',
-        ),
-      (error) => error instanceof ProtocolError && /not found/i.test(error.message),
+      () => getSessionTurnPartsResourceData(store, 'sess-disabled-parts', '0'),
+      (error) =>
+        error instanceof ProtocolError && error.message.includes('Session resources are disabled'),
     );
   });
 });

@@ -848,6 +848,7 @@ export async function consumeStreamWithProgress(
   stream: AsyncGenerator<GenerateContentResponse>,
   ctx: ServerContext,
   toolLabel?: string,
+  signal: AbortSignal = ctx.mcpReq.signal,
 ): Promise<StreamResult> {
   const state = createStreamProcessingState();
   const msg = (message: string): string => (toolLabel ? `${toolLabel}: ${message}` : message);
@@ -855,7 +856,7 @@ export async function consumeStreamWithProgress(
   await advanceAndSendProgress(ctx, state, msg, 'Evaluating prompt');
 
   for await (const chunk of stream) {
-    if (ctx.mcpReq.signal.aborted) {
+    if (signal.aborted) {
       state.aborted = true;
       break;
     }
@@ -941,9 +942,10 @@ export async function executeToolStream(
   toolName: string,
   toolLabel: string,
   streamGenerator: () => Promise<AsyncGenerator<GenerateContentResponse>>,
+  signal: AbortSignal = ctx.mcpReq.signal,
 ): Promise<{ streamResult: StreamResult; result: CallToolResult }> {
   const stream = await withRetry(streamGenerator, {
-    signal: ctx.mcpReq.signal,
+    signal,
     onRetry: async (attempt, max, delayMs) => {
       await sendProgress(
         ctx,
@@ -953,7 +955,7 @@ export async function executeToolStream(
       );
     },
   });
-  const streamResult = await consumeStreamWithProgress(stream, ctx, toolLabel);
+  const streamResult = await consumeStreamWithProgress(stream, ctx, toolLabel, signal);
   const result = validateStreamResult(streamResult, toolName);
   return { streamResult, result };
 }

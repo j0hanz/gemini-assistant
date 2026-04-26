@@ -67,14 +67,14 @@ describe('model-prompts', () => {
     ]);
   });
 
-  it('removes system instruction duplication for diff-review cache mode', () => {
+  it('keeps diff-review system instructions when cache mode prepends cache text', () => {
     const prompt = buildDiffReviewPrompt({
       cacheName: 'cachedContents/workspace-1',
       mode: 'review',
       promptText: '## Snapshot\n\n```diff\n+ok\n```',
     });
 
-    assert.strictEqual(prompt.systemInstruction, undefined);
+    assert.ok(prompt.systemInstruction?.includes('Review the unified diff'));
     assert.ok(
       prompt.promptText.startsWith(
         'Review the diff for bugs and behavior risk. Ignore formatting-only changes.',
@@ -83,7 +83,7 @@ describe('model-prompts', () => {
     assert.ok(prompt.promptText.endsWith('## Snapshot\n\n```diff\n+ok\n```'));
   });
 
-  it('keeps compare-file cache prompts task-specific', () => {
+  it('keeps compare-file system instructions when cache mode prepends cache text', () => {
     const prompt = buildDiffReviewPrompt({
       cacheName: 'cachedContents/workspace-1',
       focus: 'Focus authentication differences',
@@ -91,7 +91,7 @@ describe('model-prompts', () => {
       promptParts: [{ text: 'File A: src/a.ts' }, { text: 'File B: src/b.ts' }],
     });
 
-    assert.strictEqual(prompt.systemInstruction, undefined);
+    assert.ok(prompt.systemInstruction?.includes('Compare the files'));
     assert.deepStrictEqual(prompt.promptParts, [
       {
         text: 'Compare the files. Output: Summary, Differences, Impact. Cite short quotes.',
@@ -102,7 +102,7 @@ describe('model-prompts', () => {
     ]);
   });
 
-  it('keeps error-diagnosis cache prompts focused on live task content', () => {
+  it('keeps error-diagnosis system instructions when cache mode prepends cache text', () => {
     const prompt = buildErrorDiagnosisPrompt({
       cacheName: 'cachedContents/workspace-1',
       codeContext: 'throw new Error("boom")',
@@ -111,7 +111,7 @@ describe('model-prompts', () => {
       urls: ['https://example.com/error'],
     });
 
-    assert.strictEqual(prompt.systemInstruction, undefined);
+    assert.ok(prompt.systemInstruction?.includes('Diagnose the error'));
     assert.ok(prompt.promptText.startsWith('Diagnose the error. Output: Cause, Fix, Notes.'));
     assert.ok(prompt.promptText.includes('## Error'));
     assert.ok(prompt.promptText.includes('## Code'));
@@ -133,14 +133,14 @@ describe('model-prompts', () => {
     ]);
   });
 
-  it('keeps a concise diagram cue in cache mode', () => {
+  it('keeps diagram system instructions when cache mode prepends cache text', () => {
     const prompt = buildDiagramGenerationPrompt({
       cacheName: 'cachedContents/workspace-1',
       description: 'Show the request flow',
       diagramType: 'mermaid',
     });
 
-    assert.strictEqual(prompt.systemInstruction, undefined);
+    assert.ok(prompt.systemInstruction?.includes('Generate a mermaid diagram'));
     assert.deepStrictEqual(prompt.promptParts, [
       { text: 'Return exactly one fenced ```mermaid block.' },
       { text: 'Task: Show the request flow' },

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
 import {
+  getExposeSessionResources,
   getExposeThoughts,
   getGeminiModel,
   getMaxOutputTokens,
@@ -46,6 +47,7 @@ const NEW_VARS = [
   'SESSION_REPLAY_INLINE_DATA_MAX_BYTES',
   'SESSION_REPLAY_MAX_BYTES',
   'SESSION_EVENTS_VERBOSE',
+  'MCP_EXPOSE_SESSION_RESOURCES',
 ] as const;
 
 const OLD_VARS = [
@@ -106,6 +108,18 @@ describe('config parsing', () => {
   it('rejects invalid THOUGHTS boolean', () => {
     process.env.THOUGHTS = 'yes';
     assert.throws(() => getExposeThoughts(), /THOUGHTS/);
+  });
+
+  it('enables sensitive session resources only for explicit true or 1', () => {
+    assert.strictEqual(getExposeSessionResources(), false);
+    process.env.MCP_EXPOSE_SESSION_RESOURCES = 'true';
+    assert.strictEqual(getExposeSessionResources(), true);
+    process.env.MCP_EXPOSE_SESSION_RESOURCES = '1';
+    assert.strictEqual(getExposeSessionResources(), true);
+    process.env.MCP_EXPOSE_SESSION_RESOURCES = 'false';
+    assert.strictEqual(getExposeSessionResources(), false);
+    process.env.MCP_EXPOSE_SESSION_RESOURCES = 'yes';
+    assert.strictEqual(getExposeSessionResources(), false);
   });
 
   it('rejects invalid CACHE boolean', () => {

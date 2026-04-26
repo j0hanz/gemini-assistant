@@ -57,6 +57,7 @@ import { ChatOutputSchema, type ContextUsed, type UsageMetadata } from '../schem
 
 import { buildGenerateContentConfig, DEFAULT_TEMPERATURE, getAI } from '../client.js';
 import {
+  getExposeSessionResources,
   getExposeThoughts,
   getGeminiModel,
   getSessionLimits,
@@ -500,7 +501,7 @@ function buildConfigFromSessionContract(
 ): GenerateContentConfig {
   return pickDefined({
     ...(cacheName ? { cachedContent: cacheName } : {}),
-    systemInstruction: cacheName ? undefined : contract.systemInstruction,
+    systemInstruction: contract.systemInstruction,
     tools: contract.tools,
     toolConfig: contract.toolConfig,
     thinkingConfig: contract.thinkingConfig,
@@ -595,6 +596,15 @@ function appendSessionResource(
   result.content.push(
     withRelatedTaskMeta(
       createResourceLink(sessionDetailUri(sessionId), `Chat Session ${sessionId}`),
+      taskId,
+    ),
+  );
+  if (!getExposeSessionResources()) {
+    return;
+  }
+  result.content.push(
+    withRelatedTaskMeta(
+      createResourceLink(sessionTranscriptUri(sessionId), `Chat Session ${sessionId} Transcript`),
       taskId,
     ),
   );
@@ -1159,8 +1169,13 @@ function extractSessionId(
 }
 
 function sessionResources(sessionId: string) {
+  const detail = sessionDetailUri(sessionId);
+  if (!getExposeSessionResources()) {
+    return { detail };
+  }
+
   return {
-    detail: sessionDetailUri(sessionId),
+    detail,
     events: sessionEventsUri(sessionId),
     transcript: sessionTranscriptUri(sessionId),
     turnParts: sessionTurnPartsUri(sessionId, 0).replace(

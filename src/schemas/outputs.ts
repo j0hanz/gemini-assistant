@@ -89,8 +89,8 @@ const AnalyzeDiagramOutputSchema = z.strictObject({
 
 const SessionResourceLinksSchema = z.strictObject({
   detail: z.string().describe('Session detail resource URI'),
-  events: z.string().describe('Session events resource URI'),
-  transcript: z.string().describe('Session transcript resource URI'),
+  events: z.string().optional().describe('Session events resource URI'),
+  transcript: z.string().optional().describe('Session transcript resource URI'),
   turnParts: z
     .string()
     .optional()

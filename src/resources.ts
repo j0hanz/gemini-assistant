@@ -17,6 +17,7 @@ import {
   renderWorkflowCatalogMarkdown,
 } from './catalog.js';
 import {
+  getExposeSessionResources,
   getExposeThoughts,
   getGeminiModel,
   getSessionLimits,
@@ -41,6 +42,7 @@ const MIME_TEXT = 'text/plain' as const;
 const JSON_WITH_MARKDOWN_ALT_DESC =
   'Served as application/json with a secondary text/markdown rendering.' as const;
 const SESSION_ID_REQUIRED_MSG = 'Session ID required' as const;
+const SESSION_RESOURCES_DISABLED_MSG = 'Session resources are disabled' as const;
 const sessionNotFoundMsg = (id: string): string => `Session '${id}' not found`;
 
 type SessionDetailUri = `session://${string}`;
@@ -223,6 +225,7 @@ function sessionDetailResources(sessionStore: SessionStore): ResourceListEntry[]
 }
 
 function sessionTranscriptResources(sessionStore: SessionStore): ResourceListEntry[] {
+  if (!getExposeSessionResources()) return [];
   const entries = sessionStore.listSessionEntries();
   return buildSessionResourceEntries(
     entries,
@@ -232,6 +235,7 @@ function sessionTranscriptResources(sessionStore: SessionStore): ResourceListEnt
 }
 
 function sessionEventResources(sessionStore: SessionStore): ResourceListEntry[] {
+  if (!getExposeSessionResources()) return [];
   const entries = sessionStore.listSessionEntries();
   return buildSessionResourceEntries(
     entries,
@@ -241,6 +245,7 @@ function sessionEventResources(sessionStore: SessionStore): ResourceListEntry[] 
 }
 
 function sessionTurnPartsResources(sessionStore: SessionStore): ResourceListEntry[] {
+  if (!getExposeSessionResources()) return [];
   return sessionStore.listSessionEntries().flatMap((session) => {
     const entries = sessionStore.listSessionContentEntries(session.id) ?? [];
     return entries.flatMap((entry, index) =>
@@ -419,6 +424,10 @@ export function getSessionTranscriptResourceData(
   sessionStore: SessionStore,
   sessionId: string | undefined,
 ): SessionTranscriptResourceData {
+  if (!getExposeSessionResources()) {
+    throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, SESSION_RESOURCES_DISABLED_MSG);
+  }
+
   if (!sessionId) {
     throw new ProtocolError(ProtocolErrorCode.InvalidParams, SESSION_ID_REQUIRED_MSG);
   }
@@ -434,6 +443,10 @@ export function getSessionEventsResourceData(
   sessionStore: SessionStore,
   sessionId: string | undefined,
 ): SessionEventsResourceData {
+  if (!getExposeSessionResources()) {
+    throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, SESSION_RESOURCES_DISABLED_MSG);
+  }
+
   if (!sessionId) {
     throw new ProtocolError(ProtocolErrorCode.InvalidParams, SESSION_ID_REQUIRED_MSG);
   }
@@ -450,6 +463,10 @@ export function getSessionTurnPartsResourceData(
   sessionId: string | undefined,
   turnIndexText: string | undefined,
 ): unknown[] {
+  if (!getExposeSessionResources()) {
+    throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, SESSION_RESOURCES_DISABLED_MSG);
+  }
+
   if (!sessionId) {
     throw new ProtocolError(ProtocolErrorCode.InvalidParams, SESSION_ID_REQUIRED_MSG);
   }

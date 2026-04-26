@@ -510,12 +510,18 @@ async function runDeepResearchTurn(
   contents: string,
   config: Parameters<typeof buildGenerateContentConfig>[0],
 ): Promise<{ result: CallToolResult; streamResult: StreamResult }> {
-  return executeToolStream(ctx, 'research', label, () =>
-    getAI().models.generateContentStream({
-      model: getGeminiModel(),
-      contents,
-      config: buildGenerateContentConfig(config, getWorkSignal(ctx)),
-    }),
+  const signal = getWorkSignal(ctx);
+  return executeToolStream(
+    ctx,
+    'research',
+    label,
+    () =>
+      getAI().models.generateContentStream({
+        model: getGeminiModel(),
+        contents,
+        config: buildGenerateContentConfig(config, signal),
+      }),
+    signal,
   );
 }
 

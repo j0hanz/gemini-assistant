@@ -28,7 +28,7 @@ function resolveTextPrompt(policy: TextPromptPolicy, cacheName?: string): Resolv
     promptText: useCacheText
       ? joinNonEmpty([policy.cacheText, policy.promptText])
       : policy.promptText,
-    systemInstruction: useCacheText ? undefined : policy.systemInstruction,
+    systemInstruction: policy.systemInstruction,
   };
 }
 
@@ -38,7 +38,7 @@ function resolvePartPrompt(policy: PartPromptPolicy, cacheName?: string): Resolv
   if (useCacheText && policy.cacheText !== undefined) {
     return {
       promptParts: [{ text: policy.cacheText }, ...policy.promptParts],
-      systemInstruction: undefined,
+      systemInstruction: policy.systemInstruction,
     };
   }
 

@@ -360,6 +360,44 @@ describe('consumeStreamWithProgress', () => {
     assert.strictEqual(result.text, 'first');
   });
 
+  it('stops consuming when an explicit work signal is aborted', async () => {
+    const requestController = new AbortController();
+    const workController = new AbortController();
+    const ctx = {
+      mcpReq: {
+        _meta: { progressToken: 'test-token' },
+        signal: requestController.signal,
+        log: Object.assign(async () => {}, {
+          debug: async () => {},
+          info: async () => {},
+          warning: async () => {},
+          error: async () => {},
+        }),
+        notify: async () => {},
+      },
+    } as unknown as ServerContext;
+
+    async function* abortingStream(): AsyncGenerator<GenerateContentResponse> {
+      yield makeChunk([{ text: 'first' }]);
+      workController.abort();
+      yield makeChunk([{ text: 'second' }], FinishReason.STOP);
+    }
+
+    const result = await consumeStreamWithProgress(
+      abortingStream(),
+      ctx,
+      'Task',
+      workController.signal,
+    );
+    const toolResult = validateStreamResult(result, 'research');
+
+    assert.strictEqual(result.text, 'first');
+    assert.strictEqual(result.aborted, true);
+    assert.strictEqual(requestController.signal.aborted, false);
+    assert.strictEqual(toolResult.isError, true);
+    assert.match(toolResult.content[0]?.text ?? '', /aborted/);
+  });
+
   it('returns empty toolsUsed for text-only stream', async () => {
     const { ctx } = makeMockContext();
     const stream = fakeStream([makeChunk([{ text: 'Hello' }], FinishReason.STOP)]);

@@ -140,6 +140,11 @@ export function getExposeThoughts(): boolean {
   return parseBooleanEnv('THOUGHTS', false);
 }
 
+export function getExposeSessionResources(): boolean {
+  const raw = process.env.MCP_EXPOSE_SESSION_RESOURCES;
+  return raw === 'true' || raw === '1';
+}
+
 export function getVerbosePayloadLogging(): boolean {
   return parseBooleanEnv('LOG_PAYLOADS', false);
 }

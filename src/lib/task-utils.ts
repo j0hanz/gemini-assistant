@@ -14,6 +14,7 @@ import { logger, maybeSummarizePayload } from './logger.js';
 import { hasTerminalProgress, reportCompletion, reportFailure } from './progress.js';
 import { extractTextContent, validateStructuredToolResult } from './response.js';
 import { executor } from './tool-executor.js';
+import { getWorkSignal } from './work-signal.js';
 
 const DEFAULT_TTL = 600_000;
 
@@ -47,10 +48,7 @@ type ExtendedTaskContext = TaskContext & {
 };
 type ExtendedServerContext = ServerContext & { task?: ExtendedTaskContext };
 
-export function getWorkSignal(ctx: ServerContext): AbortSignal {
-  const task = ctx.task as ExtendedTaskContext | undefined;
-  return task?.cancellationSignal ?? ctx.mcpReq.signal;
-}
+export { getWorkSignal };
 
 function isTerminalStatusError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;

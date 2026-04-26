@@ -153,7 +153,7 @@ function buildResponseConfig(
   const thinkingConfig = buildThinkingConfig(thinkingLevel, thinkingBudget);
   return {
     ...(cacheName ? { cachedContent: cacheName } : {}),
-    ...(cacheName ? {} : { systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION }),
+    systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION,
     ...(Object.keys(thinkingConfig).length > 0 ? { thinkingConfig } : {}),
     ...(isJson
       ? {

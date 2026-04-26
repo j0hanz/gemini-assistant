@@ -547,6 +547,23 @@ describe('consumeStreamWithProgress', () => {
     );
   });
 
+  it('preserves duplicate same-name function calls when Gemini omits ids', async () => {
+    const { ctx } = makeMockContext();
+    const stream = fakeStream([
+      makeChunk([
+        { functionCall: { name: 'customTool', args: { q: 'x' } }, thoughtSignature: 'sig-1' },
+        { functionCall: { name: 'customTool', args: { q: 'x' } }, thoughtSignature: 'sig-2' },
+      ]),
+    ]);
+
+    const result = await consumeStreamWithProgress(stream, ctx);
+
+    assert.deepStrictEqual(result.functionCalls, [
+      { name: 'customTool', args: { q: 'x' }, thoughtSignature: 'sig-1' },
+      { name: 'customTool', args: { q: 'x' }, thoughtSignature: 'sig-2' },
+    ]);
+  });
+
   it('omits nameless function calls from rollups and logs a warning', async () => {
     const logCalls: { level: string; message: string }[] = [];
     const { ctx } = makeMockContext();
@@ -719,6 +736,20 @@ describe('consumeStreamWithProgress', () => {
 
     assert.strictEqual(result.text, 'visible');
     assert.deepStrictEqual(result.toolEvents, []);
+  });
+
+  it('preserves thoughtSignature when coalescing visible plain-text parts', async () => {
+    const { ctx } = makeMockContext();
+    const result = await consumeStreamWithProgress(
+      fakeStream([
+        makeChunk([{ text: 'visible ', thoughtSignature: 'sig-visible' }, { text: 'text' }]),
+      ]),
+      ctx,
+    );
+
+    assert.strictEqual(result.parts.length, 1);
+    assert.strictEqual(result.parts[0]?.text, 'visible text');
+    assert.strictEqual(result.parts[0]?.thoughtSignature, 'sig-visible');
   });
 
   it('preserves model text and function call event ordering', async () => {
@@ -1229,17 +1260,16 @@ describe('consumeStreamWithProgress', () => {
     assert.strictEqual(result.parts[0]?.text, 'abc');
   });
 
-  it('does NOT coalesce plain-text parts when either carries a thoughtSignature', async () => {
+  it('coalesces plain-text parts while preserving a leading thoughtSignature', async () => {
     const { ctx } = makeMockContext();
     const stream = fakeStream([
       makeChunk([{ text: 'a', thoughtSignature: 'sig-1' }]),
       makeChunk([{ text: 'b' }], FinishReason.STOP),
     ]);
     const result = await consumeStreamWithProgress(stream, ctx);
-    assert.strictEqual(result.parts.length, 2);
-    assert.strictEqual(result.parts[0]?.text, 'a');
+    assert.strictEqual(result.parts.length, 1);
+    assert.strictEqual(result.parts[0]?.text, 'ab');
     assert.strictEqual(result.parts[0]?.thoughtSignature, 'sig-1');
-    assert.strictEqual(result.parts[1]?.text, 'b');
   });
 
   it('counts nameless functionCall parts and surfaces anomalies.namelessFunctionCalls', async () => {

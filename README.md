@@ -143,8 +143,10 @@ Research results separate Google Search grounding from URL Context:
 - `sourceDetails[]`, `urlContextSources[]`, `urlMetadata[]`, `findings[]`, `citations[]`, and
   optional `computations[]` carry source and tool-use provenance.
 - `sourceDetails[].origin` is `googleSearch`, `urlContext`, or `both`.
-- `warnings[]` may include dropped non-public grounding-support counts; private URLs are never
-  surfaced.
+- `findings[]` and `citations[]` are source attributions from retrieved metadata, not independent
+  proof that a claim is true.
+- `warnings[]` may include dropped non-public grounding-support counts and resolved retrieval-budget
+  reductions; private URLs are never surfaced.
 - Google Search Suggestions may be appended to `content[]` when Gemini provides
   `groundingMetadata.searchEntryPoint.renderedContent`.
 
@@ -153,6 +155,8 @@ Research results separate Google Search grounding from URL Context:
 Orchestration composes server-side tool capabilities per call. Public `chat.googleSearch` and
 `chat.urls` enable direct conversation grounding; `googleSearch`, `urls`, File Search, Code
 Execution, and chat function declarations are additive when supported by the selected job.
+When `serverSideToolInvocations` is `auto`, server-side tool traces are included whenever Gemini
+built-in tools are active, including built-in-only flows.
 
 | Profile       | Google Search | URL Context | Code Execution |
 | ------------- | :-----------: | :---------: | :------------: |
@@ -214,6 +218,8 @@ Workspace cache:
 
 - `CACHE`: enable automatic workspace context caching for `chat` calls when set to `true`, default `true`
 - `CACHE_TTL`: Gemini cache TTL for workspace context, default `3600s`
+- Cache reuse is skipped when a `chat` call sets `systemInstruction`, `temperature`, or `seed`; the
+  structured response may include warnings when cache eligibility is disabled.
 
 Debug:
 
@@ -227,13 +233,19 @@ Optional local transport:
 - `CORS_ORIGIN`: optional CORS origin for HTTP transports; use `*` or one `http(s)` origin
 - `STATELESS`: enable stateless HTTP transport behavior when set to `true`, default `false`
 - `ALLOWED_HOSTS`: optional comma-separated Host header allow-list for HTTP transports; entries are normalized for case, ports, and bracketed IPv6 forms
-- `MCP_HTTP_TOKEN`: bearer token required when `HOST` is not `127.0.0.1`, `::1`, or `localhost`; must be at least 32 characters
+- `MCP_HTTP_TOKEN`: bearer token required for HTTP transports by default, including loopback binds; must be at least 32 characters and may not be a trivially repeated pattern
+- `MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP`: set to `true` only to allow loopback HTTP without `MCP_HTTP_TOKEN`
 - `MCP_HTTP_RATE_LIMIT_RPS`: per-session/IP request refill rate for `/mcp`, default `10`
 - `MCP_HTTP_RATE_LIMIT_BURST`: per-session/IP request burst for `/mcp`, default `20`
+- `MCP_TRUST_PROXY`: trust `X-Forwarded-For` for rate-limit identity when set to `true`, default `false`
 - `MAX_TRANSPORT_SESSIONS`: maximum stateful HTTP transport sessions, default `100`
 - `TRANSPORT_SESSION_TTL_MS`: idle TTL for stateful HTTP transport sessions, default `1800000`
 - `SESSION_REPLAY_MAX_BYTES`: byte budget for rebuilt chat history, default `50000`
 - `SESSION_REPLAY_INLINE_DATA_MAX_BYTES`: max inline media bytes retained in replay history, default `16384`
+
+For HTTP transports behind a reverse proxy, pair `MCP_TRUST_PROXY=true` with a strict proxy
+deployment boundary. It only affects rate-limit identity derivation; host allow-listing is still
+validated separately to reduce DNS-rebinding exposure.
 
 Booleans accept only the literal strings `true` or `false` when set. Old variable names (`GEMINI_MODEL`, `ALLOWED_FILE_ROOTS`, `WORKSPACE_*`, `MCP_TRANSPORT`, `MCP_HTTP_HOST`, `MCP_HTTP_PORT`, `LOG_VERBOSE_PAYLOADS`, etc.) are not supported and have no effect.
 
@@ -264,9 +276,9 @@ HTTP transport:
 TRANSPORT=http npx tsx src/index.ts
 ```
 
-For non-loopback HTTP binds, set `MCP_HTTP_TOKEN` and send requests with
-`Authorization: Bearer <token>`. Requests over the configured burst return `429`
-with `Retry-After`.
+For HTTP transports, set `MCP_HTTP_TOKEN` and send requests with `Authorization: Bearer <token>`.
+Loopback binds are only exempt when `MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP=true`. Requests over
+the configured burst return `429` with `Retry-After`.
 
 Web-standard transport:
 

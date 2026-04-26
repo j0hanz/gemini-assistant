@@ -31,8 +31,10 @@ const NEW_VARS = [
   'STATELESS',
   'ALLOWED_HOSTS',
   'MCP_HTTP_TOKEN',
+  'MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP',
   'MCP_HTTP_RATE_LIMIT_RPS',
   'MCP_HTTP_RATE_LIMIT_BURST',
+  'MCP_TRUST_PROXY',
   'MAX_TRANSPORT_SESSIONS',
   'TRANSPORT_SESSION_TTL_MS',
   'ROOTS',
@@ -141,6 +143,7 @@ describe('config parsing', () => {
     process.env.TRANSPORT_SESSION_TTL_MS = '60000';
 
     assert.deepStrictEqual(getTransportConfig(), {
+      allowUnauthenticatedLoopbackHttp: false,
       corsOrigin: 'https://example.test',
       host: '0.0.0.0',
       isStateless: true,
@@ -149,11 +152,13 @@ describe('config parsing', () => {
       rateLimitBurst: 20,
       rateLimitRps: 10,
       sessionTtlMs: 60_000,
+      trustProxy: false,
     });
   });
 
   it('returns default transport config values when optional envs are unset', () => {
     assert.deepStrictEqual(getTransportConfig(), {
+      allowUnauthenticatedLoopbackHttp: false,
       corsOrigin: '',
       host: '127.0.0.1',
       isStateless: false,
@@ -162,22 +167,30 @@ describe('config parsing', () => {
       rateLimitBurst: 20,
       rateLimitRps: 10,
       sessionTtlMs: 30 * 60 * 1000,
+      trustProxy: false,
     });
   });
 
   it('returns validated HTTP auth and rate-limit config values', () => {
-    process.env.MCP_HTTP_TOKEN = 'x'.repeat(32);
+    process.env.MCP_HTTP_TOKEN = 'token-1234567890abcdef-token-123456';
     process.env.MCP_HTTP_RATE_LIMIT_RPS = '7';
     process.env.MCP_HTTP_RATE_LIMIT_BURST = '11';
+    process.env.MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP = 'true';
+    process.env.MCP_TRUST_PROXY = 'true';
 
-    assert.strictEqual(getTransportConfig().token, 'x'.repeat(32));
+    assert.strictEqual(getTransportConfig().token, 'token-1234567890abcdef-token-123456');
     assert.strictEqual(getTransportConfig().rateLimitRps, 7);
     assert.strictEqual(getTransportConfig().rateLimitBurst, 11);
+    assert.strictEqual(getTransportConfig().allowUnauthenticatedLoopbackHttp, true);
+    assert.strictEqual(getTransportConfig().trustProxy, true);
   });
 
   it('rejects invalid HTTP auth and rate-limit config values', () => {
     process.env.MCP_HTTP_TOKEN = 'short';
     assert.throws(() => getTransportConfig(), /MCP_HTTP_TOKEN/);
+
+    process.env.MCP_HTTP_TOKEN = 'ab'.repeat(16);
+    assert.throws(() => getTransportConfig(), /trivially repeated pattern/);
 
     delete process.env.MCP_HTTP_TOKEN;
     process.env.MCP_HTTP_RATE_LIMIT_RPS = '0';
@@ -224,6 +237,10 @@ describe('config parsing', () => {
     process.env.MAX_TRANSPORT_SESSIONS = '100';
     process.env.TRANSPORT_SESSION_TTL_MS = '999';
     assert.throws(() => getTransportConfig(), /TRANSPORT_SESSION_TTL_MS/);
+
+    process.env.TRANSPORT_SESSION_TTL_MS = '1000';
+    process.env.MCP_TRUST_PROXY = 'yes';
+    assert.throws(() => getTransportConfig(), /MCP_TRUST_PROXY/);
   });
 
   it('returns default session limits', () => {

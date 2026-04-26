@@ -125,7 +125,7 @@ describe('ResearchOutputSchema', () => {
         {
           claim: 'Supported claim',
           supportingSourceUrls: ['https://example.com'],
-          verificationStatus: 'supported',
+          verificationStatus: 'cited',
         },
       ],
       computations: [

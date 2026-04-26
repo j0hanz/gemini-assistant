@@ -140,6 +140,20 @@ describe('sessions', () => {
       );
     });
 
+    it('drops orphaned functionResponse parts when their paired functionCall was removed', () => {
+      const parts = [
+        { functionCall: { args: { stray: true } } },
+        { functionResponse: { name: 'lookup', response: { ok: true } } },
+        { functionCall: { id: 'call-1', name: 'fetch' } },
+        { functionResponse: { id: 'call-1', name: 'fetch', response: { ok: true } } },
+      ];
+
+      assert.deepStrictEqual(buildReplayHistoryParts(parts as never), [
+        { functionCall: { id: 'call-1', name: 'fetch' } },
+        { functionResponse: { id: 'call-1', name: 'fetch', response: { ok: true } } },
+      ]);
+    });
+
     it('builds transcript parts from user-visible text and media only', () => {
       const parts = [
         { text: 'visible' },

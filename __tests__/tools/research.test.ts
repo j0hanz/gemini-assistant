@@ -552,7 +552,7 @@ describe('research tool contracts', () => {
         {
           claim: 'Supported claim',
           supportingSourceUrls: ['https://example.com/report'],
-          verificationStatus: 'supported',
+          verificationStatus: 'cited',
         },
       ]);
       assert.strictEqual(
@@ -571,6 +571,11 @@ describe('research tool contracts', () => {
       ]);
       assert.ok(
         (structured.warnings as string[]).includes('dropped 1 non-public grounding supports'),
+      );
+      assert.ok(
+        (structured.warnings as string[]).some((warning) =>
+          warning.includes('resolved retrieval budget'),
+        ),
       );
       assert.ok(
         (structured.warnings as string[]).some((warning) =>

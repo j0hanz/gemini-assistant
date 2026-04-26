@@ -53,6 +53,7 @@ export interface SessionGenerationContract {
   tools?: ToolListUnion;
   toolConfig?: ToolConfig;
   functionCallingMode?: unknown;
+  functionCallingInstructionHash?: string;
   thinkingConfig?: GenerateContentConfig['thinkingConfig'];
   responseMimeType?: GenerateContentConfig['responseMimeType'];
   responseJsonSchema?: unknown;
@@ -400,8 +401,15 @@ export function capRawParts(parts: Part[]): Part[] {
 
 export function buildReplayHistoryParts(parts: Part[]): Part[] {
   const inlineDataMaxBytes = getSessionLimits().replayInlineDataMaxBytes;
-  return parts.filter((part) => {
-    if (part.functionCall && !part.functionCall.name) return false;
+  const hasFunctionCallParts = parts.some((part) => Boolean(part.functionCall));
+  const retainedFunctionCallIds = new Set<string>();
+  const retainedFunctionCallNames = new Set<string>();
+  const retainedParts: Part[] = [];
+
+  for (const part of parts) {
+    if (part.functionCall && !part.functionCall.name) {
+      continue;
+    }
     if (part.inlineData?.data && part.inlineData.data.length > inlineDataMaxBytes) {
       // Replay history must not retain large raw media blobs; callers should
       // use fileData for durable replayable media references instead.
@@ -409,9 +417,38 @@ export function buildReplayHistoryParts(parts: Part[]): Part[] {
         inlineDataBytes: part.inlineData.data.length,
         inlineDataMaxBytes,
       });
-      return false;
+      continue;
     }
-    return true;
+
+    if (part.functionCall?.id) {
+      retainedFunctionCallIds.add(part.functionCall.id);
+    }
+    if (part.functionCall?.name) {
+      retainedFunctionCallNames.add(part.functionCall.name);
+    }
+
+    retainedParts.push(part);
+  }
+
+  return retainedParts.filter((part) => {
+    const functionResponse = part.functionResponse;
+    if (!functionResponse) {
+      return true;
+    }
+
+    if (!hasFunctionCallParts) {
+      return Boolean(functionResponse.id ?? functionResponse.name);
+    }
+
+    if (functionResponse.id) {
+      return retainedFunctionCallIds.has(functionResponse.id);
+    }
+
+    if (functionResponse.name) {
+      return retainedFunctionCallNames.has(functionResponse.name);
+    }
+
+    return false;
   });
 }
 

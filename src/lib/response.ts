@@ -231,12 +231,15 @@ export function deriveFindingsFromCitations(citations: readonly GroundingCitatio
     findings.set(citation.text, {
       claim: citation.text,
       supportingSourceUrls: [...citation.sourceUrls],
-      verificationStatus: 'supported',
+      verificationStatus: 'cited',
     });
   }
 
   return [...findings.values()];
 }
+
+export const GROUNDING_MEDIUM_CONFIDENCE_SUPPORTS = 1;
+export const GROUNDING_HIGH_CONFIDENCE_SUPPORTS = 3;
 
 export function deriveDiagramSyntaxValidation(toolEvents: readonly ToolEvent[]): {
   syntaxValid?: boolean;
@@ -286,9 +289,9 @@ export function computeGroundingSignals(
     (source) => source.origin === 'urlContext' || source.origin === 'both',
   );
   const confidence =
-    citations.length >= 3
+    citations.length >= GROUNDING_HIGH_CONFIDENCE_SUPPORTS
       ? 'high'
-      : citations.length >= 1
+      : citations.length >= GROUNDING_MEDIUM_CONFIDENCE_SUPPORTS
         ? 'medium'
         : retrievalPerformed
           ? 'low'

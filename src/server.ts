@@ -21,9 +21,33 @@ import { registerResearchTool } from './tools/research.js';
 import { registerReviewTool } from './tools/review.js';
 import type { ServerInstance } from './transport.js';
 
-const { version } = JSON.parse(
-  readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf-8'),
-) as { version: string };
+function resolvePackageVersion(): string {
+  const candidatePaths = [
+    join(import.meta.dirname, '..', 'package.json'),
+    join(import.meta.dirname, '..', '..', 'package.json'),
+    join(process.cwd(), 'package.json'),
+  ];
+
+  for (const candidatePath of candidatePaths) {
+    try {
+      const parsed = JSON.parse(readFileSync(candidatePath, 'utf-8')) as { version?: unknown };
+      if (typeof parsed.version === 'string' && parsed.version.length > 0) {
+        return parsed.version;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  const envVersion = process.env.npm_package_version?.trim();
+  if (envVersion) {
+    return envVersion;
+  }
+
+  return '0.0.0';
+}
+
+const version = resolvePackageVersion();
 
 const log = logger.child('server');
 interface ServerServices {

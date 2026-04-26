@@ -36,6 +36,44 @@ interface FunctionCallingInstructionOptions {
   serverSideToolInvocations?: boolean;
 }
 
+function escapeInstructionBlock(text: string): string {
+  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
+
+export function buildFunctionCallingInstructionText(
+  opts: FunctionCallingInstructionOptions,
+): string | undefined {
+  const declaredNames = opts.declaredNames?.filter((name) => name.trim().length > 0) ?? [];
+  const hasDeclaredFunctions = declaredNames.length > 0;
+  const hasBuiltInTraces = opts.serverSideToolInvocations === true;
+
+  if (opts.mode === undefined || opts.mode === 'NONE') {
+    return hasBuiltInTraces
+      ? 'Gemini may emit server-side built-in tool invocation traces for supported tools. Treat those traces as runtime events, not user-provided evidence.'
+      : undefined;
+  }
+
+  if (!hasDeclaredFunctions) {
+    return hasBuiltInTraces
+      ? 'Gemini may emit server-side built-in tool invocation traces for supported tools. No declared client functions are available this turn.'
+      : undefined;
+  }
+
+  const names = declaredNames.join(', ');
+  const modeInstruction =
+    opts.mode === 'ANY'
+      ? `You must call one or more of these declared functions when needed to complete the request: ${names}. Parallel calls are allowed.`
+      : opts.mode === 'VALIDATED'
+        ? `Available declared functions: ${names}. Function calls are schema-constrained by Gemini; the MCP client must still validate arguments before executing side effects.`
+        : `Available declared functions: ${names}. Call them only when the user's request requires it.`;
+
+  const executionInstruction = hasBuiltInTraces
+    ? 'Gemini may also emit server-side built-in tool invocation traces. Declared custom functions are still executed by the MCP client/application. Do not fabricate function or built-in tool results.'
+    : 'After issuing a declared function call, stop and wait for the client to return the function response. Do not invent results.';
+
+  return joinNonEmpty([modeInstruction, executionInstruction]);
+}
+
 function resolveTextPrompt(policy: TextPromptPolicy, cacheName?: string): ResolvedTextPrompt {
   const useCacheText = Boolean(cacheName && policy.cacheText);
   return {
@@ -70,26 +108,12 @@ export function appendFunctionCallingInstruction(
   systemInstruction: string | undefined,
   opts: FunctionCallingInstructionOptions,
 ): string | undefined {
-  const declaredNames = opts.declaredNames?.filter((name) => name.trim().length > 0) ?? [];
-  if (opts.mode === undefined || opts.mode === 'NONE' || declaredNames.length === 0) {
+  const instruction = buildFunctionCallingInstructionText(opts);
+  if (!instruction) {
     return systemInstruction;
   }
 
-  const names = declaredNames.join(', ');
-  const modeInstruction =
-    opts.mode === 'ANY'
-      ? `You must call one or more of these declared functions when needed to complete the request: ${names}. Parallel calls are allowed.`
-      : opts.mode === 'VALIDATED'
-        ? `Available functions: ${names}. Function calls are schema-constrained by Gemini; the MCP client must still validate arguments before executing side effects.`
-        : `Available functions: ${names}. Call only when the user's request requires it.`;
-
-  return joinNonEmpty([
-    systemInstruction,
-    modeInstruction,
-    opts.serverSideToolInvocations === true
-      ? 'Gemini may return server-side built-in tool invocation traces. Declared custom functions are still executed by the MCP client/application. Do not fabricate function results.'
-      : 'After issuing a call, stop and wait for the client to return the function response. Do not invent results.',
-  ]);
+  return joinNonEmpty([systemInstruction, instruction]);
 }
 
 function buildOutputInstruction(title: string, sections: readonly string[]): string {
@@ -115,7 +139,7 @@ export function buildGroundedAnswerPrompt(
       promptText,
       systemInstruction: joinNonEmpty([
         retrievalUnavailable ? 'No retrieval tools are available this turn.' : undefined,
-        "Answer using sources retrieved this turn. If no source supports a claim, mark it '(unverified)'. If retrieval returned nothing, reply with exactly: 'No sources retrieved.' Do not invent URLs.",
+        "Answer using sources retrieved this turn. If no source supports a claim, mark it '(unverified)'. If retrieval returned nothing, say that no sources were retrieved. Do not invent URLs.",
       ]),
     },
     cacheName,
@@ -228,9 +252,8 @@ export function buildDiffReviewPrompt(
   }
 
   const hasDocs = args.docContexts && args.docContexts.length > 0;
-  // The trailing documentationDrift JSON block is validated against Zod at runtime.
   const docInstruction = hasDocs
-    ? ' Cross-reference the diff against the documentation context. If the diff makes the docs factually incorrect or misleading, emit a `documentationDrift` array inside a JSON block at the end of your response (```json\\n{ "documentationDrift": [...] }\\n```). CRITICAL: If docs are still accurate, omit the `documentationDrift` JSON completely. Do not emit an empty array.'
+    ? ' Cross-reference the diff against the documentation context. If the diff makes the docs factually incorrect or misleading, emit a trailing fenced JSON block exactly in the form ```json\\n{ "documentationDrift": [...] }\\n```. If docs are still accurate, omit the JSON block entirely. Do not emit an empty array or unfenced JSON.'
     : '';
 
   const docContent = hasDocs
@@ -323,11 +346,13 @@ export function buildAgenticResearchPrompt(args: {
   urls?: readonly string[] | undefined;
   cacheName?: string | undefined;
 }): ResolvedTextPrompt {
+  const sanitizedTopic = escapeInstructionBlock(args.topic);
+
   return resolveTextPrompt(
     {
       promptText: joinNonEmpty([
         args.urls && args.urls.length > 0 ? `Primary URLs:\n${args.urls.join('\n')}` : undefined,
-        `Topic: ${args.topic}`,
+        `<research_topic>${sanitizedTopic}</research_topic>`,
         'Research the topic and produce a grounded Markdown report.',
       ]),
       systemInstruction: joinNonEmpty([

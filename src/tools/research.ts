@@ -160,10 +160,12 @@ function emitDeepResearchToolBudgetLogs(
   ctx: ServerContext,
   streamResult: StreamResult,
   searchDepth: number,
+  resolvedRetrievalBudget: number,
   retrievalTurnsRan?: number,
 ): string[] {
   const toolsUsedOccurrences = countOccurrences(streamResult.toolsUsedOccurrences);
   const payload = {
+    resolvedRetrievalBudget,
     searchDepth,
     toolsUsed: streamResult.toolsUsed,
     toolsUsedOccurrences,
@@ -174,8 +176,12 @@ function emitDeepResearchToolBudgetLogs(
 
   const warnings: string[] = [];
 
-  if (searchDepth >= 3 && retrievalTurnsRan !== undefined && retrievalTurnsRan < searchDepth - 1) {
-    const warning = `deep research ran ${String(retrievalTurnsRan)} retrieval turn(s), fewer than requested budget ${String(searchDepth - 1)}`;
+  if (
+    searchDepth >= 3 &&
+    retrievalTurnsRan !== undefined &&
+    retrievalTurnsRan < resolvedRetrievalBudget
+  ) {
+    const warning = `deep research ran ${String(retrievalTurnsRan)} retrieval turn(s), fewer than resolved budget ${String(resolvedRetrievalBudget)}`;
     log.warn('deep research retrieval turn budget underused', { ...payload, retrievalTurnsRan });
     void mcpLog(ctx, 'warning', 'deep research retrieval turn budget underused');
     warnings.push(warning);
@@ -257,6 +263,7 @@ function buildAgenticSearchResult(
   textContent: string,
   ctx: ServerContext,
   searchDepth: number,
+  resolvedRetrievalBudget: number,
   extraWarnings: readonly string[] = [],
   retrievalTurnsRan?: number,
 ) {
@@ -264,6 +271,7 @@ function buildAgenticSearchResult(
     ctx,
     streamResult,
     searchDepth,
+    resolvedRetrievalBudget,
     retrievalTurnsRan,
   );
 
@@ -592,11 +600,17 @@ async function runDeepResearchPlan(
     args.topic,
     args.searchDepth,
   );
+  const requestedRetrievalBudget = Math.max(1, Math.min(args.searchDepth, subQueries.length));
   const maxRetrievalTurns = Math.min(
     subQueries.length,
     args.searchDepth,
     MAX_DEEP_RESEARCH_TURNS - (args.searchDepth >= 4 ? 3 : 2),
   );
+  if (maxRetrievalTurns < requestedRetrievalBudget) {
+    warnings.push(
+      `deep research resolved retrieval budget to ${String(maxRetrievalTurns)} turn(s) from requested ${String(requestedRetrievalBudget)}`,
+    );
+  }
   if (maxRetrievalTurns < subQueries.length) {
     warnings.push('deep research turn budget exceeded; returning partial retrieval coverage');
   }
@@ -722,6 +736,7 @@ async function runDeepResearchPlan(
     synthesisTurn.streamResult.text,
     ctx,
     args.searchDepth,
+    maxRetrievalTurns,
     warnings,
     maxRetrievalTurns,
   );
@@ -932,7 +947,7 @@ async function agenticSearchWork(
         ),
       }),
     responseBuilder: (streamResult, textContent) =>
-      buildAgenticSearchResult(streamResult, textContent, ctx, searchDepth),
+      buildAgenticSearchResult(streamResult, textContent, ctx, searchDepth, searchDepth),
   });
 }
 

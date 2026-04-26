@@ -161,7 +161,7 @@ describe('public contract schemas', () => {
           {
             claim: 'x',
             supportingSourceUrls: ['https://example.com'],
-            verificationStatus: 'supported',
+            verificationStatus: 'cited',
           },
         ],
         sourceDetails: [

@@ -11,6 +11,8 @@ import {
 } from '../src/lib/validation.js';
 import { startWebStandardTransport } from '../src/transport.js';
 
+const VALID_TOKEN = 'token-1234567890abcdef-token-123456';
+
 function createNoopServerInstance() {
   const server = new McpServer({ name: 'transport-auth-test', version: '0.0.1' });
   server.registerTool(
@@ -99,7 +101,7 @@ describe('transport HTTP protection', () => {
   it('returns 401 for missing bearer token on protected binds', async () => {
     process.env.HOST = '0.0.0.0';
     process.env.ALLOWED_HOSTS = '0.0.0.0';
-    process.env.MCP_HTTP_TOKEN = 'x'.repeat(32);
+    process.env.MCP_HTTP_TOKEN = VALID_TOKEN;
     const transport = await startWebStandardTransport(() => createNoopServerInstance());
     try {
       const response = await transport.handler(request());
@@ -114,7 +116,7 @@ describe('transport HTTP protection', () => {
 
   it('throws for broad binds without ALLOWED_HOSTS even when MCP_HTTP_TOKEN is set', () => {
     process.env.HOST = '0.0.0.0';
-    process.env.MCP_HTTP_TOKEN = 'x'.repeat(32);
+    process.env.MCP_HTTP_TOKEN = VALID_TOKEN;
     try {
       assert.throws(
         () => startWebStandardTransport(() => createNoopServerInstance()),
@@ -129,12 +131,12 @@ describe('transport HTTP protection', () => {
   it('allows broad binds with explicit ALLOWED_HOSTS', async () => {
     process.env.HOST = '0.0.0.0';
     process.env.ALLOWED_HOSTS = 'example.test';
-    process.env.MCP_HTTP_TOKEN = 'x'.repeat(32);
+    process.env.MCP_HTTP_TOKEN = VALID_TOKEN;
     const transport = await startWebStandardTransport(() => createNoopServerInstance());
     try {
       const response = await transport.handler(
         request({
-          authorization: `Bearer ${'x'.repeat(32)}`,
+          authorization: `Bearer ${VALID_TOKEN}`,
           host: 'example.test:3000',
           'x-request-url': 'http://example.test:3000/not-found',
         }),
@@ -149,7 +151,7 @@ describe('transport HTTP protection', () => {
   });
 
   it('returns 429 with Retry-After when the burst is exhausted', async () => {
-    const token = 'x'.repeat(32);
+    const token = VALID_TOKEN;
     process.env.HOST = '0.0.0.0';
     process.env.ALLOWED_HOSTS = '0.0.0.0';
     process.env.MCP_HTTP_TOKEN = token;
@@ -172,7 +174,7 @@ describe('transport HTTP protection', () => {
   });
 
   it('does not trust x-forwarded-for to bypass web-standard rate limiting', async () => {
-    const token = 'x'.repeat(32);
+    const token = VALID_TOKEN;
     process.env.HOST = '0.0.0.0';
     process.env.ALLOWED_HOSTS = '0.0.0.0';
     process.env.MCP_HTTP_TOKEN = token;
@@ -198,8 +200,21 @@ describe('transport HTTP protection', () => {
     }
   });
 
-  it('allows loopback binds without MCP_HTTP_TOKEN', async () => {
+  it('requires an explicit opt-out for unauthenticated loopback binds', async () => {
     process.env.HOST = '127.0.0.1';
+    try {
+      assert.throws(
+        () => startWebStandardTransport(() => createNoopServerInstance()),
+        /MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP/,
+      );
+    } finally {
+      delete process.env.HOST;
+    }
+  });
+
+  it('allows loopback binds with the explicit unauthenticated opt-out', async () => {
+    process.env.HOST = '127.0.0.1';
+    process.env.MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP = 'true';
     const transport = await startWebStandardTransport(() => createNoopServerInstance());
     try {
       const response = await transport.handler(
@@ -209,12 +224,43 @@ describe('transport HTTP protection', () => {
     } finally {
       await transport.close();
       delete process.env.HOST;
+      delete process.env.MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP;
+    }
+  });
+
+  it('trusts x-forwarded-for only when MCP_TRUST_PROXY=true', async () => {
+    const token = VALID_TOKEN;
+    process.env.HOST = '0.0.0.0';
+    process.env.ALLOWED_HOSTS = '0.0.0.0';
+    process.env.MCP_HTTP_TOKEN = token;
+    process.env.MCP_TRUST_PROXY = 'true';
+    process.env.MCP_HTTP_RATE_LIMIT_RPS = '1';
+    process.env.MCP_HTTP_RATE_LIMIT_BURST = '1';
+    const transport = await startWebStandardTransport(() => createNoopServerInstance());
+    try {
+      await transport.handler(
+        request({ authorization: `Bearer ${token}`, 'x-forwarded-for': '192.0.2.1' }),
+      );
+      const response = await transport.handler(
+        request({ authorization: `Bearer ${token}`, 'x-forwarded-for': '192.0.2.2' }),
+      );
+      assert.notStrictEqual(response.status, 429);
+      assert.strictEqual(response.headers.get('retry-after'), null);
+    } finally {
+      await transport.close();
+      delete process.env.HOST;
+      delete process.env.ALLOWED_HOSTS;
+      delete process.env.MCP_HTTP_TOKEN;
+      delete process.env.MCP_TRUST_PROXY;
+      delete process.env.MCP_HTTP_RATE_LIMIT_RPS;
+      delete process.env.MCP_HTTP_RATE_LIMIT_BURST;
     }
   });
 
   it('normalizes explicit ALLOWED_HOSTS entries with ports', async () => {
     process.env.HOST = '127.0.0.1';
     process.env.ALLOWED_HOSTS = 'localhost:3000';
+    process.env.MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP = 'true';
     const transport = await startWebStandardTransport(() => createNoopServerInstance());
     try {
       const accepted = await transport.handler(request({ host: 'localhost:3000' }));
@@ -226,6 +272,7 @@ describe('transport HTTP protection', () => {
       await transport.close();
       delete process.env.HOST;
       delete process.env.ALLOWED_HOSTS;
+      delete process.env.MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP;
     }
   });
 });

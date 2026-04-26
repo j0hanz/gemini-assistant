@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
@@ -264,5 +266,16 @@ describe('uploadFile', () => {
     } finally {
       client.files.upload = original;
     }
+  });
+
+  it('rejects binary content masquerading as a text upload', async () => {
+    const controller = new AbortController();
+    const tempDir = mkdtempSync(join(tmpdir(), 'gemini-file-test-'));
+    const filePath = join(tempDir, 'binary.txt');
+    writeFileSync(filePath, Buffer.from([0x00, 0xff, 0x10, 0x20]));
+
+    await assert.rejects(() => uploadFile(filePath, controller.signal, async () => [tempDir]), {
+      message: /binary data/,
+    });
   });
 });

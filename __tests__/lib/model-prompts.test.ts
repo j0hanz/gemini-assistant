@@ -38,8 +38,8 @@ describe('model-prompts', () => {
       }),
       [
         'Base',
-        "Available functions: lookup, search. Call only when the user's request requires it.",
-        'After issuing a call, stop and wait for the client to return the function response. Do not invent results.',
+        "Available declared functions: lookup, search. Call them only when the user's request requires it.",
+        'After issuing a declared function call, stop and wait for the client to return the function response. Do not invent results.',
       ].join('\n\n'),
     );
 
@@ -51,7 +51,7 @@ describe('model-prompts', () => {
       [
         'Base',
         'You must call one or more of these declared functions when needed to complete the request: lookup. Parallel calls are allowed.',
-        'After issuing a call, stop and wait for the client to return the function response. Do not invent results.',
+        'After issuing a declared function call, stop and wait for the client to return the function response. Do not invent results.',
       ].join('\n\n'),
     );
 
@@ -63,8 +63,8 @@ describe('model-prompts', () => {
       }),
       [
         'Base',
-        'Available functions: lookup. Function calls are schema-constrained by Gemini; the MCP client must still validate arguments before executing side effects.',
-        'Gemini may return server-side built-in tool invocation traces. Declared custom functions are still executed by the MCP client/application. Do not fabricate function results.',
+        'Available declared functions: lookup. Function calls are schema-constrained by Gemini; the MCP client must still validate arguments before executing side effects.',
+        'Gemini may also emit server-side built-in tool invocation traces. Declared custom functions are still executed by the MCP client/application. Do not fabricate function or built-in tool results.',
       ].join('\n\n'),
     );
   });
@@ -78,8 +78,8 @@ describe('model-prompts', () => {
       }),
       [
         'Base',
-        "Available functions: lookup. Call only when the user's request requires it.",
-        'Gemini may return server-side built-in tool invocation traces. Declared custom functions are still executed by the MCP client/application. Do not fabricate function results.',
+        "Available declared functions: lookup. Call them only when the user's request requires it.",
+        'Gemini may also emit server-side built-in tool invocation traces. Declared custom functions are still executed by the MCP client/application. Do not fabricate function or built-in tool results.',
       ].join('\n\n'),
     );
   });
@@ -257,7 +257,7 @@ describe('model-prompts', () => {
     assert.ok(prompt.systemInstruction?.includes('Research with Google Search'));
     assert.ok(prompt.systemInstruction?.includes('Code Execution'));
     assert.ok(prompt.systemInstruction?.includes('multiple searches'));
-    assert.ok(prompt.promptText.includes('Topic: MCP adoption'));
+    assert.ok(prompt.promptText.includes('<research_topic>MCP adoption</research_topic>'));
   });
 
   it('builds agentic-research prompts with primary URLs and output shape', () => {

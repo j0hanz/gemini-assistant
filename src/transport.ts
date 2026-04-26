@@ -107,6 +107,7 @@ interface ManagedRequestOptions<TTransport, TResult> {
 }
 
 interface ResolvedTransportConfig {
+  allowUnauthenticatedLoopbackHttp: boolean;
   allowedHosts: ReturnType<typeof resolveAllowedHosts>;
   corsOrigin: string;
   host: string;
@@ -117,10 +118,12 @@ interface ResolvedTransportConfig {
   rateLimitRps: number;
   sessionTtlMs: number;
   token?: string;
+  trustProxy: boolean;
 }
 
 function resolveTransportRuntimeConfig(): ResolvedTransportConfig {
   const {
+    allowUnauthenticatedLoopbackHttp,
     port,
     host,
     corsOrigin,
@@ -130,8 +133,10 @@ function resolveTransportRuntimeConfig(): ResolvedTransportConfig {
     rateLimitRps,
     sessionTtlMs,
     token,
+    trustProxy,
   } = getTransportConfig();
   return {
+    allowUnauthenticatedLoopbackHttp,
     allowedHosts: resolveAllowedHosts(host),
     corsOrigin,
     host,
@@ -141,6 +146,7 @@ function resolveTransportRuntimeConfig(): ResolvedTransportConfig {
     rateLimitBurst,
     rateLimitRps,
     sessionTtlMs,
+    trustProxy,
     ...(token ? { token } : {}),
   };
 }
@@ -179,14 +185,110 @@ function isLoopbackBindHost(host: string): boolean {
   return host === '127.0.0.1' || host === '::1' || host === 'localhost';
 }
 
-function assertHttpBindIsProtected(host: string, token: string | undefined): void {
-  if (!isLoopbackBindHost(host) && !token) {
+function assertHttpBindIsProtected(
+  host: string,
+  token: string | undefined,
+  allowUnauthenticatedLoopbackHttp: boolean,
+): void {
+  if (!token && (!isLoopbackBindHost(host) || !allowUnauthenticatedLoopbackHttp)) {
     throw new AppError(
       'transport',
-      `HTTP transport bound to ${host} requires MCP_HTTP_TOKEN.`,
+      `HTTP transport bound to ${host} requires MCP_HTTP_TOKEN unless MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP=true is set for loopback use.`,
       'server',
     );
   }
+}
+
+function parseForwardedForHeader(value: string | null | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const first = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .find((entry) => entry.length > 0);
+
+  return first ?? undefined;
+}
+
+function extractBearerIdentity(authorization: string | undefined | null): string | undefined {
+  const prefix = 'Bearer ';
+  if (!authorization?.startsWith(prefix)) {
+    return undefined;
+  }
+
+  const token = authorization.slice(prefix.length).trim();
+  if (!token) {
+    return undefined;
+  }
+
+  return `auth:${createHash('sha256').update(token).digest('hex')}`;
+}
+
+function nodeRateLimitKey(
+  req: IncomingMessage,
+  sessionId: string | undefined,
+  trustProxy: boolean,
+): string | undefined {
+  if (sessionId) {
+    return `session:${sessionId}`;
+  }
+
+  const forwardedIdentity = trustProxy
+    ? parseForwardedForHeader(
+        Array.isArray(req.headers['x-forwarded-for'])
+          ? req.headers['x-forwarded-for'][0]
+          : req.headers['x-forwarded-for'],
+      )
+    : undefined;
+  if (forwardedIdentity) {
+    return `ip:${forwardedIdentity}`;
+  }
+
+  const authorizationIdentity = extractBearerIdentity(req.headers.authorization);
+  if (authorizationIdentity) {
+    return authorizationIdentity;
+  }
+
+  if (req.socket.remoteAddress) {
+    return `ip:${req.socket.remoteAddress}`;
+  }
+
+  return undefined;
+}
+
+function webRateLimitKey(
+  req: Request,
+  sessionId: string | undefined,
+  trustProxy: boolean,
+): string | undefined {
+  if (sessionId) {
+    return `session:${sessionId}`;
+  }
+
+  const forwardedIdentity = trustProxy
+    ? parseForwardedForHeader(req.headers.get('x-forwarded-for'))
+    : undefined;
+  if (forwardedIdentity) {
+    return `ip:${forwardedIdentity}`;
+  }
+
+  const authorizationIdentity = extractBearerIdentity(req.headers.get('authorization'));
+  if (authorizationIdentity) {
+    return authorizationIdentity;
+  }
+
+  try {
+    const hostname = new URL(req.url).hostname;
+    if (isLoopbackBindHost(hostname)) {
+      return `ip:${hostname}`;
+    }
+  } catch {
+    // Ignore malformed URLs and fall through to the missing-identity path.
+  }
+
+  return undefined;
 }
 
 function assertHostValidationIsConfigured(host: string, allowedHosts: string[] | undefined): void {
@@ -214,14 +316,6 @@ function isAuthorized(
   );
 }
 
-function nodeRateLimitKey(req: IncomingMessage, sessionId: string | undefined): string {
-  return sessionId ?? req.socket.remoteAddress ?? 'unknown';
-}
-
-function webRateLimitKey(req: Request, sessionId: string | undefined): string {
-  return sessionId ?? 'anonymous';
-}
-
 function takeRateLimit(rateLimiter: RateLimiter, key: string): boolean {
   return rateLimiter.take(key);
 }
@@ -242,6 +336,13 @@ function nodeRateLimitedResponse(res: ServerResponse): void {
   res.end(JSON.stringify(rpcErrorPayload('Rate limited')));
 }
 
+function nodeMissingIdentityResponse(res: ServerResponse): void {
+  if (res.headersSent) return;
+  res.statusCode = 400;
+  res.setHeader('Content-Type', APPLICATION_JSON);
+  res.end(JSON.stringify(rpcErrorPayload('Unable to derive caller identity for rate limiting')));
+}
+
 function webUnauthorizedResponse(corsOrigin: string): Response {
   return withCors(
     new Response(JSON.stringify(rpcErrorPayload('Unauthorized')), {
@@ -258,6 +359,19 @@ function webRateLimitedResponse(corsOrigin: string): Response {
       status: 429,
       headers: { 'content-type': APPLICATION_JSON, 'retry-after': '1' },
     }),
+    corsOrigin,
+  );
+}
+
+function webMissingIdentityResponse(corsOrigin: string): Response {
+  return withCors(
+    new Response(
+      JSON.stringify(rpcErrorPayload('Unable to derive caller identity for rate limiting')),
+      {
+        status: 400,
+        headers: { 'content-type': APPLICATION_JSON },
+      },
+    ),
     corsOrigin,
   );
 }
@@ -783,10 +897,12 @@ export async function startHttpTransport(
     rateLimitBurst,
     rateLimitRps,
     sessionTtlMs,
+    allowUnauthenticatedLoopbackHttp,
     allowedHosts,
     token,
+    trustProxy,
   } = resolveTransportRuntimeConfig();
-  assertHttpBindIsProtected(host, token);
+  assertHttpBindIsProtected(host, token, allowUnauthenticatedLoopbackHttp);
   assertHostValidationIsConfigured(host, allowedHosts);
   const rateLimiter = createRateLimiter({ rps: rateLimitRps, burst: rateLimitBurst });
 
@@ -840,7 +956,12 @@ export async function startHttpTransport(
       nodeUnauthorizedResponse(res);
       return;
     }
-    if (!takeRateLimit(rateLimiter, nodeRateLimitKey(req, sessionId))) {
+    const rateLimitKey = nodeRateLimitKey(req, sessionId, trustProxy);
+    if (!rateLimitKey) {
+      nodeMissingIdentityResponse(res);
+      return;
+    }
+    if (!takeRateLimit(rateLimiter, rateLimitKey)) {
       nodeRateLimitedResponse(res);
       return;
     }
@@ -947,10 +1068,12 @@ export function startWebStandardTransport(
     rateLimitBurst,
     rateLimitRps,
     sessionTtlMs,
+    allowUnauthenticatedLoopbackHttp,
     allowedHosts,
     token,
+    trustProxy,
   } = resolveTransportRuntimeConfig();
-  assertHttpBindIsProtected(host, token);
+  assertHttpBindIsProtected(host, token, allowUnauthenticatedLoopbackHttp);
   assertHostValidationIsConfigured(host, allowedHosts);
   const rateLimiter = createRateLimiter({ rps: rateLimitRps, burst: rateLimitBurst });
 
@@ -996,7 +1119,11 @@ export function startWebStandardTransport(
     if (!isAuthorized(req.headers.get('authorization'), token)) {
       return webUnauthorizedResponse(corsOrigin);
     }
-    if (!takeRateLimit(rateLimiter, webRateLimitKey(req, sessionId))) {
+    const rateLimitKey = webRateLimitKey(req, sessionId, trustProxy);
+    if (!rateLimitKey) {
+      return webMissingIdentityResponse(corsOrigin);
+    }
+    if (!takeRateLimit(rateLimiter, rateLimitKey)) {
       return webRateLimitedResponse(corsOrigin);
     }
     if (rejectDeleteWithoutSession(req.method, sessionId, isStateless)) {

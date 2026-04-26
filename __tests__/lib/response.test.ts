@@ -438,14 +438,30 @@ describe('grounding signal helpers', () => {
       {
         claim: 'Claim',
         supportingSourceUrls: ['https://example.com/a'],
-        verificationStatus: 'supported',
+        verificationStatus: 'cited',
       },
       {
         claim: 'Other',
         supportingSourceUrls: ['https://example.com/b'],
-        verificationStatus: 'supported',
+        verificationStatus: 'cited',
       },
     ]);
+  });
+
+  it('does not let prose-only tool-usage audits affect grounding confidence', () => {
+    const warnings = auditClaimedToolUsage('I searched and found a source.', []);
+    assert.deepStrictEqual(warnings, [
+      'prose claims googleSearch but it was not invoked this turn',
+    ]);
+    assert.strictEqual(
+      computeGroundingSignals(
+        {},
+        [{ text: 'Claim', sourceUrls: ['https://example.com'] }],
+        [],
+        [{ origin: 'googleSearch', url: 'https://example.com' }],
+      ).confidence,
+      'medium',
+    );
   });
 
   it('derives overall status from grounding confidence', () => {

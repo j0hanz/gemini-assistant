@@ -322,4 +322,49 @@ describe('analyze diagram validation', () => {
       client.models.generateContentStream = originalGenerateContentStream;
     }
   });
+
+  it('marks unlabeled fences as syntax invalid instead of silently accepting them', async () => {
+    const { analyze } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () =>
+      fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: '```\nflowchart TD\nA-->B\n```' }] },
+              finishReason: FinishReason.STOP,
+            },
+          ],
+        } as GenerateContentResponse,
+      ]);
+
+    try {
+      await analyze.createTask(
+        {
+          goal: 'Generate a diagram',
+          outputKind: 'diagram',
+          diagramType: 'mermaid',
+          targetKind: 'url',
+          urls: ['https://example.com'],
+        },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+
+      const structured = store.stored[0]?.result.structuredContent;
+      const parsed = AnalyzeOutputSchema.safeParse(structured);
+      assert.ok(parsed.success);
+      assert.strictEqual(parsed.data.kind, 'diagram');
+      assert.strictEqual(parsed.data.syntaxValid, false);
+      assert.deepStrictEqual(parsed.data.syntaxErrors, [
+        'Gemini returned an unlabeled fenced block; expected ```mermaid',
+      ]);
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
 });

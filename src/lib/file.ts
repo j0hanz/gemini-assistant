@@ -1,6 +1,6 @@
 import type { ServerContext } from '@modelcontextprotocol/server';
 
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { extname } from 'node:path';
 
 import { createPartFromUri, type Part } from '@google/genai';
@@ -73,6 +73,64 @@ export function getMimeType(filePath: string): string {
   return MIME_MAP[ext] ?? 'application/octet-stream';
 }
 
+const TEXT_LIKE_MIME_TYPES = new Set([
+  'application/json',
+  'application/xml',
+  'application/rtf',
+  'image/svg+xml',
+  'text/csv',
+  'text/html',
+  'text/javascript',
+  'text/plain',
+]);
+
+function isTextLikeMimeType(mimeType: string): boolean {
+  return mimeType.startsWith('text/') || TEXT_LIKE_MIME_TYPES.has(mimeType);
+}
+
+function startsWithBytes(buffer: Buffer, signature: readonly number[]): boolean {
+  return signature.every((byte, index) => buffer[index] === byte);
+}
+
+async function validateUploadMimeType(resolvedPath: string, mimeType: string): Promise<void> {
+  if (mimeType === 'application/octet-stream') {
+    throw new Error(`Unsupported file type for upload: ${resolvedPath}`);
+  }
+
+  const content = await readFile(resolvedPath);
+
+  if (isTextLikeMimeType(mimeType)) {
+    if (content.includes(0)) {
+      throw new Error(`Text upload contains binary data: ${resolvedPath}`);
+    }
+    return;
+  }
+
+  const matches =
+    (mimeType === 'application/pdf' && startsWithBytes(content, [0x25, 0x50, 0x44, 0x46])) ||
+    (mimeType === 'image/png' &&
+      startsWithBytes(content, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ||
+    (mimeType === 'image/jpeg' && startsWithBytes(content, [0xff, 0xd8, 0xff])) ||
+    (mimeType === 'image/gif' &&
+      (startsWithBytes(content, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) ||
+        startsWithBytes(content, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61]))) ||
+    (mimeType === 'image/webp' &&
+      startsWithBytes(content, [0x52, 0x49, 0x46, 0x46]) &&
+      content.subarray(8, 12).toString('ascii') === 'WEBP') ||
+    (mimeType === 'image/bmp' && startsWithBytes(content, [0x42, 0x4d])) ||
+    ((mimeType === 'application/zip' ||
+      mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') &&
+      startsWithBytes(content, [0x50, 0x4b, 0x03, 0x04]));
+
+  if (!matches) {
+    throw new Error(
+      `File content does not match declared upload MIME type (${mimeType}): ${resolvedPath}`,
+    );
+  }
+}
+
 // ── File Upload ───────────────────────────────────────────────────────
 
 interface UploadedFile {
@@ -110,6 +168,7 @@ export async function uploadFile(
   }
 
   const mimeType = getMimeType(resolvedPath);
+  await validateUploadMimeType(resolvedPath, mimeType);
 
   const uploaded = await withRetry(
     () => getAI().files.upload({ file: resolvedPath, config: { mimeType, abortSignal: signal } }),

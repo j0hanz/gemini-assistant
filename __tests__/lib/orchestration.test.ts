@@ -77,9 +77,9 @@ describe('buildOrchestrationConfig', () => {
     assert.deepStrictEqual(result.toolConfig, { includeServerSideToolInvocations: true });
   });
 
-  it('auto-enables server-side tool invocations only for mixed built-in and function flows', () => {
+  it('auto-enables server-side tool invocations for built-in flows', () => {
     const result = buildOrchestrationConfig({ builtInToolNames: ['googleSearch'] });
-    assert.strictEqual(result.toolConfig, undefined);
+    assert.deepStrictEqual(result.toolConfig, { includeServerSideToolInvocations: true });
 
     const mixed = buildOrchestrationConfig({
       builtInToolNames: ['googleSearch'],
@@ -277,10 +277,7 @@ describe('resolveServerSideToolInvocations', () => {
   it('resolves the policy truth table', () => {
     assert.strictEqual(resolveServerSideToolInvocations('auto', new Set()), undefined);
     assert.strictEqual(resolveServerSideToolInvocations(undefined, new Set()), undefined);
-    assert.strictEqual(
-      resolveServerSideToolInvocations('auto', new Set(['googleSearch'])),
-      undefined,
-    );
+    assert.strictEqual(resolveServerSideToolInvocations('auto', new Set(['googleSearch'])), true);
     assert.strictEqual(
       resolveServerSideToolInvocations('auto', new Set(['googleSearch', 'functions'])),
       true,

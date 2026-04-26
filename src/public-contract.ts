@@ -158,6 +158,8 @@ export const DISCOVERY_ENTRIES = [
       'Transcript, events, and raw turn-parts resources require MCP_EXPOSE_SESSION_RESOURCES=true.',
       'Structured output is intended for single-turn calls and new sessions, not resumed sessions.',
       'Declared functions are executed by the MCP client, not by this server; return results through functionResponses on the same sessionId.',
+      'Workspace cache reuse is skipped when a chat call sets systemInstruction, temperature, or seed; the response may include warnings when cache eligibility is disabled.',
+      'serverSideToolInvocations=auto includes server-side tool traces whenever Gemini built-in tools are active, including built-in-only flows.',
     ],
     related: [
       { kind: 'resource', name: 'session://' },
@@ -185,10 +187,11 @@ export const DISCOVERY_ENTRIES = [
       'fileSearch?',
     ],
     returns:
-      'A summary with grounding status, grounding signals, claim-linked findings, Google Search sources, URL Context provenance, warnings, and tool-usage details from the multi-step research path.',
+      'A summary with grounding status, grounding signals, claim-linked source attributions, Google Search sources, URL Context provenance, warnings, and tool-usage details from the multi-step research path.',
     limitations: [
       'Mode defaults to quick; this contract does not accept legacy top-level query or topic fields.',
       'Grounding uses Google Search, optional URL Context, and optional Gemini File Search stores.',
+      'Claim-level findings and citations reflect source attribution from retrieved metadata, not independent verification of truth.',
     ],
     related: [
       { kind: 'prompt', name: 'research' },

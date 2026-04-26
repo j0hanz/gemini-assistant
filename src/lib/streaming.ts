@@ -383,9 +383,11 @@ async function handleFunctionCallPart(
   }
 
   const fnName = functionCall.name;
-  const fnKey = functionCall.id ?? `${fnName ?? ''}:${JSON.stringify(functionCall.args ?? {})}`;
-  if (fnName && !state._fnSeen.has(fnKey)) {
-    state._fnSeen.add(fnKey);
+  const functionId = functionCall.id;
+  if (fnName && (!functionId || !state._fnSeen.has(functionId))) {
+    if (functionId) {
+      state._fnSeen.add(functionId);
+    }
     state.functionCalls.push({
       name: fnName,
       ...(functionCall.id ? { id: functionCall.id } : {}),
@@ -659,7 +661,6 @@ function isCoalescablePlainTextPart(part: Part): boolean {
   return (
     typeof part.text === 'string' &&
     !part.thought &&
-    part.thoughtSignature === undefined &&
     !part.functionCall &&
     !part.functionResponse &&
     !part.toolCall &&
@@ -671,12 +672,30 @@ function isCoalescablePlainTextPart(part: Part): boolean {
   );
 }
 
+function canCoalescePlainTextParts(left: Part, right: Part): boolean {
+  if (!isCoalescablePlainTextPart(left) || !isCoalescablePlainTextPart(right)) {
+    return false;
+  }
+
+  return (
+    left.thoughtSignature === undefined ||
+    right.thoughtSignature === undefined ||
+    left.thoughtSignature === right.thoughtSignature
+  );
+}
+
 function appendStreamPart(state: StreamProcessingState, part: Part): void {
   if (isCoalescablePlainTextPart(part)) {
     const lastIndex = state.parts.length - 1;
     const last = lastIndex >= 0 ? state.parts[lastIndex] : undefined;
-    if (last && isCoalescablePlainTextPart(last)) {
-      state.parts[lastIndex] = { ...last, text: `${last.text ?? ''}${part.text ?? ''}` };
+    if (last && canCoalescePlainTextParts(last, part)) {
+      state.parts[lastIndex] = {
+        ...last,
+        text: `${last.text ?? ''}${part.text ?? ''}`,
+        ...(last.thoughtSignature === undefined && part.thoughtSignature !== undefined
+          ? { thoughtSignature: part.thoughtSignature }
+          : {}),
+      };
       return;
     }
   }

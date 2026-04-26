@@ -329,7 +329,7 @@ export const OptionalFunctionsSpecSchema = z
 
 export const ServerSideToolInvocationsSchema = withFieldMetadata(
   z.enum(SERVER_SIDE_TOOL_INVOCATIONS_OPTIONS).default('auto'),
-  'Server-side Gemini tool trace policy. `auto` (default): enabled only when built-in tools AND function declarations are both active. `always`: forces traces regardless of tool mix. `never`: omits traces.',
+  'Server-side Gemini tool trace policy. `auto` (default): enabled whenever built-in Gemini tools are active. `always`: forces traces regardless of tool mix. `never`: omits traces.',
 );
 
 const usageMetadataFields = {
@@ -482,9 +482,9 @@ export const FindingSchema = z.strictObject({
     itemDescription: 'Public source URL',
   }),
   verificationStatus: z
-    .enum(['supported', 'partial', 'unverified'])
+    .enum(['cited', 'partial', 'unverified'])
     .optional()
-    .describe('Claim verification status derived from available grounding evidence'),
+    .describe('Claim attribution status derived from available grounding metadata'),
 });
 
 export const GroundingSignalsSchema = z.strictObject({

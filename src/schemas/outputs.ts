@@ -144,11 +144,14 @@ export const ResearchOutputSchema = z.strictObject({
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
   toolsUsed: z.array(z.string()).optional().describe('Tools invoked during deep research'),
   groundingSignals: GroundingSignalsSchema.optional(),
-  findings: z.array(FindingSchema).optional().describe('Claim-level findings with attribution'),
+  findings: z
+    .array(FindingSchema)
+    .optional()
+    .describe('Claim-level findings attributed to retrieved sources; not independent proof'),
   citations: z
     .array(GroundingCitationSchema)
     .optional()
-    .describe('Claim-level citations derived from Gemini grounding supports'),
+    .describe('Claim-level source attributions derived from Gemini grounding supports'),
   computations: z
     .array(ComputationSchema)
     .optional()

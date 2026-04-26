@@ -180,8 +180,7 @@ export function resolveServerSideToolInvocations(
   if (policy === 'never') return undefined;
   if (policy === 'always') return true;
   const hasBuiltIn = BUILT_IN_TOOL_NAMES.some((name) => activeCapabilities.has(name));
-  const hasFunctions = activeCapabilities.has('functions');
-  return hasBuiltIn && hasFunctions ? true : undefined;
+  return hasBuiltIn ? true : undefined;
 }
 
 function resolveFunctionCallingMode(

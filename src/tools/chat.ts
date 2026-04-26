@@ -1,5 +1,7 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
+import { createHash } from 'node:crypto';
+
 import { Validator } from '@cfworker/json-schema';
 import { FinishReason, FunctionCallingConfigMode } from '@google/genai';
 import type {
@@ -12,7 +14,10 @@ import type {
 
 import { AppError, assertNever } from '../lib/errors.js';
 import { logger, mcpLog } from '../lib/logger.js';
-import { appendFunctionCallingInstruction } from '../lib/model-prompts.js';
+import {
+  appendFunctionCallingInstruction,
+  buildFunctionCallingInstructionText,
+} from '../lib/model-prompts.js';
 import {
   buildOrchestrationConfig,
   buildOrchestrationRequestFromInputs,
@@ -113,6 +118,7 @@ interface AskStructuredContent extends Record<string, unknown> {
   thoughts?: string;
   toolEvents?: ToolEvent[];
   usage?: UsageMetadata;
+  warnings?: string[];
 }
 
 export interface AskDependencies {
@@ -189,13 +195,53 @@ function isRetryableSchemaFailure(
   return jsonMode === true && (parsedData === undefined || warnings.length > 0);
 }
 
-function buildRepairPromptSuffix(warnings: string[]): string {
+function buildReducedRepairPrompt(
+  originalPrompt: string,
+  invalidOutput: string,
+  warnings: readonly string[],
+): string {
   const warningText = warnings
     .map((warning) => `- ${warning}`)
     .join('\n')
     .slice(0, JSON_REPAIR_WARNING_TEXT_LIMIT);
+  const invalidOutputText = invalidOutput.slice(0, 4_000);
 
-  return `\n\nCRITICAL: The previous response was invalid JSON or failed schema validation. Error(s):\n${warningText}\nReturn ONLY valid JSON that conforms exactly to the provided schema.`;
+  return [
+    'Repair the invalid JSON response from the previous turn.',
+    'Return ONLY valid JSON that conforms exactly to the provided schema.',
+    `Original user request:\n${originalPrompt}`,
+    `Validation errors:\n${warningText}`,
+    `Previous invalid output:\n${invalidOutputText}`,
+  ].join('\n\n');
+}
+
+function appendAskWarnings(result: CallToolResult, warnings: readonly string[]): CallToolResult {
+  if (result.isError || warnings.length === 0) {
+    return result;
+  }
+
+  const structured = getAskStructuredContent(result) ?? {
+    answer: extractTextContent(result.content),
+  };
+  const existingWarnings = Array.isArray(structured.warnings)
+    ? structured.warnings.filter((value): value is string => typeof value === 'string')
+    : [];
+
+  return {
+    ...result,
+    structuredContent: {
+      ...structured,
+      warnings: [...existingWarnings, ...warnings],
+    },
+  };
+}
+
+function hashInstructionText(text: string | undefined): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+
+  return createHash('sha256').update(text).digest('hex');
 }
 
 export function buildAskStructuredContent(
@@ -546,6 +592,7 @@ function buildSessionGenerationContract(
   model: string,
   config: GenerateContentConfig,
   functionCallingMode?: FunctionCallingConfigMode,
+  functionCallingInstructionHash?: string,
 ): SessionGenerationContract {
   return pickDefined({
     model,
@@ -553,6 +600,7 @@ function buildSessionGenerationContract(
     tools: config.tools,
     toolConfig: config.toolConfig,
     functionCallingMode,
+    functionCallingInstructionHash,
     thinkingConfig: config.thinkingConfig,
     responseMimeType: config.responseMimeType,
     responseJsonSchema: config.responseJsonSchema,
@@ -735,6 +783,7 @@ export async function askWithoutSession(
   let currentPrompt = prompt;
   let attempt = 0;
   let askResult!: AskExecutionResult;
+  let usedJsonRepair = false;
 
   for (;;) {
     const attemptConfig =
@@ -742,13 +791,11 @@ export async function askWithoutSession(
         ? config
         : buildGenerateContentConfig(
             {
-              ...buildAskGenerationOptions(
-                args,
-                toolConfig,
-                tools,
-                functionCallingMode,
-                resolved.serverSideToolInvocations,
-              ),
+              ...(typeof config.systemInstruction === 'string'
+                ? { systemInstruction: config.systemInstruction }
+                : {}),
+              responseSchema: args.responseSchema,
+              jsonMode,
               costProfile: 'chat.jsonRepair',
               thinkingLevel: 'MINIMAL',
               maxOutputTokens: 2_048,
@@ -797,11 +844,22 @@ export async function askWithoutSession(
       warningCount: warnings.length,
       hadParsedData: parsedData !== undefined,
     });
-    currentPrompt = `${prompt}${buildRepairPromptSuffix(warnings)}`;
+    currentPrompt = buildReducedRepairPrompt(
+      prompt,
+      extractTextContent(askResult.result.content),
+      warnings,
+    );
+    usedJsonRepair = true;
     attempt++;
   }
 
-  return { ...askResult, sentMessage: currentPrompt };
+  if (usedJsonRepair) {
+    askResult.result = appendAskWarnings(askResult.result, [
+      'JSON repair turn used after the initial response failed parsing or schema validation.',
+    ]);
+  }
+
+  return { ...askResult, sentMessage: prompt };
 }
 
 function appendTranscriptPair(
@@ -962,6 +1020,29 @@ async function resolveWorkspaceCacheName(
   }
 }
 
+function buildWorkspaceCacheSkipWarnings(args: AskArgs): string[] {
+  if (!getWorkspaceCacheEnabled()) {
+    return [];
+  }
+
+  const reasons: string[] = [];
+  if (args.systemInstruction) {
+    reasons.push('custom systemInstruction');
+  }
+  if (args.temperature !== undefined && args.temperature !== DEFAULT_TEMPERATURE) {
+    reasons.push('custom temperature');
+  }
+  if (args.seed !== undefined) {
+    reasons.push('custom seed');
+  }
+
+  if (reasons.length === 0) {
+    return [];
+  }
+
+  return [`Automatic workspace cache skipped because this request uses ${reasons.join(', ')}.`];
+}
+
 function buildAskToolingConfig(args: AskArgs) {
   const orchestration = buildOrchestrationConfig(buildChatOrchestrationRequest(args));
   return {
@@ -1008,6 +1089,10 @@ function isCompatibleSessionContract(
     sameSessionContractValue(stored.tools, requested.tools) &&
     sameSessionContractValue(stored.toolConfig, requested.toolConfig) &&
     sameSessionContractValue(stored.functionCallingMode, requested.functionCallingMode) &&
+    sameSessionContractValue(
+      stored.functionCallingInstructionHash,
+      requested.functionCallingInstructionHash,
+    ) &&
     sameSessionContractValue(stored.responseMimeType, requested.responseMimeType) &&
     sameSessionContractValue(stored.responseJsonSchema, requested.responseJsonSchema)
   );
@@ -1016,6 +1101,13 @@ function isCompatibleSessionContract(
 function buildRequestedSessionContract(args: AskArgs): SessionGenerationContract {
   const { toolConfig, tools, functionCallingMode, serverSideToolInvocations } =
     buildAskToolingConfig(args);
+  const functionCallingInstructionHash = hashInstructionText(
+    buildFunctionCallingInstructionText({
+      ...(functionCallingMode !== undefined ? { mode: functionCallingMode } : {}),
+      declaredNames: args.functions?.declarations.map((declaration) => declaration.name) ?? [],
+      serverSideToolInvocations,
+    }),
+  );
   const config = buildGenerateContentConfig({
     ...buildAskGenerationOptions(
       args,
@@ -1027,7 +1119,12 @@ function buildRequestedSessionContract(args: AskArgs): SessionGenerationContract
     costProfile: 'chat',
   });
 
-  return buildSessionGenerationContract(getGeminiModel(), config, functionCallingMode);
+  return buildSessionGenerationContract(
+    getGeminiModel(),
+    config,
+    functionCallingMode,
+    functionCallingInstructionHash,
+  );
 }
 
 export function createDefaultAskDependencies(
@@ -1198,6 +1295,7 @@ async function askNewSession(
 interface PreparedAskRequest {
   effectiveArgs: AskArgs;
   contextUsed: ContextUsed;
+  warnings: string[];
 }
 
 async function prepareAskRequest(
@@ -1225,8 +1323,12 @@ async function prepareAskRequest(
       )
     : emptyContextUsed();
   const effectiveArgs = workspaceCacheName ? { ...args, cacheName: workspaceCacheName } : args;
+  const warnings =
+    workspaceCacheName || persistedCacheName || !canUseWorkspaceCache
+      ? []
+      : buildWorkspaceCacheSkipWarnings(args);
 
-  return { effectiveArgs, contextUsed };
+  return { effectiveArgs, contextUsed, warnings };
 }
 
 function isPreparedRequest(
@@ -1248,11 +1350,11 @@ export function createAskWork(
     );
     if (!isPreparedRequest(prepared)) return prepared;
 
-    const { effectiveArgs, contextUsed } = prepared;
+    const { effectiveArgs, contextUsed, warnings } = prepared;
 
     if (!effectiveArgs.sessionId) {
       const askResult = await deps.runWithoutSession(effectiveArgs, ctx);
-      return attachContextUsed(askResult.result, contextUsed);
+      return appendAskWarnings(attachContextUsed(askResult.result, contextUsed), warnings);
     }
 
     const sessionId = effectiveArgs.sessionId;
@@ -1265,7 +1367,7 @@ export function createAskWork(
         liveChat,
         contextUsed,
       );
-      if (resumed) return resumed;
+      if (resumed) return appendAskWarnings(resumed, warnings);
     } else if (deps.getSessionEntry(sessionId)) {
       const rebuiltChat = deps.rebuildChat(sessionId, effectiveArgs);
       if (rebuiltChat) {
@@ -1279,7 +1381,7 @@ export function createAskWork(
           contextUsed,
           sessionSummary,
         );
-        if (resumed) return resumed;
+        if (resumed) return appendAskWarnings(resumed, warnings);
       } else {
         const transcript = deps.listSessionTranscriptEntries(sessionId) ?? [];
         if (transcript.length > 0) {
@@ -1291,11 +1393,9 @@ export function createAskWork(
       }
     }
 
-    return await askNewSession(
-      effectiveArgs as AskArgs & { sessionId: string },
-      ctx,
-      deps,
-      contextUsed,
+    return appendAskWarnings(
+      await askNewSession(effectiveArgs as AskArgs & { sessionId: string }, ctx, deps, contextUsed),
+      warnings,
     );
   };
 }
@@ -1381,6 +1481,9 @@ function assembleChatOutput(
   const warnings = Array.isArray(structured.schemaWarnings)
     ? structured.schemaWarnings.filter((value): value is string => typeof value === 'string')
     : undefined;
+  const extraWarnings = Array.isArray(structured.warnings)
+    ? structured.warnings.filter((value): value is string => typeof value === 'string')
+    : undefined;
   const sessionId = extractSessionId(result, sessionIdHint);
   const session =
     sessionId && typeof structured.session === 'object' && structured.session !== null
@@ -1403,7 +1506,7 @@ function assembleChatOutput(
     'chat',
     ChatOutputSchema,
     pickDefined({
-      ...buildBaseStructuredOutput(taskId, warnings),
+      ...buildBaseStructuredOutput(taskId, [...(warnings ?? []), ...(extraWarnings ?? [])]),
       answer,
       data: structured.data,
       session,

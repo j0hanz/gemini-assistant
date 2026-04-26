@@ -54,7 +54,7 @@ function extractDiagram(
   text: string,
   diagramType: 'mermaid' | 'plantuml',
   ctx: ServerContext,
-): { diagram: string; explanation: string } {
+): { diagram: string; explanation: string; syntaxErrors?: string[]; syntaxValid?: boolean } {
   const labeledPattern = buildDiagramFencePattern(diagramType);
   const match = labeledPattern.exec(text);
 
@@ -73,10 +73,17 @@ function extractDiagram(
     return {
       diagram: unlabeledMatch[1].trimEnd(),
       explanation: text.replace(UNLABELED_DIAGRAM_FENCED_PATTERN, '').trim(),
+      syntaxErrors: [`Gemini returned an unlabeled fenced block; expected \`\`\`${diagramType}`],
+      syntaxValid: false,
     };
   }
 
-  return { diagram: text, explanation: '' };
+  return {
+    diagram: text,
+    explanation: '',
+    syntaxErrors: [`Gemini did not return a labeled \`\`\`${diagramType} fence`],
+    syntaxValid: false,
+  };
 }
 
 function formatAnalyzeDiagramMarkdown(
@@ -329,13 +336,28 @@ async function analyzeDiagramWork(
           safetySettings: args.safetySettings,
         },
         responseBuilder: (streamResult, textContent: string) => {
-          const { diagram, explanation } = extractDiagram(textContent, args.diagramType, ctx);
+          const extracted = extractDiagram(textContent, args.diagramType, ctx);
+          const { diagram, explanation } = extracted;
           const diagramType = args.diagramType;
           const formatted = formatAnalyzeDiagramMarkdown(diagram, diagramType, explanation);
-          const syntaxValidation =
+          const toolSyntaxValidation =
             args.validateSyntax === true
               ? deriveDiagramSyntaxValidation(streamResult.toolEvents)
               : {};
+          const syntaxErrors = [
+            ...(extracted.syntaxErrors ?? []),
+            ...(toolSyntaxValidation.syntaxErrors ?? []),
+          ];
+          const syntaxValidation = {
+            ...(extracted.syntaxValid === false
+              ? { syntaxValid: false }
+              : toolSyntaxValidation.syntaxValid !== undefined
+                ? { syntaxValid: toolSyntaxValidation.syntaxValid }
+                : extracted.syntaxValid !== undefined
+                  ? { syntaxValid: extracted.syntaxValid }
+                  : {}),
+            ...(syntaxErrors.length > 0 ? { syntaxErrors } : {}),
+          };
           const warnings =
             args.validateSyntax === true &&
             !streamResult.toolEvents.some((event) => event.kind === 'code_execution_result')

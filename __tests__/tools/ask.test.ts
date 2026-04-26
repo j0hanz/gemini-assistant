@@ -1145,10 +1145,7 @@ describe('ask contract', () => {
       if (typeof retryContents !== 'string') {
         assert.fail('Expected retry contents to be a string');
       }
-      assert.match(
-        retryContents,
-        /CRITICAL: The previous response was invalid JSON or failed schema validation/,
-      );
+      assert.match(retryContents, /Repair the invalid JSON response from the previous turn/);
     } finally {
       process.env.CACHE = originalCache;
       stub.restore();
@@ -1520,7 +1517,7 @@ describe('ask contract', () => {
       systemInstruction?: string;
       tools?: Record<string, unknown>[];
     };
-    assert.strictEqual(rebuildConfig.systemInstruction, 'original system');
+    assert.match(rebuildConfig.systemInstruction ?? '', /^original system(?:\n\n|$)/);
     assert.deepStrictEqual(rebuildConfig.tools, [{ googleSearch: {} }]);
   });
 

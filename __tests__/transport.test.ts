@@ -8,10 +8,12 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 
 import assert from 'node:assert/strict';
 import { createServer as createNodeServer, request as sendNodeRequest } from 'node:http';
-import { afterEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { ScopedLogger } from '../src/lib/logger.js';
 import { startHttpTransport, startWebStandardTransport } from '../src/transport.js';
+
+const VALID_TOKEN = 'token-1234567890abcdef-token-123456';
 
 const originalScopedLoggerError = Object.getOwnPropertyDescriptor(ScopedLogger.prototype, 'error')
   ?.value as typeof ScopedLogger.prototype.error;
@@ -238,14 +240,20 @@ afterEach(() => {
   delete process.env.CORS_ORIGIN;
   delete process.env.STATELESS;
   delete process.env.ALLOWED_HOSTS;
+  delete process.env.MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP;
   delete process.env.MAX_TRANSPORT_SESSIONS;
   delete process.env.MCP_HTTP_TOKEN;
   delete process.env.MCP_HTTP_RATE_LIMIT_RPS;
   delete process.env.MCP_HTTP_RATE_LIMIT_BURST;
+  delete process.env.MCP_TRUST_PROXY;
   ScopedLogger.prototype.error = originalScopedLoggerError;
   ScopedLogger.prototype.info = originalScopedLoggerInfo;
   ScopedLogger.prototype.warn = originalScopedLoggerWarn;
   WebStandardStreamableHTTPServerTransport.prototype.handleRequest = originalWebHandleRequest;
+});
+
+beforeEach(() => {
+  process.env.MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP = 'true';
 });
 
 describe('startWebStandardTransport', () => {
@@ -266,7 +274,7 @@ describe('startWebStandardTransport', () => {
 
   it('accepts matching Host headers for specific non-local binds', async () => {
     process.env.HOST = 'example.internal';
-    process.env.MCP_HTTP_TOKEN = 't'.repeat(32);
+    process.env.MCP_HTTP_TOKEN = VALID_TOKEN;
     const transport = await startWebStandardTransport(() => createServerInstance());
 
     try {
@@ -286,7 +294,7 @@ describe('startWebStandardTransport', () => {
           {
             hostHeader: 'example.internal:3000',
             requestUrl: 'http://example.internal:3000/mcp',
-            authorization: `Bearer ${'t'.repeat(32)}`,
+            authorization: `Bearer ${VALID_TOKEN}`,
           },
         ),
       );
@@ -300,7 +308,7 @@ describe('startWebStandardTransport', () => {
 
   it('rejects mismatched Host headers for specific non-local binds', async () => {
     process.env.HOST = 'example.internal';
-    process.env.MCP_HTTP_TOKEN = 't'.repeat(32);
+    process.env.MCP_HTTP_TOKEN = VALID_TOKEN;
     const transport = await startWebStandardTransport(() => createServerInstance());
 
     try {

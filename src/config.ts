@@ -6,12 +6,14 @@ import {
 } from '@google/genai';
 
 interface TransportConfig {
+  allowUnauthenticatedLoopbackHttp: boolean;
   corsOrigin: string;
   host: string;
   isStateless: boolean;
   maxSessions: number;
   port: number;
   token?: string;
+  trustProxy: boolean;
   rateLimitBurst: number;
   rateLimitRps: number;
   sessionTtlMs: number;
@@ -102,7 +104,29 @@ function parseOptionalTokenEnv(name: string): string | undefined {
   if (trimmed.length < 32) {
     throw new Error(`${name} must be at least 32 characters when set.`);
   }
+  if (isTriviallyRepeatedToken(trimmed)) {
+    throw new Error(`${name} must not be a trivially repeated pattern.`);
+  }
   return trimmed;
+}
+
+function isTriviallyRepeatedToken(value: string): boolean {
+  if (/^(.)\1+$/.test(value)) {
+    return true;
+  }
+
+  for (let size = 2; size <= 8; size += 1) {
+    if (value.length % size !== 0) {
+      continue;
+    }
+
+    const segment = value.slice(0, size);
+    if (segment.repeat(value.length / size) === value) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function parseCorsOriginEnv(): string {
@@ -185,6 +209,10 @@ export function getTransportConfig(): TransportConfig {
   const token = parseOptionalTokenEnv('MCP_HTTP_TOKEN');
 
   return {
+    allowUnauthenticatedLoopbackHttp: parseBooleanEnv(
+      'MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP',
+      false,
+    ),
     corsOrigin: parseCorsOriginEnv(),
     host,
     isStateless: parseBooleanEnv('STATELESS', false),
@@ -201,6 +229,7 @@ export function getTransportConfig(): TransportConfig {
     sessionTtlMs: parseIntEnv('TRANSPORT_SESSION_TTL_MS', DEFAULT_TRANSPORT_SESSION_TTL_MS, {
       min: 1_000,
     }),
+    trustProxy: parseBooleanEnv('MCP_TRUST_PROXY', false),
   };
 }
 

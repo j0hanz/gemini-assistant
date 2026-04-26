@@ -507,8 +507,8 @@ describe('ask contract', () => {
         { mode: 'AUTO' },
       );
       const structured = result.structuredContent as Record<string, unknown>;
-      assert.deepStrictEqual(structured.functionCalls, [
-        { name: 'lookup_doc', args: { query: 'x' } },
+      assert.deepStrictEqual(structured.toolEvents, [
+        { kind: 'function_call', name: 'lookup_doc', args: { query: 'x' } },
       ]);
     } finally {
       stub.restore();

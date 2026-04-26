@@ -31,7 +31,7 @@ const DEFAULT_HTTP_RATE_LIMIT_RPS = 10;
 const DEFAULT_HTTP_RATE_LIMIT_BURST = 20;
 const DEFAULT_MAX_TRANSCRIPT_ENTRIES = 50;
 const DEFAULT_MAX_EVENT_ENTRIES = 50;
-const DEFAULT_MAX_OUTPUT_TOKENS = 4_096;
+const DEFAULT_MAX_OUTPUT_TOKENS = 2_048;
 const DEFAULT_SESSION_REPLAY_MAX_BYTES = 50_000;
 const DEFAULT_SESSION_REPLAY_INLINE_DATA_MAX_BYTES = 16 * 1024;
 
@@ -253,10 +253,14 @@ export function getMaxOutputTokens(): number {
 }
 
 export function getThinkingBudgetCap(): number {
-  return parseIntEnv('GEMINI_THINKING_BUDGET_CAP', 32_768, {
+  return parseIntEnv('GEMINI_THINKING_BUDGET_CAP', 16_384, {
     min: 0,
     max: 1_048_576,
   });
+}
+
+export function getMessageMaxChars(): number {
+  return parseIntEnv('CHAT_MESSAGE_MAX_CHARS', 100_000, { min: 1_000, max: 1_000_000 });
 }
 
 export function getSlimSessionEvents(): boolean {

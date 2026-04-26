@@ -743,6 +743,19 @@ function finalizeStreamResult(state: StreamProcessingState): StreamResult {
       ? { namelessFunctionCalls: state.namelessFunctionCallCount }
       : undefined;
 
+  const filteredToolEvents = state.toolEvents.filter((event) => event.kind !== 'model_text');
+
+  let defaultSafetyRatings = state.safetyRatings;
+  if (Array.isArray(defaultSafetyRatings)) {
+    const filtered = defaultSafetyRatings.filter((r: unknown) => {
+      if (typeof r === 'object' && r !== null && 'probability' in r) {
+        return (r as Record<string, unknown>).probability !== 'NEGLIGIBLE';
+      }
+      return true;
+    });
+    defaultSafetyRatings = filtered.length > 0 ? filtered : undefined;
+  }
+
   return {
     text: state.text,
     textByWave: state.textByWave,
@@ -751,12 +764,12 @@ function finalizeStreamResult(state: StreamProcessingState): StreamResult {
     toolsUsed: [...state.toolsUsed],
     toolsUsedOccurrences: toolsUsedOccurrences(state.toolEvents),
     functionCalls: state.functionCalls,
-    toolEvents: state.toolEvents,
+    toolEvents: filteredToolEvents,
     hadCandidate: state.hadCandidate,
     ...pickDefined({
       aborted: state.aborted,
       finishReason: state.finishReason,
-      safetyRatings: state.safetyRatings,
+      safetyRatings: defaultSafetyRatings,
       finishMessage: state.finishMessage,
       citationMetadata: state.citationMetadata,
       groundingMetadata: state.groundingMetadata,

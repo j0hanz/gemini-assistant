@@ -24,15 +24,15 @@ import type { AskThinkingLevel } from './public-contract.js';
 export { DEFAULT_TEMPERATURE } from './public-contract.js';
 
 const DEFAULT_TOOL_COST_PROFILES = {
-  chat: { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
+  chat: { thinkingLevel: 'LOW', maxOutputTokens: 2_048 },
   'research.quick': { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
   'research.deep.plan': { thinkingLevel: 'MINIMAL', maxOutputTokens: 1_024 },
   'research.deep.retrieval': { thinkingLevel: 'LOW', maxOutputTokens: 2_048 },
-  'research.deep.synthesis': { thinkingLevel: 'MEDIUM', maxOutputTokens: 8_192 },
+  'research.deep.synthesis': { thinkingLevel: 'MEDIUM', maxOutputTokens: 6_144 },
   'research.deep.contradiction': { thinkingLevel: 'LOW', maxOutputTokens: 1_024 },
   'analyze.summary': { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
-  'analyze.diagram': { thinkingLevel: 'MEDIUM', maxOutputTokens: 8_192 },
-  'review.diff': { thinkingLevel: 'LOW', maxOutputTokens: 6_144 },
+  'analyze.diagram': { thinkingLevel: 'LOW', maxOutputTokens: 8_192 },
+  'review.diff': { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
   'review.comparison': { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
   'review.failure': { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
   'chat.jsonRepair': { thinkingLevel: 'MINIMAL', maxOutputTokens: 2_048 },

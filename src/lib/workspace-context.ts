@@ -203,8 +203,9 @@ export function emptyContextUsed(): ContextUsed {
 export const MIN_CACHE_TOKENS = 4_000;
 const MAX_SCAN_FILE_SIZE = 512 * 1024;
 const MAX_TOTAL_CONTEXT_SIZE = 256 * 1024;
+const MAX_SCAN_FILES_PER_ROOT = 25;
 const WORKSPACE_CACHE_DISPLAY = 'gemini-assistant-workspace';
-const HASH_CHECK_INTERVAL_MS = 30_000;
+const HASH_CHECK_INTERVAL_MS = 120_000;
 const log = logger.child('workspace');
 
 export const SCAN_FILE_NAMES = new Set([
@@ -306,6 +307,7 @@ async function scanRootForFiles(root: string): Promise<Map<string, string>> {
     const content = await tryReadFile(filePath);
     if (content) {
       files.set(filePath, content);
+      if (files.size >= MAX_SCAN_FILES_PER_ROOT) break;
     }
   }
   return files;

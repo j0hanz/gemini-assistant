@@ -5,6 +5,7 @@ import type { ParsePayload } from 'zod/v4/core';
 
 import { AppError } from '../lib/errors.js';
 
+import { getMessageMaxChars } from '../config.js';
 import {
   analyzeOutputKind,
   analyzeTargetKind,
@@ -364,8 +365,10 @@ const ReviewInputBaseSchema = z.strictObject({
   question: optionalField(
     textField('Comparison focus when subjectKind=comparison (behavior, APIs, security, etc.).'),
   ),
-  error: optionalField(textField('Error message or stack trace when subjectKind=failure.')),
-  codeContext: optionalField(textField('Relevant source code context when subjectKind=failure.')),
+  error: optionalField(textField('Error message or stack trace when subjectKind=failure.', 32_000)),
+  codeContext: optionalField(
+    textField('Relevant source code context when subjectKind=failure.', 16_000),
+  ),
   googleSearch: withFieldMetadata(
     z.boolean().optional(),
     'Enable Google Search when subjectKind=comparison or subjectKind=failure.',
@@ -387,7 +390,7 @@ export type ReviewInput = z.infer<typeof ReviewInputSchema>;
 
 function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
   const askCommonShape = {
-    message: requiredText('User message or prompt', 100_000),
+    message: requiredText('User message or prompt', getMessageMaxChars()),
     sessionId: completable(
       optionalField(sessionId('Session ID for multi-turn chat. Omit for single-turn.')),
       completeSessionIds,

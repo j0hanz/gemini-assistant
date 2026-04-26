@@ -75,7 +75,7 @@ describe('client config', () => {
     const config = buildGenerateContentConfig({ costProfile: 'review.diff' });
 
     assert.strictEqual(config.thinkingConfig?.thinkingLevel, ThinkingLevel.LOW);
-    assert.strictEqual(config.maxOutputTokens, 6_144);
+    assert.strictEqual(config.maxOutputTokens, 4_096);
   });
 
   it('preserves systemInstruction when cachedContent is used', () => {

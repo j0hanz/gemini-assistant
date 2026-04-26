@@ -718,9 +718,7 @@ describe('consumeStreamWithProgress', () => {
     );
 
     assert.strictEqual(result.text, 'visible');
-    assert.deepStrictEqual(result.toolEvents, [
-      { kind: 'model_text', text: 'visible', thoughtSignature: 'sig-visible' },
-    ]);
+    assert.deepStrictEqual(result.toolEvents, []);
   });
 
   it('preserves model text and function call event ordering', async () => {
@@ -738,7 +736,7 @@ describe('consumeStreamWithProgress', () => {
 
     assert.deepStrictEqual(
       result.toolEvents.map((event) => event.kind),
-      ['model_text', 'function_call', 'model_text'],
+      ['function_call'],
     );
   });
 

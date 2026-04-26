@@ -275,12 +275,12 @@ describe('config parsing', () => {
     assert.strictEqual(getWorkspaceCacheTtl(), '3600s');
   });
 
-  it('defaults GEMINI_MAX_OUTPUT_TOKENS to 4096', () => {
-    assert.strictEqual(getMaxOutputTokens(), 4_096);
+  it('defaults GEMINI_MAX_OUTPUT_TOKENS to 2048', () => {
+    assert.strictEqual(getMaxOutputTokens(), 2048);
   });
 
-  it('defaults GEMINI_THINKING_BUDGET_CAP to 32768', () => {
-    assert.strictEqual(getThinkingBudgetCap(), 32_768);
+  it('defaults GEMINI_THINKING_BUDGET_CAP to 16384', () => {
+    assert.strictEqual(getThinkingBudgetCap(), 16384);
   });
 
   it('returns configured GEMINI_THINKING_BUDGET_CAP when set', () => {

@@ -303,7 +303,9 @@ function isEmptyStructuredValue(value: unknown): boolean {
 }
 
 function isTrivialFinishMessage(finishMessage: string | undefined): boolean {
-  return finishMessage === undefined || finishMessage === '' || finishMessage === 'STOP';
+  return (
+    finishMessage === undefined || /^\s*$/.test(finishMessage) || /^stop$/i.test(finishMessage)
+  );
 }
 
 // ── Structured Content ────────────────────────────────────────────────
@@ -329,11 +331,17 @@ export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
   finishMessage?: string | undefined;
   citationMetadata?: unknown;
 }): SharedStructuredMetadata<TFunctionCall, TToolEvent> {
+  const hasToolEvents = toolEvents && toolEvents.length > 0;
+
   return pickDefined({
     contextUsed,
-    functionCalls: functionCalls && functionCalls.length > 0 ? [...functionCalls] : undefined,
+    functionCalls: hasToolEvents
+      ? undefined
+      : functionCalls && functionCalls.length > 0
+        ? [...functionCalls]
+        : undefined,
     thoughts: includeThoughts && thoughtText ? thoughtText : undefined,
-    toolEvents: toolEvents && toolEvents.length > 0 ? [...toolEvents] : undefined,
+    toolEvents: hasToolEvents ? [...toolEvents] : undefined,
     usage,
     safetyRatings: isEmptyStructuredValue(safetyRatings) ? undefined : safetyRatings,
     finishMessage: isTrivialFinishMessage(finishMessage) ? undefined : finishMessage,

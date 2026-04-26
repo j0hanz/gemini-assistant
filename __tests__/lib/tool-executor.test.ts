@@ -280,7 +280,6 @@ describe('ToolExecutor', () => {
 
     assert.deepStrictEqual(result.structuredContent, {
       answer: 'answer',
-      functionCalls: [{ name: 'lookupDocs', args: { topic: 'mcp' } }],
       toolEvents: [{ kind: 'function_call', name: 'lookupDocs', args: { topic: 'mcp' } }],
     });
   });
@@ -345,7 +344,6 @@ describe('ToolExecutor', () => {
     assert.strictEqual(validated.isError, undefined);
     assert.deepStrictEqual(validated.structuredContent, {
       answer: 'answer',
-      functionCalls: [{ name: 'lookupDocs', args: { topic: 'mcp' } }],
       toolEvents: [{ kind: 'function_call', name: 'lookupDocs', args: { topic: 'mcp' } }],
       usage: {
         candidatesTokenCount: 2,

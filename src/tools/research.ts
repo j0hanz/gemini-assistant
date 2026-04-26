@@ -857,7 +857,6 @@ async function agenticSearchWork(
         grounded: true,
         urls,
         fileSearch,
-        extraTools: ['codeExecution'],
       }),
       urls,
     },

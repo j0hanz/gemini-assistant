@@ -36,7 +36,7 @@ const execFileAsync = promisify(execFile);
 
 const GIT_TIMEOUT_MS = 30_000;
 const GIT_MAX_BUFFER = 10 * 1024 * 1024;
-const MAX_DIFF_CHARS = 500_000;
+const MAX_DIFF_CHARS = 200_000;
 const MAX_UNTRACKED_FILE_BYTES = 1024 * 1024;
 const EMPTY_DIFF_STATS: DiffStats = { files: 0, additions: 0, deletions: 0 };
 const DIFF_HEADER_PATTERN = /^diff --git (?:"a\/(.+?)"|a\/(.+?)) (?:"b\/(.+?)"|b\/(.+?))$/;
@@ -1178,7 +1178,11 @@ export async function analyzePrWork(
       const parsedData = tryParseJsonResponse(finalSummary) as
         | { documentationDrift?: unknown }
         | undefined;
-      if (parsedData?.documentationDrift && Array.isArray(parsedData.documentationDrift)) {
+      if (
+        parsedData?.documentationDrift &&
+        Array.isArray(parsedData.documentationDrift) &&
+        parsedData.documentationDrift.length > 0
+      ) {
         documentationDrift = parsedData.documentationDrift as NonNullable<
           typeof documentationDrift
         >;

@@ -7,20 +7,11 @@ import { z } from 'zod/v4';
 
 import { AppError } from '../../src/lib/errors.js';
 import {
-  AgenticSearchInputSchema,
-  AnalyzeFileInputSchema,
   AnalyzeInputSchema,
-  AnalyzeUrlInputSchema,
-  AskInputSchema,
   ChatInputSchema,
-  CompareFilesInputSchema,
-  ExecuteCodeInputSchema,
-  ExplainErrorInputSchema,
-  GenerateDiagramInputSchema,
   parseResponseSchemaJsonValue,
   ResearchInputSchema,
   ReviewInputSchema,
-  SearchInputSchema,
 } from '../../src/schemas/inputs.js';
 
 const absolutePath = (...segments: string[]) => join(process.cwd(), ...segments);
@@ -67,128 +58,6 @@ function assertSchemaIssue(
     );
   }
 }
-
-describe('AskInputSchema', () => {
-  it('accepts valid minimal input', () => {
-    const result = AskInputSchema.safeParse({ message: 'hello' });
-    assert.ok(result.success);
-  });
-
-  it('accepts googleSearch without urls', () => {
-    const result = AskInputSchema.safeParse({ message: 'hello', googleSearch: true });
-    assert.ok(result.success);
-  });
-
-  it('accepts bare message as the minimal branch', () => {
-    const result = AskInputSchema.safeParse({ message: 'hello' });
-    assert.ok(result.success);
-  });
-
-  it('accepts the url branch with urls', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'analyze these pages',
-      urls: ['https://example.com/docs'],
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects empty sessionId after trim', () => {
-    const result = AskInputSchema.safeParse({ message: 'hello', sessionId: '   ' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('accepts the full structured-output surface', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'return JSON',
-      sessionId: 'sess-1',
-      systemInstruction: 'Be concise',
-      thinkingLevel: 'LOW',
-      responseSchema: { type: 'object', properties: { answer: { type: 'string' } } },
-      temperature: 0.2,
-      seed: 42,
-      googleSearch: true,
-      urls: ['https://example.com/docs'],
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts function responses for session continuation', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'continue',
-      sessionId: 'sess-1',
-      functionResponses: [
-        {
-          id: 'call-1',
-          name: 'lookup_order',
-          response: { output: { status: 'shipped' } },
-        },
-      ],
-    });
-
-    assert.ok(result.success);
-  });
-
-  it('rejects responseSchema objects without a JSON Schema keyword', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'test',
-      responseSchema: { foo: 'bar' },
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects toolProfile (no longer a supported field)', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'analyze these pages',
-      toolProfile: 'search',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects urls below the minimum length', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'analyze these pages',
-      urls: [],
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects url arrays combined with unknown toolProfile', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'analyze these pages',
-      toolProfile: 'url',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown fields', () => {
-    const result = AskInputSchema.safeParse({ message: 'hello', extra: true });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects responseSchema required keys missing from properties', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'return JSON',
-      responseSchema: {
-        type: 'object',
-        properties: { answer: { type: 'string' } },
-        required: ['missing'],
-      },
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects duplicate required keys in responseSchema', () => {
-    const result = AskInputSchema.safeParse({
-      message: 'return JSON',
-      responseSchema: {
-        type: 'object',
-        properties: { answer: { type: 'string' } },
-        required: ['answer', 'answer'],
-      },
-    });
-    assert.strictEqual(result.success, false);
-  });
-});
 
 describe('ChatInputSchema', () => {
   it('accepts valid minimal input', () => {
@@ -506,109 +375,6 @@ describe('ChatInputSchema', () => {
   });
 });
 
-describe('ExecuteCodeInputSchema', () => {
-  it('accepts valid input', () => {
-    const result = ExecuteCodeInputSchema.safeParse({ task: 'sort an array' });
-    assert.ok(result.success);
-  });
-
-  it('accepts with language hint', () => {
-    const result = ExecuteCodeInputSchema.safeParse({
-      task: 'fibonacci',
-      language: 'python',
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects missing task', () => {
-    const result = ExecuteCodeInputSchema.safeParse({});
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects empty task', () => {
-    const result = ExecuteCodeInputSchema.safeParse({ task: '' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown fields', () => {
-    const result = ExecuteCodeInputSchema.safeParse({ task: 'sort an array', extra: true });
-    assert.strictEqual(result.success, false);
-  });
-});
-
-describe('SearchInputSchema', () => {
-  it('accepts valid input', () => {
-    const result = SearchInputSchema.safeParse({ query: 'latest Node.js version' });
-    assert.ok(result.success);
-  });
-
-  it('accepts with systemInstruction', () => {
-    const result = SearchInputSchema.safeParse({
-      query: 'weather',
-      systemInstruction: 'Be brief',
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects missing query', () => {
-    const result = SearchInputSchema.safeParse({});
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects empty query', () => {
-    const result = SearchInputSchema.safeParse({ query: '' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('accepts with urls', () => {
-    const result = SearchInputSchema.safeParse({
-      query: 'compare recipes',
-      urls: ['https://example.com/recipe1', 'https://example.com/recipe2'],
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts fileSearch', () => {
-    const result = SearchInputSchema.safeParse({
-      query: 'latest news',
-      fileSearch: { fileSearchStoreNames: ['fileSearchStores/research'] },
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts without urls (backward compatible)', () => {
-    const result = SearchInputSchema.safeParse({ query: 'latest news' });
-    assert.ok(result.success);
-  });
-
-  it('rejects invalid urls', () => {
-    const result = SearchInputSchema.safeParse({
-      query: 'test',
-      urls: ['not-a-url'],
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects private urls', () => {
-    const result = SearchInputSchema.safeParse({
-      query: 'test',
-      urls: ['http://localhost:3000'],
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects more than 20 urls', () => {
-    const urls = Array.from({ length: 21 }, (_, i) => `https://example.com/${i}`);
-    const result = SearchInputSchema.safeParse({ query: 'test', urls });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown fields', () => {
-    const result = SearchInputSchema.safeParse({ query: 'weather', extra: true });
-    assert.strictEqual(result.success, false);
-  });
-});
-
 describe('ResearchInputSchema', () => {
   it('accepts quick research input', () => {
     const result = ResearchInputSchema.safeParse({
@@ -628,7 +394,7 @@ describe('ResearchInputSchema', () => {
     });
     assert.ok(result.success);
     if (result.success) {
-      assert.strictEqual(result.data.searchDepth, 2);
+      assert.strictEqual(result.data.searchDepth, undefined);
     }
   });
 
@@ -639,15 +405,6 @@ describe('ResearchInputSchema', () => {
       extra: true,
     });
     assert.strictEqual(result.success, false);
-  });
-
-  it('allows declarative searchDepth default in quick mode', () => {
-    const result = ResearchInputSchema.safeParse({
-      mode: 'quick',
-      goal: 'test',
-      searchDepth: 3,
-    });
-    assert.strictEqual(result.success, true);
   });
 
   it('accepts URLs in deep mode and still rejects systemInstruction', () => {
@@ -689,147 +446,6 @@ describe('ResearchInputSchema', () => {
       }),
       ['systemInstruction'],
       'systemInstruction is not allowed when mode=deep.',
-    );
-  });
-});
-
-describe('AgenticSearchInputSchema', () => {
-  it('accepts valid input with topic only', () => {
-    const result = AgenticSearchInputSchema.safeParse({ topic: 'AI market trends' });
-    assert.ok(result.success);
-  });
-
-  it('accepts with searchDepth', () => {
-    const result = AgenticSearchInputSchema.safeParse({ topic: 'test', searchDepth: 5 });
-    assert.ok(result.success);
-  });
-
-  it('defaults searchDepth to 2', () => {
-    const result = AgenticSearchInputSchema.safeParse({ topic: 'test' });
-    assert.ok(result.success);
-    if (result.success) {
-      assert.strictEqual(result.data.searchDepth, 2);
-    }
-  });
-
-  it('rejects searchDepth > 5', () => {
-    const result = AgenticSearchInputSchema.safeParse({ topic: 'test', searchDepth: 6 });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects searchDepth < 1', () => {
-    const result = AgenticSearchInputSchema.safeParse({ topic: 'test', searchDepth: 0 });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects missing topic', () => {
-    const result = AgenticSearchInputSchema.safeParse({});
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects empty topic', () => {
-    const result = AgenticSearchInputSchema.safeParse({ topic: '' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('accepts with thinkingLevel', () => {
-    const result = AgenticSearchInputSchema.safeParse({ topic: 'test', thinkingLevel: 'HIGH' });
-    assert.ok(result.success);
-  });
-
-  it('accepts fileSearch', () => {
-    const result = AgenticSearchInputSchema.safeParse({
-      topic: 'test',
-      fileSearch: { fileSearchStoreNames: ['fileSearchStores/agentic'] },
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects unknown fields', () => {
-    const result = AgenticSearchInputSchema.safeParse({ topic: 'test', extra: true });
-    assert.strictEqual(result.success, false);
-  });
-});
-
-describe('AnalyzeFileInputSchema', () => {
-  it('accepts valid input', () => {
-    const result = AnalyzeFileInputSchema.safeParse({
-      filePath: absolutePath('fixtures', 'file.pdf'),
-      question: 'Summarize this document',
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts relative filePath', () => {
-    const result = AnalyzeFileInputSchema.safeParse({
-      filePath: 'fixtures/file.pdf',
-      question: 'Summarize this document',
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects empty filePath', () => {
-    const result = AnalyzeFileInputSchema.safeParse({
-      filePath: '',
-      question: 'What is this?',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects empty question', () => {
-    const result = AnalyzeFileInputSchema.safeParse({
-      filePath: absolutePath('fixtures', 'file.pdf'),
-      question: '',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects root-escaping relative filePath', () => {
-    const result = AnalyzeFileInputSchema.safeParse({
-      filePath: '../file.pdf',
-      question: 'Summarize this document',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects missing fields', () => {
-    assert.strictEqual(AnalyzeFileInputSchema.safeParse({}).success, false);
-    assert.strictEqual(AnalyzeFileInputSchema.safeParse({ filePath: '/a' }).success, false);
-    assert.strictEqual(AnalyzeFileInputSchema.safeParse({ question: 'q' }).success, false);
-  });
-
-  it('rejects the removed CURRENT_WORKSPACE_ROOT field', () => {
-    const result = AnalyzeFileInputSchema.safeParse({
-      CURRENT_WORKSPACE_ROOT: process.cwd(),
-      filePath: absolutePath('fixtures', 'file.pdf'),
-      question: 'Summarize this document',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown fields', () => {
-    const result = AnalyzeFileInputSchema.safeParse({
-      filePath: absolutePath('fixtures', 'file.pdf'),
-      question: 'Summarize this document',
-      extra: true,
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects Windows drive-relative filePath forms', () => {
-    assert.strictEqual(
-      AnalyzeFileInputSchema.safeParse({
-        filePath: 'C:temp.txt',
-        question: 'Summarize this document',
-      }).success,
-      false,
-    );
-    assert.strictEqual(
-      AnalyzeFileInputSchema.safeParse({
-        filePath: 'C:..\\temp.txt',
-        question: 'Summarize this document',
-      }).success,
-      false,
     );
   });
 });
@@ -994,7 +610,7 @@ describe('shared selector defaults', () => {
     assert.strictEqual(result.success, false);
   });
 
-  it('defaults analyze diagramType to mermaid when outputKind=diagram', () => {
+  it('leaves diagramType unset when outputKind=diagram is provided', () => {
     const result = AnalyzeInputSchema.safeParse({
       goal: 'Diagram this file',
       filePath: 'src/index.ts',
@@ -1002,7 +618,7 @@ describe('shared selector defaults', () => {
     });
     assert.ok(result.success);
     if (result.success) {
-      assert.strictEqual(result.data.diagramType, 'mermaid');
+      assert.strictEqual(result.data.diagramType, undefined);
     }
   });
 
@@ -1012,91 +628,6 @@ describe('shared selector defaults', () => {
     if (result.success) {
       assert.strictEqual(result.data.subjectKind, 'diff');
     }
-  });
-});
-
-describe('AnalyzeUrlInputSchema', () => {
-  it('accepts valid input', () => {
-    const result = AnalyzeUrlInputSchema.safeParse({
-      urls: ['https://example.com'],
-      question: 'Summarize this page',
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts multiple urls', () => {
-    const result = AnalyzeUrlInputSchema.safeParse({
-      urls: ['https://example.com/a', 'https://example.com/b'],
-      question: 'Compare these',
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts with systemInstruction', () => {
-    const result = AnalyzeUrlInputSchema.safeParse({
-      urls: ['https://example.com'],
-      question: 'Summarize',
-      systemInstruction: 'Be concise',
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts fileSearch', () => {
-    const result = AnalyzeUrlInputSchema.safeParse({
-      urls: ['https://example.com'],
-      question: 'Summarize',
-      fileSearch: { fileSearchStoreNames: ['fileSearchStores/url'] },
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects empty urls array', () => {
-    const result = AnalyzeUrlInputSchema.safeParse({
-      urls: [],
-      question: 'test',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects invalid urls', () => {
-    const result = AnalyzeUrlInputSchema.safeParse({
-      urls: ['not-a-url'],
-      question: 'test',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects more than 20 urls', () => {
-    const urls = Array.from({ length: 21 }, (_, i) => `https://example.com/${i}`);
-    const result = AnalyzeUrlInputSchema.safeParse({ urls, question: 'test' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects missing question', () => {
-    const result = AnalyzeUrlInputSchema.safeParse({ urls: ['https://example.com'] });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects empty question', () => {
-    const result = AnalyzeUrlInputSchema.safeParse({
-      urls: ['https://example.com'],
-      question: '',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects missing urls', () => {
-    const result = AnalyzeUrlInputSchema.safeParse({ question: 'test' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown fields', () => {
-    const result = AnalyzeUrlInputSchema.safeParse({
-      urls: ['https://example.com'],
-      question: 'Summarize this page',
-      extra: true,
-    });
-    assert.strictEqual(result.success, false);
   });
 });
 
@@ -1205,7 +736,7 @@ describe('AnalyzeInputSchema', () => {
     );
     assert.strictEqual(
       analyzeShape.diagramType?.description,
-      'Diagram syntax to generate when outputKind=diagram.',
+      'Diagram syntax to generate when outputKind=diagram. Defaults to mermaid.',
     );
     assert.strictEqual(
       analyzeShape.mediaResolution?.description,
@@ -1288,286 +819,6 @@ describe('ReviewInputSchema', () => {
     assert.strictEqual(
       getObjectShape(ReviewInputSchema).subjectKind.description,
       'What to review: the current diff, a file comparison, or a failure report.',
-    );
-  });
-});
-
-describe('ExplainErrorInputSchema', () => {
-  it('accepts valid minimal input', () => {
-    const result = ExplainErrorInputSchema.safeParse({ error: 'TypeError: x is not a function' });
-    assert.ok(result.success);
-  });
-
-  it('accepts with codeContext and language', () => {
-    const result = ExplainErrorInputSchema.safeParse({
-      error: 'NullPointerException',
-      codeContext: 'const x = null; x.foo();',
-      language: 'typescript',
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts with googleSearch enabled', () => {
-    const result = ExplainErrorInputSchema.safeParse({
-      error: 'ECONNREFUSED',
-      googleSearch: true,
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts with urls', () => {
-    const result = ExplainErrorInputSchema.safeParse({
-      error: 'Module not found',
-      urls: ['https://github.com/issue/123'],
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects more than 20 urls', () => {
-    const urls = Array.from({ length: 21 }, (_, i) => `https://example.com/${i}`);
-    const result = ExplainErrorInputSchema.safeParse({ error: 'test', urls });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects empty error', () => {
-    const result = ExplainErrorInputSchema.safeParse({ error: '' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects missing error', () => {
-    const result = ExplainErrorInputSchema.safeParse({});
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects invalid urls', () => {
-    const result = ExplainErrorInputSchema.safeParse({
-      error: 'test',
-      urls: ['ftp://example.com'],
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown fields', () => {
-    const result = ExplainErrorInputSchema.safeParse({
-      error: 'test',
-      extra: true,
-    });
-    assert.strictEqual(result.success, false);
-  });
-});
-describe('CompareFilesInputSchema', () => {
-  it('accepts valid minimal input', () => {
-    const result = CompareFilesInputSchema.safeParse({
-      filePathA: absolutePath('src', 'a.ts'),
-      filePathB: absolutePath('src', 'b.ts'),
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts with question', () => {
-    const result = CompareFilesInputSchema.safeParse({
-      filePathA: absolutePath('a.ts'),
-      filePathB: absolutePath('b.ts'),
-      question: 'security differences',
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts relative file paths', () => {
-    const result = CompareFilesInputSchema.safeParse({
-      filePathA: 'src/a.ts',
-      filePathB: 'src/b.ts',
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts with googleSearch', () => {
-    const result = CompareFilesInputSchema.safeParse({
-      filePathA: absolutePath('a.ts'),
-      filePathB: absolutePath('b.ts'),
-      googleSearch: true,
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects missing filePathA', () => {
-    const result = CompareFilesInputSchema.safeParse({ filePathB: '/b.ts' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects missing filePathB', () => {
-    const result = CompareFilesInputSchema.safeParse({ filePathA: absolutePath('a.ts') });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects empty filePathA', () => {
-    const result = CompareFilesInputSchema.safeParse({ filePathA: '', filePathB: '/b.ts' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects root-escaping relative file paths', () => {
-    const result = CompareFilesInputSchema.safeParse({
-      filePathA: '../a.ts',
-      filePathB: absolutePath('b.ts'),
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects the removed CURRENT_WORKSPACE_ROOT field', () => {
-    const result = CompareFilesInputSchema.safeParse({
-      CURRENT_WORKSPACE_ROOT: process.cwd(),
-      filePathA: absolutePath('a.ts'),
-      filePathB: absolutePath('b.ts'),
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown fields', () => {
-    const result = CompareFilesInputSchema.safeParse({
-      filePathA: absolutePath('a.ts'),
-      filePathB: absolutePath('b.ts'),
-      extra: true,
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects Windows drive-relative file paths', () => {
-    assert.strictEqual(
-      CompareFilesInputSchema.safeParse({
-        filePathA: 'C:temp-a.ts',
-        filePathB: absolutePath('b.ts'),
-      }).success,
-      false,
-    );
-    assert.strictEqual(
-      CompareFilesInputSchema.safeParse({
-        filePathA: absolutePath('a.ts'),
-        filePathB: 'C:..\\temp-b.ts',
-      }).success,
-      false,
-    );
-  });
-});
-describe('GenerateDiagramInputSchema', () => {
-  it('accepts valid minimal input', () => {
-    const result = GenerateDiagramInputSchema.safeParse({ description: 'auth flow' });
-    assert.ok(result.success);
-  });
-
-  it('defaults diagramType to mermaid', () => {
-    const result = GenerateDiagramInputSchema.safeParse({ description: 'test' });
-    assert.ok(result.success);
-    if (result.success) {
-      assert.strictEqual(result.data.diagramType, 'mermaid');
-    }
-  });
-
-  it('accepts with sourceFilePath', () => {
-    const result = GenerateDiagramInputSchema.safeParse({
-      description: 'class diagram',
-      sourceFilePath: absolutePath('src', 'index.ts'),
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts relative source file paths', () => {
-    const result = GenerateDiagramInputSchema.safeParse({
-      description: 'class diagram',
-      sourceFilePath: 'src/index.ts',
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts with sourceFilePaths', () => {
-    const result = GenerateDiagramInputSchema.safeParse({
-      description: 'architecture',
-      sourceFilePaths: [absolutePath('src', 'a.ts'), absolutePath('src', 'b.ts')],
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects both sourceFilePath and sourceFilePaths', () => {
-    const result = GenerateDiagramInputSchema.safeParse({
-      description: 'test',
-      sourceFilePath: absolutePath('a.ts'),
-      sourceFilePaths: [absolutePath('b.ts')],
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects more than 10 sourceFilePaths', () => {
-    const paths = Array.from({ length: 11 }, (_, i) => absolutePath(`file${i}.ts`));
-    const result = GenerateDiagramInputSchema.safeParse({
-      description: 'test',
-      sourceFilePaths: paths,
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('accepts with validateSyntax', () => {
-    const result = GenerateDiagramInputSchema.safeParse({
-      description: 'sequence diagram',
-      validateSyntax: true,
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts with googleSearch', () => {
-    const result = GenerateDiagramInputSchema.safeParse({
-      description: 'ER diagram',
-      googleSearch: true,
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects root-escaping relative source file paths', () => {
-    const result = GenerateDiagramInputSchema.safeParse({
-      description: 'test',
-      sourceFilePath: '../src/index.ts',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects empty description', () => {
-    const result = GenerateDiagramInputSchema.safeParse({ description: '' });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects missing description', () => {
-    const result = GenerateDiagramInputSchema.safeParse({});
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects the removed CURRENT_WORKSPACE_ROOT field', () => {
-    const result = GenerateDiagramInputSchema.safeParse({
-      CURRENT_WORKSPACE_ROOT: process.cwd(),
-      description: 'test',
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects unknown input fields', () => {
-    const result = GenerateDiagramInputSchema.safeParse({
-      description: 'test',
-      extra: true,
-    });
-    assert.strictEqual(result.success, false);
-  });
-
-  it('rejects Windows drive-relative source file paths', () => {
-    assert.strictEqual(
-      GenerateDiagramInputSchema.safeParse({
-        description: 'test',
-        sourceFilePath: 'C:diagram.ts',
-      }).success,
-      false,
-    );
-    assert.strictEqual(
-      GenerateDiagramInputSchema.safeParse({
-        description: 'test',
-        sourceFilePaths: ['C:..\\diagram.ts'],
-      }).success,
-      false,
     );
   });
 });

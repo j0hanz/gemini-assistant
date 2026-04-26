@@ -4,9 +4,7 @@ import { describe, it } from 'node:test';
 import { z } from 'zod/v4';
 
 import {
-  AnalyzeInputSchema,
   ChatInputSchema,
-  ResearchInputSchema,
   ReviewInputSchema,
 } from '../../src/schemas/inputs.js';
 import { GeminiResponseSchema } from '../../src/schemas/inputs.js';
@@ -82,14 +80,6 @@ describe('public input JSON Schema', () => {
     assert.strictEqual(
       jsonSchemaProperty(z.toJSONSchema(ChatInputSchema), 'temperature')?.default,
       1,
-    );
-    assert.strictEqual(
-      jsonSchemaProperty(z.toJSONSchema(ResearchInputSchema), 'searchDepth')?.default,
-      2,
-    );
-    assert.strictEqual(
-      jsonSchemaProperty(z.toJSONSchema(AnalyzeInputSchema), 'diagramType')?.default,
-      'mermaid',
     );
   });
 

@@ -465,6 +465,8 @@ function buildAnalyzeStructuredContent(
     thoughts: structured.thoughts,
     toolEvents: structured.toolEvents,
     usage: structured.usage,
+    contextUsed: structured.contextUsed,
+    computations: structured.computations,
   };
 
   if (args.outputKind === 'diagram') {

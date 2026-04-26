@@ -792,7 +792,7 @@ async function agenticSearchWork(
   {
     deliverable,
     topic,
-    searchDepth,
+    searchDepth = 2,
     thinkingLevel,
     thinkingBudget,
     urls,

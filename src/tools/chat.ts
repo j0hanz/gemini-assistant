@@ -1264,6 +1264,7 @@ function assembleChatOutput(
       finishMessage: structured.finishMessage,
       citationMetadata: structured.citationMetadata,
       contextUsed: structured.contextUsed,
+      computations: structured.computations,
       workspaceCacheApplied:
         (structured.contextUsed as ContextUsed | undefined)?.workspaceCacheApplied ?? false,
     }),

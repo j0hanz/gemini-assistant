@@ -1,15 +1,14 @@
 import { completable } from '@modelcontextprotocol/server';
 
+import type { GenerateContentConfig, SafetySetting } from '@google/genai';
 import { z } from 'zod/v4';
 import type { ParsePayload } from 'zod/v4/core';
 
 import { AppError } from '../lib/errors.js';
 
-import { getMessageMaxChars } from '../config.js';
 import {
   analyzeOutputKind,
   analyzeTargetKind,
-  createFilePairFields,
   createGenerationConfigFields,
   createUrlContextFields,
   DIAGRAM_TYPES,
@@ -19,7 +18,6 @@ import {
   optionalField,
   OptionalFileSearchSpecSchema,
   OptionalFunctionsSpecSchema,
-  requiredText,
   researchMode,
   REVIEW_SUBJECT_OPTIONS,
   ServerSideToolInvocationsSchema,
@@ -33,7 +31,6 @@ import {
   workspacePathArray,
 } from './fields.js';
 import {
-  validateExclusiveSourceFileFields,
   validateFlatAnalyzeInput,
   validateFlatResearchInput,
   validateFlatReviewInput,
@@ -253,7 +250,7 @@ const ResearchInputBaseSchema = z.strictObject({
   ),
   deliverable: optionalField(textField('Requested output form (brief, report, checklist, etc.).')),
   searchDepth: withFieldMetadata(
-    z.int().min(1).max(5).default(2).optional(),
+    z.int().min(1).max(5).optional(),
     'Search depth, default 2; deep research only when `mode=deep` is explicit.',
   ),
   thinkingLevel: thinkingLevelField,
@@ -289,8 +286,8 @@ const AnalyzeInputBaseSchema = z.strictObject({
   }),
   outputKind: analyzeOutputKind(),
   diagramType: withFieldMetadata(
-    z.enum(DIAGRAM_TYPES).default('mermaid').optional(),
-    'Diagram syntax to generate when outputKind=diagram.',
+    z.enum(DIAGRAM_TYPES).optional(),
+    'Diagram syntax to generate when outputKind=diagram. Defaults to mermaid.',
   ),
   validateSyntax: z
     .boolean()
@@ -388,145 +385,93 @@ const ReviewInputBaseSchema = z.strictObject({
 export const ReviewInputSchema = ReviewInputBaseSchema.superRefine(validateFlatReviewInput);
 export type ReviewInput = z.infer<typeof ReviewInputSchema>;
 
-function createAskInputSchema(completeSessionIds: SessionIdCompleter = () => []) {
-  const askCommonShape = {
-    message: requiredText('User message or prompt', getMessageMaxChars()),
-    sessionId: completable(
-      optionalField(sessionId('Session ID for multi-turn chat. Omit for single-turn.')),
-      completeSessionIds,
-    ),
-    systemInstruction: optionalField(
-      textField('System instructions for response style, constraints, or behavior.'),
-    ),
-    thinkingLevel: thinkingLevelField,
-    thinkingBudget: thinkingBudgetField,
-    ...generationConfigFields,
-    responseSchema: withFieldMetadata(
-      GeminiResponseSchema.optional(),
-      'JSON Schema for structured output.',
-    ),
-    temperature: temperatureField(),
-    seed: withFieldMetadata(z.int().optional(), 'Fixed random seed for reproducible outputs.'),
-    codeExecution: withFieldMetadata(
-      z.boolean().optional(),
-      'Enable native Python code execution within the chat session. Useful for math, logic, or data processing.',
-    ),
-    fileSearch: withFieldMetadata(
-      OptionalFileSearchSpecSchema,
-      'Enable Gemini File Search over named stores for retrieval-augmented chat.',
-    ),
-    functions: withFieldMetadata(
-      OptionalFunctionsSpecSchema,
-      'Typed Gemini function declarations. The MCP client owns function execution and returns function responses through the session.',
-    ),
-    functionResponses: withFieldMetadata(
-      FunctionResponsesSchema.optional(),
-      'Caller-executed Gemini function responses for an existing session. Requires sessionId and continues the model after functionCalls returned by a previous turn.',
-    ),
-    serverSideToolInvocations: ServerSideToolInvocationsSchema,
-    googleSearch: withFieldMetadata(
-      z.boolean().optional(),
-      'Enable Google Search grounding. Optional; additive. Combine with `urls` for URL Context.',
-    ),
-  };
-
-  return z.union([
-    z.strictObject({
-      ...askCommonShape,
-    }),
-    z.strictObject({
-      ...askCommonShape,
-      ...createUrlContextFields({
-        itemDescription: 'Public URL to analyze with URL Context',
-        description: 'URLs for URL Context (max 20). Enables URL Context automatically.',
-        min: 1,
-        max: 20,
-      }),
-    }),
-  ]);
+export interface AskInput {
+  message: string;
+  sessionId?: string | undefined;
+  systemInstruction?: string | undefined;
+  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | undefined;
+  thinkingBudget?: number | undefined;
+  maxOutputTokens?: number | undefined;
+  safetySettings?:
+    | {
+        category: NonNullable<SafetySetting['category']>;
+        threshold: NonNullable<SafetySetting['threshold']>;
+        method?: NonNullable<SafetySetting['method']> | undefined;
+      }[]
+    | undefined;
+  responseSchema?: GeminiResponseSchema | undefined;
+  temperature?: number | undefined;
+  seed?: number | undefined;
+  codeExecution?: boolean | undefined;
+  fileSearch?:
+    | {
+        fileSearchStoreNames: string[];
+        metadataFilter?: unknown;
+      }
+    | undefined;
+  functions?:
+    | {
+        declarations: {
+          name: string;
+          description: string;
+          parametersJsonSchema?: Record<string, unknown> | undefined;
+        }[];
+        mode?: 'AUTO' | 'ANY' | 'NONE' | 'VALIDATED' | undefined;
+      }
+    | undefined;
+  functionResponses?:
+    | {
+        name: string;
+        response: Record<string, unknown>;
+        id?: string | undefined;
+      }[]
+    | undefined;
+  serverSideToolInvocations?: 'auto' | 'always' | 'never' | undefined;
+  googleSearch?: boolean | undefined;
+  urls?: string[] | undefined;
 }
 
-export const AskInputSchema = createAskInputSchema();
-export type AskInput = z.infer<typeof AskInputSchema>;
+export interface SearchInput {
+  query: string;
+  systemInstruction?: string | undefined;
+  urls?: string[] | undefined;
+  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | undefined;
+  thinkingBudget?: number | undefined;
+  maxOutputTokens?: number | undefined;
+  safetySettings?: AskInput['safetySettings'];
+  fileSearch?: AskInput['fileSearch'];
+}
 
-export const ExecuteCodeInputSchema = z.strictObject({
-  task: requiredText('Code task to perform'),
-  language: optionalField(
-    textField(
-      'Preferred language for the generated solution. Use to steer the model toward a target language even though Gemini executes code in Python.',
-    ),
-  ),
-  thinkingLevel: thinkingLevelField,
-  thinkingBudget: thinkingBudgetField,
-});
+export interface AgenticSearchInput {
+  topic: string;
+  searchDepth?: number | undefined;
+  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | undefined;
+  thinkingBudget?: number | undefined;
+  maxOutputTokens?: number | undefined;
+  safetySettings?: AskInput['safetySettings'];
+  fileSearch?: AskInput['fileSearch'];
+}
 
-export const SearchInputSchema = z.strictObject({
-  query: requiredText('Question or topic to research'),
-  systemInstruction: optionalField(
-    textField(
-      'Instructions for how search results should be synthesized. Use for output format, audience, tone, or filtering constraints.',
-    ),
-  ),
-  ...createUrlContextFields({
-    itemDescription: 'Public URL to analyze alongside search results',
-    description: 'URLs to deeply analyze alongside search results (max 20). Enables URL Context.',
-    max: 20,
-    optional: true,
-  }),
-  thinkingLevel: thinkingLevelField,
-  thinkingBudget: thinkingBudgetField,
-  fileSearch: withFieldMetadata(
-    OptionalFileSearchSpecSchema,
-    'Enable Gemini File Search over named stores alongside web search.',
-  ),
-});
-export type SearchInput = z.infer<typeof SearchInputSchema>;
+export interface AnalyzeFileInput {
+  filePath: string;
+  question: string;
+  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | undefined;
+  thinkingBudget?: number | undefined;
+  mediaResolution?: GenerateContentConfig['mediaResolution'] | undefined;
+  maxOutputTokens?: number | undefined;
+  safetySettings?: AskInput['safetySettings'];
+}
 
-export const AgenticSearchInputSchema = z.strictObject({
-  topic: requiredText('Topic or question for deep multi-step research'),
-  searchDepth: withFieldMetadata(
-    z.int().min(1).max(5).optional().default(2),
-    'Search depth, default 2; deep research only when `mode=deep` is explicit.',
-  ),
-  thinkingLevel: thinkingLevelField,
-  thinkingBudget: thinkingBudgetField,
-  fileSearch: withFieldMetadata(
-    OptionalFileSearchSpecSchema,
-    'Enable Gemini File Search over named stores alongside agentic research.',
-  ),
-});
-export type AgenticSearchInput = z.infer<typeof AgenticSearchInputSchema>;
-
-export const AnalyzeFileInputSchema = z.strictObject({
-  filePath: workspacePath('Workspace-relative or absolute path to the file'),
-  question: requiredText('What to analyze or ask about the file'),
-  thinkingLevel: thinkingLevelField,
-  thinkingBudget: thinkingBudgetField,
-  mediaResolution: mediaResolution(
-    'Resolution for image/video processing. Higher = more detail, more tokens.',
-  ),
-});
-export type AnalyzeFileInput = z.infer<typeof AnalyzeFileInputSchema>;
-
-export const AnalyzeUrlInputSchema = z.strictObject({
-  ...createUrlContextFields({
-    itemDescription: 'Public URL to analyze',
-    description: 'URLs to analyze (max 20). Must be publicly accessible.',
-    min: 1,
-    max: 20,
-  }),
-  question: requiredText('What to analyze or ask about the URL content'),
-  systemInstruction: optionalField(
-    textField('Instructions for output presentation (format, rubric, audience).'),
-  ),
-  thinkingLevel: thinkingLevelField,
-  thinkingBudget: thinkingBudgetField,
-  fileSearch: withFieldMetadata(
-    OptionalFileSearchSpecSchema,
-    'Enable Gemini File Search over named stores alongside URL analysis.',
-  ),
-});
-export type AnalyzeUrlInput = z.infer<typeof AnalyzeUrlInputSchema>;
+export interface AnalyzeUrlInput {
+  urls: string[];
+  question: string;
+  systemInstruction?: string | undefined;
+  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | undefined;
+  thinkingBudget?: number | undefined;
+  maxOutputTokens?: number | undefined;
+  safetySettings?: AskInput['safetySettings'];
+  fileSearch?: AskInput['fileSearch'];
+}
 
 export interface AnalyzePrInput {
   dryRun?: boolean | undefined;
@@ -536,72 +481,14 @@ export interface AnalyzePrInput {
   thinkingLevel?: ReviewInput['thinkingLevel'];
 }
 
-export const ExplainErrorInputSchema = z.strictObject({
-  error: requiredText('Error message, stack trace, or log output to diagnose'),
-  codeContext: optionalField(textField('Relevant source code context.')),
-  language: optionalField(textField('Programming language hint.')),
-  thinkingLevel: thinkingLevelField,
-  thinkingBudget: thinkingBudgetField,
-  googleSearch: withFieldMetadata(
-    z.boolean().optional(),
-    'Enable Google Search to look up error messages in docs, issues, and forums.',
-  ),
-  ...createUrlContextFields({
-    itemDescription: 'Public URL for additional context',
-    description: 'URLs for additional context (docs, issues). Enables URL Context (max 20).',
-    max: 20,
-    optional: true,
-  }),
-});
-
-export const CompareFilesInputSchema = z.strictObject({
-  ...createFilePairFields(
-    'Workspace-relative or absolute path to the first file',
-    'Workspace-relative or absolute path to the second file',
-  ),
-  question: optionalField(textField('Comparison focus (e.g., API changes, behavior, security).')),
-  thinkingLevel: thinkingLevelField,
-  thinkingBudget: thinkingBudgetField,
-  googleSearch: withFieldMetadata(
-    z.boolean().optional(),
-    'Enable Google Search for best practices or migration context.',
-  ),
-  ...createUrlContextFields({
-    itemDescription: 'Public URL to include via URL Context',
-    description: 'Public URLs for additional context (max 20). Enables URL Context.',
-    max: 20,
-    optional: true,
-  }),
-});
-export type CompareFilesInput = z.infer<typeof CompareFilesInputSchema>;
-
-export const GenerateDiagramInputSchema = z
-  .strictObject({
-    description: requiredText('What to diagram: architecture, flow, sequence, etc.'),
-    diagramType: withFieldMetadata(
-      z.enum(DIAGRAM_TYPES).optional().default('mermaid'),
-      'Diagram syntax to generate. Use `mermaid` for common Markdown workflows or `plantuml` when that ecosystem is required.',
-    ),
-    sourceFilePath: workspacePath(
-      'Workspace-relative or absolute path to a single source file to derive the diagram from',
-    ).optional(),
-    sourceFilePaths: workspacePathArray({
-      description:
-        'Multiple source files to derive the diagram from. Use when architecture or flow understanding depends on more than one file.',
-      itemDescription:
-        'Workspace-relative or absolute path to a source file for diagram generation',
-      min: 1,
-      max: 10,
-      optional: true,
-    }),
-    thinkingLevel: thinkingLevelField,
-    googleSearch: withFieldMetadata(
-      z.boolean().optional(),
-      'Enable Google Search for diagram syntax help or pattern reference.',
-    ),
-    validateSyntax: withFieldMetadata(
-      z.boolean().optional(),
-      'Validate generated diagram syntax in execution sandbox.',
-    ),
-  })
-  .superRefine(validateExclusiveSourceFileFields);
+export interface CompareFilesInput {
+  filePathA: string;
+  filePathB: string;
+  question?: string | undefined;
+  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | undefined;
+  thinkingBudget?: number | undefined;
+  googleSearch?: boolean | undefined;
+  urls?: string[] | undefined;
+  maxOutputTokens?: number | undefined;
+  safetySettings?: AskInput['safetySettings'];
+}

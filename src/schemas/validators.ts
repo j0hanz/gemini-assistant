@@ -204,6 +204,7 @@ export function validateExclusiveSourceFileFields(
 }
 
 interface FlatAnalyzeInput {
+  diagramType?: string | undefined;
   filePath?: string | undefined;
   filePaths?: string[] | undefined;
   outputKind?: 'diagram' | 'summary' | undefined;
@@ -311,13 +312,14 @@ const ANALYZE_OUTPUT_RULES = [
   {
     selector: 'outputKind',
     value: 'summary',
-    forbiddenFields: ['validateSyntax'],
+    forbiddenFields: ['validateSyntax', 'diagramType'],
   },
 ] as const satisfies readonly SelectorRule<NonNullable<FlatAnalyzeInput['outputKind']>>[];
 
 interface FlatResearchInput {
   deliverable?: string | undefined;
   mode?: 'deep' | 'quick' | undefined;
+  searchDepth?: number | undefined;
   systemInstruction?: string | undefined;
 }
 
@@ -334,7 +336,7 @@ const RESEARCH_MODE_RULES = [
   {
     selector: 'mode',
     value: 'quick',
-    forbiddenFields: ['deliverable'],
+    forbiddenFields: ['deliverable', 'searchDepth'],
   },
   {
     selector: 'mode',

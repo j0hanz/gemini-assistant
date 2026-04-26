@@ -1,4 +1,4 @@
-import type { Part } from '@google/genai';
+import type { FunctionCallingConfigMode, Part } from '@google/genai';
 
 interface ResolvedTextPrompt {
   promptText: string;
@@ -31,7 +31,7 @@ export interface Capabilities {
 }
 
 interface FunctionCallingInstructionOptions {
-  mode?: 'AUTO' | 'ANY' | 'NONE' | 'VALIDATED';
+  mode?: FunctionCallingConfigMode | 'AUTO' | 'ANY' | 'NONE' | 'VALIDATED';
   declaredNames?: readonly string[];
   serverSideToolInvocations?: boolean;
 }
@@ -87,7 +87,7 @@ export function appendFunctionCallingInstruction(
     systemInstruction,
     modeInstruction,
     opts.serverSideToolInvocations === true
-      ? 'The server may execute the call. Do not fabricate function results.'
+      ? 'Gemini may return server-side built-in tool invocation traces. Declared custom functions are still executed by the MCP client/application. Do not fabricate function results.'
       : 'After issuing a call, stop and wait for the client to return the function response. Do not invent results.',
   ]);
 }

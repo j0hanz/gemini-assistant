@@ -64,7 +64,22 @@ describe('model-prompts', () => {
       [
         'Base',
         'Available functions: lookup. Function calls are schema-constrained by Gemini; the MCP client must still validate arguments before executing side effects.',
-        'The server may execute the call. Do not fabricate function results.',
+        'Gemini may return server-side built-in tool invocation traces. Declared custom functions are still executed by the MCP client/application. Do not fabricate function results.',
+      ].join('\n\n'),
+    );
+  });
+
+  it('uses distinct server-side invocation wording for built-ins versus declared functions', () => {
+    assert.strictEqual(
+      appendFunctionCallingInstruction('Base', {
+        declaredNames: ['lookup'],
+        mode: 'AUTO',
+        serverSideToolInvocations: true,
+      }),
+      [
+        'Base',
+        "Available functions: lookup. Call only when the user's request requires it.",
+        'Gemini may return server-side built-in tool invocation traces. Declared custom functions are still executed by the MCP client/application. Do not fabricate function results.',
       ].join('\n\n'),
     );
   });

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import { beforeEach, describe, it } from 'node:test';
 
-import { FinishReason } from '@google/genai';
+import { FinishReason, FunctionCallingConfigMode } from '@google/genai';
 import type { GenerateContentResponse, Part } from '@google/genai';
 import { z } from 'zod/v4';
 
@@ -432,6 +432,50 @@ describe('ToolExecutor', () => {
       assert.strictEqual(config.maxOutputTokens, 123);
       assert.strictEqual(config.abortSignal, ctx.mcpReq.signal);
       assert.deepStrictEqual(config.tools, [{ urlContext: {} }]);
+    } finally {
+      client.models.generateContentStream = originalGenerate;
+    }
+  });
+
+  it('runGeminiStream forwards resolved functionCallingMode into generateContent config', async () => {
+    const executor = createExecutor();
+    const { ctx } = makeMockContext();
+    const client = getAI();
+    const originalGenerate = client.models.generateContentStream.bind(client.models);
+    let capturedRequest: Record<string, unknown> | undefined;
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async (request: Record<string, unknown>) => {
+      capturedRequest = request;
+      return fakeStream([makeChunk([{ text: 'answer' }], FinishReason.STOP)]);
+    };
+
+    try {
+      const result = await executor.runGeminiStream(ctx, {
+        toolName: 'search',
+        label: 'Web Search',
+        orchestration: {
+          builtInToolNames: ['googleSearch'],
+          functionDeclarations: [{ name: 'lookup', parameters: { type: 'object' } }],
+        },
+        buildContents: () => ({ contents: 'prompt text' }),
+        config: {
+          costProfile: 'research.quick',
+        },
+      });
+
+      assert.strictEqual(result.isError, undefined);
+      const config = capturedRequest?.config as {
+        toolConfig?: {
+          functionCallingConfig?: { mode?: FunctionCallingConfigMode };
+          includeServerSideToolInvocations?: boolean;
+        };
+      };
+      assert.strictEqual(
+        config.toolConfig?.functionCallingConfig?.mode,
+        FunctionCallingConfigMode.VALIDATED,
+      );
+      assert.strictEqual(config.toolConfig?.includeServerSideToolInvocations, true);
     } finally {
       client.models.generateContentStream = originalGenerate;
     }

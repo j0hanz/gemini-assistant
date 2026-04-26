@@ -1,11 +1,7 @@
 import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 
-import type {
-  FunctionCallingConfigMode,
-  FunctionDeclaration,
-  ToolConfig,
-  ToolListUnion,
-} from '@google/genai';
+import { FunctionCallingConfigMode } from '@google/genai';
+import type { FunctionDeclaration, ToolConfig, ToolListUnion } from '@google/genai';
 
 import { AppError } from './errors.js';
 import { logger, mcpLog } from './logger.js';
@@ -100,6 +96,7 @@ export interface OrchestrationRequest {
   builtInToolNames?: readonly BuiltInToolName[] | undefined;
   functionDeclarations?: readonly FunctionDeclaration[] | undefined;
   functionCallingMode?: FunctionCallingConfigMode | undefined;
+  responseSchemaRequested?: boolean | undefined;
   serverSideToolInvocations?: ServerSideToolInvocationsPolicy | undefined;
   urls?: readonly string[] | undefined;
 }
@@ -111,6 +108,7 @@ export interface CommonToolInputs {
   fileSearch?: { fileSearchStoreNames: readonly string[]; metadataFilter?: unknown } | undefined;
   functionDeclarations?: readonly FunctionDeclaration[] | undefined;
   functionCallingMode?: FunctionCallingConfigMode | undefined;
+  responseSchemaRequested?: boolean | undefined;
   serverSideToolInvocations?: ServerSideToolInvocationsPolicy | undefined;
   extraBuiltInToolSpecs?: readonly BuiltInToolSpec[] | undefined;
 }
@@ -139,6 +137,9 @@ export function buildOrchestrationRequestFromInputs(input: CommonToolInputs): Or
       : {}),
     ...(input.functionCallingMode !== undefined
       ? { functionCallingMode: input.functionCallingMode }
+      : {}),
+    ...(input.responseSchemaRequested !== undefined
+      ? { responseSchemaRequested: input.responseSchemaRequested }
       : {}),
     ...(input.serverSideToolInvocations !== undefined
       ? { serverSideToolInvocations: input.serverSideToolInvocations }
@@ -183,6 +184,23 @@ export function resolveServerSideToolInvocations(
   return hasBuiltIn && hasFunctions ? true : undefined;
 }
 
+function resolveFunctionCallingMode(
+  explicitMode: FunctionCallingConfigMode | undefined,
+  activeCapabilities: ReadonlySet<string>,
+  responseSchemaRequested: boolean | undefined,
+): FunctionCallingConfigMode | undefined {
+  if (explicitMode !== undefined) {
+    return explicitMode;
+  }
+  if (!activeCapabilities.has('functions')) {
+    return undefined;
+  }
+  const hasBuiltIn = BUILT_IN_TOOL_NAMES.some((name) => activeCapabilities.has(name));
+  return hasBuiltIn || responseSchemaRequested === true
+    ? FunctionCallingConfigMode.VALIDATED
+    : undefined;
+}
+
 export function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationConfig {
   const specs = request.builtInToolSpecs ?? specsFromNames(request.builtInToolNames ?? []);
   const builtInTools = buildBuiltInTools(specs);
@@ -211,13 +229,16 @@ export function buildOrchestrationConfig(request: OrchestrationRequest): Orchest
     request.serverSideToolInvocations,
     activeCapabilities,
   );
+  const functionCallingMode = resolveFunctionCallingMode(
+    request.functionCallingMode,
+    activeCapabilities,
+    request.responseSchemaRequested,
+  );
 
   const toolProfileDetails: ToolProfileDetails = {
     ...(fileSearchStoreCount !== undefined ? { fileSearchStoreCount } : {}),
     ...(functionCount !== undefined && functionCount > 0 ? { functionCount } : {}),
-    ...(request.functionCallingMode !== undefined
-      ? { functionCallingMode: request.functionCallingMode }
-      : {}),
+    ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
     ...(includeServerSideToolInvocations === true ? { serverSideToolInvocations: true } : {}),
   };
 
@@ -231,8 +252,8 @@ export function buildOrchestrationConfig(request: OrchestrationRequest): Orchest
     config.toolConfig = { includeServerSideToolInvocations: true };
   }
 
-  if (request.functionCallingMode !== undefined) {
-    config.functionCallingMode = request.functionCallingMode;
+  if (functionCallingMode !== undefined) {
+    config.functionCallingMode = functionCallingMode;
   }
 
   if (tools.length > 0) {

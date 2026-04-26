@@ -308,6 +308,7 @@ export class ToolExecutor {
             {
               systemInstruction,
               ...request.config,
+              functionCallingMode: resolved.config.functionCallingMode,
               tools: resolved.config.tools,
               toolConfig: resolved.config.toolConfig,
             },

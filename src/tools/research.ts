@@ -665,9 +665,16 @@ async function runDeepResearchPlan(
   );
   if (resolvedSynthesis.error) return resolvedSynthesis.error;
   const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
+  const synthesisCanRetrieve =
+    resolvedSynthesis.config.activeCapabilities.has('googleSearch') ||
+    resolvedSynthesis.config.activeCapabilities.has('urlContext') ||
+    resolvedSynthesis.config.activeCapabilities.has('fileSearch');
 
   const synthesisPrompt = buildAgenticResearchPrompt({
-    capabilities: buildPromptCapabilities(resolvedSynthesis.config.activeCapabilities, true),
+    capabilities: buildPromptCapabilities(
+      resolvedSynthesis.config.activeCapabilities,
+      synthesisCanRetrieve,
+    ),
     deliverable: args.deliverable,
     topic: `${args.topic}\n\nRetrieved evidence summaries:\n${retrievalSummaries}`,
     urls: args.urls,

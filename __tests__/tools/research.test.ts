@@ -636,6 +636,51 @@ describe('research tool contracts', () => {
     }
   });
 
+  it('does not advertise multi-turn retrieval during deep synthesis when synthesis has only code execution', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+    const calls: Record<string, unknown>[] = [];
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async (request: Record<string, unknown>) => {
+      calls.push(request);
+      return fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'Deep research report' }] },
+              finishReason: 'STOP',
+            },
+          ],
+        },
+      ]);
+    };
+
+    try {
+      await research.createTask(
+        {
+          goal: 'compare approaches',
+          mode: 'deep',
+          searchDepth: 4,
+        },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+
+      const synthesisConfig = calls.find((entry) =>
+        String(entry.contents).includes('Retrieved evidence summaries:'),
+      )?.config as Record<string, unknown> | undefined;
+      assert.deepStrictEqual(synthesisConfig?.tools, [{ codeExecution: {} }]);
+      const systemInstruction = synthesisConfig?.systemInstruction;
+      assert.strictEqual(typeof systemInstruction, 'string');
+      assert.doesNotMatch(systemInstruction, /multiple searches/i);
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
   it('makes searchDepth change the number of Gemini stream calls', async () => {
     const { research } = getHandlers();
     const store = makeMockStore();

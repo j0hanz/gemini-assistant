@@ -389,6 +389,7 @@ function buildChatOrchestrationRequest(args: AskArgs) {
     ...(args.functions?.mode !== undefined
       ? { functionCallingMode: toFunctionCallingConfigMode(args.functions.mode) }
       : {}),
+    ...(args.responseSchema !== undefined ? { responseSchemaRequested: true } : {}),
     ...(args.serverSideToolInvocations !== undefined
       ? { serverSideToolInvocations: args.serverSideToolInvocations }
       : {}),
@@ -583,7 +584,7 @@ function buildAskGenerationOptions(
   return {
     ...args,
     systemInstruction: appendFunctionCallingInstruction(args.systemInstruction, {
-      ...(args.functions?.mode !== undefined ? { mode: args.functions.mode } : {}),
+      ...(functionCallingMode !== undefined ? { mode: functionCallingMode } : {}),
       declaredNames: args.functions?.declarations.map((declaration) => declaration.name) ?? [],
       serverSideToolInvocations,
     }),

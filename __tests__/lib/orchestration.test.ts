@@ -107,6 +107,92 @@ describe('buildOrchestrationConfig', () => {
     assert.strictEqual(result.functionCallingMode, FunctionCallingConfigMode.ANY);
   });
 
+  it('defaults functionCallingMode to VALIDATED for functions paired with built-ins or structured output', () => {
+    const declarations = [{ name: 'lookup', parameters: { type: 'object' } }];
+    const cases = [
+      {
+        label: 'googleSearch',
+        request: { builtInToolNames: ['googleSearch'] as const },
+      },
+      {
+        label: 'urlContext',
+        request: { builtInToolNames: ['urlContext'] as const },
+      },
+      {
+        label: 'codeExecution',
+        request: { builtInToolNames: ['codeExecution'] as const },
+      },
+      {
+        label: 'fileSearch',
+        request: {
+          builtInToolSpecs: [{ kind: 'fileSearch' as const, fileSearchStoreNames: ['stores/a'] }],
+        },
+      },
+      {
+        label: 'responseSchemaRequested',
+        request: { responseSchemaRequested: true },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = buildOrchestrationConfig({
+        ...testCase.request,
+        functionDeclarations: declarations,
+      });
+      assert.strictEqual(
+        result.functionCallingMode,
+        FunctionCallingConfigMode.VALIDATED,
+        testCase.label,
+      );
+      assert.strictEqual(
+        result.toolProfileDetails.functionCallingMode,
+        FunctionCallingConfigMode.VALIDATED,
+        testCase.label,
+      );
+    }
+  });
+
+  it('keeps explicit functionCallingMode values over implicit VALIDATED defaults', () => {
+    const declarations = [{ name: 'lookup', parameters: { type: 'object' } }];
+    const explicitModes = [
+      FunctionCallingConfigMode.AUTO,
+      FunctionCallingConfigMode.ANY,
+      FunctionCallingConfigMode.NONE,
+      FunctionCallingConfigMode.VALIDATED,
+    ];
+
+    for (const mode of explicitModes) {
+      const result = buildOrchestrationConfig({
+        builtInToolNames: ['googleSearch'],
+        functionDeclarations: declarations,
+        functionCallingMode: mode,
+        responseSchemaRequested: true,
+      });
+      assert.strictEqual(result.functionCallingMode, mode);
+      assert.strictEqual(result.toolProfileDetails.functionCallingMode, mode);
+    }
+  });
+
+  it('does not default functionCallingMode when only declared functions are present', () => {
+    const result = buildOrchestrationConfig({
+      functionDeclarations: [{ name: 'lookup', parameters: { type: 'object' } }],
+    });
+    assert.strictEqual(result.functionCallingMode, undefined);
+    assert.strictEqual(result.toolProfileDetails.functionCallingMode, undefined);
+  });
+
+  it('does not change auto server-side invocation policy when only structured output is added', () => {
+    const result = buildOrchestrationConfig({
+      functionDeclarations: [{ name: 'lookup', parameters: { type: 'object' } }],
+      responseSchemaRequested: true,
+      serverSideToolInvocations: 'auto',
+    });
+
+    assert.strictEqual(result.functionCallingMode, FunctionCallingConfigMode.VALIDATED);
+    assert.strictEqual(result.toolConfig, undefined);
+    assert.strictEqual(result.toolProfileDetails.serverSideToolInvocations, undefined);
+  });
+
   it('builds fileSearch from typed built-in specs', () => {
     const result = buildOrchestrationConfig({
       builtInToolSpecs: [{ kind: 'fileSearch', fileSearchStoreNames: ['fileSearchStores/docs'] }],
@@ -273,10 +359,12 @@ describe('buildOrchestrationRequestFromInputs', () => {
     const req = buildOrchestrationRequestFromInputs({
       functionDeclarations: [{ name: 'a' }, { name: 'b' }, { name: 'c' }],
       functionCallingMode: FunctionCallingConfigMode.VALIDATED,
+      responseSchemaRequested: true,
       serverSideToolInvocations: 'always',
     });
     assert.strictEqual(req.functionDeclarations?.length, 3);
     assert.strictEqual(req.functionCallingMode, FunctionCallingConfigMode.VALIDATED);
+    assert.strictEqual(req.responseSchemaRequested, true);
     assert.strictEqual(req.serverSideToolInvocations, 'always');
   });
 

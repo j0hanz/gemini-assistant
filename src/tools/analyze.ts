@@ -48,34 +48,6 @@ interface AnalyzeDiagramInput {
   validateSyntax?: boolean | undefined;
 }
 
-function requireAnalyzeField<T>(
-  value: T | undefined,
-  field: string,
-  discriminator: string,
-  kind: string,
-): T {
-  if (value === undefined) {
-    throw new Error(`AnalyzeInput validation requires ${field} when ${discriminator}=${kind}.`);
-  }
-  return value;
-}
-
-function requireAnalyzeFilePath(args: AnalyzeInput): string {
-  return requireAnalyzeField(args.filePath, 'filePath', 'targetKind', 'file');
-}
-
-function requireAnalyzeUrls(args: AnalyzeInput): string[] {
-  return requireAnalyzeField(args.urls, 'urls', 'targetKind', 'url');
-}
-
-function requireAnalyzeFilePaths(args: AnalyzeInput): string[] {
-  return requireAnalyzeField(args.filePaths, 'filePaths', 'targetKind', 'multi');
-}
-
-function requireAnalyzeDiagramType(args: AnalyzeInput): 'mermaid' | 'plantuml' {
-  return requireAnalyzeField(args.diagramType, 'diagramType', 'outputKind', 'diagram');
-}
-
 const UNLABELED_DIAGRAM_FENCED_PATTERN = /```\s*\n([\s\S]*?)```/;
 
 export function buildDiagramFencePattern(diagramType: 'mermaid' | 'plantuml'): RegExp {
@@ -407,7 +379,7 @@ async function runAnalyzeTarget(
   if (args.targetKind === 'file') {
     return await fileWork(
       {
-        filePath: requireAnalyzeFilePath(args),
+        filePath: args.filePath,
         question: args.goal,
         thinkingLevel: args.thinkingLevel,
         thinkingBudget: args.thinkingBudget,
@@ -424,7 +396,7 @@ async function runAnalyzeTarget(
   if (args.targetKind === 'url') {
     return await analyzeUrlWork(
       {
-        urls: requireAnalyzeUrls(args),
+        urls: args.urls,
         question: args.goal,
         thinkingLevel: args.thinkingLevel,
         thinkingBudget: args.thinkingBudget,
@@ -439,7 +411,7 @@ async function runAnalyzeTarget(
   return await analyzeMultiFileWork(
     rootsFetcher,
     workspaceCacheManager,
-    requireAnalyzeFilePaths(args),
+    args.filePaths,
     args.goal,
     args.thinkingLevel,
     ctx,
@@ -462,8 +434,8 @@ function getExplanationString(explanation: unknown): string | undefined {
 }
 
 function getAnalyzedPaths(args: AnalyzeInput): string[] | undefined {
-  if (args.targetKind === 'file') return [requireAnalyzeFilePath(args)];
-  if (args.targetKind === 'multi') return requireAnalyzeFilePaths(args);
+  if (args.targetKind === 'file') return [args.filePath];
+  if (args.targetKind === 'multi') return args.filePaths;
   return undefined;
 }
 
@@ -483,7 +455,7 @@ function buildAnalyzeStructuredContent(
   };
 
   if (args.outputKind === 'diagram') {
-    const diagramType = requireAnalyzeDiagramType(args);
+    const diagramType = args.diagramType ?? 'mermaid';
 
     return pickDefined({
       ...buildSuccessfulStructuredContent({
@@ -512,7 +484,7 @@ function buildAnalyzeStructuredContent(
         summary: typeof structured.summary === 'string' ? structured.summary : '',
         groundingSignals: structured.groundingSignals,
         urlMetadata: structured.urlMetadata,
-        analyzedPaths: args.targetKind === 'multi' ? requireAnalyzeFilePaths(args) : undefined,
+        analyzedPaths: args.targetKind === 'multi' ? args.filePaths : undefined,
       },
       shared: base,
     }),

@@ -17,7 +17,7 @@ import {
   getSafetySettings,
   getThinkingBudgetCap,
 } from './config.js';
-import { type AskThinkingLevel } from './public-contract.js';
+import type { AskThinkingLevel } from './public-contract.js';
 
 // ── Config Utilities ──────────────────────────────────────────────────
 

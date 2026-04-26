@@ -3,7 +3,11 @@ import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server
 
 import { randomUUID } from 'node:crypto';
 
-import type { ContentListUnion, GenerateContentConfig } from '@google/genai';
+import type {
+  ContentListUnion,
+  GenerateContentConfig,
+  GenerateContentResponse,
+} from '@google/genai';
 
 import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getExposeThoughts, getGeminiModel } from '../config.js';
@@ -187,7 +191,7 @@ export class ToolExecutor {
       initialMsg: string;
       logMessage?: string;
       logData?: unknown;
-      generator: () => Promise<AsyncGenerator<import('@google/genai').GenerateContentResponse>>;
+      generator: () => Promise<AsyncGenerator<GenerateContentResponse>>;
       responseBuilder?: StreamResponseBuilder<T>;
     },
   ): Promise<CallToolResult> {
@@ -213,7 +217,7 @@ export class ToolExecutor {
     ctx: ServerContext,
     toolName: string,
     toolLabel: string,
-    streamGenerator: () => Promise<AsyncGenerator<import('@google/genai').GenerateContentResponse>>,
+    streamGenerator: () => Promise<AsyncGenerator<GenerateContentResponse>>,
     responseBuilder: StreamResponseBuilder<T> = () => ({}),
   ): Promise<CallToolResult> {
     return this.executeWithTracing(

@@ -7,8 +7,8 @@ import { basename, isAbsolute, join } from 'node:path';
 import type { ContextSourceReport, ContextUsed } from '../schemas/outputs.js';
 
 import { DEFAULT_SYSTEM_INSTRUCTION, getAI } from '../client.js';
-import { getGeminiModel } from '../config.js';
 import {
+  getGeminiModel,
   getWorkspaceAutoScan,
   getWorkspaceCacheEnabled,
   getWorkspaceCacheTtl,

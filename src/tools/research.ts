@@ -26,7 +26,6 @@ import {
   selectSearchAndUrlContextTools,
 } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
-import { pickDefined } from '../lib/response.js';
 import {
   appendSearchEntryPointContent,
   appendSources,
@@ -49,6 +48,7 @@ import {
   formatCountLabel,
   formatSourceLabels,
   mergeSourceDetails,
+  pickDefined,
   safeValidateStructuredContent,
 } from '../lib/response.js';
 import {
@@ -919,7 +919,7 @@ async function runDeepResearch(
   workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
   const searchDepth = args.searchDepth ?? 2;
-  const hasExplicitThinkingLevel = Object.prototype.hasOwnProperty.call(args, 'thinkingLevel');
+  const hasExplicitThinkingLevel = Object.hasOwn(args, 'thinkingLevel');
   const thinkingLevel = hasExplicitThinkingLevel ? args.thinkingLevel : undefined;
 
   return await agenticSearchWork(

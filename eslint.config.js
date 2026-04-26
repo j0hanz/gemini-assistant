@@ -2,87 +2,203 @@ import eslint from '@eslint/js';
 import eslintConfigPrettier from 'eslint-config-prettier/flat';
 import tseslint from 'typescript-eslint';
 
+const sourceFiles = ['src/**/*.ts'];
+const testFiles = ['__tests__/**/*.ts'];
+const jsConfigFiles = ['**/*.js', '**/*.mjs'];
+
+const nodeBuiltins = [
+  'assert',
+  'buffer',
+  'child_process',
+  'cluster',
+  'console',
+  'crypto',
+  'dns',
+  'events',
+  'fs',
+  'fs/promises',
+  'http',
+  'http2',
+  'https',
+  'module',
+  'net',
+  'os',
+  'path',
+  'perf_hooks',
+  'process',
+  'querystring',
+  'readline',
+  'stream',
+  'stream/promises',
+  'string_decoder',
+  'timers',
+  'timers/promises',
+  'tls',
+  'tty',
+  'url',
+  'util',
+  'v8',
+  'vm',
+  'worker_threads',
+  'zlib',
+];
+
 export default tseslint.config(
-  // Base JS recommended
-  eslint.configs.recommended,
-
-  // TypeScript strict + type-checked rules
-  tseslint.configs.strictTypeChecked,
-  tseslint.configs.stylisticTypeChecked,
-
-  // Type-aware parser options
   {
-    languageOptions: {
-      parserOptions: {
-        projectService: {
-          allowDefaultProject: ['*.js', '*.mjs'],
-        },
-        tsconfigRootDir: import.meta.dirname,
-      },
+    ignores: ['dist/**', 'dist-test/**', 'coverage/**', 'node_modules/**', '.agents/**', 'logs/**'],
+  },
+
+  {
+    linterOptions: {
+      reportUnusedDisableDirectives: 'error',
+      reportUnusedInlineConfigs: 'error',
     },
   },
 
-  // Project-specific rule overrides
+  {
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+    },
+  },
+
+  eslint.configs.recommended,
+  tseslint.configs.strictTypeChecked,
+  tseslint.configs.stylisticTypeChecked,
+
+  // Project-wide rule defaults applied to both src and tests.
   {
     rules: {
-      // Allow console.error (required for MCP stdio servers — stdout is reserved for JSON-RPC)
-      'no-console': ['error', { allow: ['error'] }],
-
-      // Relax for this codebase: catch blocks often use unknown
+      // Catch blocks frequently use `unknown`; numbers are safe to interpolate.
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
 
-      // Allow void for fire-and-forget promises (e.g. file cleanup in finally blocks)
-      '@typescript-eslint/no-floating-promises': ['error', { ignoreVoid: true }],
-
-      // Allow unused vars with _ prefix (common pattern for destructuring)
+      // Allow `_`-prefixed args/vars/caught-errors as the deliberate unused-marker convention.
       '@typescript-eslint/no-unused-vars': [
         'error',
         {
           argsIgnorePattern: '^_',
           varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          ignoreRestSiblings: true,
         },
       ],
     },
   },
 
-  // Test files: disable projectService, use explicit project + relaxed rules
   {
-    files: ['__tests__/**/*.ts'],
+    files: sourceFiles,
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      // TypeScript already checks undefined identifiers; ESLint core no-undef adds noise in TS projects.
+      'no-undef': 'off',
+
+      // MCP stdio servers must not write protocol-breaking logs to stdout.
+      'no-console': ['error', { allow: ['error'] }],
+
+      // Enforce node: protocol for Node.js built-ins.
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: nodeBuiltins.map((name) => ({
+            name,
+            message: `Use the node: protocol for Node.js built-ins, e.g. node:${name}.`,
+          })),
+        },
+      ],
+
+      // Catches accidental split value imports while still allowing separate type imports.
+      'no-duplicate-imports': [
+        'error',
+        {
+          includeExports: true,
+          allowSeparateTypeImports: true,
+        },
+      ],
+
+      // Low-noise correctness/style rules for server code.
+      curly: ['error', 'all'],
+      eqeqeq: ['error', 'always', { null: 'ignore' }],
+      'no-implicit-coercion': 'error',
+      'no-template-curly-in-string': 'error',
+      'no-var': 'error',
+      'object-shorthand': ['error', 'always'],
+      'prefer-const': ['error', { destructuring: 'all' }],
+      'prefer-object-has-own': 'error',
+
+      // TypeScript-specific discipline.
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        {
+          prefer: 'type-imports',
+          fixStyle: 'separate-type-imports',
+        },
+      ],
+      '@typescript-eslint/consistent-type-exports': 'error',
+      '@typescript-eslint/no-import-type-side-effects': 'error',
+
+      // Fire-and-forget promises must be explicit with void.
+      '@typescript-eslint/no-floating-promises': ['error', { ignoreVoid: true, ignoreIIFE: true }],
+
+      // Express/MCP route handlers often pass async callbacks to APIs typed as void callbacks.
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        {
+          checksVoidReturn: {
+            arguments: false,
+            attributes: false,
+          },
+        },
+      ],
+
+      // Useful for protocol enums, transport modes, Gemini finish reasons, tool profiles, etc.
+      // Allow default cases (this codebase uses `assertNever(...)` defensively).
+      '@typescript-eslint/switch-exhaustiveness-check': [
+        'error',
+        {
+          allowDefaultCaseForExhaustiveSwitch: true,
+          requireDefaultForNonUnion: false,
+        },
+      ],
+    },
+  },
+
+  {
+    files: testFiles,
     languageOptions: {
       parserOptions: {
         projectService: false,
         project: './tsconfig.test.json',
+        tsconfigRootDir: import.meta.dirname,
       },
     },
     rules: {
-      // describe/it return promises in Node's test runner — top-level floating is expected
+      'no-undef': 'off',
+
+      // Tests need looser ergonomics for mocks, fixtures, assertions, and deliberate edge cases.
       '@typescript-eslint/no-floating-promises': 'off',
-      // Mock stubs are often empty
       '@typescript-eslint/no-empty-function': 'off',
-      // Mock callbacks often don't need await
       '@typescript-eslint/require-await': 'off',
-      // Test assertions use bracket notation for flexibility
       '@typescript-eslint/dot-notation': 'off',
-      // doesNotThrow expects void-returning callbacks
       '@typescript-eslint/no-confusing-void-expression': 'off',
-      // Test assertions with mock data may use unsafe types
       '@typescript-eslint/no-unsafe-argument': 'off',
-      // Unnecessary condition checks after assert.ok() are fine in tests
+      '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unnecessary-condition': 'off',
     },
   },
 
-  // Disable type-checked rules for JS config files
   {
-    files: ['**/*.js', '**/*.mjs'],
+    files: jsConfigFiles,
     ...tseslint.configs.disableTypeChecked,
+    rules: {
+      ...tseslint.configs.disableTypeChecked.rules,
+      'no-undef': 'off',
+    },
   },
 
-  // Prettier must be last — turns off conflicting formatting rules
   eslintConfigPrettier,
-
-  // Global ignores
-  {
-    ignores: ['dist/**', 'node_modules/**', '.agents/**'],
-  },
 );

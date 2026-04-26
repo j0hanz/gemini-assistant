@@ -349,7 +349,7 @@ export function buildReplayHistoryParts(parts: Part[]): Part[] {
 export function buildTranscriptParts(parts: Part[]): Part[] {
   return parts.filter((part) => {
     if (part.thought === true) return false;
-    return !!part.text || !!part.inlineData || !!part.fileData;
+    return Boolean(part.text) || Boolean(part.inlineData) || Boolean(part.fileData);
   });
 }
 

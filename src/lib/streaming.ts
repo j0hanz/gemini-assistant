@@ -1,8 +1,8 @@
 import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 
-import { FinishReason } from '@google/genai';
 import type {
   BlockedReason,
+  FinishReason,
   GenerateContentResponse,
   GenerateContentResponsePromptFeedback,
   GenerateContentResponseUsageMetadata,
@@ -13,10 +13,10 @@ import type {
 
 import { AppError, finishReasonToError, withRetry } from './errors.js';
 import { mcpLog } from './logger.js';
-import { advanceProgress, PROGRESS_TOTAL, sendProgress } from './progress.js';
+import { advanceProgress, PROGRESS_CAP, PROGRESS_TOTAL, sendProgress } from './progress.js';
 import { pickDefined, promptBlockedError } from './response.js';
 
-export { advanceProgress, PROGRESS_CAP, PROGRESS_TOTAL } from './progress.js';
+export { advanceProgress, PROGRESS_CAP, PROGRESS_TOTAL };
 
 export interface FunctionCallEntry {
   id?: string;
@@ -274,6 +274,9 @@ async function recordToolActivity(
 }
 
 function normalizeToolName(toolType: string | undefined): string | undefined {
+  if (toolType === undefined) {
+    return undefined;
+  }
   switch (toolType) {
     case 'GOOGLE_SEARCH':
     case 'GOOGLE_SEARCH_WEB':
@@ -289,7 +292,7 @@ function normalizeToolName(toolType: string | undefined): string | undefined {
     case 'COMPUTER_USE':
       return 'computerUse';
     default:
-      return toolType?.trim() ? toolType : undefined;
+      return toolType.trim() ? toolType : undefined;
   }
 }
 

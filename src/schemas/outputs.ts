@@ -1,5 +1,6 @@
 import { z } from 'zod/v4';
 
+import type { SearchEntryPointSchema } from './fields.js';
 import {
   UsageMetadataSchema as BaseUsageMetadataSchema,
   DIAGRAM_TYPES,
@@ -13,7 +14,6 @@ import {
   publicHttpUrlArray,
   RESEARCH_MODE_OPTIONS,
   REVIEW_SUBJECT_OPTIONS,
-  SearchEntryPointSchema,
   SourceDetailSchema,
   UrlMetadataEntrySchema,
 } from './fields.js';

@@ -14,8 +14,7 @@ import type { z } from 'zod/v4';
 
 import { withUploadsAndPipeline } from '../lib/file.js';
 import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
-import { buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
-import { buildDiffReviewPrompt } from '../lib/model-prompts.js';
+import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { ProgressReporter } from '../lib/progress.js';
 import {
   buildSuccessfulStructuredContent,
@@ -25,7 +24,7 @@ import {
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
-import { type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
+import type { WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import { SCAN_FILE_NAMES } from '../lib/workspace-context.js';
 import {
   type AnalyzePrInput,

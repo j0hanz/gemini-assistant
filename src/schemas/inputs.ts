@@ -36,9 +36,9 @@ import {
   validateFlatAnalyzeInput,
   validateFlatResearchInput,
   validateFlatReviewInput,
+  validateGeminiJsonSchema,
   validatePropertyKeyList,
 } from './validators.js';
-import { validateGeminiJsonSchema } from './validators.js';
 
 const JSON_LITERAL_SCHEMA = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 

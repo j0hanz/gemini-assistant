@@ -78,7 +78,7 @@ function buildBuiltInTools(specs: readonly BuiltInToolSpec[]): ToolListUnion {
 }
 
 function hasTool(tools: ToolListUnion, key: BuiltInToolName): boolean {
-  return tools.some((tool) => Object.prototype.hasOwnProperty.call(tool, key));
+  return tools.some((tool) => Object.hasOwn(tool, key));
 }
 
 export function buildToolProfile(tools: ToolListUnion | undefined): string {

@@ -24,12 +24,12 @@ import {
   resolveOrchestration,
 } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
-import { pickDefined } from '../lib/response.js';
 import {
   buildBaseStructuredOutput,
   buildSharedStructuredMetadata,
   createResourceLink,
   extractTextContent,
+  pickDefined,
   safeValidateStructuredContent,
   tryParseJsonResponse,
   withRelatedTaskMeta,
@@ -49,7 +49,7 @@ import {
   buildSessionSummary,
   emptyContextUsed,
 } from '../lib/workspace-context.js';
-import { type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
+import type { WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import {
   type AskInput,
   type ChatInput,
@@ -57,7 +57,7 @@ import {
   parseResponseSchemaJsonValue,
   type WithChatDefaults,
 } from '../schemas/inputs.js';
-import { type GeminiResponseSchema } from '../schemas/inputs.js';
+import type { GeminiResponseSchema } from '../schemas/inputs.js';
 import { ChatOutputSchema, type ContextUsed, type UsageMetadata } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, DEFAULT_TEMPERATURE, getAI } from '../client.js';
@@ -90,7 +90,7 @@ import {
   type TranscriptEntry,
 } from '../sessions.js';
 
-export { appendToolResponseTurn, buildRebuiltChatContents } from '../sessions.js';
+export { appendToolResponseTurn, buildRebuiltChatContents };
 
 type ChatWorkInput = WithChatDefaults<ChatInput>;
 export type AskArgs = WithChatDefaults<AskInput> & {
@@ -310,7 +310,7 @@ function hasExpiredSession(
   sessionId: string | undefined,
   deps: Pick<AskDependencies, 'isEvicted'>,
 ): boolean {
-  return !!sessionId && deps.isEvicted(sessionId);
+  return sessionId !== undefined && deps.isEvicted(sessionId);
 }
 
 function getAskUrls(args: AskArgs): readonly string[] | undefined {
@@ -645,7 +645,7 @@ export async function askWithoutSession(
     };
   }
   const { prompt, toolConfig, toolProfile, tools, urls, functionCallingMode } = resolved;
-  const jsonMode = !!args.responseSchema;
+  const jsonMode = Boolean(args.responseSchema);
   const config = buildGenerateContentConfig(
     {
       ...buildAskGenerationOptions(args, toolConfig, tools, functionCallingMode),

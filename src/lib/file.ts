@@ -6,9 +6,8 @@ import { extname } from 'node:path';
 import { createPartFromUri, type Part } from '@google/genai';
 
 import { getAI } from '../client.js';
-import { cleanupErrorLogger } from './errors.js';
-import { withRetry } from './errors.js';
-import { ProgressReporter } from './progress.js';
+import { cleanupErrorLogger, withRetry } from './errors.js';
+import type { ProgressReporter } from './progress.js';
 import type { RootsFetcher } from './validation.js';
 import { resolveWorkspacePath } from './validation.js';
 

@@ -10,22 +10,18 @@ import type { z } from 'zod/v4';
 
 import { withUploadsAndPipeline } from '../lib/file.js';
 import { mcpLog } from '../lib/logger.js';
-import { buildFileAnalysisPrompt } from '../lib/model-prompts.js';
-import { buildDiagramGenerationPrompt } from '../lib/model-prompts.js';
-import {
-  type BuiltInToolName,
-  type ServerSideToolInvocationsPolicy,
-} from '../lib/orchestration.js';
+import { buildDiagramGenerationPrompt, buildFileAnalysisPrompt } from '../lib/model-prompts.js';
+import type { BuiltInToolName, ServerSideToolInvocationsPolicy } from '../lib/orchestration.js';
 import { ProgressReporter } from '../lib/progress.js';
-import { pickDefined } from '../lib/response.js';
 import {
   buildSuccessfulStructuredContent,
+  pickDefined,
   safeValidateStructuredContent,
 } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import { executor } from '../lib/tool-executor.js';
 import { buildServerRootsFetcher, type RootsFetcher } from '../lib/validation.js';
-import { type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
+import type { WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
 import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 

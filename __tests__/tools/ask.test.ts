@@ -19,6 +19,15 @@ import {
   createDefaultAskDependencies,
 } from '../../src/tools/chat.js';
 
+// Disable workspace cache by default for this test file. Without this, the
+// shared workspace cache manager would attempt a real Gemini API cache call
+// the first time `prepareAskRequest` runs without a sessionId, causing the
+// first such test to hang on a network timeout (observed >3 minutes). Tests
+// that exercise workspace-cache behavior explicitly opt in via
+// `process.env.CACHE = 'true'` and restore the previous value in their
+// `finally` blocks.
+process.env.CACHE ??= 'false';
+
 const workspaceCacheManager = createWorkspaceCacheManager();
 
 function createAskWork(

@@ -36,6 +36,14 @@ export const SESSIONS_LIST_URI = 'session://' as const;
 export const WORKSPACE_CONTEXT_URI = 'workspace://context' as const;
 export const WORKSPACE_CACHE_URI = 'workspace://cache' as const;
 
+const MIME_JSON = 'application/json' as const;
+const MIME_MARKDOWN = 'text/markdown' as const;
+const MIME_TEXT = 'text/plain' as const;
+const JSON_WITH_MARKDOWN_ALT_DESC =
+  'Served as application/json with a secondary text/markdown rendering.' as const;
+const SESSION_ID_REQUIRED_MSG = 'Session ID required' as const;
+const sessionNotFoundMsg = (id: string): string => `Session '${id}' not found`;
+
 type SessionDetailUri = `session://${string}`;
 type SessionTranscriptUri = `session://${string}/transcript`;
 type SessionEventsUri = `session://${string}/events`;
@@ -93,7 +101,7 @@ function jsonResource(uri: string, data: unknown): ReadResourceResult {
     contents: [
       {
         uri,
-        mimeType: 'application/json',
+        mimeType: MIME_JSON,
         text: JSON.stringify(data),
       },
     ],
@@ -105,19 +113,19 @@ function dualContentResource(uri: string, data: unknown, markdown: string): Read
     contents: [
       {
         uri,
-        mimeType: 'application/json',
+        mimeType: MIME_JSON,
         text: JSON.stringify(data),
       },
       {
         uri,
-        mimeType: 'text/markdown',
+        mimeType: MIME_MARKDOWN,
         text: markdown,
       },
     ],
   };
 }
 
-function textResource(uri: string, text: string, mimeType = 'text/plain'): ReadResourceResult {
+function textResource(uri: string, text: string, mimeType: string = MIME_TEXT): ReadResourceResult {
   return {
     contents: [
       {
@@ -192,7 +200,7 @@ export function readWorkspaceContextResource(
   uri: URL | string,
   data: WorkspaceContextResourceData,
 ): ReadResourceResult {
-  return textResource(toResourceUri(uri), renderWorkspaceContextMarkdown(data), 'text/markdown');
+  return textResource(toResourceUri(uri), renderWorkspaceContextMarkdown(data), MIME_MARKDOWN);
 }
 
 function buildSessionResourceEntries(
@@ -413,12 +421,12 @@ export function getSessionTranscriptResourceData(
   sessionId: string | undefined,
 ): SessionTranscriptResourceData {
   if (!sessionId) {
-    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Session ID required');
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, SESSION_ID_REQUIRED_MSG);
   }
 
   const transcript = sessionStore.listSessionTranscriptEntries(sessionId);
   if (!transcript) {
-    throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Session '${sessionId}' not found`);
+    throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, sessionNotFoundMsg(sessionId));
   }
   return transcript;
 }
@@ -428,12 +436,12 @@ export function getSessionEventsResourceData(
   sessionId: string | undefined,
 ): SessionEventsResourceData {
   if (!sessionId) {
-    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Session ID required');
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, SESSION_ID_REQUIRED_MSG);
   }
 
   const events = sessionStore.listSessionEventEntries(sessionId);
   if (!events) {
-    throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Session '${sessionId}' not found`);
+    throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, sessionNotFoundMsg(sessionId));
   }
   return events;
 }
@@ -444,12 +452,12 @@ export function getSessionTurnPartsResourceData(
   turnIndexText: string | undefined,
 ): unknown[] {
   if (!sessionId) {
-    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Session ID required');
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, SESSION_ID_REQUIRED_MSG);
   }
 
   const entry = sessionStore.getSessionEntry(sessionId);
   if (!entry) {
-    throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Session '${sessionId}' not found`);
+    throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, sessionNotFoundMsg(sessionId));
   }
 
   if (!turnIndexText || !/^\d+$/.test(turnIndexText)) {
@@ -565,7 +573,7 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
     {
       title: 'Active Chat Sessions',
       description: 'List of active server-managed chat sessions and their last access time.',
-      mimeType: 'application/json',
+      mimeType: MIME_JSON,
       annotations: {
         audience: ['assistant'],
         priority: 0.7,
@@ -585,7 +593,7 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
     {
       title: 'Chat Session Detail',
       description: 'Metadata for a single server-managed chat session by ID.',
-      mimeType: 'application/json',
+      mimeType: MIME_JSON,
       annotations: {
         audience: ['assistant'],
         priority: 0.7,
@@ -595,7 +603,7 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
       const id = requireTemplateParam(sessionId, 'Session ID');
       const entry = sessionStore.getSessionEntry(id);
       if (!entry) {
-        throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Session '${id}' not found`);
+        throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, sessionNotFoundMsg(id));
       }
       return jsonResource(uri.href, entry);
     },
@@ -612,9 +620,8 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
     {
       title: 'Chat Session Transcript',
       description:
-        'Transcript entries for a single active chat session by ID. ' +
-        'Served as application/json with a secondary text/markdown rendering.',
-      mimeType: 'application/json',
+        'Transcript entries for a single active chat session by ID. ' + JSON_WITH_MARKDOWN_ALT_DESC,
+      mimeType: MIME_JSON,
       annotations: {
         audience: ['assistant'],
         priority: 0.8,
@@ -637,8 +644,8 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
       description:
         'Structured Gemini tool and function inspection summary for a single active chat session. ' +
         'This is a normalized view, not a raw replay-ready Gemini history. Large payloads may be truncated. ' +
-        'Served as application/json with a secondary text/markdown rendering.',
-      mimeType: 'application/json',
+        JSON_WITH_MARKDOWN_ALT_DESC,
+      mimeType: MIME_JSON,
       annotations: {
         audience: ['assistant'],
         priority: 0.7,
@@ -662,7 +669,7 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
         'Raw Gemini model-turn `Part[]` for replay-safe orchestration. ' +
         'Oversized `inlineData` payloads are elided but all other parts — ' +
         'including `thought` and `thoughtSignature` — are served verbatim.',
-      mimeType: 'application/json',
+      mimeType: MIME_JSON,
       annotations: {
         audience: ['assistant'],
         priority: 0.8,
@@ -694,8 +701,8 @@ function registerDiscoveryResources(server: McpServer): void {
       title: 'Discovery Catalog',
       description:
         'Machine-readable catalog of public tools, prompts, and resources. ' +
-        'Served as application/json with a secondary text/markdown rendering.',
-      mimeType: 'application/json',
+        JSON_WITH_MARKDOWN_ALT_DESC,
+      mimeType: MIME_JSON,
       annotations: {
         audience: ['assistant'],
         priority: 0.8,
@@ -711,8 +718,8 @@ function registerDiscoveryResources(server: McpServer): void {
       title: 'Workflow Catalog',
       description:
         'Machine-readable catalog of guided workflows for gemini-assistant. ' +
-        'Served as application/json with a secondary text/markdown rendering.',
-      mimeType: 'application/json',
+        JSON_WITH_MARKDOWN_ALT_DESC,
+      mimeType: MIME_JSON,
       annotations: {
         audience: ['assistant'],
         priority: 0.8,
@@ -735,8 +742,8 @@ function registerContextResource(
       title: 'Server Context Dashboard',
       description:
         'Live snapshot of workspace files, sessions, caches, and config. ' +
-        'Served as application/json with a secondary text/markdown rendering.',
-      mimeType: 'application/json',
+        JSON_WITH_MARKDOWN_ALT_DESC,
+      mimeType: MIME_JSON,
       annotations: {
         audience: ['assistant'],
         priority: 0.7,
@@ -760,7 +767,7 @@ function registerWorkspaceResources(
     {
       title: 'Workspace Context',
       description: 'Assembled project context from workspace files for Gemini.',
-      mimeType: 'text/markdown',
+      mimeType: MIME_MARKDOWN,
       annotations: {
         audience: ['assistant'],
         priority: 1.0,
@@ -791,7 +798,7 @@ function registerWorkspaceResources(
     {
       title: 'Workspace Cache Status',
       description: 'Current status of the Gemini workspace context cache.',
-      mimeType: 'application/json',
+      mimeType: MIME_JSON,
       annotations: {
         audience: ['assistant'],
         priority: 0.5,

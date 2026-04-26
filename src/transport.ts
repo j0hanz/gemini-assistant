@@ -6,7 +6,11 @@ import type {
   McpServer,
   WebStandardStreamableHTTPServerTransport,
 } from '@modelcontextprotocol/server';
-import { WebStandardStreamableHTTPServerTransport as WebHttpTransport } from '@modelcontextprotocol/server';
+import {
+  JSONRPC_VERSION,
+  ProtocolErrorCode,
+  WebStandardStreamableHTTPServerTransport as WebHttpTransport,
+} from '@modelcontextprotocol/server';
 
 import { Buffer } from 'node:buffer';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
@@ -165,6 +169,8 @@ export interface WebStandardTransportResult {
 
 const log = logger.child('transport');
 
+const APPLICATION_JSON = 'application/json' as const;
+
 function isLoopbackBindHost(host: string): boolean {
   return host === '127.0.0.1' || host === '::1' || host === 'localhost';
 }
@@ -210,7 +216,7 @@ function nodeUnauthorizedResponse(res: ServerResponse): void {
   if (res.headersSent) return;
   res.statusCode = 401;
   res.setHeader('WWW-Authenticate', 'Bearer');
-  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Type', APPLICATION_JSON);
   res.end(JSON.stringify(rpcErrorPayload('Unauthorized')));
 }
 
@@ -218,7 +224,7 @@ function nodeRateLimitedResponse(res: ServerResponse): void {
   if (res.headersSent) return;
   res.statusCode = 429;
   res.setHeader('Retry-After', '1');
-  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Type', APPLICATION_JSON);
   res.end(JSON.stringify(rpcErrorPayload('Rate limited')));
 }
 
@@ -226,7 +232,7 @@ function webUnauthorizedResponse(corsOrigin: string): Response {
   return withCors(
     new Response(JSON.stringify(rpcErrorPayload('Unauthorized')), {
       status: 401,
-      headers: { 'content-type': 'application/json', 'www-authenticate': 'Bearer' },
+      headers: { 'content-type': APPLICATION_JSON, 'www-authenticate': 'Bearer' },
     }),
     corsOrigin,
   );
@@ -236,7 +242,7 @@ function webRateLimitedResponse(corsOrigin: string): Response {
   return withCors(
     new Response(JSON.stringify(rpcErrorPayload('Rate limited')), {
       status: 429,
-      headers: { 'content-type': 'application/json', 'retry-after': '1' },
+      headers: { 'content-type': APPLICATION_JSON, 'retry-after': '1' },
     }),
     corsOrigin,
   );
@@ -301,8 +307,8 @@ function buildBaseTransportOptions(
 
 function rpcErrorPayload(message: string) {
   return {
-    jsonrpc: '2.0',
-    error: { code: -32_603, message },
+    jsonrpc: JSONRPC_VERSION,
+    error: { code: ProtocolErrorCode.InternalError, message },
     id: null,
   };
 }
@@ -310,14 +316,14 @@ function rpcErrorPayload(message: string) {
 function nodeErrorResponse(res: ServerResponse, status: number, message: string): void {
   if (res.headersSent) return;
   res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Type', APPLICATION_JSON);
   res.end(JSON.stringify(rpcErrorPayload(message)));
 }
 
 function responseError(status: number, message: string): Response {
   return new Response(JSON.stringify(rpcErrorPayload(message)), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': APPLICATION_JSON },
   });
 }
 

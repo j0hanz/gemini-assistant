@@ -55,36 +55,32 @@ interface AnalyzeDiagramInput {
   validateSyntax?: boolean | undefined;
 }
 
-function requireAnalyzeFilePath(args: AnalyzeInput): string {
-  if (args.filePath) {
-    return args.filePath;
+function requireAnalyzeField<T>(
+  value: T | undefined,
+  field: string,
+  discriminator: string,
+  kind: string,
+): T {
+  if (value === undefined) {
+    throw new Error(`AnalyzeInput validation requires ${field} when ${discriminator}=${kind}.`);
   }
+  return value;
+}
 
-  throw new Error('AnalyzeInput validation requires filePath when targetKind=file.');
+function requireAnalyzeFilePath(args: AnalyzeInput): string {
+  return requireAnalyzeField(args.filePath, 'filePath', 'targetKind', 'file');
 }
 
 function requireAnalyzeUrls(args: AnalyzeInput): string[] {
-  if (args.urls) {
-    return args.urls;
-  }
-
-  throw new Error('AnalyzeInput validation requires urls when targetKind=url.');
+  return requireAnalyzeField(args.urls, 'urls', 'targetKind', 'url');
 }
 
 function requireAnalyzeFilePaths(args: AnalyzeInput): string[] {
-  if (args.filePaths) {
-    return args.filePaths;
-  }
-
-  throw new Error('AnalyzeInput validation requires filePaths when targetKind=multi.');
+  return requireAnalyzeField(args.filePaths, 'filePaths', 'targetKind', 'multi');
 }
 
 function requireAnalyzeDiagramType(args: AnalyzeInput): 'mermaid' | 'plantuml' {
-  if (args.diagramType) {
-    return args.diagramType;
-  }
-
-  throw new Error('AnalyzeInput validation requires diagramType when outputKind=diagram.');
+  return requireAnalyzeField(args.diagramType, 'diagramType', 'outputKind', 'diagram');
 }
 
 const UNLABELED_DIAGRAM_FENCED_PATTERN = /```\s*\n([\s\S]*?)```/;

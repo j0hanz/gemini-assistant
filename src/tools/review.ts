@@ -204,6 +204,8 @@ interface BudgetedSnapshotDiff {
 }
 
 type ReviewCompareWork = ReturnType<typeof createCompareFileWork>;
+
+type ReviewFileSearch = Extract<ReviewInput, { subjectKind: 'comparison' }>['fileSearch'];
 type ReviewDiagnoseFailureWork = typeof diagnoseFailureWork;
 type ReviewAnalyzePrWork = typeof analyzePrWork;
 
@@ -285,7 +287,7 @@ function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
       maxOutputTokens?: ReviewInput['maxOutputTokens'];
       safetySettings?: ReviewInput['safetySettings'];
       thinkingBudget?: ReviewInput['thinkingBudget'];
-      fileSearch?: ReviewInput['fileSearch'] | undefined;
+      fileSearch?: ReviewFileSearch | undefined;
     },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
@@ -350,7 +352,7 @@ function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
 interface FailureReviewSubject {
   codeContext?: string | undefined;
   error: string;
-  fileSearch?: ReviewInput['fileSearch'] | undefined;
+  fileSearch?: ReviewFileSearch | undefined;
   googleSearch?: boolean | undefined;
   kind: 'failure';
   language?: string | undefined;

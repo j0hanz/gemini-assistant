@@ -1,0 +1,33 @@
+{
+  "skill_name": "mcp-v2",
+  "evals": [
+    {
+      "id": 0,
+      "name": "register-new-summarize-tool",
+      "prompt": "I'm working in an MCP server codebase that uses @modelcontextprotocol/server v2 and zod/v4. Add a new tool called `summarize` that takes a `text` field (string, min 1 char) and an optional `maxWords` field (integer 1-500, default 100), and returns a structured object with `summary` (string) and `wordCount` (integer). For now just stub the implementation by returning the first N words of the input. Make it follow v2 best practices. Show me the complete tool file as I would save it under `src/tools/summarize.ts`.",
+      "expected_output": "A complete summarize.ts file using registerTool, z.strictObject for both inputSchema and outputSchema, .describe() on every field, structuredContent in the result, content array also present, proper imports from @modelcontextprotocol/server and zod/v4, .js extension on relative imports, no console.log.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "migrate-v1-server-to-v2",
+      "prompt": "I have this v1 MCP server file at `legacy-server.ts` (contents below). Migrate it to v2 (`@modelcontextprotocol/server` + `@modelcontextprotocol/node`). Show me the complete migrated file.\n\n```ts\nimport { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';\nimport { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';\nimport { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';\nimport { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';\nimport { z } from 'zod';\nimport express from 'express';\nimport { randomUUID } from 'node:crypto';\n\nconst server = new McpServer({ name: 'legacy', version: '1.0.0' });\n\nserver.tool(\n  'add',\n  'Add two numbers',\n  { a: z.number(), b: z.number() },\n  async ({ a, b }, extra) => {\n    extra.signal.throwIfAborted();\n    await extra.sendNotification({ method: 'notifications/message', params: { level: 'info', data: 'computing' } });\n    if (!Number.isFinite(a) || !Number.isFinite(b)) {\n      throw new McpError(ErrorCode.InvalidParams, 'numbers must be finite');\n    }\n    return { content: [{ type: 'text', text: String(a + b) }] };\n  },\n);\n\nserver.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));\n\nconst app = express();\nconst transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() });\napp.all('/mcp', async (req, res) => transport.handleRequest(req, res, req.body));\nawait server.connect(transport);\napp.listen(3000);\n```",
+      "expected_output": "Migrated file with: imports from @modelcontextprotocol/server, @modelcontextprotocol/node, @modelcontextprotocol/express; zod/v4 import; registerTool() (not .tool()); inputSchema as z.strictObject; ctx.mcpReq.signal/notify (not extra.signal/sendNotification); ProtocolError (not McpError); setRequestHandler with string 'tools/list'; NodeStreamableHTTPServerTransport; createMcpExpressApp.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "minimal-stdio-client",
+      "prompt": "Build me a minimal MCP client in TypeScript that uses @modelcontextprotocol/client v2 to spawn a local stdio MCP server (npx -y @modelcontextprotocol/server-everything), connect to it, list all available tools (paginated), call the first tool that has no required arguments, and print both the structuredContent and the text content. Handle errors properly — both tool-level errors and protocol/SDK errors. Make it work cross-platform (Windows + macOS + Linux). Show the full file.",
+      "expected_output": "Complete client file with: Client + StdioClientTransport import from @modelcontextprotocol/client; cross-platform npx (npx.cmd on win32); pagination loop over listTools with cursor; try/catch handling both isError result branch AND ProtocolError + SdkError thrown errors; transport.stderr piped; cleanup with client.close() in finally.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "add-progress-and-timeouts",
+      "prompt": "I have this MCP v2 server tool that processes a list of items and is failing intermittently with timeouts and offering no feedback. Update it to: (1) report progress notifications when the caller provided a progressToken, (2) honor abort signals so the tool stops promptly when cancelled, (3) use the correct error model — return isError: true for upstream failures, throw ProtocolError only for genuine protocol problems. Show the updated tool.\n\n```ts\nimport type { CallToolResult, McpServer } from '@modelcontextprotocol/server';\nimport { z } from 'zod/v4';\n\nconst InputSchema = z.strictObject({\n  items: z.array(z.string()).min(1).max(100),\n});\n\nconst OutputSchema = z.strictObject({\n  processed: z.number().int().nonnegative(),\n  results: z.array(z.string()),\n});\n\nexport function registerProcessTool(server: McpServer): void {\n  server.registerTool(\n    'process-items',\n    { inputSchema: InputSchema, outputSchema: OutputSchema },\n    async ({ items }): Promise<CallToolResult> => {\n      const results: string[] = [];\n      for (const item of items) {\n        const r = await fetch(`https://api.example.com/process?item=${item}`);\n        if (!r.ok) throw new Error(`upstream ${r.status}`);\n        results.push(await r.text());\n      }\n      const out = { processed: items.length, results };\n      return { content: [{ type: 'text', text: `Processed ${out.processed}` }], structuredContent: out };\n    },\n  );\n}\n```",
+      "expected_output": "Updated tool that: reads ctx.mcpReq._meta?.progressToken and only emits progress when it exists; uses ctx.mcpReq.notify with method 'notifications/progress' and params {progressToken, progress, total, message}; passes ctx.mcpReq.signal to fetch (signal: ctx.mcpReq.signal) so it aborts; returns {content, isError: true} for upstream HTTP failures (does NOT throw); does not throw ProtocolError for normal upstream failures; preserves outputSchema/structuredContent contract.",
+      "files": []
+    }
+  ]
+}

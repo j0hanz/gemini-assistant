@@ -25,6 +25,7 @@ import {
   formatCountLabel,
   mergeSourceDetails,
   safeValidateStructuredContent,
+  tryParseJsonResponse,
   validateStructuredContent,
   validateStructuredToolResult,
 } from '../../src/lib/response.js';
@@ -229,6 +230,44 @@ describe('buildSharedStructuredMetadata', () => {
         finishMessage: 'max tokens',
       },
     );
+  });
+});
+
+describe('tryParseJsonResponse', () => {
+  it('prefers the last fenced code block when earlier blocks are not JSON', () => {
+    const parsed = tryParseJsonResponse(
+      [
+        'Summary text',
+        '```ts',
+        "console.log('not json');",
+        '```',
+        '```json',
+        '{"documentationDrift":[{"file":"README.md"}]}',
+        '```',
+      ].join('\n'),
+    );
+
+    assert.deepStrictEqual(parsed, {
+      documentationDrift: [{ file: 'README.md' }],
+    });
+  });
+
+  it('prefers the trailing fenced JSON block when multiple JSON blocks are present', () => {
+    const parsed = tryParseJsonResponse(
+      [
+        '```json',
+        '{"documentationDrift":[{"file":"OLD.md"}]}',
+        '```',
+        'Interleaved analysis',
+        '```json',
+        '{"documentationDrift":[{"file":"NEW.md"}]}',
+        '```',
+      ].join('\n'),
+    );
+
+    assert.deepStrictEqual(parsed, {
+      documentationDrift: [{ file: 'NEW.md' }],
+    });
   });
 });
 

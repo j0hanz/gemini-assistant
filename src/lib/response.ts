@@ -44,7 +44,9 @@ export const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
 
 export function tryParseJsonResponse(text: string): unknown {
   const candidates = [text.trim()];
-  const fencedMatch = JSON_CODE_BLOCK_PATTERN.exec(text)?.[1]?.trim();
+  const fencedMatch = Array.from(text.matchAll(new RegExp(JSON_CODE_BLOCK_PATTERN.source, 'gi')))
+    .at(-1)?.[1]
+    ?.trim();
   if (fencedMatch && fencedMatch !== candidates[0]) {
     candidates.push(fencedMatch);
   }

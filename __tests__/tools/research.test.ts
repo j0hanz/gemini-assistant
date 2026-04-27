@@ -573,7 +573,7 @@ describe('research tool contracts', () => {
         (structured.warnings as string[]).includes('dropped 1 non-public grounding supports'),
       );
       assert.ok(
-        (structured.warnings as string[]).some((warning) =>
+        !(structured.warnings as string[]).some((warning) =>
           warning.includes('resolved retrieval budget'),
         ),
       );
@@ -691,11 +691,48 @@ describe('research tool contracts', () => {
     const store = makeMockStore();
     const client = getAI();
     const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
-    const calls: Record<string, unknown>[] = [];
+    const depthThreeCalls: Record<string, unknown>[] = [];
+    const depthFourCalls: Record<string, unknown>[] = [];
+
+    function countRetrievalCalls(calls: readonly Record<string, unknown>[]): number {
+      return calls.filter((request) => {
+        const contents = request.contents;
+        return (
+          typeof contents === 'string' &&
+          !contents.startsWith('Return JSON only as {"queries":["..."]}.') &&
+          !contents.includes('Retrieved evidence summaries:') &&
+          !contents.startsWith('Review this synthesis for source disagreements.')
+        );
+      }).length;
+    }
 
     // @ts-expect-error test override
     client.models.generateContentStream = async (request: Record<string, unknown>) => {
-      calls.push(request);
+      const contents = request.contents;
+      if (
+        typeof contents === 'string' &&
+        contents.startsWith('Return JSON only as {"queries":["..."]}.')
+      ) {
+        return fakeStream([
+          {
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        queries: ['query one', 'query two', 'query three', 'query four'],
+                      }),
+                    },
+                  ],
+                },
+                finishReason: 'STOP',
+              },
+            ],
+          },
+        ]);
+      }
+
       return fakeStream([
         {
           candidates: [
@@ -714,15 +751,101 @@ describe('research tool contracts', () => {
         makeMockContext(store),
       );
       await flushTaskWork();
-      assert.strictEqual(calls.length, 1);
+      assert.strictEqual(depthThreeCalls.length, 0);
 
-      calls.length = 0;
+      // @ts-expect-error test reassignment for capture isolation
+      client.models.generateContentStream = async (request: Record<string, unknown>) => {
+        depthThreeCalls.push(request);
+        const contents = request.contents;
+        if (
+          typeof contents === 'string' &&
+          contents.startsWith('Return JSON only as {"queries":["..."]}.')
+        ) {
+          return fakeStream([
+            {
+              candidates: [
+                {
+                  content: {
+                    parts: [
+                      {
+                        text: JSON.stringify({
+                          queries: ['query one', 'query two', 'query three', 'query four'],
+                        }),
+                      },
+                    ],
+                  },
+                  finishReason: 'STOP',
+                },
+              ],
+            },
+          ]);
+        }
+
+        return fakeStream([
+          {
+            candidates: [
+              {
+                content: { parts: [{ text: 'Research answer' }] },
+                finishReason: 'STOP',
+              },
+            ],
+          },
+        ]);
+      };
+
       await research.createTask(
         { goal: 'multi pass', mode: 'deep', searchDepth: 3 },
         makeMockContext(store),
       );
       await flushTaskWork();
-      assert.ok(calls.length >= 3);
+      assert.strictEqual(countRetrievalCalls(depthThreeCalls), 3);
+
+      // @ts-expect-error test reassignment for capture isolation
+      client.models.generateContentStream = async (request: Record<string, unknown>) => {
+        depthFourCalls.push(request);
+        const contents = request.contents;
+        if (
+          typeof contents === 'string' &&
+          contents.startsWith('Return JSON only as {"queries":["..."]}.')
+        ) {
+          return fakeStream([
+            {
+              candidates: [
+                {
+                  content: {
+                    parts: [
+                      {
+                        text: JSON.stringify({
+                          queries: ['query one', 'query two', 'query three', 'query four'],
+                        }),
+                      },
+                    ],
+                  },
+                  finishReason: 'STOP',
+                },
+              ],
+            },
+          ]);
+        }
+
+        return fakeStream([
+          {
+            candidates: [
+              {
+                content: { parts: [{ text: 'Research answer' }] },
+                finishReason: 'STOP',
+              },
+            ],
+          },
+        ]);
+      };
+
+      await research.createTask(
+        { goal: 'deeper pass', mode: 'deep', searchDepth: 4 },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+      assert.strictEqual(countRetrievalCalls(depthFourCalls), 4);
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
     }

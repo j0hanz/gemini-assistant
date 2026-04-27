@@ -323,37 +323,112 @@ export class ToolExecutor {
     );
   }
 
+  private async executeStreamWork<T extends Record<string, unknown>>(
+    ctx: ServerContext,
+    toolName: string,
+    toolLabel: string,
+    streamGenerator: () => Promise<AsyncGenerator<GenerateContentResponse>>,
+    responseBuilder: StreamResponseBuilder<T>,
+  ): Promise<{ result: CallToolResult; reportMessage?: string | undefined }> {
+    const { streamResult, result } = await executeToolStream(
+      ctx,
+      toolName,
+      toolLabel,
+      streamGenerator,
+      getWorkSignal(ctx),
+    );
+    if (result.isError) {
+      return { result };
+    }
+
+    const text = extractTextContent(result.content);
+    const built = responseBuilder(streamResult, text);
+    const resultOverlay = built.resultMod ? built.resultMod(result) : {};
+    const overlayStructuredContent =
+      resultOverlay.structuredContent && typeof resultOverlay.structuredContent === 'object'
+        ? resultOverlay.structuredContent
+        : undefined;
+    const finalResult: CallToolResult = {
+      ...result,
+      ...resultOverlay,
+    };
+
+    const usage = extractUsage(streamResult.usageMetadata);
+    const baseStructuredContent =
+      result.structuredContent && typeof result.structuredContent === 'object'
+        ? result.structuredContent
+        : undefined;
+
+    const mergedStructuredContent =
+      baseStructuredContent || overlayStructuredContent || built.structuredContent
+        ? {
+            ...(baseStructuredContent ?? {}),
+            ...(overlayStructuredContent ?? {}),
+            ...(built.structuredContent ?? {}),
+            ...buildSharedStructuredMetadata({
+              functionCalls: streamResult.functionCalls,
+              includeThoughts: getExposeThoughts(),
+              thoughtText: streamResult.thoughtText,
+              toolEvents: streamResult.toolEvents,
+              usage,
+              safetyRatings: streamResult.safetyRatings,
+              finishMessage: streamResult.finishMessage,
+              citationMetadata: streamResult.citationMetadata,
+            }),
+          }
+        : undefined;
+
+    const mergedResult: CallToolResult = {
+      ...finalResult,
+      ...(mergedStructuredContent ? { structuredContent: mergedStructuredContent } : {}),
+    };
+
+    return { result: mergedResult, reportMessage: built.reportMessage };
+  }
+
   async runGeminiStream<T extends Record<string, unknown>>(
     ctx: ServerContext,
     request: GeminiStreamRequest<T>,
   ): Promise<CallToolResult> {
-    const resolved = await resolveOrchestration(request.orchestration, ctx, request.toolName);
-    if (resolved.error) return resolved.error;
-
-    const { contents, systemInstruction } = request.buildContents(
-      resolved.config.activeCapabilities,
-    );
-
-    return await this.runStream(
+    return await this.executeWithTracing(
       ctx,
       request.toolName,
       request.label,
-      () =>
-        getAI().models.generateContentStream({
-          model: getGeminiModel(),
-          contents,
-          config: buildGenerateContentConfig(
-            {
-              systemInstruction,
-              ...request.config,
-              functionCallingMode: resolved.config.functionCallingMode,
-              tools: resolved.config.tools,
-              toolConfig: resolved.config.toolConfig,
-            },
-            getWorkSignal(ctx),
-          ),
-        }),
-      request.responseBuilder,
+      'stream',
+      undefined,
+      async () => {
+        const resolved = await resolveOrchestration(request.orchestration, ctx, request.toolName);
+        if (resolved.error) {
+          return { result: resolved.error };
+        }
+
+        const { contents, systemInstruction } = request.buildContents(
+          resolved.config.activeCapabilities,
+        );
+
+        return this.executeStreamWork(
+          ctx,
+          request.toolName,
+          request.label,
+          () =>
+            getAI().models.generateContentStream({
+              model: getGeminiModel(),
+              contents,
+              config: buildGenerateContentConfig(
+                {
+                  systemInstruction,
+                  ...request.config,
+                  functionCallingMode: resolved.config.functionCallingMode,
+                  tools: resolved.config.tools,
+                  toolConfig: resolved.config.toolConfig,
+                },
+                getWorkSignal(ctx),
+              ),
+            }),
+          request.responseBuilder ?? (() => ({})),
+        );
+      },
+      true,
     );
   }
 

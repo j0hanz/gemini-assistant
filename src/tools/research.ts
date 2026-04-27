@@ -605,11 +605,7 @@ async function runDeepResearchPlan(
     args.searchDepth,
   );
   const requestedRetrievalBudget = Math.max(1, Math.min(args.searchDepth, subQueries.length));
-  const maxRetrievalTurns = Math.min(
-    subQueries.length,
-    args.searchDepth,
-    MAX_DEEP_RESEARCH_TURNS - (args.searchDepth >= 4 ? 3 : 2),
-  );
+  const maxRetrievalTurns = Math.min(subQueries.length, args.searchDepth, MAX_DEEP_RESEARCH_TURNS);
   if (maxRetrievalTurns < requestedRetrievalBudget) {
     warnings.push(
       `deep research resolved retrieval budget to ${String(maxRetrievalTurns)} turn(s) from requested ${String(requestedRetrievalBudget)}`,

@@ -483,7 +483,7 @@ describe('ToolExecutor', () => {
 
   it('runGeminiStream returns URL validation errors before model calls', async () => {
     const executor = createExecutor();
-    const { ctx } = makeMockContext();
+    const { ctx, progressCalls } = makeMockContext();
     const client = getAI();
     const originalGenerate = client.models.generateContentStream.bind(client.models);
     let modelCalled = false;
@@ -506,6 +506,11 @@ describe('ToolExecutor', () => {
       assert.strictEqual(result.isError, true);
       assert.strictEqual(modelCalled, false);
       assert.match(String(result.content[0]?.text ?? ''), /Private, loopback, and localhost URLs/);
+      assert.deepStrictEqual(progressCalls.at(-1), {
+        progress: 100,
+        total: 100,
+        message: `Web Search: failed — ${String(result.content[0]?.text ?? '')}`,
+      });
     } finally {
       client.models.generateContentStream = originalGenerate;
     }

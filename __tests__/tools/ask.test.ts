@@ -9,6 +9,7 @@ import { describe, it } from 'node:test';
 import { FinishReason, HarmCategory } from '@google/genai';
 
 import { getAI } from '../../src/client.js';
+import { toToolSessionAccess, toToolWorkspaceAccess } from '../../src/lib/tool-context.js';
 import { createWorkspaceCacheManager } from '../../src/lib/workspace-context.js';
 import {
   createSessionStore,
@@ -34,11 +35,12 @@ import {
 process.env.CACHE ??= 'false';
 
 const workspaceCacheManager = createWorkspaceCacheManager();
+const workspaceAccess = toToolWorkspaceAccess(workspaceCacheManager);
 
 function createAskWork(
-  deps = createDefaultAskDependencies(createSessionStore(), workspaceCacheManager),
+  deps = createDefaultAskDependencies(toToolSessionAccess(createSessionStore()), workspaceAccess),
 ) {
-  return createBaseAskWork(deps, workspaceCacheManager);
+  return createBaseAskWork(deps, workspaceAccess);
 }
 
 function createContext(): ServerContext {
@@ -155,7 +157,7 @@ function createPendingCallEntries(
 function createSessionContract(args: AskArgs): SessionGenerationContract {
   process.env.API_KEY ??= 'test-key-for-ask';
   const store = createSessionStore();
-  const deps = createDefaultAskDependencies(store, workspaceCacheManager);
+  const deps = createDefaultAskDependencies(toToolSessionAccess(store), workspaceAccess);
 
   try {
     const created = deps.createChat(args);
@@ -1576,7 +1578,7 @@ describe('ask contract', () => {
     const originalCache = process.env.CACHE;
     process.env.CACHE = 'false';
     const store = createSessionStore();
-    const deps = createDefaultAskDependencies(store, workspaceCacheManager);
+    const deps = createDefaultAskDependencies(toToolSessionAccess(store), workspaceAccess);
     const client = getAI();
     const originalCreate = client.chats.create.bind(client.chats);
     const calls: Record<string, unknown>[] = [];

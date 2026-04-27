@@ -24,6 +24,8 @@ import {
   extractTextOrError,
   formatCountLabel,
   mergeSourceDetails,
+  mergeStructured,
+  readStructuredObject,
   safeValidateStructuredContent,
   tryParseJsonResponse,
   validateStructuredContent,
@@ -230,6 +232,124 @@ describe('buildSharedStructuredMetadata', () => {
         finishMessage: 'max tokens',
       },
     );
+  });
+});
+
+describe('readStructuredObject', () => {
+  it('returns structured content when it is an object', () => {
+    assert.deepStrictEqual(
+      readStructuredObject({
+        content: [{ type: 'text', text: 'ok' }],
+        structuredContent: { answer: 'ok', warnings: ['keep'] },
+      }),
+      { answer: 'ok', warnings: ['keep'] },
+    );
+  });
+
+  it('returns undefined for error results, missing structured content, and non-object structured content', () => {
+    assert.strictEqual(
+      readStructuredObject({
+        content: [{ type: 'text', text: 'bad' }],
+        isError: true,
+        structuredContent: { answer: 'bad' },
+      }),
+      undefined,
+    );
+    assert.strictEqual(
+      readStructuredObject({
+        content: [{ type: 'text', text: 'ok' }],
+      }),
+      undefined,
+    );
+    assert.strictEqual(
+      readStructuredObject({
+        content: [{ type: 'text', text: 'ok' }],
+        structuredContent: 'not-an-object',
+      }),
+      undefined,
+    );
+  });
+});
+
+describe('mergeStructured', () => {
+  it('returns the original result when there is nothing to merge', () => {
+    const result = {
+      content: [{ type: 'text' as const, text: 'ok' }],
+    };
+
+    assert.strictEqual(mergeStructured(result, undefined), result);
+  });
+
+  it('merges patch fields and preserves key order from the base object', () => {
+    const result = {
+      content: [{ type: 'text' as const, text: 'ok' }],
+      structuredContent: {
+        answer: 'ok',
+        contextUsed: { workspaceCacheApplied: false, sources: [] },
+      },
+    };
+
+    assert.deepStrictEqual(mergeStructured(result, { sessionId: 'sess-1' }), {
+      content: [{ type: 'text', text: 'ok' }],
+      structuredContent: {
+        answer: 'ok',
+        contextUsed: { workspaceCacheApplied: false, sources: [] },
+        sessionId: 'sess-1',
+      },
+    });
+  });
+
+  it('concatenates warnings from the base structured content and merge options', () => {
+    assert.deepStrictEqual(
+      mergeStructured(
+        {
+          content: [{ type: 'text' as const, text: 'ok' }],
+          structuredContent: {
+            answer: 'ok',
+            warnings: ['existing'],
+          },
+        },
+        { contextUsed: { workspaceCacheApplied: true, sources: [] } },
+        { warnings: ['added', 'last'] },
+      ),
+      {
+        content: [{ type: 'text', text: 'ok' }],
+        structuredContent: {
+          answer: 'ok',
+          warnings: ['existing', 'added', 'last'],
+          contextUsed: { workspaceCacheApplied: true, sources: [] },
+        },
+      },
+    );
+  });
+
+  it('preserves existing warnings when the patch omits them and ignores error results', () => {
+    assert.deepStrictEqual(
+      mergeStructured(
+        {
+          content: [{ type: 'text' as const, text: 'ok' }],
+          structuredContent: {
+            answer: 'ok',
+            warnings: ['existing'],
+          },
+        },
+        { answer: 'updated' },
+      ),
+      {
+        content: [{ type: 'text', text: 'ok' }],
+        structuredContent: {
+          answer: 'updated',
+          warnings: ['existing'],
+        },
+      },
+    );
+
+    const errorResult = {
+      content: [{ type: 'text' as const, text: 'bad' }],
+      isError: true,
+      structuredContent: { answer: 'bad' },
+    };
+    assert.strictEqual(mergeStructured(errorResult, { answer: 'ignored' }), errorResult);
   });
 });
 

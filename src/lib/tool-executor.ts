@@ -25,6 +25,7 @@ import { ProgressReporter, reportCompletion, reportFailure } from './progress.js
 import {
   buildSharedStructuredMetadata,
   extractTextContent,
+  mergeStructured,
   safeValidateStructuredContent,
 } from './response.js';
 import { executeToolStream, extractUsage, type StreamResult } from './streaming.js';
@@ -186,22 +187,23 @@ export class ToolExecutor {
       ),
     };
 
-    const mergedStructuredContent =
+    const mergedResult = mergeStructured(
+      {
+        ...finalResult,
+        ...(baseStructuredContent ? { structuredContent: baseStructuredContent } : {}),
+      },
       baseStructuredContent || overlayStructuredContent || built.structuredContent
         ? {
-            ...(baseStructuredContent ?? {}),
             ...(overlayStructuredContent ?? {}),
             ...(built.structuredContent ?? {}),
             ...sharedStructuredContent,
-            ...(mergedWarnings.length > 0 ? { warnings: mergedWarnings } : {}),
           }
-        : undefined;
+        : undefined,
+      mergedWarnings.length > 0 ? { warnings: mergedWarnings } : undefined,
+    );
 
     return {
-      result: {
-        ...finalResult,
-        ...(mergedStructuredContent ? { structuredContent: mergedStructuredContent } : {}),
-      },
+      result: mergedResult,
       reportMessage: built.reportMessage,
     };
   }

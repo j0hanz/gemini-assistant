@@ -1,3 +1,7 @@
+import type { CallToolResult } from '@modelcontextprotocol/server';
+
+import { createHash } from 'node:crypto';
+
 import type {
   BlockedReason,
   Chat,
@@ -14,6 +18,7 @@ import type {
 
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
+import { extractTextContent } from './lib/response.js';
 import type { FunctionCallEntry, StreamAnomalies, ToolEvent } from './lib/streaming.js';
 import type { UsageMetadata } from './schemas/outputs.js';
 
@@ -60,6 +65,101 @@ export interface SessionGenerationContract {
   responseJsonSchema?: unknown;
 }
 
+export function hashInstructionText(text: string | undefined): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+
+  return createHash('sha256').update(text).digest('hex');
+}
+
+export function buildSessionGenerationContract(
+  model: string,
+  config: GenerateContentConfig,
+  functionCallingMode?: unknown,
+  functionCallingInstructionHash?: string,
+): SessionGenerationContract {
+  return {
+    model,
+    ...(config.systemInstruction !== undefined
+      ? { systemInstruction: config.systemInstruction }
+      : {}),
+    ...(config.cachedContent !== undefined ? { cachedContent: config.cachedContent } : {}),
+    ...(config.tools !== undefined ? { tools: config.tools } : {}),
+    ...(config.toolConfig !== undefined ? { toolConfig: config.toolConfig } : {}),
+    ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
+    ...(functionCallingInstructionHash !== undefined ? { functionCallingInstructionHash } : {}),
+    ...(config.thinkingConfig !== undefined ? { thinkingConfig: config.thinkingConfig } : {}),
+    ...(config.responseMimeType !== undefined ? { responseMimeType: config.responseMimeType } : {}),
+    ...(config.responseJsonSchema !== undefined
+      ? { responseJsonSchema: config.responseJsonSchema }
+      : {}),
+  };
+}
+
+export function buildConfigFromSessionContract(
+  contract: SessionGenerationContract,
+  cacheName?: string,
+): GenerateContentConfig {
+  const resolvedCachedContent = cacheName ?? contract.cachedContent;
+
+  return {
+    ...(resolvedCachedContent !== undefined ? { cachedContent: resolvedCachedContent } : {}),
+    ...(contract.systemInstruction !== undefined
+      ? { systemInstruction: contract.systemInstruction }
+      : {}),
+    ...(contract.tools !== undefined ? { tools: contract.tools } : {}),
+    ...(contract.toolConfig !== undefined ? { toolConfig: contract.toolConfig } : {}),
+    ...(contract.thinkingConfig !== undefined ? { thinkingConfig: contract.thinkingConfig } : {}),
+    ...(contract.responseMimeType !== undefined
+      ? { responseMimeType: contract.responseMimeType }
+      : {}),
+    ...(contract.responseJsonSchema !== undefined
+      ? { responseJsonSchema: contract.responseJsonSchema }
+      : {}),
+  };
+}
+
+export function canonicalizeSessionContractValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalizeSessionContractValue(item));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, canonicalizeSessionContractValue(nested)]),
+    );
+  }
+  return value;
+}
+
+export function sameSessionContractValue(left: unknown, right: unknown): boolean {
+  return (
+    JSON.stringify(canonicalizeSessionContractValue(left)) ===
+    JSON.stringify(canonicalizeSessionContractValue(right))
+  );
+}
+
+export function isCompatibleSessionContract(
+  stored: SessionGenerationContract,
+  requested: SessionGenerationContract,
+): boolean {
+  return (
+    sameSessionContractValue(stored.model, requested.model) &&
+    sameSessionContractValue(stored.systemInstruction, requested.systemInstruction) &&
+    sameSessionContractValue(stored.tools, requested.tools) &&
+    sameSessionContractValue(stored.toolConfig, requested.toolConfig) &&
+    sameSessionContractValue(stored.functionCallingMode, requested.functionCallingMode) &&
+    sameSessionContractValue(
+      stored.functionCallingInstructionHash,
+      requested.functionCallingInstructionHash,
+    ) &&
+    sameSessionContractValue(stored.responseMimeType, requested.responseMimeType) &&
+    sameSessionContractValue(stored.responseJsonSchema, requested.responseJsonSchema)
+  );
+}
+
 export interface SessionEventEntry {
   request: {
     message: string;
@@ -87,6 +187,42 @@ export interface SessionEventEntry {
   };
   timestamp: number;
   taskId?: string;
+}
+
+interface SessionTurnStructuredContent {
+  citationMetadata?: unknown;
+  data?: unknown;
+  functionCalls?: FunctionCallEntry[];
+  safetyRatings?: unknown;
+  schemaWarnings?: string[];
+  thoughts?: string;
+  toolEvents?: ToolEvent[];
+  usage?: UsageMetadata;
+}
+
+interface SessionTurnResult {
+  content: CallToolResult['content'];
+  isError?: boolean | undefined;
+  structuredContent?: unknown;
+}
+
+interface SessionTurnStreamResult {
+  anomalies?: StreamAnomalies;
+  finishMessage?: string;
+  finishReason?: string;
+  groundingMetadata?: GroundingMetadata;
+  parts: Part[];
+  promptBlockReason?: string;
+  promptFeedback?: unknown;
+  urlContextMetadata?: UrlContextMetadata;
+}
+
+export interface SessionTurnInput {
+  result: SessionTurnResult;
+  sentMessage?: string;
+  streamResult: SessionTurnStreamResult;
+  toolProfile: string;
+  urls?: string[];
 }
 
 interface SessionEntry {
@@ -496,6 +632,141 @@ function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {
   };
 }
 
+export function appendTranscriptPair(
+  sessionId: string,
+  message: string,
+  result: SessionTurnResult,
+  deps: {
+    appendSessionTranscript: (sessionId: string, item: TranscriptEntry) => boolean;
+    now: () => number;
+  },
+  taskId?: string,
+): void {
+  if (result.isError) return;
+  const timestamp = deps.now();
+
+  deps.appendSessionTranscript(sessionId, {
+    role: 'user',
+    text: message,
+    timestamp,
+    ...(taskId ? { taskId } : {}),
+  });
+  deps.appendSessionTranscript(sessionId, {
+    role: 'assistant',
+    text: extractTextContent(result.content),
+    timestamp,
+    ...(taskId ? { taskId } : {}),
+  });
+}
+
+export function buildSessionEventRequest(
+  message: string,
+  sentMessage: string,
+  askResult: SessionTurnInput,
+): SessionEventEntry['request'] {
+  return {
+    message,
+    ...(sentMessage !== message ? { sentMessage } : {}),
+    ...(askResult.toolProfile !== 'none' ? { toolProfile: askResult.toolProfile } : {}),
+    ...(askResult.urls ? { urls: askResult.urls } : {}),
+  };
+}
+
+export function buildSessionEventResponse(
+  askResult: SessionTurnInput,
+  structured: SessionTurnStructuredContent | undefined,
+): SessionEventEntry['response'] {
+  const { streamResult } = askResult;
+  return {
+    text: extractTextContent(askResult.result.content),
+    ...(streamResult.finishReason !== undefined ? { finishReason: streamResult.finishReason } : {}),
+    ...(streamResult.finishMessage !== undefined
+      ? { finishMessage: streamResult.finishMessage }
+      : {}),
+    ...(streamResult.promptBlockReason !== undefined
+      ? { promptBlockReason: streamResult.promptBlockReason }
+      : {}),
+    ...(structured?.data !== undefined ? { data: sanitizeSessionValue(structured.data) } : {}),
+    ...(structured?.functionCalls
+      ? { functionCalls: sanitizeFunctionCalls(structured.functionCalls) }
+      : {}),
+    ...(structured?.schemaWarnings ? { schemaWarnings: structured.schemaWarnings } : {}),
+    ...(structured?.safetyRatings !== undefined ? { safetyRatings: '[REDACTED]' } : {}),
+    ...(structured?.citationMetadata !== undefined ? { citationMetadata: '[REDACTED]' } : {}),
+    ...(structured?.thoughts !== undefined ? { thoughts: structured.thoughts } : {}),
+    ...(structured?.toolEvents ? { toolEvents: sanitizeToolEvents(structured.toolEvents) } : {}),
+    ...(structured?.usage !== undefined ? { usage: structured.usage } : {}),
+    ...(streamResult.groundingMetadata !== undefined
+      ? {
+          groundingMetadata: '[REDACTED]' as NonNullable<
+            SessionEventEntry['response']['groundingMetadata']
+          >,
+        }
+      : {}),
+    ...(streamResult.urlContextMetadata !== undefined
+      ? {
+          urlContextMetadata: '[REDACTED]' as NonNullable<
+            SessionEventEntry['response']['urlContextMetadata']
+          >,
+        }
+      : {}),
+    ...(streamResult.promptFeedback !== undefined
+      ? { promptFeedback: sanitizeSessionValue(streamResult.promptFeedback, 'promptFeedback') }
+      : {}),
+    ...(streamResult.anomalies !== undefined ? { anomalies: { ...streamResult.anomalies } } : {}),
+  };
+}
+
+export function appendSessionTurn(
+  sessionId: string,
+  askResult: SessionTurnInput,
+  args: { message: string },
+  deps: {
+    appendSessionContent: (sessionId: string, item: ContentEntry) => boolean;
+    appendSessionEvent: (sessionId: string, item: SessionEventEntry) => boolean;
+    appendSessionTranscript: (sessionId: string, item: TranscriptEntry) => boolean;
+    now: () => number;
+  },
+  taskId?: string,
+  sentArgs: { message: string } = args,
+): void {
+  appendTranscriptPair(sessionId, args.message, askResult.result, deps, taskId);
+  if (askResult.result.isError) return;
+  const structured = askResult.result.structuredContent as SessionTurnStructuredContent | undefined;
+  const timestamp = deps.now();
+  const sentMessage = askResult.sentMessage ?? sentArgs.message;
+
+  deps.appendSessionContent(sessionId, {
+    role: 'user',
+    parts: [{ text: sentMessage }],
+    timestamp,
+    ...(taskId ? { taskId } : {}),
+  });
+  deps.appendSessionContent(sessionId, {
+    role: 'model',
+    parts: buildReplayHistoryParts(askResult.streamResult.parts),
+    rawParts: capRawParts(structuredClone(askResult.streamResult.parts)),
+    timestamp,
+    ...(taskId ? { taskId } : {}),
+    ...(askResult.streamResult.finishReason !== undefined
+      ? { finishReason: askResult.streamResult.finishReason as FinishReason }
+      : {}),
+    ...(askResult.streamResult.finishMessage !== undefined
+      ? { finishMessage: askResult.streamResult.finishMessage }
+      : {}),
+    ...(askResult.streamResult.promptBlockReason !== undefined
+      ? { promptBlockReason: askResult.streamResult.promptBlockReason as BlockedReason }
+      : {}),
+  });
+
+  deps.appendSessionEvent(sessionId, {
+    request: buildSessionEventRequest(args.message, sentMessage, askResult),
+    response: buildSessionEventResponse(askResult, structured),
+    timestamp,
+    ...(taskId ? { taskId } : {}),
+  });
+}
+
 export class SessionStore {
   private readonly evictedSessions = new Set<string>();
 
@@ -545,14 +816,10 @@ export class SessionStore {
   }
 
   listSessionEntries(): SessionSummary[] {
-    // Read-path eviction: filter out expired sessions so consumers never see
-    // entries that subsequent session reads would report as missing. Eviction
-    // is performed silently (no notifyChange) — the periodic sweep remains the
-    // canonical broadcaster to avoid notification storms on every list call.
+    // Filter out expired sessions without mutating the Map during iteration.
     const active: SessionSummary[] = [];
     for (const [id, entry] of this.sessions) {
       if (this.hasExpired(entry)) {
-        this.removeSession(id, true);
         continue;
       }
       active.push(toSessionSummary(id, entry));

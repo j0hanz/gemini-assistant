@@ -9,6 +9,7 @@ import {
   buildTranscriptParts,
   createSessionAccess,
   createSessionStore,
+  isCompatibleSessionContract,
   type SessionStore,
   type SessionStoreOptions,
 } from '../src/sessions.js';
@@ -68,6 +69,72 @@ describe('sessions', () => {
       assert.strictEqual(
         access.getSession('sess-access-adapter'),
         store.getSession('sess-access-adapter'),
+      );
+    });
+  });
+
+  describe('session contract compatibility', () => {
+    it('treats identical contracts as compatible', () => {
+      const contract = {
+        model: 'gemini-test',
+        systemInstruction: 'same system',
+        tools: [{ googleSearch: {} }],
+        responseJsonSchema: { type: 'object', properties: { answer: { type: 'string' } } },
+      };
+
+      assert.strictEqual(isCompatibleSessionContract(contract, contract), true);
+    });
+
+    it('rejects different models', () => {
+      assert.strictEqual(
+        isCompatibleSessionContract({ model: 'gemini-a' }, { model: 'gemini-b' }),
+        false,
+      );
+    });
+
+    it('treats reordered object keys inside tools as compatible', () => {
+      assert.strictEqual(
+        isCompatibleSessionContract(
+          {
+            model: 'gemini-test',
+            tools: [{ functionDeclarations: [{ name: 'lookup', description: 'Look up weather' }] }],
+          },
+          {
+            model: 'gemini-test',
+            tools: [
+              {
+                functionDeclarations: [{ description: 'Look up weather', name: 'lookup' }],
+              },
+            ],
+          },
+        ),
+        true,
+      );
+    });
+
+    it('treats missing and undefined responseJsonSchema as compatible', () => {
+      assert.strictEqual(
+        isCompatibleSessionContract(
+          { model: 'gemini-test' },
+          { model: 'gemini-test', responseJsonSchema: undefined },
+        ),
+        true,
+      );
+    });
+
+    it('rejects different function calling instruction hashes', () => {
+      assert.strictEqual(
+        isCompatibleSessionContract(
+          {
+            model: 'gemini-test',
+            functionCallingInstructionHash: 'abc',
+          },
+          {
+            model: 'gemini-test',
+            functionCallingInstructionHash: 'xyz',
+          },
+        ),
+        false,
       );
     });
   });
@@ -729,7 +796,7 @@ describe('sessions', () => {
       assert.strictEqual(typeof entry.lastAccess, 'number');
     });
 
-    it('excludes expired sessions and evicts them silently', () => {
+    it('excludes expired sessions without evicting them on read', () => {
       let now = 1_000_000;
       const store = createStore({ ttlMs: 1_000, now: () => now, sweepIntervalMs: 60_000 });
       store.setSession('sess-expiry-active', mockChat('active') as never);
@@ -743,7 +810,33 @@ describe('sessions', () => {
       const ids = store.listSessionEntries().map((session) => session.id);
       assert.ok(ids.includes('sess-expiry-active'));
       assert.ok(!ids.includes('sess-expiry-stale'));
-      assert.strictEqual(store.isEvicted('sess-expiry-stale'), true);
+      assert.strictEqual(store.isEvicted('sess-expiry-stale'), false);
+      assert.throws(() => store.setSession('sess-expiry-stale', mockChat('duplicate') as never), {
+        message: 'Session already exists: sess-expiry-stale',
+      });
+    });
+
+    it('does not notify subscribers when filtering expired sessions from listSessionEntries', () => {
+      let now = 1_000_000;
+      const store = createStore({ ttlMs: 1_000, now: () => now, sweepIntervalMs: 60_000 });
+      const events: boolean[] = [];
+
+      store.setSession('sess-list-notify-active', mockChat('active') as never);
+      store.setSession('sess-list-notify-stale', mockChat('stale') as never);
+
+      now += 500;
+      store.getSession('sess-list-notify-active');
+      now += 600;
+
+      store.subscribe((event) => {
+        events.push(event.listChanged);
+      });
+
+      const ids = store.listSessionEntries().map((session) => session.id);
+
+      assert.ok(ids.includes('sess-list-notify-active'));
+      assert.ok(!ids.includes('sess-list-notify-stale'));
+      assert.deepStrictEqual(events, []);
     });
   });
 

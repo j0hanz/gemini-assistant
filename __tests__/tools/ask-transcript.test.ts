@@ -4,8 +4,14 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { getAI } from '../../src/client.js';
+import { toToolSessionAccess, toToolWorkspaceAccess } from '../../src/lib/tool-context.js';
 import { createWorkspaceCacheManager } from '../../src/lib/workspace-context.js';
-import { createSessionStore } from '../../src/sessions.js';
+import {
+  appendSessionTurn,
+  buildSessionEventRequest,
+  buildSessionEventResponse,
+  createSessionStore,
+} from '../../src/sessions.js';
 import {
   createAskWork as createBaseAskWork,
   createDefaultAskDependencies,
@@ -17,7 +23,7 @@ function createAskWork(
   deps: Parameters<typeof createBaseAskWork>[0],
   manager = workspaceCacheManager,
 ) {
-  return createBaseAskWork(deps, manager);
+  return createBaseAskWork(deps, toToolWorkspaceAccess(manager));
 }
 
 let previousCacheEnv: string | undefined;
@@ -127,6 +133,29 @@ function createHarness() {
       },
       rebuildChat: () => undefined,
     },
+  };
+}
+
+function createAskExecutionResult(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    result: {
+      content: [{ type: 'text' as const, text: 'Assistant answer' }],
+      structuredContent: {
+        answer: 'Assistant answer',
+      },
+    },
+    streamResult: {
+      functionCalls: [],
+      parts: [],
+      text: 'Assistant answer',
+      textByWave: ['Assistant answer'],
+      thoughtText: '',
+      toolEvents: [],
+      toolsUsed: [],
+      toolsUsedOccurrences: [],
+    },
+    toolProfile: 'none' as const,
+    ...overrides,
   };
 }
 
@@ -503,7 +532,10 @@ describe('ask transcript capture', () => {
         timestamp: 1,
       });
 
-      const deps = createDefaultAskDependencies(sessionStore, manager);
+      const deps = createDefaultAskDependencies(
+        toToolSessionAccess(sessionStore),
+        toToolWorkspaceAccess(manager),
+      );
       const rebuilt = deps.rebuildChat('sess-rebuild-cache', {
         message: 'Follow up',
         sessionId: 'sess-rebuild-cache',
@@ -518,5 +550,97 @@ describe('ask transcript capture', () => {
       sessionStore.close();
       await manager.close();
     }
+  });
+
+  it('appendSessionTurn appends transcript and event entries for successful results', () => {
+    const harness = createHarness();
+    harness.sessions.set('sess-direct', { contents: [], events: [], transcript: [] });
+
+    appendSessionTurn(
+      'sess-direct',
+      createAskExecutionResult({
+        toolProfile: 'search',
+        urls: ['https://example.com'],
+      }),
+      { message: 'Hello', sessionId: 'sess-direct' },
+      harness.deps,
+      'task-direct',
+    );
+
+    assert.deepStrictEqual(harness.sessions.get('sess-direct')?.transcript, [
+      { role: 'user', text: 'Hello', timestamp: 1, taskId: 'task-direct' },
+      { role: 'assistant', text: 'Assistant answer', timestamp: 1, taskId: 'task-direct' },
+    ]);
+    assert.deepStrictEqual(harness.sessions.get('sess-direct')?.events, [
+      {
+        request: {
+          message: 'Hello',
+          toolProfile: 'search',
+          urls: ['https://example.com'],
+        },
+        response: { text: 'Assistant answer' },
+        timestamp: 2,
+        taskId: 'task-direct',
+      },
+    ]);
+  });
+
+  it('appendSessionTurn skips all writes for error results', () => {
+    const harness = createHarness();
+    harness.sessions.set('sess-error-direct', { contents: [], events: [], transcript: [] });
+
+    appendSessionTurn(
+      'sess-error-direct',
+      createAskExecutionResult({
+        result: {
+          content: [{ type: 'text' as const, text: 'failed' }],
+          isError: true,
+        },
+      }),
+      { message: 'Hello', sessionId: 'sess-error-direct' },
+      harness.deps,
+      'task-direct',
+    );
+
+    assert.deepStrictEqual(harness.sessions.get('sess-error-direct')?.transcript, []);
+    assert.deepStrictEqual(harness.sessions.get('sess-error-direct')?.events, []);
+    assert.deepStrictEqual(harness.sessions.get('sess-error-direct')?.contents, []);
+  });
+
+  it('buildSessionEventRequest omits toolProfile when it is none', () => {
+    assert.deepStrictEqual(
+      buildSessionEventRequest('Hello', 'Hello', createAskExecutionResult({ toolProfile: 'none' })),
+      { message: 'Hello' },
+    );
+  });
+
+  it('buildSessionEventResponse redacts sensitive structured metadata fields', () => {
+    const response = buildSessionEventResponse(
+      createAskExecutionResult({
+        streamResult: {
+          functionCalls: [],
+          parts: [],
+          text: 'Assistant answer',
+          textByWave: ['Assistant answer'],
+          thoughtText: '',
+          toolEvents: [],
+          toolsUsed: [],
+          toolsUsedOccurrences: [],
+          groundingMetadata: { groundingChunks: [{ web: { uri: 'https://example.com' } }] },
+          urlContextMetadata: { urlMetadata: [{ retrievedUrl: 'https://example.com' }] },
+        },
+      }),
+      {
+        answer: 'Assistant answer',
+        safetyRatings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', probability: 'LOW' }],
+        citationMetadata: { citations: [{ startIndex: 1, endIndex: 2 }] },
+      },
+    );
+
+    assert.deepStrictEqual(response.text, 'Assistant answer');
+    assert.deepStrictEqual(response.safetyRatings, '[REDACTED]');
+    assert.deepStrictEqual(response.citationMetadata, '[REDACTED]');
+    assert.deepStrictEqual(response.groundingMetadata, '[REDACTED]');
+    assert.deepStrictEqual(response.urlContextMetadata, '[REDACTED]');
   });
 });

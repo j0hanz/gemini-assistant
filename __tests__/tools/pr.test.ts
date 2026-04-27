@@ -26,6 +26,7 @@ const {
   __setReviewGitRunnerForTests,
   isSensitiveUntrackedPath,
   matchesNoisyPath,
+  parseAnalyzePrModelOutput,
   reviewWork,
   resolveReviewWorkingDirectory,
   scoreDiffUnitRisk,
@@ -582,6 +583,82 @@ describe('buildAnalysisPrompt', () => {
     );
     assert.ok(prompt.includes('Focus:'));
     assert.ok(prompt.includes('security review'));
+  });
+});
+
+describe('parseAnalyzePrModelOutput', () => {
+  it('returns summary and documentation drift for valid structured output', () => {
+    assert.deepStrictEqual(
+      parseAnalyzePrModelOutput(
+        JSON.stringify({
+          summary: 'Review summary',
+          documentationDrift: [
+            {
+              file: 'README.md',
+              driftDescription: 'README no longer matches the code.',
+              suggestedUpdate: 'Update the setup section.',
+            },
+          ],
+        }),
+      ),
+      {
+        summary: 'Review summary',
+        documentationDrift: [
+          {
+            file: 'README.md',
+            driftDescription: 'README no longer matches the code.',
+            suggestedUpdate: 'Update the setup section.',
+          },
+        ],
+        schemaWarnings: [],
+      },
+    );
+  });
+
+  it('falls back to summary-only parsing and records a schema warning for extra keys', () => {
+    const result = parseAnalyzePrModelOutput(
+      JSON.stringify({
+        summary: 'Review summary',
+        unexpected: true,
+      }),
+    );
+
+    assert.strictEqual(result.summary, 'Review summary');
+    assert.strictEqual(result.documentationDrift, undefined);
+    assert.ok(result.schemaWarnings.length > 0);
+    assert.match(
+      result.schemaWarnings[0] ?? '',
+      /review structured output failed schema validation/,
+    );
+  });
+
+  it('keeps summary and records a warning when documentationDrift fails schema validation', () => {
+    const result = parseAnalyzePrModelOutput(
+      JSON.stringify({
+        summary: 'Review summary',
+        documentationDrift: [
+          {
+            file: 'README.md',
+            driftDescription: 'README no longer matches the code.',
+          },
+        ],
+      }),
+    );
+
+    assert.strictEqual(result.summary, 'Review summary');
+    assert.strictEqual(result.documentationDrift, undefined);
+    assert.ok(
+      result.schemaWarnings.some((warning) =>
+        warning.includes('documentationDrift structured output failed schema validation'),
+      ),
+    );
+  });
+
+  it('returns an empty summary and no warnings for empty text', () => {
+    assert.deepStrictEqual(parseAnalyzePrModelOutput(''), {
+      summary: '',
+      schemaWarnings: [],
+    });
   });
 });
 

@@ -18,6 +18,8 @@ const { createPromptDefinitions, PUBLIC_PROMPT_NAMES, registerPrompts } =
 const { PUBLIC_RESOURCE_URIS, registerResources } = await import('../../src/resources.js');
 const { createSessionStore } = await import('../../src/sessions.js');
 const { PUBLIC_TOOL_NAMES } = await import('../../src/public-contract.js');
+const { toToolSessionAccess, toToolWorkspaceAccess } =
+  await import('../../src/lib/tool-context.js');
 const { createWorkspaceCacheManager } = await import('../../src/lib/workspace-context.js');
 
 const rootsFetcher = async (): Promise<string[]> => [];
@@ -40,11 +42,16 @@ function createServer(): McpServer {
 
 const sessionStore = createSessionStore();
 const workspaceCacheManager = createWorkspaceCacheManager();
+const toolServices = {
+  rootsFetcher,
+  session: toToolSessionAccess(sessionStore),
+  workspace: toToolWorkspaceAccess(workspaceCacheManager),
+};
 
 describe('tool registration', () => {
   it('registers chat without error', () => {
     const server = createServer();
-    assert.doesNotThrow(() => registerChatTool(server, sessionStore, workspaceCacheManager));
+    assert.doesNotThrow(() => registerChatTool(server, toolServices));
   });
 
   it('registers research without error', () => {
@@ -75,7 +82,7 @@ describe('tool registration', () => {
   it('registers all public tools, prompts, and resources on the same server', () => {
     const server = createServer();
     assert.doesNotThrow(() => {
-      registerChatTool(server, sessionStore, workspaceCacheManager);
+      registerChatTool(server, toolServices);
       registerResearchTool(server, workspaceCacheManager);
       registerAnalyzeTool(server, workspaceCacheManager, rootsFetcher);
       registerReviewTool(server, workspaceCacheManager, rootsFetcher);

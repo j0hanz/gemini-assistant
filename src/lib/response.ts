@@ -35,6 +35,57 @@ export function pickDefined<T extends Record<string, unknown>>(obj: T): PickDefi
   ) as PickDefined<T>;
 }
 
+export function readStructuredObject(
+  result: Pick<CallToolResult, 'isError' | 'structuredContent'>,
+): Record<string, unknown> | undefined {
+  if (result.isError || !result.structuredContent || typeof result.structuredContent !== 'object') {
+    return undefined;
+  }
+
+  return result.structuredContent;
+}
+
+export function mergeStructured(
+  result: CallToolResult,
+  patch: Record<string, unknown> | undefined,
+  options?: { warnings?: readonly string[] },
+): CallToolResult {
+  if (result.isError) {
+    return result;
+  }
+
+  const baseStructured = readStructuredObject(result);
+  const incomingWarnings = options?.warnings ?? [];
+  const existingWarnings = Array.isArray(baseStructured?.warnings)
+    ? baseStructured.warnings.filter((value): value is string => typeof value === 'string')
+    : [];
+
+  if (!baseStructured && !patch && incomingWarnings.length === 0) {
+    return result;
+  }
+
+  const baseWithoutWarnings = Object.fromEntries(
+    Object.entries(baseStructured ?? {}).filter(([key]) => key !== 'warnings'),
+  );
+  const patchWithoutWarnings = Object.fromEntries(
+    Object.entries(patch ?? {}).filter(([key]) => key !== 'warnings'),
+  );
+  const warnings = [...existingWarnings, ...incomingWarnings];
+
+  return {
+    ...result,
+    structuredContent: {
+      ...baseWithoutWarnings,
+      ...patchWithoutWarnings,
+      ...(warnings.length > 0
+        ? { warnings }
+        : existingWarnings.length > 0
+          ? { warnings: existingWarnings }
+          : {}),
+    },
+  };
+}
+
 export interface CollectedItems<T> {
   items: T[];
   droppedNonPublic: number;

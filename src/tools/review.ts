@@ -1001,6 +1001,74 @@ function buildStructuredContent(
   };
 }
 
+export function parseAnalyzePrModelOutput(textContent: string): {
+  summary: string;
+  documentationDrift?: { file: string; driftDescription: string; suggestedUpdate: string }[];
+  schemaWarnings: string[];
+} {
+  if (textContent.trim().length === 0) {
+    return {
+      summary: '',
+      schemaWarnings: [],
+    };
+  }
+
+  let summary = textContent || '';
+  const schemaWarnings: string[] = [];
+  let documentationDrift:
+    | { file: string; driftDescription: string; suggestedUpdate: string }[]
+    | undefined;
+
+  const parsedJson = tryParseJsonResponse(textContent);
+  const parsedData = AnalyzePrModelOutputSchema.safeParse(parsedJson);
+
+  if (parsedData.success) {
+    summary = parsedData.data.summary.trim();
+    if (parsedData.data.documentationDrift?.length) {
+      documentationDrift = parsedData.data.documentationDrift;
+    }
+    return {
+      summary,
+      ...(documentationDrift ? { documentationDrift } : {}),
+      schemaWarnings,
+    };
+  }
+
+  schemaWarnings.push(
+    `review structured output failed schema validation: ${z.prettifyError(parsedData.error)}`,
+  );
+
+  const parsedFallback = z
+    .object({
+      summary: z.string().optional(),
+      documentationDrift: z.unknown().optional(),
+    })
+    .safeParse(parsedJson);
+
+  if (parsedFallback.success) {
+    summary = parsedFallback.data.summary?.trim() ?? summary;
+
+    if (parsedFallback.data.documentationDrift !== undefined) {
+      const parsedDocumentationDrift = z
+        .array(DocumentationDriftSchema)
+        .safeParse(parsedFallback.data.documentationDrift);
+      if (parsedDocumentationDrift.success && parsedDocumentationDrift.data.length > 0) {
+        documentationDrift = parsedDocumentationDrift.data;
+      } else if (!parsedDocumentationDrift.success) {
+        schemaWarnings.push(
+          `documentationDrift structured output failed schema validation: ${z.prettifyError(parsedDocumentationDrift.error)}`,
+        );
+      }
+    }
+  }
+
+  return {
+    summary,
+    ...(documentationDrift ? { documentationDrift } : {}),
+    schemaWarnings,
+  };
+}
+
 function buildNoChangesAnalysis(snapshot: LocalDiffSnapshot): string {
   const skippedNotes = [
     snapshot.skippedBinaryPaths.length > 0
@@ -1253,47 +1321,9 @@ export async function analyzePrWork(
       safetySettings,
     },
     responseBuilder: (_streamResult, textContent: string) => {
-      let finalSummary = textContent || '';
-      const schemaWarnings: string[] = [];
-      let documentationDrift:
-        | { file: string; driftDescription: string; suggestedUpdate: string }[]
-        | undefined;
-
-      const parsedData = AnalyzePrModelOutputSchema.safeParse(tryParseJsonResponse(textContent));
-      if (parsedData.success) {
-        finalSummary = parsedData.data.summary.trim();
-        if (parsedData.data.documentationDrift?.length) {
-          documentationDrift = parsedData.data.documentationDrift;
-        }
-      } else {
-        schemaWarnings.push(
-          `review structured output failed schema validation: ${z.prettifyError(parsedData.error)}`,
-        );
-
-        const parsedFallback = z
-          .strictObject({
-            summary: z.string().optional(),
-            documentationDrift: z.unknown().optional(),
-          })
-          .safeParse(tryParseJsonResponse(textContent));
-
-        if (parsedFallback.success) {
-          finalSummary = parsedFallback.data.summary?.trim() ?? finalSummary;
-
-          if (parsedFallback.data.documentationDrift !== undefined) {
-            const parsedDocumentationDrift = z
-              .array(DocumentationDriftSchema)
-              .safeParse(parsedFallback.data.documentationDrift);
-            if (parsedDocumentationDrift.success && parsedDocumentationDrift.data.length > 0) {
-              documentationDrift = parsedDocumentationDrift.data;
-            } else if (!parsedDocumentationDrift.success) {
-              schemaWarnings.push(
-                `documentationDrift structured output failed schema validation: ${z.prettifyError(parsedDocumentationDrift.error)}`,
-              );
-            }
-          }
-        }
-      }
+      const parsedOutput = parseAnalyzePrModelOutput(textContent);
+      let finalSummary = parsedOutput.summary;
+      const { documentationDrift, schemaWarnings } = parsedOutput;
 
       if (documentationDrift && documentationDrift.length > 0) {
         finalSummary = `⚠️ **Documentation Drift Detected**\n\nThe following documentation files may need updates based on this diff:\n${documentationDrift.map((d) => `- **${d.file}**: ${d.driftDescription} (Suggestion: ${d.suggestedUpdate})`).join('\n')}\n\n---\n\n${finalSummary}`;

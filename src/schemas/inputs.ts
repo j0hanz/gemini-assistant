@@ -31,13 +31,7 @@ import {
   workspacePath,
   workspacePathArray,
 } from './fields.js';
-import {
-  validateFlatAnalyzeInput,
-  validateFlatResearchInput,
-  validateFlatReviewInput,
-  validateGeminiJsonSchema,
-  validatePropertyKeyList,
-} from './validators.js';
+import { validateGeminiJsonSchema, validatePropertyKeyList } from './validators.js';
 
 const JSON_LITERAL_SCHEMA = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 
@@ -240,8 +234,62 @@ export type WithChatDefaults<
   urls?: string[] | undefined;
 };
 
-const ResearchInputBaseSchema = z.strictObject({
-  mode: researchMode(),
+const RESEARCH_MODE_DESCRIPTION = 'Research mode selector (`quick` or `deep`).';
+const ANALYZE_TARGET_KIND_DESCRIPTION =
+  'What to analyze: one file, one or more public URLs, or a small local file set.';
+const ANALYZE_OUTPUT_KIND_DESCRIPTION =
+  'Requested output format: summary text or a generated diagram.';
+const REVIEW_SUBJECT_KIND_DESCRIPTION =
+  'What to review: the current diff, a file comparison, or a failure report.';
+
+function addSelectorIssue(
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+  field: string,
+  message: string,
+  input: unknown,
+): void {
+  ctx.addIssue({
+    code: 'custom',
+    message,
+    path: [field],
+    input,
+  });
+}
+
+function validateAnalyzeOutputSelection(
+  value: {
+    outputKind?: 'diagram' | 'summary' | undefined;
+    diagramType?: string | undefined;
+    validateSyntax?: boolean | undefined;
+  },
+  ctx: z.core.$RefinementCtx<Record<string, unknown>>,
+): void {
+  const outputKind = value.outputKind ?? 'summary';
+
+  if (outputKind !== 'summary') {
+    return;
+  }
+
+  if (value.validateSyntax !== undefined) {
+    addSelectorIssue(
+      ctx,
+      'validateSyntax',
+      'validateSyntax is not allowed when outputKind=summary.',
+      value.validateSyntax,
+    );
+  }
+
+  if (value.diagramType !== undefined) {
+    addSelectorIssue(
+      ctx,
+      'diagramType',
+      'diagramType is not allowed when outputKind=summary.',
+      value.diagramType,
+    );
+  }
+}
+
+const researchSharedShape = {
   goal: goalText('Question or research goal to answer quickly'),
   ...createUrlContextFields({
     itemDescription: 'Public URL to analyze alongside search results',
@@ -249,6 +297,18 @@ const ResearchInputBaseSchema = z.strictObject({
     max: 20,
     optional: true,
   }),
+  thinkingLevel: thinkingLevelField,
+  thinkingBudget: thinkingBudgetField,
+  ...generationConfigFields,
+  fileSearch: withFieldMetadata(
+    OptionalFileSearchSpecSchema,
+    'Enable Gemini File Search over named stores alongside research retrieval.',
+  ),
+};
+
+const ResearchInputBaseSchema = z.strictObject({
+  mode: researchMode(RESEARCH_MODE_DESCRIPTION),
+  ...researchSharedShape,
   systemInstruction: optionalField(
     textField(
       'Instructions for output presentation (format, audience, tone). Allowed only when mode=quick.',
@@ -263,20 +323,42 @@ const ResearchInputBaseSchema = z.strictObject({
     z.int().min(1).max(5).optional(),
     'Search depth, default 2. Allowed only when mode=deep.',
   ),
-  thinkingLevel: thinkingLevelField,
-  thinkingBudget: thinkingBudgetField,
-  ...generationConfigFields,
-  fileSearch: withFieldMetadata(
-    OptionalFileSearchSpecSchema,
-    'Enable Gemini File Search over named stores alongside research retrieval.',
+});
+
+const ResearchQuickSchema = z.strictObject({
+  mode: withFieldMetadata(z.literal('quick').default('quick'), RESEARCH_MODE_DESCRIPTION),
+  ...researchSharedShape,
+  systemInstruction: optionalField(
+    textField('Instructions for output presentation (format, audience, tone).'),
   ),
 });
-export const ResearchInputSchema = ResearchInputBaseSchema.superRefine(validateFlatResearchInput);
+
+const ResearchDeepSchema = z.strictObject({
+  mode: withFieldMetadata(z.literal('deep'), RESEARCH_MODE_DESCRIPTION),
+  ...researchSharedShape,
+  deliverable: optionalField(textField('Requested output form (brief, report, checklist, etc.).')),
+  searchDepth: withFieldMetadata(
+    z.int().min(1).max(5).optional(),
+    'Search depth, default 2. Only used for deep research.',
+  ),
+});
+
+const ResearchVariantSchema = z.discriminatedUnion('mode', [
+  ResearchQuickSchema,
+  ResearchDeepSchema,
+]);
+
+export const ResearchInputSchema = ResearchInputBaseSchema.pipe(
+  ResearchVariantSchema as unknown as z.ZodType<
+    z.infer<typeof ResearchVariantSchema>,
+    z.infer<typeof ResearchInputBaseSchema>
+  >,
+);
 export type ResearchInput = z.infer<typeof ResearchInputSchema>;
 
 const AnalyzeInputBaseSchema = z.strictObject({
   goal: goalText('Question or analysis goal for the selected targets'),
-  targetKind: analyzeTargetKind(),
+  targetKind: analyzeTargetKind(ANALYZE_TARGET_KIND_DESCRIPTION),
   filePath: optionalField(
     workspacePath(
       'Workspace-relative or absolute path to analyze when targetKind=file. Allowed only when targetKind=file.',
@@ -297,7 +379,7 @@ const AnalyzeInputBaseSchema = z.strictObject({
     max: 5,
     optional: true,
   }),
-  outputKind: analyzeOutputKind(),
+  outputKind: analyzeOutputKind(ANALYZE_OUTPUT_KIND_DESCRIPTION),
   diagramType: withFieldMetadata(
     z.enum(DIAGRAM_TYPES).optional(),
     'Diagram syntax to generate when outputKind=diagram. Defaults to mermaid. Allowed only when outputKind=diagram.',
@@ -323,33 +405,96 @@ const AnalyzeInputBaseSchema = z.strictObject({
     'Resolution for image/video processing. Higher = more detail, more tokens.',
   ),
 });
-export const AnalyzeInputSchema = AnalyzeInputBaseSchema.superRefine(validateFlatAnalyzeInput);
-type AnalyzeInputFlat = z.infer<typeof AnalyzeInputSchema>;
-type AnalyzeInputCommon = Omit<AnalyzeInputFlat, 'targetKind' | 'filePath' | 'urls' | 'filePaths'>;
-/**
- * Discriminated union over `targetKind`. The runtime schema is a single strict
- * object (preserving exact validator wording); this type alias narrows variant
- * fields after a `targetKind` check so call sites need no runtime guards.
- */
-export type AnalyzeInput =
-  | (AnalyzeInputCommon & {
-      targetKind: 'file';
-      filePath: string;
-      urls?: string[] | undefined;
-      filePaths?: undefined;
-    })
-  | (AnalyzeInputCommon & {
-      targetKind: 'url';
-      urls: string[];
-      filePath?: undefined;
-      filePaths?: undefined;
-    })
-  | (AnalyzeInputCommon & {
-      targetKind: 'multi';
-      filePaths: string[];
-      urls?: string[] | undefined;
-      filePath?: undefined;
-    });
+
+const analyzeSharedShape = {
+  goal: goalText('Question or analysis goal for the selected targets'),
+  outputKind: analyzeOutputKind(ANALYZE_OUTPUT_KIND_DESCRIPTION),
+  diagramType: withFieldMetadata(
+    z.enum(DIAGRAM_TYPES).optional(),
+    'Diagram syntax to generate when outputKind=diagram. Defaults to mermaid.',
+  ),
+  validateSyntax: z.boolean().optional().describe('Validate generated diagram syntax.'),
+  thinkingLevel: thinkingLevelField,
+  thinkingBudget: thinkingBudgetField,
+  ...generationConfigFields,
+  googleSearch: withFieldMetadata(
+    z.boolean().optional(),
+    'Enable Google Search grounding. Optional; additive. Extra tokens when enabled.',
+  ),
+  fileSearch: withFieldMetadata(
+    OptionalFileSearchSpecSchema,
+    'Enable Gemini File Search over named stores during file/url/multi analysis.',
+  ),
+  mediaResolution: mediaResolution(
+    'Resolution for image/video processing. Higher = more detail, more tokens.',
+  ),
+};
+
+const AnalyzeFileSchema = z
+  .strictObject({
+    targetKind: withFieldMetadata(
+      z.literal('file').default('file'),
+      ANALYZE_TARGET_KIND_DESCRIPTION,
+    ),
+    ...analyzeSharedShape,
+    filePath: workspacePath('Workspace-relative or absolute path to analyze when targetKind=file'),
+    urls: createUrlContextFields({
+      itemDescription: 'Public URL to analyze',
+      description: 'Optional public URLs to include as additional URL context.',
+      min: 1,
+      max: 20,
+      optional: true,
+    }).urls,
+  })
+  .superRefine(validateAnalyzeOutputSelection);
+
+const AnalyzeUrlSchema = z
+  .strictObject({
+    targetKind: withFieldMetadata(z.literal('url'), ANALYZE_TARGET_KIND_DESCRIPTION),
+    ...analyzeSharedShape,
+    urls: createUrlContextFields({
+      itemDescription: 'Public URL to analyze',
+      description: 'Public URLs to analyze when targetKind=url.',
+      min: 1,
+      max: 20,
+      optional: false,
+    }).urls,
+  })
+  .superRefine(validateAnalyzeOutputSelection);
+
+const AnalyzeMultiSchema = z
+  .strictObject({
+    targetKind: withFieldMetadata(z.literal('multi'), ANALYZE_TARGET_KIND_DESCRIPTION),
+    ...analyzeSharedShape,
+    filePaths: workspacePathArray({
+      description: 'Local files to analyze when targetKind=multi.',
+      itemDescription: 'Workspace-relative or absolute path to a local file',
+      min: 2,
+      max: 5,
+    }),
+    urls: createUrlContextFields({
+      itemDescription: 'Public URL to analyze',
+      description: 'Optional public URLs to include as additional URL context.',
+      min: 1,
+      max: 20,
+      optional: true,
+    }).urls,
+  })
+  .superRefine(validateAnalyzeOutputSelection);
+
+const AnalyzeVariantSchema = z.discriminatedUnion('targetKind', [
+  AnalyzeFileSchema,
+  AnalyzeUrlSchema,
+  AnalyzeMultiSchema,
+]);
+
+export const AnalyzeInputSchema = AnalyzeInputBaseSchema.pipe(
+  AnalyzeVariantSchema as unknown as z.ZodType<
+    z.infer<typeof AnalyzeVariantSchema>,
+    z.infer<typeof AnalyzeInputBaseSchema>
+  >,
+);
+export type AnalyzeInput = z.infer<typeof AnalyzeInputSchema>;
 const reviewCommonShape = {
   focus: optionalField(textField('Review priorities (e.g. regressions, security, performance).')),
   thinkingLevel: thinkingLevelField,
@@ -360,7 +505,7 @@ const reviewCommonShape = {
 const ReviewInputBaseSchema = z.strictObject({
   subjectKind: withFieldMetadata(
     z.enum(REVIEW_SUBJECT_OPTIONS).default('diff'),
-    'What to review: the current diff, a file comparison, or a failure report.',
+    REVIEW_SUBJECT_KIND_DESCRIPTION,
   ),
   dryRun: withFieldMetadata(
     z.boolean().optional(),
@@ -415,7 +560,85 @@ const ReviewInputBaseSchema = z.strictObject({
   }),
   ...reviewCommonShape,
 });
-export const ReviewInputSchema = ReviewInputBaseSchema.superRefine(validateFlatReviewInput);
+
+const ReviewDiffSchema = z.strictObject({
+  subjectKind: withFieldMetadata(
+    z.literal('diff').default('diff'),
+    REVIEW_SUBJECT_KIND_DESCRIPTION,
+  ),
+  dryRun: withFieldMetadata(z.boolean().optional(), 'Skip model review for subjectKind=diff.'),
+  language: optionalField(textField('Primary language hint for diff or failure review.')),
+  fileSearch: withFieldMetadata(
+    OptionalFileSearchSpecSchema,
+    'Enable Gemini File Search over named stores during comparison or failure review. Ignored for subjectKind=diff.',
+  ),
+  ...reviewCommonShape,
+});
+
+const ReviewComparisonSchema = z.strictObject({
+  subjectKind: withFieldMetadata(z.literal('comparison'), REVIEW_SUBJECT_KIND_DESCRIPTION),
+  filePathA: workspacePath(
+    'Workspace-relative or absolute path to the first file when subjectKind=comparison',
+  ),
+  filePathB: workspacePath(
+    'Workspace-relative or absolute path to the second file when subjectKind=comparison',
+  ),
+  question: optionalField(
+    textField('Comparison focus when subjectKind=comparison (behavior, APIs, security, etc.).'),
+  ),
+  googleSearch: withFieldMetadata(
+    z.boolean().optional(),
+    'Enable Google Search when subjectKind=comparison or subjectKind=failure.',
+  ),
+  fileSearch: withFieldMetadata(
+    OptionalFileSearchSpecSchema,
+    'Enable Gemini File Search over named stores during comparison or failure review.',
+  ),
+  ...createUrlContextFields({
+    itemDescription: 'Public URL to include via URL Context',
+    description: 'Public URLs for additional context when subjectKind=comparison or failure.',
+    max: 20,
+    optional: true,
+  }),
+  ...reviewCommonShape,
+});
+
+const ReviewFailureSchema = z.strictObject({
+  subjectKind: withFieldMetadata(z.literal('failure'), REVIEW_SUBJECT_KIND_DESCRIPTION),
+  language: optionalField(textField('Primary language hint for diff or failure review.')),
+  error: textField('Error message or stack trace when subjectKind=failure.', 32_000),
+  codeContext: optionalField(
+    textField('Relevant source code context when subjectKind=failure.', 16_000),
+  ),
+  googleSearch: withFieldMetadata(
+    z.boolean().optional(),
+    'Enable Google Search when subjectKind=comparison or subjectKind=failure.',
+  ),
+  fileSearch: withFieldMetadata(
+    OptionalFileSearchSpecSchema,
+    'Enable Gemini File Search over named stores during comparison or failure review.',
+  ),
+  ...createUrlContextFields({
+    itemDescription: 'Public URL to include via URL Context',
+    description: 'Public URLs for additional context when subjectKind=comparison or failure.',
+    max: 20,
+    optional: true,
+  }),
+  ...reviewCommonShape,
+});
+
+const ReviewVariantSchema = z.discriminatedUnion('subjectKind', [
+  ReviewDiffSchema,
+  ReviewComparisonSchema,
+  ReviewFailureSchema,
+]);
+
+export const ReviewInputSchema = ReviewInputBaseSchema.pipe(
+  ReviewVariantSchema as unknown as z.ZodType<
+    z.infer<typeof ReviewVariantSchema>,
+    z.infer<typeof ReviewInputBaseSchema>
+  >,
+);
 export type ReviewInput = z.infer<typeof ReviewInputSchema>;
 
 export interface AskInput {

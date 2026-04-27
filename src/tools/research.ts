@@ -966,7 +966,10 @@ async function runQuickResearch(
   );
 }
 
-async function runDeepResearch(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {
+async function runDeepResearch(
+  args: Extract<ResearchInput, { mode: 'deep' }>,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
   const searchDepth = args.searchDepth ?? 2;
   const hasExplicitThinkingLevel = Object.hasOwn(args, 'thinkingLevel');
   const thinkingLevel = hasExplicitThinkingLevel ? args.thinkingLevel : undefined;
@@ -991,6 +994,12 @@ function isQuickResearchInput(args: ResearchInput): args is ResearchInput & {
   mode: 'quick';
 } {
   return args.mode === 'quick';
+}
+
+function isDeepResearchInput(
+  args: ResearchInput,
+): args is Extract<ResearchInput, { mode: 'deep' }> {
+  return args.mode === 'deep';
 }
 
 function extractResearchSummary(structured: Record<string, unknown>): string {
@@ -1032,7 +1041,9 @@ function buildResearchStructuredContent(
 async function researchWork(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {
   const result = isQuickResearchInput(args)
     ? await runQuickResearch(args, ctx)
-    : await runDeepResearch(args, ctx);
+    : isDeepResearchInput(args)
+      ? await runDeepResearch(args, ctx)
+      : await runQuickResearch(args, ctx);
 
   if (result.isError) {
     return result;

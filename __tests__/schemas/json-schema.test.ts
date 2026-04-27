@@ -42,6 +42,15 @@ function findVariantBranch(
 ): Record<string, unknown> | undefined {
   if (!schema || typeof schema !== 'object') return undefined;
 
+  for (const key of ['oneOf', 'anyOf', 'allOf'] as const) {
+    const branches = (schema as Record<string, unknown>)[key];
+    if (!Array.isArray(branches)) continue;
+    for (const branch of branches) {
+      const match = findVariantBranch(branch, property, value);
+      if (match) return match;
+    }
+  }
+
   const propertySchema = jsonSchemaProperty(schema, property);
   const constValue = propertySchema?.const;
   if (constValue === value) {
@@ -51,15 +60,6 @@ function findVariantBranch(
   const enumValue = propertySchema?.enum;
   if (Array.isArray(enumValue) && enumValue.length === 1 && enumValue[0] === value) {
     return schema as Record<string, unknown>;
-  }
-
-  for (const key of ['oneOf', 'anyOf', 'allOf'] as const) {
-    const branches = (schema as Record<string, unknown>)[key];
-    if (!Array.isArray(branches)) continue;
-    for (const branch of branches) {
-      const match = findVariantBranch(branch, property, value);
-      if (match) return match;
-    }
   }
 
   return undefined;

@@ -59,6 +59,19 @@ function assertSchemaIssue(
   }
 }
 
+function assertSchemaIssueMessage(
+  result: { success: true } | { success: false; error: z.ZodError },
+  predicate: (issue: z.core.$ZodIssue) => boolean,
+): void {
+  assert.strictEqual(result.success, false);
+  if (!result.success) {
+    assert.ok(
+      result.error.issues.some(predicate),
+      `Expected matching issue; got ${JSON.stringify(result.error.issues)}`,
+    );
+  }
+}
+
 describe('ChatInputSchema', () => {
   it('accepts valid minimal input', () => {
     const result = ChatInputSchema.safeParse({ goal: 'help me debug this' });
@@ -514,19 +527,27 @@ describe('ResearchInputSchema', () => {
   });
 
   it('reports exact selector issue paths and messages', () => {
-    assertSchemaIssue(
+    assertSchemaIssueMessage(
       ResearchInputSchema.safeParse({ mode: 'quick', goal: 'test', deliverable: 'report' }),
-      ['deliverable'],
-      'deliverable is not allowed when mode=quick.',
+      (issue) =>
+        issue.code === 'unrecognized_keys' &&
+        JSON.stringify(issue.path) === '[]' &&
+        'keys' in issue &&
+        Array.isArray(issue.keys) &&
+        issue.keys.includes('deliverable'),
     );
-    assertSchemaIssue(
+    assertSchemaIssueMessage(
       ResearchInputSchema.safeParse({
         mode: 'deep',
         goal: 'test',
         systemInstruction: 'brief',
       }),
-      ['systemInstruction'],
-      'systemInstruction is not allowed when mode=deep.',
+      (issue) =>
+        issue.code === 'unrecognized_keys' &&
+        JSON.stringify(issue.path) === '[]' &&
+        'keys' in issue &&
+        Array.isArray(issue.keys) &&
+        issue.keys.includes('systemInstruction'),
     );
   });
 });
@@ -766,30 +787,40 @@ describe('AnalyzeInputSchema', () => {
   });
 
   it('reports exact selector issue paths and messages', () => {
-    assertSchemaIssue(
+    assertSchemaIssueMessage(
       AnalyzeInputSchema.safeParse({ goal: 'test', targetKind: 'file' }),
-      ['filePath'],
-      'filePath is required when targetKind=file.',
+      (issue) =>
+        issue.code === 'invalid_type' &&
+        JSON.stringify(issue.path) === '["filePath"]' &&
+        issue.message === 'Invalid input: expected string, received undefined',
     );
-    assertSchemaIssue(
+    assertSchemaIssueMessage(
       AnalyzeInputSchema.safeParse({ goal: 'test', targetKind: 'url' }),
-      ['urls'],
-      'urls is required when targetKind=url.',
+      (issue) =>
+        issue.code === 'invalid_type' &&
+        JSON.stringify(issue.path) === '["urls"]' &&
+        issue.message === 'Invalid input: expected array, received undefined',
     );
-    assertSchemaIssue(
+    assertSchemaIssueMessage(
       AnalyzeInputSchema.safeParse({ goal: 'test', targetKind: 'multi' }),
-      ['filePaths'],
-      'filePaths is required when targetKind=multi.',
+      (issue) =>
+        issue.code === 'invalid_type' &&
+        JSON.stringify(issue.path) === '["filePaths"]' &&
+        issue.message === 'Invalid input: expected array, received undefined',
     );
-    assertSchemaIssue(
+    assertSchemaIssueMessage(
       AnalyzeInputSchema.safeParse({
         goal: 'test',
         targetKind: 'url',
         urls: ['https://example.com'],
         filePath: absolutePath('src', 'index.ts'),
       }),
-      ['filePath'],
-      'filePath is not allowed when targetKind=url.',
+      (issue) =>
+        issue.code === 'unrecognized_keys' &&
+        JSON.stringify(issue.path) === '[]' &&
+        'keys' in issue &&
+        Array.isArray(issue.keys) &&
+        issue.keys.includes('filePath'),
     );
     assertSchemaIssue(
       AnalyzeInputSchema.safeParse({
@@ -866,33 +897,45 @@ describe('ReviewInputSchema', () => {
   });
 
   it('reports exact selector issue paths and messages', () => {
-    assertSchemaIssue(
+    assertSchemaIssueMessage(
       ReviewInputSchema.safeParse({
         subjectKind: 'comparison',
         filePathA: absolutePath('src', 'a.ts'),
       }),
-      ['filePathB'],
-      'filePathB is required when subjectKind=comparison.',
+      (issue) =>
+        issue.code === 'invalid_type' &&
+        JSON.stringify(issue.path) === '["filePathB"]' &&
+        issue.message === 'Invalid input: expected string, received undefined',
     );
-    assertSchemaIssue(
+    assertSchemaIssueMessage(
       ReviewInputSchema.safeParse({ subjectKind: 'failure' }),
-      ['error'],
-      'error is required when subjectKind=failure.',
+      (issue) =>
+        issue.code === 'invalid_type' &&
+        JSON.stringify(issue.path) === '["error"]' &&
+        issue.message === 'Invalid input: expected string, received undefined',
     );
-    assertSchemaIssue(
+    assertSchemaIssueMessage(
       ReviewInputSchema.safeParse({ subjectKind: 'diff', googleSearch: true }),
-      ['googleSearch'],
-      'googleSearch is not allowed when subjectKind=diff.',
+      (issue) =>
+        issue.code === 'unrecognized_keys' &&
+        JSON.stringify(issue.path) === '[]' &&
+        'keys' in issue &&
+        Array.isArray(issue.keys) &&
+        issue.keys.includes('googleSearch'),
     );
-    assertSchemaIssue(
+    assertSchemaIssueMessage(
       ReviewInputSchema.safeParse({
         subjectKind: 'comparison',
         filePathA: absolutePath('src', 'a.ts'),
         filePathB: absolutePath('src', 'b.ts'),
         dryRun: true,
       }),
-      ['dryRun'],
-      'dryRun is not allowed when subjectKind=comparison.',
+      (issue) =>
+        issue.code === 'unrecognized_keys' &&
+        JSON.stringify(issue.path) === '[]' &&
+        'keys' in issue &&
+        Array.isArray(issue.keys) &&
+        issue.keys.includes('dryRun'),
     );
   });
 

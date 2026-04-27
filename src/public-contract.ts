@@ -120,10 +120,10 @@ export const JOB_METADATA = [
   },
 ] as const satisfies readonly JobMetadata[];
 
-export const DISCOVERY_ENTRIES = [
-  {
-    name: 'chat',
-    kind: 'tool',
+type DiscoveryEntryMetadata = Omit<DiscoveryEntry, 'kind' | 'name'>;
+
+const TOOL_DISCOVERY_DETAILS = {
+  chat: {
     title: 'Chat',
     bestFor:
       'Direct Gemini chat, structured output, optional Search/URL grounding, and multi-turn server-managed sessions.',
@@ -167,9 +167,7 @@ export const DISCOVERY_ENTRIES = [
       { kind: 'resource', name: 'gemini://sessions/{sessionId}/turns/{turnIndex}/parts' },
     ],
   },
-  {
-    name: 'research',
-    kind: 'tool',
+  research: {
     title: 'Research',
     bestFor: 'Web-grounded lookup with an explicit quick or deep research mode.',
     whenToUse: 'Use for tasks requiring current public information.',
@@ -198,9 +196,7 @@ export const DISCOVERY_ENTRIES = [
       { kind: 'resource', name: 'discover://workflows' },
     ],
   },
-  {
-    name: 'analyze',
-    kind: 'tool',
+  analyze: {
     title: 'Analyze',
     bestFor:
       'Focused analysis of one local file, one or more public URLs, a small file set, or diagram generation from known artifacts.',
@@ -233,9 +229,7 @@ export const DISCOVERY_ENTRIES = [
       { kind: 'resource', name: 'workspace://context' },
     ],
   },
-  {
-    name: 'review',
-    kind: 'tool',
+  review: {
     title: 'Review',
     bestFor: 'Reviewing local diffs, comparing two files, or diagnosing a failing change.',
     whenToUse: 'Use for evaluative tasks (bugs, regressions, root causes).',
@@ -268,9 +262,10 @@ export const DISCOVERY_ENTRIES = [
       { kind: 'resource', name: 'discover://workflows' },
     ],
   },
-  {
-    name: 'discover',
-    kind: 'prompt',
+} as const satisfies Record<PublicJobName, DiscoveryEntryMetadata>;
+
+const PROMPT_DISCOVERY_DETAILS = {
+  discover: {
     title: 'Discover Prompt',
     bestFor: 'Orienting a user to the public jobs and the most relevant starting point.',
     whenToUse: 'Use to guide a client on which public job to use.',
@@ -281,9 +276,7 @@ export const DISCOVERY_ENTRIES = [
       { kind: 'resource', name: 'discover://workflows' },
     ],
   },
-  {
-    name: 'research',
-    kind: 'prompt',
+  research: {
     title: 'Research Prompt',
     bestFor: 'Packaging a research goal into the quick-versus-deep decision flow.',
     whenToUse: 'Use to guide a client on how to explain a research task.',
@@ -295,9 +288,7 @@ export const DISCOVERY_ENTRIES = [
       { kind: 'resource', name: 'discover://workflows' },
     ],
   },
-  {
-    name: 'review',
-    kind: 'prompt',
+  review: {
     title: 'Review Prompt',
     bestFor: 'Helping a client frame a diff review, file comparison, or failure triage request.',
     whenToUse: 'Use to clarify the type of review needed.',
@@ -308,9 +299,10 @@ export const DISCOVERY_ENTRIES = [
       { kind: 'resource', name: 'discover://workflows' },
     ],
   },
-  {
-    name: 'discover://catalog',
-    kind: 'resource',
+} as const satisfies Record<PublicPromptName, DiscoveryEntryMetadata>;
+
+const RESOURCE_DISCOVERY_DETAILS = {
+  'discover://catalog': {
     title: 'Discovery Catalog Resource',
     bestFor: 'Browsing the full public surface from one shared metadata source.',
     whenToUse: 'Use for a machine-readable list of public tools, prompts, and resources.',
@@ -318,19 +310,7 @@ export const DISCOVERY_ENTRIES = [
     returns: 'JSON and Markdown discovery catalog content.',
     related: [{ kind: 'resource', name: 'discover://workflows' }],
   },
-  {
-    name: 'discover://workflows',
-    kind: 'resource',
-    title: 'Workflow Catalog Resource',
-    bestFor: 'Browsing job-first starter workflows instead of a raw list of names.',
-    whenToUse: 'Use to find recommended entry points for common jobs.',
-    inputs: [],
-    returns: 'JSON and Markdown workflow catalog content.',
-    related: [{ kind: 'resource', name: 'discover://catalog' }],
-  },
-  {
-    name: 'discover://context',
-    kind: 'resource',
+  'discover://context': {
     title: 'Server Context Dashboard',
     bestFor: 'Inspecting the server knowledge state: workspace files, sessions, and config.',
     whenToUse: 'Use to understand available server context.',
@@ -341,9 +321,15 @@ export const DISCOVERY_ENTRIES = [
       { kind: 'resource', name: 'workspace://context' },
     ],
   },
-  {
-    name: 'session://',
-    kind: 'resource',
+  'discover://workflows': {
+    title: 'Workflow Catalog Resource',
+    bestFor: 'Browsing job-first starter workflows instead of a raw list of names.',
+    whenToUse: 'Use to find recommended entry points for common jobs.',
+    inputs: [],
+    returns: 'JSON and Markdown workflow catalog content.',
+    related: [{ kind: 'resource', name: 'discover://catalog' }],
+  },
+  'session://': {
     title: 'Session List Resource',
     bestFor: 'Browsing active in-memory chat sessions.',
     whenToUse: 'Use to inspect or resume a chat session.',
@@ -351,9 +337,7 @@ export const DISCOVERY_ENTRIES = [
     returns: 'JSON list of active session IDs and their last access timestamps.',
     related: [{ kind: 'tool', name: 'chat' }],
   },
-  {
-    name: 'session://{sessionId}',
-    kind: 'resource',
+  'session://{sessionId}': {
     title: 'Session Detail Resource',
     bestFor: 'Inspecting a single active session entry.',
     whenToUse: 'Use to get details for one session.',
@@ -364,9 +348,7 @@ export const DISCOVERY_ENTRIES = [
       { kind: 'resource', name: 'session://{sessionId}/transcript' },
     ],
   },
-  {
-    name: 'session://{sessionId}/transcript',
-    kind: 'resource',
+  'session://{sessionId}/transcript': {
     title: 'Session Transcript Resource',
     bestFor: 'Inspecting the text transcript for one active session.',
     whenToUse: 'Use for read-only visibility into recent turns.',
@@ -375,9 +357,7 @@ export const DISCOVERY_ENTRIES = [
     limitations: ['Transcript access requires MCP_EXPOSE_SESSION_RESOURCES=true.'],
     related: [{ kind: 'resource', name: 'session://{sessionId}' }],
   },
-  {
-    name: 'session://{sessionId}/events',
-    kind: 'resource',
+  'session://{sessionId}/events': {
     title: 'Session Events Resource',
     bestFor: 'Inspecting normalized Gemini tool and function activity for one active session.',
     whenToUse: 'Use to get the server-managed inspection summary.',
@@ -386,9 +366,7 @@ export const DISCOVERY_ENTRIES = [
     limitations: ['Events access requires MCP_EXPOSE_SESSION_RESOURCES=true.'],
     related: [{ kind: 'resource', name: 'session://{sessionId}' }],
   },
-  {
-    name: 'gemini://sessions/{sessionId}/turns/{turnIndex}/parts',
-    kind: 'resource',
+  'gemini://sessions/{sessionId}/turns/{turnIndex}/parts': {
     title: 'Session Turn Parts Resource',
     bestFor: 'Retrieving SDK-faithful Gemini `Part[]` for one persisted model turn.',
     whenToUse: 'Use for replay-safe multi-turn orchestration that needs SDK-faithful parts.',
@@ -398,9 +376,7 @@ export const DISCOVERY_ENTRIES = [
     limitations: ['Raw turn-parts access requires MCP_EXPOSE_SESSION_RESOURCES=true.'],
     related: [{ kind: 'resource', name: 'session://{sessionId}' }],
   },
-  {
-    name: 'workspace://context',
-    kind: 'resource',
+  'workspace://context': {
     title: 'Workspace Context Resource',
     bestFor: 'Viewing the assembled workspace context used for Gemini calls.',
     whenToUse: 'Use to inspect which local files are summarized for the model.',
@@ -408,9 +384,7 @@ export const DISCOVERY_ENTRIES = [
     returns: 'Markdown workspace context with sources and token estimate.',
     related: [{ kind: 'resource', name: 'workspace://cache' }],
   },
-  {
-    name: 'workspace://cache',
-    kind: 'resource',
+  'workspace://cache': {
     title: 'Workspace Cache Resource',
     bestFor: 'Inspecting automatic workspace cache state.',
     whenToUse: 'Use to verify workspace caching status.',
@@ -418,6 +392,24 @@ export const DISCOVERY_ENTRIES = [
     returns: 'JSON workspace cache status.',
     related: [{ kind: 'resource', name: 'workspace://context' }],
   },
+} as const satisfies Record<PublicResourceUri, DiscoveryEntryMetadata>;
+
+function buildDiscoveryEntriesForKind<Name extends string>(
+  kind: DiscoveryKind,
+  names: readonly Name[],
+  metadata: Record<Name, DiscoveryEntryMetadata>,
+): DiscoveryEntry[] {
+  return names.map((name) => ({
+    name,
+    kind,
+    ...metadata[name],
+  }));
+}
+
+export const DISCOVERY_ENTRIES = [
+  ...buildDiscoveryEntriesForKind('tool', PUBLIC_TOOL_NAMES, TOOL_DISCOVERY_DETAILS),
+  ...buildDiscoveryEntriesForKind('prompt', PUBLIC_PROMPT_NAMES, PROMPT_DISCOVERY_DETAILS),
+  ...buildDiscoveryEntriesForKind('resource', PUBLIC_RESOURCE_URIS, RESOURCE_DISCOVERY_DETAILS),
 ] as const satisfies readonly DiscoveryEntry[];
 
 export const WORKFLOW_ENTRIES = [

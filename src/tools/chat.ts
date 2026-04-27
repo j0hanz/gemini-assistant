@@ -24,14 +24,12 @@ import {
   resolveOrchestration,
   resolveServerSideToolInvocations,
 } from '../lib/orchestration.js';
-import { ProgressReporter } from '../lib/progress.js';
 import {
   buildBaseStructuredOutput,
-  buildSharedStructuredMetadata,
+  buildStructuredResponse,
   createResourceLink,
   extractTextContent,
   pickDefined,
-  safeValidateStructuredContent,
   tryParseJsonResponse,
   withRelatedTaskMeta,
 } from '../lib/response.js';
@@ -43,14 +41,19 @@ import {
   type ToolEvent,
 } from '../lib/streaming.js';
 import { READ_ONLY_SESSION_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
-import { executor } from '../lib/tool-executor.js';
-import { getAllowedRoots, validateGeminiRequest, validateUrls } from '../lib/validation.js';
 import {
+  bindToolServices,
   buildContextUsed,
   buildSessionSummary,
+  createDefaultToolServices,
   emptyContextUsed,
-} from '../lib/workspace-context.js';
-import type { WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
+  type ToolServices,
+  type ToolWorkspaceAccess,
+  type ToolWorkspaceCacheManager,
+  toToolSessionAccess,
+  toToolWorkspaceAccess,
+} from '../lib/tool-context.js';
+import { createToolContext, executor } from '../lib/tool-executor.js';
 import {
   type AskInput,
   type ChatInput,
@@ -87,6 +90,7 @@ import {
   sanitizeFunctionCalls,
   sanitizeSessionValue,
   sanitizeToolEvents,
+  type SessionAccess,
   type SessionEventEntry,
   type SessionGenerationContract,
   type SessionStore,
@@ -95,6 +99,41 @@ import {
 } from '../sessions.js';
 
 export { appendToolResponseTurn, buildRebuiltChatContents };
+
+function isToolServices(value: ToolServices | SessionStore | undefined): value is ToolServices {
+  return (
+    value !== undefined &&
+    typeof value === 'object' &&
+    'session' in value &&
+    'workspace' in value &&
+    'rootsFetcher' in value
+  );
+}
+
+function isSessionAccess(value: SessionAccess | SessionStore): value is SessionAccess {
+  return 'appendContent' in value;
+}
+
+function isWorkspaceAccess(
+  value: ToolWorkspaceAccess | ToolWorkspaceCacheManager | undefined,
+): value is ToolWorkspaceAccess {
+  return value !== undefined && 'allowedRoots' in value;
+}
+
+function resolveChatServices(
+  servicesOrSessionStore?: ToolServices | SessionStore,
+  workspaceCacheManagerInstance?: ToolWorkspaceCacheManager,
+): ToolServices {
+  if (isToolServices(servicesOrSessionStore)) {
+    return servicesOrSessionStore;
+  }
+
+  return {
+    rootsFetcher: () => Promise.resolve([]),
+    session: toToolSessionAccess(servicesOrSessionStore ?? createDefaultToolServices().session),
+    workspace: toToolWorkspaceAccess(workspaceCacheManagerInstance),
+  };
+}
 
 type ChatWorkInput = WithChatDefaults<ChatInput>;
 export type AskArgs = WithChatDefaults<AskInput> & {
@@ -265,25 +304,26 @@ export function buildAskStructuredContent(
   const usage = extractUsage(streamResult.usageMetadata);
   const warnings = buildAskWarnings(parsedData, jsonMode, responseSchema);
   const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
-  const sharedMetadata = buildSharedStructuredMetadata({
-    ...(contextUsed ? { contextUsed } : {}),
-    functionCalls: streamResult.functionCalls,
-    includeThoughts: getExposeThoughts(),
-    thoughtText: streamResult.thoughtText,
-    toolEvents: streamResult.toolEvents,
-    usage,
-    safetyRatings: streamResult.safetyRatings,
-    finishMessage: streamResult.finishMessage,
-    citationMetadata: streamResult.citationMetadata,
-  });
 
-  return {
-    answer,
-    ...(parsedData !== undefined ? { data: parsedData } : {}),
-    ...(computations.length > 0 ? { computations } : {}),
-    ...(warnings.length > 0 ? { schemaWarnings: warnings } : {}),
-    ...sharedMetadata,
-  };
+  return buildStructuredResponse(
+    {
+      answer,
+      ...(parsedData !== undefined ? { data: parsedData } : {}),
+      ...(computations.length > 0 ? { computations } : {}),
+      ...(warnings.length > 0 ? { schemaWarnings: warnings } : {}),
+    },
+    {
+      ...(contextUsed ? { contextUsed } : {}),
+      functionCalls: streamResult.functionCalls,
+      includeThoughts: getExposeThoughts(),
+      thoughtText: streamResult.thoughtText,
+      toolEvents: streamResult.toolEvents,
+      usage,
+      safetyRatings: streamResult.safetyRatings,
+      finishMessage: streamResult.finishMessage,
+      citationMetadata: streamResult.citationMetadata,
+    },
+  );
 }
 
 export function formatStructuredResult(
@@ -445,6 +485,7 @@ function buildChatOrchestrationRequest(args: AskArgs) {
 function validateAskRequest(
   args: AskArgs,
   deps: Pick<AskDependencies, 'getSessionEntry' | 'isEvicted' | 'listSessionContentEntries'>,
+  ctx: ServerContext,
 ): CallToolResult | undefined {
   const { responseSchema, sessionId } = args;
   if (sessionId !== undefined && getStatelessTransportFlag()) {
@@ -454,26 +495,25 @@ function validateAskRequest(
     ).toToolResult();
   }
   const urls = getAskUrls(args);
-  const invalidUrlResult = validateUrls(urls);
-  if (invalidUrlResult) {
-    return invalidUrlResult;
-  }
 
   const sessionEntry = sessionId ? deps.getSessionEntry(sessionId) : undefined;
   const hasExistingSession = sessionEntry !== undefined;
   const hasFunctionResponses = (args.functionResponses?.length ?? 0) > 0;
   const orchestration = buildOrchestrationConfig(buildChatOrchestrationRequest(args));
-  const preflightResult = validateGeminiRequest({
-    allowExistingSessionSchema: sessionEntry?.contract !== undefined,
-    hasExistingSession,
-    jsonMode: responseSchema !== undefined,
-    responseSchema,
-    sessionId,
-    activeCapabilities: orchestration.activeCapabilities,
-    fileSearchStoreNames: args.fileSearch?.fileSearchStoreNames,
+  const inputValidation = createToolContext('chat', ctx).validateInputs({
+    urls,
+    geminiRequest: {
+      allowExistingSessionSchema: sessionEntry?.contract !== undefined,
+      hasExistingSession,
+      jsonMode: responseSchema !== undefined,
+      responseSchema,
+      sessionId,
+      activeCapabilities: orchestration.activeCapabilities,
+      fileSearchStoreNames: args.fileSearch?.fileSearchStoreNames,
+    },
   });
-  if (preflightResult) {
-    return preflightResult;
+  if (inputValidation) {
+    return inputValidation;
   }
 
   const conflicts: [boolean, string][] = [
@@ -996,7 +1036,7 @@ function buildSessionEventResponse(
 
 async function resolveWorkspaceCacheName(
   args: AskArgs,
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
+  workspace: ToolWorkspaceAccess,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
   if (
@@ -1009,11 +1049,11 @@ async function resolveWorkspaceCacheName(
   }
 
   try {
-    const allowedRoots = await getAllowedRoots();
+    const allowedRoots = await workspace.allowedRoots();
     if (allowedRoots.length === 0) {
       return undefined;
     }
-    return await workspaceCacheManagerInstance.getOrCreateCache(allowedRoots, signal);
+    return await workspace.getOrCreateCache(allowedRoots, signal);
   } catch (err) {
     logger.child('workspace').warn(`Failed to resolve workspace cache: ${String(err)}`);
     return undefined;
@@ -1128,13 +1168,19 @@ function buildRequestedSessionContract(args: AskArgs): SessionGenerationContract
 }
 
 export function createDefaultAskDependencies(
-  sessionStore: SessionStore,
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
+  sessionAccessOrStore: SessionAccess | SessionStore,
+  workspaceOrManager: ToolWorkspaceAccess | ToolWorkspaceCacheManager,
 ): AskDependencies {
+  const sessionAccess = isSessionAccess(sessionAccessOrStore)
+    ? sessionAccessOrStore
+    : toToolSessionAccess(sessionAccessOrStore);
+  const workspace = isWorkspaceAccess(workspaceOrManager)
+    ? workspaceOrManager
+    : toToolWorkspaceAccess(workspaceOrManager);
   return {
-    appendSessionContent: sessionStore.appendSessionContent.bind(sessionStore),
-    appendSessionEvent: sessionStore.appendSessionEvent.bind(sessionStore),
-    appendSessionTranscript: sessionStore.appendSessionTranscript.bind(sessionStore),
+    appendSessionContent: (sessionId, item) => sessionAccess.appendContent(sessionId, item),
+    appendSessionEvent: (sessionId, item) => sessionAccess.appendEvent(sessionId, item),
+    appendSessionTranscript: (sessionId, item) => sessionAccess.appendTranscript(sessionId, item),
     createChat: (args) => {
       const { toolConfig, tools, functionCallingMode, serverSideToolInvocations } =
         buildAskToolingConfig(args);
@@ -1157,21 +1203,21 @@ export function createDefaultAskDependencies(
         contract: buildRequestedSessionContract(args),
       };
     },
-    getSession: sessionStore.getSession.bind(sessionStore),
-    getSessionEntry: sessionStore.getSessionEntry.bind(sessionStore),
-    isEvicted: sessionStore.isEvicted.bind(sessionStore),
-    listSessionContentEntries: sessionStore.listSessionContentEntries.bind(sessionStore),
-    listSessionTranscriptEntries: sessionStore.listSessionTranscriptEntries.bind(sessionStore),
+    getSession: (sessionId) => sessionAccess.getSession(sessionId),
+    getSessionEntry: (sessionId) => sessionAccess.getSessionEntry(sessionId),
+    isEvicted: (sessionId) => sessionAccess.isEvicted(sessionId),
+    listSessionContentEntries: (sessionId) => sessionAccess.listContentEntries(sessionId),
+    listSessionTranscriptEntries: (sessionId) => sessionAccess.listTranscriptEntries(sessionId),
     rebuildChat: (sessionId, args) => {
-      const contents = sessionStore.listSessionContentEntries(sessionId) ?? [];
+      const contents = sessionAccess.listContentEntries(sessionId) ?? [];
       if (contents.length === 0) {
         return undefined;
       }
 
-      const sessionEntry = sessionStore.getSessionEntry(sessionId);
+      const sessionEntry = sessionAccess.getSessionEntry(sessionId);
       const contract = sessionEntry?.contract;
       const cacheName = sessionEntry?.cacheName;
-      const activeCacheName = workspaceCacheManagerInstance.getCacheStatus().cacheName;
+      const activeCacheName = workspace.getCacheStatus().cacheName;
       const rebuildArgs =
         cacheName && cacheName === activeCacheName ? { ...args, cacheName } : args;
       if (cacheName && cacheName !== activeCacheName) {
@@ -1206,12 +1252,14 @@ export function createDefaultAskDependencies(
         config,
         history: buildRebuiltChatContents(contents, getSessionLimits().replayMaxBytes),
       });
-      sessionStore.replaceSession(sessionId, chat);
+      sessionAccess.replaceSession(sessionId, chat);
       return chat;
     },
     now: () => Date.now(),
     runWithoutSession: askWithoutSession,
-    setSession: sessionStore.setSession.bind(sessionStore),
+    setSession: (sessionId, chat, rebuiltAt, cacheName, contract) => {
+      sessionAccess.setSession(sessionId, chat, rebuiltAt, cacheName, contract);
+    },
   };
 }
 
@@ -1252,7 +1300,7 @@ async function askExistingSession(
       : contextUsed;
 
   await mcpLog(ctx, 'debug', `Resuming session ${args.sessionId}`);
-  const progress = new ProgressReporter(ctx, TOOL_LABELS.chat);
+  const { progress } = createToolContext('chat', ctx);
   await progress.send(0, undefined, 'Resuming session');
   const askResult = await deps.runWithoutSession(resumedArgs, ctx, chat);
   askResult.result = attachContextUsed(askResult.result, effectiveContextUsed);
@@ -1301,10 +1349,11 @@ interface PreparedAskRequest {
 async function prepareAskRequest(
   args: AskArgs,
   deps: AskDependencies,
+  ctx: ServerContext,
   signal: AbortSignal,
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
+  workspace: ToolWorkspaceAccess,
 ): Promise<PreparedAskRequest | CallToolResult> {
-  const validationError = validateAskRequest(args, deps);
+  const validationError = validateAskRequest(args, deps, ctx);
   if (validationError) return validationError;
 
   const persistedCacheName = args.sessionId
@@ -1313,7 +1362,7 @@ async function prepareAskRequest(
   const canUseWorkspaceCache =
     !persistedCacheName && (!args.sessionId || deps.getSessionEntry(args.sessionId) === undefined);
   const workspaceCacheName = canUseWorkspaceCache
-    ? await resolveWorkspaceCacheName(args, workspaceCacheManagerInstance, signal)
+    ? await resolveWorkspaceCacheName(args, workspace, signal)
     : persistedCacheName;
   const contextUsed = workspaceCacheName
     ? buildContextUsed(
@@ -1339,15 +1388,13 @@ function isPreparedRequest(
 
 export function createAskWork(
   deps: AskDependencies,
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
+  workspaceOrManager?: ToolWorkspaceAccess | ToolWorkspaceCacheManager,
 ) {
+  const workspace = isWorkspaceAccess(workspaceOrManager)
+    ? workspaceOrManager
+    : toToolWorkspaceAccess(workspaceOrManager);
   return async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
-    const prepared = await prepareAskRequest(
-      args,
-      deps,
-      ctx.mcpReq.signal,
-      workspaceCacheManagerInstance,
-    );
+    const prepared = await prepareAskRequest(args, deps, ctx, ctx.mcpReq.signal, workspace);
     if (!isPreparedRequest(prepared)) return prepared;
 
     const { effectiveArgs, contextUsed, warnings } = prepared;
@@ -1470,6 +1517,7 @@ function assembleChatOutput(
   result: CallToolResult,
   sessionIdHint: string | undefined,
   taskId: string | undefined,
+  ctx: ServerContext,
 ): CallToolResult {
   if (result.isError) {
     return result;
@@ -1502,8 +1550,7 @@ function assembleChatOutput(
             resources: sessionResources(sessionId),
           }
         : undefined;
-  return safeValidateStructuredContent(
-    'chat',
+  return createToolContext('chat', ctx).validateOutput(
     ChatOutputSchema,
     pickDefined({
       ...buildBaseStructuredOutput(taskId, [...(warnings ?? []), ...(extraWarnings ?? [])]),
@@ -1565,17 +1612,21 @@ export async function chatWork(
     ctx,
   );
 
-  return assembleChatOutput(result, args.sessionId, ctx.task?.id);
+  return assembleChatOutput(result, args.sessionId, ctx.task?.id, ctx);
 }
 
 export function registerChatTool(
   server: McpServer,
-  sessionStore: SessionStore,
-  workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
+  servicesOrSessionStore?: ToolServices | SessionStore,
+  workspaceCacheManagerInstance?: ToolWorkspaceCacheManager,
 ): void {
-  const askWork = createAskWork(
-    createDefaultAskDependencies(sessionStore, workspaceCacheManagerInstance),
+  const resolvedServices = resolveChatServices(
+    servicesOrSessionStore,
     workspaceCacheManagerInstance,
+  );
+  const askWork = createAskWork(
+    createDefaultAskDependencies(resolvedServices.session, resolvedServices.workspace),
+    resolvedServices.workspace,
   );
 
   registerWorkTool<ChatInput>({
@@ -1585,10 +1636,12 @@ export function registerChatTool(
       title: 'Chat',
       description:
         'Direct Gemini chat with optional server-managed sessions and reusable cache memory.',
-      inputSchema: createChatInputSchema(sessionStore.completeSessionIds.bind(sessionStore)),
+      inputSchema: createChatInputSchema((prefix) =>
+        resolvedServices.session.completeSessionIds(prefix),
+      ),
       outputSchema: ChatOutputSchema,
       annotations: READ_ONLY_SESSION_ANNOTATIONS,
     },
-    work: (args, ctx) => chatWork(askWork, args, ctx),
+    work: (args, ctx) => chatWork(askWork, args, bindToolServices(ctx, resolvedServices)),
   });
 }

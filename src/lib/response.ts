@@ -18,6 +18,7 @@ import type {
 } from '../schemas/outputs.js';
 
 import { finishReasonToError, SafetyError } from './errors.js';
+import { parseJson } from './json.js';
 import { logger } from './logger.js';
 import type { ToolEvent } from './streaming.js';
 import { isPublicHttpUrl } from './validation.js';
@@ -48,17 +49,7 @@ export function tryParseJsonResponse(text: string): unknown {
     candidates.push(fencedMatch);
   }
 
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-
-    try {
-      return JSON.parse(candidate) as unknown;
-    } catch {
-      // Ignore invalid JSON candidates and fall back to raw text output.
-    }
-  }
-
-  return undefined;
+  return parseJson(text, { candidates });
 }
 
 // ── URL Metadata ──────────────────────────────────────────────────────
@@ -95,6 +86,7 @@ export function collectUrlMetadataWithCounts(
       status: meta.urlRetrievalStatus ?? 'UNKNOWN',
     });
   }
+
   return { items: entries, droppedNonPublic };
 }
 
@@ -426,6 +418,30 @@ function pickSharedStructuredResultFields(
       SHARED_STRUCTURED_RESULT_KEYS.map((key) => [key, structured[key]]),
     ) as Record<SharedStructuredResultKey, unknown>,
   );
+}
+
+export function buildStructuredResponse<
+  T extends Record<string, unknown>,
+  TFunctionCall = never,
+  TToolEvent = never,
+>(
+  domain: T,
+  shared?: {
+    contextUsed?: ContextUsed;
+    functionCalls?: readonly TFunctionCall[];
+    includeThoughts?: boolean;
+    thoughtText?: string;
+    toolEvents?: readonly TToolEvent[];
+    usage?: UsageMetadata | undefined;
+    safetyRatings?: unknown;
+    finishMessage?: string | undefined;
+    citationMetadata?: unknown;
+  },
+): T & SharedStructuredMetadata<TFunctionCall, TToolEvent> & Record<string, unknown> {
+  return {
+    ...domain,
+    ...(shared ? buildSharedStructuredMetadata<TFunctionCall, TToolEvent>(shared) : {}),
+  };
 }
 
 export function buildSuccessfulStructuredContent<TDomain extends Record<string, unknown>>({

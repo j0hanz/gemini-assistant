@@ -5,6 +5,7 @@ import { z } from 'zod/v4';
 import type { ParsePayload } from 'zod/v4/core';
 
 import { AppError } from '../lib/errors.js';
+import { parseJson } from '../lib/json.js';
 
 import {
   analyzeOutputKind,
@@ -134,7 +135,10 @@ const thinkingBudgetField = thinkingBudget();
 const generationConfigFields = createGenerationConfigFields();
 
 export function parseResponseSchemaJsonValue(raw: string): GeminiResponseSchema {
-  const parsed = JSON.parse(raw) as unknown;
+  const parsed = parseJson(raw);
+  if (parsed === undefined) {
+    throw new SyntaxError('responseSchemaJson must be valid JSON.');
+  }
   const compatibilityErrors = validateGeminiJsonSchema(parsed);
   if (compatibilityErrors.length > 0) {
     throw new AppError(

@@ -7,6 +7,7 @@ import { AppError } from '../src/lib/errors.js';
 import {
   buildReplayHistoryParts,
   buildTranscriptParts,
+  createSessionAccess,
   createSessionStore,
   type SessionStore,
   type SessionStoreOptions,
@@ -49,6 +50,28 @@ afterEach(() => {
 });
 
 describe('sessions', () => {
+  describe('createSessionAccess', () => {
+    it('adapts a session store behind the narrow session service interface', () => {
+      const store = createStore();
+      const access = createSessionAccess(store);
+
+      store.setSession('sess-access-adapter', mockChat('adapter') as never);
+      access.appendTranscript('sess-access-adapter', {
+        role: 'user',
+        text: 'Hello',
+        timestamp: 1,
+      });
+
+      assert.deepStrictEqual(access.listTranscriptEntries('sess-access-adapter'), [
+        { role: 'user', text: 'Hello', timestamp: 1 },
+      ]);
+      assert.strictEqual(
+        access.getSession('sess-access-adapter'),
+        store.getSession('sess-access-adapter'),
+      );
+    });
+  });
+
   describe('buildReplayHistoryParts', () => {
     it('preserves thought parts along with Gemini replay parts', () => {
       const parts = [

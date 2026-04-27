@@ -216,13 +216,22 @@ export function buildGenerateContentConfig(
 
 // ── Client ────────────────────────────────────────────────────────────
 
-let _ai: GoogleGenAI | undefined;
+class GeminiClientHolder {
+  private ai: GoogleGenAI | undefined;
+
+  get(): GoogleGenAI {
+    if (!this.ai) {
+      const apiKey = getApiKey();
+      this.ai = new GoogleGenAI({ apiKey });
+    }
+
+    return this.ai;
+  }
+}
+
+const geminiClientHolder = new GeminiClientHolder();
 
 /** Lazily initialized Gemini client - throws only when first accessed. */
 export function getAI(): GoogleGenAI {
-  if (!_ai) {
-    const apiKey = getApiKey();
-    _ai = new GoogleGenAI({ apiKey });
-  }
-  return _ai;
+  return geminiClientHolder.get();
 }

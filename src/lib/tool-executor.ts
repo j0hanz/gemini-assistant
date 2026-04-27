@@ -11,6 +11,7 @@ import type {
 
 import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getExposeThoughts, getGeminiModel } from '../config.js';
+import { TOOL_LABELS } from '../public-contract.js';
 import { AppError } from './errors.js';
 import { logContext, logger, maybeSummarizePayload, mcpLog, type ScopedLogger } from './logger.js';
 import {
@@ -21,10 +22,48 @@ import {
   resolveOrchestration,
 } from './orchestration.js';
 import { ProgressReporter, reportCompletion, reportFailure } from './progress.js';
-import { buildSharedStructuredMetadata, extractTextContent } from './response.js';
+import {
+  buildSharedStructuredMetadata,
+  extractTextContent,
+  safeValidateStructuredContent,
+} from './response.js';
 import { executeToolStream, extractUsage, type StreamResult } from './streaming.js';
+import { findToolServices } from './tool-context.js';
+import { type GeminiRequestPreflight, validateGeminiRequest, validateUrls } from './validation.js';
 import { getWorkSignal } from './work-signal.js';
-import { getWorkspaceCacheName, type WorkspaceCacheManagerImpl } from './workspace-context.js';
+
+type ToolLabelKey = keyof typeof TOOL_LABELS;
+
+interface ToolContextValidationOptions {
+  urls?: readonly string[] | undefined;
+  geminiRequest?: GeminiRequestPreflight | undefined;
+}
+
+export function createToolContext(toolKey: ToolLabelKey, ctx: ServerContext) {
+  return {
+    progress: new ProgressReporter(ctx, TOOL_LABELS[toolKey]),
+    validateInputs(options: ToolContextValidationOptions = {}): CallToolResult | undefined {
+      const invalidUrlResult = validateUrls(options.urls);
+      if (invalidUrlResult) {
+        return invalidUrlResult;
+      }
+
+      if (options.geminiRequest) {
+        return validateGeminiRequest(options.geminiRequest);
+      }
+
+      return undefined;
+    },
+    validateOutput(
+      outputSchema: unknown,
+      structuredContent: unknown,
+      result: CallToolResult,
+      toolName = toolKey,
+    ): CallToolResult {
+      return safeValidateStructuredContent(toolName, outputSchema, structuredContent, result);
+    },
+  };
+}
 
 type StreamResponseBuilder<T extends Record<string, unknown>> = (
   streamResult: StreamResult,
@@ -59,7 +98,6 @@ export interface GeminiPipelineRequest<T extends Record<string, unknown>> {
   label: string;
   commonInputs?: CommonToolInputs | undefined;
   builtInToolSpecs?: readonly BuiltInToolSpec[] | undefined;
-  workspaceCacheManager: WorkspaceCacheManagerImpl;
   buildContents: (activeCapabilities: Set<string>) => {
     contents: ContentListUnion;
     systemInstruction?: string | undefined;
@@ -323,7 +361,8 @@ export class ToolExecutor {
     ctx: ServerContext,
     request: GeminiPipelineRequest<T>,
   ): Promise<CallToolResult> {
-    const cacheName = await getWorkspaceCacheName(ctx, request.workspaceCacheManager);
+    const toolServices = findToolServices(ctx);
+    const cacheName = toolServices ? await toolServices.workspace.resolveCacheName(ctx) : undefined;
 
     const baseOrchestration = buildOrchestrationRequestFromInputs(request.commonInputs ?? {});
     const mergedSpecs: BuiltInToolSpec[] = [

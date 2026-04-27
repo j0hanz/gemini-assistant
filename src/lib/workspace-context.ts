@@ -17,7 +17,12 @@ import {
 import type { TranscriptEntry } from '../sessions.js';
 import { isAbortError, withRetry } from './errors.js';
 import { logger } from './logger.js';
-import { getAllowedRoots, isPathWithinRoot, normalizePathForComparison } from './validation.js';
+import {
+  getAllowedRoots,
+  isPathWithinRoot,
+  normalizePathForComparison,
+  type RootsFetcher,
+} from './validation.js';
 
 const TOKENS_PER_CHAR = 4;
 
@@ -256,6 +261,14 @@ interface WorkspaceCacheStatus {
   sources: string[];
   createdAt: number | undefined;
   ttl: string;
+}
+
+export interface WorkspaceAccess {
+  allowedRoots(): Promise<string[]>;
+  getCacheStatus(): WorkspaceCacheStatus;
+  getOrCreateCache(roots: readonly string[], signal?: AbortSignal): Promise<string | undefined>;
+  resolveCacheName(ctx: ServerContext): Promise<string | undefined>;
+  scanFileNames(): readonly string[];
 }
 
 function normalizeRootsKey(roots: readonly string[]): string {
@@ -659,16 +672,30 @@ export function createWorkspaceCacheManager(): WorkspaceCacheManagerImpl {
   return new WorkspaceCacheManagerImpl();
 }
 
+export function createWorkspaceAccess(
+  manager: WorkspaceCacheManagerImpl,
+  rootsFetcher?: RootsFetcher,
+): WorkspaceAccess {
+  return {
+    allowedRoots: async () => getAllowedRoots(rootsFetcher),
+    getCacheStatus: () => manager.getCacheStatus(),
+    getOrCreateCache: async (roots, signal) => manager.getOrCreateCache([...roots], signal),
+    resolveCacheName: async (ctx) => getWorkspaceCacheName(ctx, manager, rootsFetcher),
+    scanFileNames: () => [...SCAN_FILE_NAMES],
+  };
+}
+
 export async function getWorkspaceCacheName(
   ctx: ServerContext,
   manager: WorkspaceCacheManagerImpl,
+  rootsFetcher?: RootsFetcher,
 ): Promise<string | undefined> {
   if (!getWorkspaceCacheEnabled()) {
     return undefined;
   }
 
   try {
-    const allowedRoots = await getAllowedRoots();
+    const allowedRoots = await getAllowedRoots(rootsFetcher);
     if (allowedRoots.length === 0) {
       return undefined;
     }

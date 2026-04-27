@@ -109,6 +109,26 @@ export interface SessionSummary {
   rebuiltAt?: number;
 }
 
+export interface SessionAccess {
+  appendContent(id: string, item: ContentEntry): boolean;
+  appendEvent(id: string, item: SessionEventEntry): boolean;
+  appendTranscript(id: string, item: TranscriptEntry): boolean;
+  completeSessionIds(prefix?: string): string[];
+  getSession(id: string): Chat | undefined;
+  getSessionEntry(id: string): SessionSummary | undefined;
+  isEvicted(id: string): boolean;
+  listContentEntries(id: string): ContentEntry[] | undefined;
+  listTranscriptEntries(id: string): TranscriptEntry[] | undefined;
+  replaceSession(id: string, chat: Chat): void;
+  setSession(
+    id: string,
+    chat: Chat,
+    rebuiltAt?: number,
+    cacheName?: string,
+    contract?: SessionGenerationContract,
+  ): void;
+}
+
 export interface SessionChangeEvent {
   listChanged: boolean;
 }
@@ -683,6 +703,7 @@ export class SessionStore {
   }
 
   private setSessionEntry(id: string, entry: SessionEntry): void {
+    this.evictedSessions.delete(id);
     this.sessions.delete(id);
     this.sessions.set(id, entry);
   }
@@ -794,6 +815,22 @@ export class SessionStore {
     }
     return oldestId;
   }
+}
+
+export function createSessionAccess(store: SessionStore): SessionAccess {
+  return {
+    appendContent: store.appendSessionContent.bind(store),
+    appendEvent: store.appendSessionEvent.bind(store),
+    appendTranscript: store.appendSessionTranscript.bind(store),
+    completeSessionIds: store.completeSessionIds.bind(store),
+    getSession: store.getSession.bind(store),
+    getSessionEntry: store.getSessionEntry.bind(store),
+    isEvicted: store.isEvicted.bind(store),
+    listContentEntries: store.listSessionContentEntries.bind(store),
+    listTranscriptEntries: store.listSessionTranscriptEntries.bind(store),
+    replaceSession: store.replaceSession.bind(store),
+    setSession: store.setSession.bind(store),
+  };
 }
 
 export function createSessionStore(options?: SessionStoreOptions): SessionStore {

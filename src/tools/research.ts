@@ -8,6 +8,7 @@ import type {
 } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
+import { parseJson } from '../lib/json.js';
 import { logger, mcpLog } from '../lib/logger.js';
 import {
   buildAgenticResearchPrompt,
@@ -21,7 +22,6 @@ import {
   resolveOrchestration,
   selectSearchAndUrlContextTools,
 } from '../lib/orchestration.js';
-import { ProgressReporter } from '../lib/progress.js';
 import {
   appendSearchEntryPointContent,
   appendSources,
@@ -29,6 +29,7 @@ import {
   auditClaimedToolUsage,
   buildDroppedSupportWarnings,
   buildSourceReportMessage,
+  buildStructuredResponse,
   buildSuccessfulStructuredContent,
   buildUrlContextSourceDetails,
   collectGroundedSourceDetailsWithCounts,
@@ -46,7 +47,6 @@ import {
   formatSourceLabels,
   mergeSourceDetails,
   pickDefined,
-  safeValidateStructuredContent,
 } from '../lib/response.js';
 import {
   deriveComputationsFromToolEvents,
@@ -59,8 +59,13 @@ import {
   READONLY_NON_IDEMPOTENT_ANNOTATIONS,
   registerWorkTool,
 } from '../lib/task-utils.js';
-import { executor } from '../lib/tool-executor.js';
-import { getWorkspaceCacheName, type WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
+import {
+  bindToolServices,
+  createDefaultToolServices,
+  findToolServices,
+  type ToolServices,
+} from '../lib/tool-context.js';
+import { createToolContext, executor } from '../lib/tool-executor.js';
 import {
   type AgenticSearchInput,
   type AnalyzeUrlInput,
@@ -292,25 +297,27 @@ function buildAgenticSearchResult(
     resultMod: (result: CallToolResult) => ({
       content: [...result.content, ...contentAdditions],
     }),
-    structuredContent: pickDefined({
-      report: textContent,
-      sources: context.sourceDetails.length > 0 ? undefined : context.groundedSources,
-      sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
-      urlContextSources:
-        context.sourceDetails.length > 0
-          ? undefined
-          : context.urlContextSources.length > 0
-            ? context.urlContextSources
-            : undefined,
-      urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
-      toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
-      status: context.status,
-      groundingSignals: context.groundingSignals,
-      findings: context.findings.length > 0 ? context.findings : undefined,
-      citations: context.citations.length > 0 ? context.citations : undefined,
-      computations: context.computations.length > 0 ? context.computations : undefined,
-      warnings: warnings.length > 0 ? warnings : undefined,
-    }),
+    structuredContent: buildStructuredResponse(
+      pickDefined({
+        report: textContent,
+        sources: context.sourceDetails.length > 0 ? undefined : context.groundedSources,
+        sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
+        urlContextSources:
+          context.sourceDetails.length > 0
+            ? undefined
+            : context.urlContextSources.length > 0
+              ? context.urlContextSources
+              : undefined,
+        urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
+        toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
+        status: context.status,
+        groundingSignals: context.groundingSignals,
+        findings: context.findings.length > 0 ? context.findings : undefined,
+        citations: context.citations.length > 0 ? context.citations : undefined,
+        computations: context.computations.length > 0 ? context.computations : undefined,
+        warnings: warnings.length > 0 ? warnings : undefined,
+      }),
+    ),
     reportMessage: buildSourceReportMessage(context.groundedSources.length),
   };
 }
@@ -343,24 +350,26 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
     resultMod: (result: CallToolResult) => ({
       content: [...result.content, ...contentAdditions],
     }),
-    structuredContent: pickDefined({
-      answer: textContent,
-      sources: context.sourceDetails.length > 0 ? undefined : context.groundedSources,
-      sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
-      urlContextSources:
-        context.sourceDetails.length > 0
-          ? undefined
-          : context.urlContextSources.length > 0
-            ? context.urlContextSources
-            : undefined,
-      urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
-      status: context.status,
-      groundingSignals: context.groundingSignals,
-      findings: context.findings.length > 0 ? context.findings : undefined,
-      citations: context.citations.length > 0 ? context.citations : undefined,
-      computations: context.computations.length > 0 ? context.computations : undefined,
-      warnings: warnings.length > 0 ? warnings : undefined,
-    }),
+    structuredContent: buildStructuredResponse(
+      pickDefined({
+        answer: textContent,
+        sources: context.sourceDetails.length > 0 ? undefined : context.groundedSources,
+        sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
+        urlContextSources:
+          context.sourceDetails.length > 0
+            ? undefined
+            : context.urlContextSources.length > 0
+              ? context.urlContextSources
+              : undefined,
+        urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
+        status: context.status,
+        groundingSignals: context.groundingSignals,
+        findings: context.findings.length > 0 ? context.findings : undefined,
+        citations: context.citations.length > 0 ? context.citations : undefined,
+        computations: context.computations.length > 0 ? context.computations : undefined,
+        warnings: warnings.length > 0 ? warnings : undefined,
+      }),
+    ),
     reportMessage: buildSourceReportMessage(context.groundedSources.length),
   };
 }
@@ -407,22 +416,18 @@ function parsePlannedSubQueries(
   searchDepth: number,
 ): string[] {
   const maxQueries = Math.min(searchDepth, 5);
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    const candidates = Array.isArray(parsed)
-      ? parsed
-      : typeof parsed === 'object' && parsed !== null && 'queries' in parsed
-        ? (parsed as { queries?: unknown }).queries
-        : undefined;
-    if (Array.isArray(candidates)) {
-      const queries = candidates
-        .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-        .map((entry) => entry.trim())
-        .slice(0, maxQueries);
-      if (queries.length > 0) return queries;
-    }
-  } catch {
-    // Fall through to deterministic fallback queries.
+  const parsed = parseJson(text);
+  const candidates = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === 'object' && parsed !== null && 'queries' in parsed
+      ? (parsed as { queries?: unknown }).queries
+      : undefined;
+  if (Array.isArray(candidates)) {
+    const queries = candidates
+      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+      .map((entry) => entry.trim())
+      .slice(0, maxQueries);
+    if (queries.length > 0) return queries;
   }
 
   return [
@@ -570,11 +575,10 @@ async function runDeepResearchPlan(
     fileSearch?: ResearchInput['fileSearch'] | undefined;
   },
   ctx: ServerContext,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
   const warnings: string[] = [];
   const results: StreamResult[] = [];
-  const progress = new ProgressReporter(ctx, TOOL_LABELS.agenticSearch);
+  const { progress } = createToolContext('agenticSearch', ctx);
   await progress.send(0, undefined, 'Planning deep research');
   await mcpLog(ctx, 'info', 'Agentic search requested');
   log.info('Agentic search requested', {
@@ -678,7 +682,7 @@ async function runDeepResearchPlan(
     'agentic_search',
   );
   if (resolvedSynthesis.error) return resolvedSynthesis.error;
-  const cacheName = await getWorkspaceCacheName(ctx, workspaceCacheManager);
+  const cacheName = await findToolServices(ctx)?.workspace.resolveCacheName(ctx);
   const synthesisCanRetrieve =
     resolvedSynthesis.config.activeCapabilities.has('googleSearch') ||
     resolvedSynthesis.config.activeCapabilities.has('urlContext') ||
@@ -760,9 +764,8 @@ async function searchWork(
     fileSearch,
   }: SearchInput & GenerationConfigFields,
   ctx: ServerContext,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
-  const progress = new ProgressReporter(ctx, TOOL_LABELS.search);
+  const { progress } = createToolContext('search', ctx);
   await progress.send(0, undefined, 'Starting');
   await mcpLog(ctx, 'info', 'Search requested');
 
@@ -774,7 +777,6 @@ async function searchWork(
       urls,
       ...(fileSearch ? { fileSearch } : {}),
     },
-    workspaceCacheManager,
     buildContents: (activeCapabilities) => {
       const prompt = buildGroundedAnswerPrompt(
         query,
@@ -810,7 +812,6 @@ export async function analyzeUrlWork(
     fileSearch,
   }: AnalyzeUrlInput & GenerationConfigFields,
   ctx: ServerContext,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
   const prompt = buildFileAnalysisPrompt({
     goal: question,
@@ -818,7 +819,7 @@ export async function analyzeUrlWork(
     urls,
   });
 
-  const progress = new ProgressReporter(ctx, TOOL_LABELS.analyzeUrl);
+  const { progress } = createToolContext('analyzeUrl', ctx);
   await progress.send(0, undefined, 'Fetching');
   await mcpLog(ctx, 'info', `Analyze URL requested for ${urls.length} urls`);
 
@@ -829,7 +830,6 @@ export async function analyzeUrlWork(
       urls,
       ...(fileSearch ? { fileSearch } : {}),
     },
-    workspaceCacheManager,
     buildContents: () => ({
       contents: [prompt.promptText],
       systemInstruction: systemInstruction ?? prompt.systemInstruction,
@@ -863,7 +863,6 @@ async function agenticSearchWork(
       urls?: readonly string[] | undefined;
     },
   ctx: ServerContext,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
   if (searchDepth >= 5 || (searchDepth >= 4 && !deliverable)) {
     try {
@@ -897,7 +896,6 @@ async function agenticSearchWork(
         fileSearch,
       },
       ctx,
-      workspaceCacheManager,
     );
   }
 
@@ -956,7 +954,6 @@ async function runQuickResearch(
     mode: 'quick';
   },
   ctx: ServerContext,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
   return await searchWork(
     {
@@ -970,15 +967,10 @@ async function runQuickResearch(
       fileSearch: args.fileSearch,
     },
     ctx,
-    workspaceCacheManager,
   );
 }
 
-async function runDeepResearch(
-  args: ResearchInput,
-  ctx: ServerContext,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
-): Promise<CallToolResult> {
+async function runDeepResearch(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {
   const searchDepth = args.searchDepth ?? 2;
   const hasExplicitThinkingLevel = Object.hasOwn(args, 'thinkingLevel');
   const thinkingLevel = hasExplicitThinkingLevel ? args.thinkingLevel : undefined;
@@ -996,7 +988,6 @@ async function runDeepResearch(
       fileSearch: args.fileSearch,
     },
     ctx,
-    workspaceCacheManager,
   );
 }
 
@@ -1042,32 +1033,25 @@ function buildResearchStructuredContent(
   });
 }
 
-async function researchWork(
-  args: ResearchInput,
-  ctx: ServerContext,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
-): Promise<CallToolResult> {
+async function researchWork(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {
   const result = isQuickResearchInput(args)
-    ? await runQuickResearch(args, ctx, workspaceCacheManager)
-    : await runDeepResearch(args, ctx, workspaceCacheManager);
+    ? await runQuickResearch(args, ctx)
+    : await runDeepResearch(args, ctx);
 
   if (result.isError) {
     return result;
   }
 
   const structured = result.structuredContent ?? {};
-  return safeValidateStructuredContent(
-    'research',
+  return createToolContext('research', ctx).validateOutput(
     ResearchOutputSchema,
     buildResearchStructuredContent(args, ctx, structured),
     result,
   );
 }
 
-export function registerResearchTool(
-  server: McpServer,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
-): void {
+export function registerResearchTool(server: McpServer, services?: ToolServices): void {
+  const resolvedServices = services ?? createDefaultToolServices();
   registerWorkTool<ResearchInput>({
     server,
     tool: {
@@ -1079,6 +1063,6 @@ export function registerResearchTool(
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
     overrides: { defaultTtlMs: 900_000 },
-    work: (args, ctx) => researchWork(args, ctx, workspaceCacheManager),
+    work: (args, ctx) => researchWork(args, bindToolServices(ctx, resolvedServices)),
   });
 }

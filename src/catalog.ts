@@ -20,7 +20,16 @@ function compareDiscoveryEntries(left: DiscoveryEntry, right: DiscoveryEntry): n
 }
 
 export function listDiscoveryEntries(): DiscoveryEntry[] {
-  return [...DISCOVERY_ENTRIES].sort(compareDiscoveryEntries);
+  return buildDiscoveryEntries().sort(compareDiscoveryEntries);
+}
+
+export function buildDiscoveryEntries(): DiscoveryEntry[] {
+  return DISCOVERY_ENTRIES.map((entry) => ({
+    ...entry,
+    inputs: [...entry.inputs],
+    related: entry.related.map((related) => ({ ...related })),
+    ...(entry.limitations !== undefined ? { limitations: [...entry.limitations] } : {}),
+  }));
 }
 
 export function listWorkflowEntries(): WorkflowEntry[] {
@@ -34,7 +43,7 @@ export function listWorkflowEntries(): WorkflowEntry[] {
 }
 
 export function findDiscoveryEntry(kind: DiscoveryKind, name: string): DiscoveryEntry | undefined {
-  return DISCOVERY_ENTRIES.find((entry) => entry.kind === kind && entry.name === name);
+  return buildDiscoveryEntries().find((entry) => entry.kind === kind && entry.name === name);
 }
 
 export function findWorkflowEntry(name: string): WorkflowEntry | undefined {

@@ -7,14 +7,20 @@ import { AppError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
 import { createSharedTaskInfra, type SharedTaskInfra } from './lib/task-infra.js';
+import type { ToolServices } from './lib/tool-context.js';
 import { buildServerRootsFetcher, type RootsFetcher } from './lib/validation.js';
-import { createWorkspaceCacheManager } from './lib/workspace-context.js';
+import { createWorkspaceAccess, createWorkspaceCacheManager } from './lib/workspace-context.js';
 
 import { getStatelessTransportFlag } from './config.js';
 import { registerPrompts } from './prompts.js';
 import { PUBLIC_STATIC_RESOURCE_URIS, PUBLIC_TOOL_NAMES } from './public-contract.js';
 import { registerResources, SESSIONS_LIST_URI } from './resources.js';
-import { createSessionStore, type SessionChangeEvent, type SessionStore } from './sessions.js';
+import {
+  createSessionAccess,
+  createSessionStore,
+  type SessionChangeEvent,
+  type SessionStore,
+} from './sessions.js';
 import { registerAnalyzeTool } from './tools/analyze.js';
 import { registerChatTool } from './tools/chat.js';
 import { registerResearchTool } from './tools/research.js';
@@ -52,7 +58,7 @@ const version = resolvePackageVersion();
 const log = logger.child('server');
 interface ServerServices {
   sessionStore: SessionStore;
-  workspaceCacheManager: ReturnType<typeof createWorkspaceCacheManager>;
+  toolServices: ToolServices;
   rootsFetcher: RootsFetcher;
 }
 
@@ -60,16 +66,16 @@ type ServerRegistrar = (server: McpServer, services: ServerServices) => void;
 
 const SERVER_TOOL_REGISTRARS = [
   (server, services) => {
-    registerChatTool(server, services.sessionStore, services.workspaceCacheManager);
+    registerChatTool(server, services.toolServices);
   },
   (server, services) => {
-    registerResearchTool(server, services.workspaceCacheManager);
+    registerResearchTool(server, services.toolServices);
   },
   (server, services) => {
-    registerAnalyzeTool(server, services.workspaceCacheManager, services.rootsFetcher);
+    registerAnalyzeTool(server, services.toolServices);
   },
   (server, services) => {
-    registerReviewTool(server, services.workspaceCacheManager, services.rootsFetcher);
+    registerReviewTool(server, services.toolServices);
   },
 ] as const satisfies readonly ServerRegistrar[];
 
@@ -193,10 +199,15 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
   });
 
   const rootsFetcher = buildServerRootsFetcher(server);
+  const toolServices: ToolServices = {
+    rootsFetcher,
+    session: createSessionAccess(sessionStore),
+    workspace: createWorkspaceAccess(workspaceCacheManager, rootsFetcher),
+  };
 
   registerServerTools(server, {
     sessionStore,
-    workspaceCacheManager,
+    toolServices,
     rootsFetcher,
   });
 

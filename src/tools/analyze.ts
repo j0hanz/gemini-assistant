@@ -11,17 +11,19 @@ import {
   type BuiltInToolName,
   type BuiltInToolSpec,
 } from '../lib/orchestration.js';
-import { ProgressReporter } from '../lib/progress.js';
 import {
   buildSuccessfulStructuredContent,
   deriveDiagramSyntaxValidation,
   pickDefined,
-  safeValidateStructuredContent,
 } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
-import { executor } from '../lib/tool-executor.js';
-import type { RootsFetcher } from '../lib/validation.js';
-import type { WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
+import {
+  bindToolServices,
+  createDefaultToolServices,
+  type ToolRootsFetcher,
+  type ToolServices,
+} from '../lib/tool-context.js';
+import { createToolContext, executor } from '../lib/tool-executor.js';
 import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 
@@ -105,10 +107,7 @@ function collectDiagramSourceFiles(
   return [...(sourceFilePath ? [sourceFilePath] : []), ...(sourceFilePaths ?? [])];
 }
 
-function createAnalyzeFileWork(
-  rootsFetcher: RootsFetcher,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
-) {
+function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher) {
   return async function analyzeFileWork(
     {
       filePath,
@@ -130,7 +129,7 @@ function createAnalyzeFileWork(
     },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
-    const progress = new ProgressReporter(ctx, TOOL_LABELS.analyzeFile);
+    const { progress } = createToolContext('analyzeFile', ctx);
 
     return await withUploadsAndPipeline(
       ctx,
@@ -150,7 +149,6 @@ function createAnalyzeFileWork(
             urls,
             ...(fileSearch ? { fileSearch } : {}),
           },
-          workspaceCacheManager,
           buildContents: (activeCaps) => {
             const { promptText, systemInstruction } = buildFileAnalysisPrompt({
               goal: question,
@@ -181,7 +179,7 @@ function createAnalyzeFileWork(
           }),
         });
       },
-      0, // indexOffset
+      0,
     );
   };
 }
@@ -196,8 +194,7 @@ interface AnalyzeMultiExtra {
 }
 
 async function analyzeMultiFileWork(
-  rootsFetcher: RootsFetcher,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
+  rootsFetcher: ToolRootsFetcher,
   filePaths: string[],
   goal: string,
   thinkingLevel: AnalyzeInput['thinkingLevel'],
@@ -205,7 +202,7 @@ async function analyzeMultiFileWork(
   extra: AnalyzeMultiExtra = {},
 ): Promise<CallToolResult> {
   const { maxOutputTokens, safetySettings, googleSearch, urls, thinkingBudget, fileSearch } = extra;
-  const progress = new ProgressReporter(ctx, TOOL_LABELS.analyze);
+  const { progress } = createToolContext('analyze', ctx);
 
   return await withUploadsAndPipeline(
     ctx,
@@ -224,7 +221,6 @@ async function analyzeMultiFileWork(
           urls,
           ...(fileSearch ? { fileSearch } : {}),
         },
-        workspaceCacheManager,
         buildContents: (activeCaps) => {
           const prompt = buildFileAnalysisPrompt({
             attachedParts: contents,
@@ -254,7 +250,7 @@ async function analyzeMultiFileWork(
         }),
       });
     },
-    0, // indexOffset
+    0,
   );
 }
 
@@ -266,12 +262,11 @@ function pickDiagramBuiltInTools(args: AnalyzeDiagramInput): BuiltInToolName[] {
 }
 
 async function analyzeDiagramWork(
-  rootsFetcher: RootsFetcher,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
+  rootsFetcher: ToolRootsFetcher,
   args: AnalyzeDiagramInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const progress = new ProgressReporter(ctx, TOOL_LABELS.analyzeDiagram);
+  const { progress } = createToolContext('analyzeDiagram', ctx);
 
   const filesToUpload =
     args.targetKind === 'file' || args.targetKind === 'multi'
@@ -318,7 +313,6 @@ async function analyzeDiagramWork(
           ...(args.fileSearch ? { fileSearch: args.fileSearch } : {}),
         },
         builtInToolSpecs: diagramSpecs,
-        workspaceCacheManager,
         buildContents: () => {
           const prompt = buildDiagramGenerationPrompt({
             attachedParts,
@@ -379,34 +373,27 @@ async function analyzeDiagramWork(
         },
       });
     },
-    1, // indexOffset
+    1,
   );
 }
 
 async function analyzeWork(
-  rootsFetcher: RootsFetcher,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
+  rootsFetcher: ToolRootsFetcher,
   fileWork: ReturnType<typeof createAnalyzeFileWork>,
   args: AnalyzeInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const result =
     args.outputKind === 'diagram'
-      ? await analyzeDiagramWork(
-          rootsFetcher,
-          workspaceCacheManager,
-          args as AnalyzeDiagramInput,
-          ctx,
-        )
-      : await runAnalyzeTarget(rootsFetcher, workspaceCacheManager, fileWork, args, ctx);
+      ? await analyzeDiagramWork(rootsFetcher, args as AnalyzeDiagramInput, ctx)
+      : await runAnalyzeTarget(rootsFetcher, fileWork, args, ctx);
 
   if (result.isError) {
     return result;
   }
 
   const structured = result.structuredContent ?? {};
-  return safeValidateStructuredContent(
-    'analyze',
+  return createToolContext('analyze', ctx).validateOutput(
     AnalyzeOutputSchema,
     buildAnalyzeStructuredContent(args, ctx, structured),
     result,
@@ -414,8 +401,7 @@ async function analyzeWork(
 }
 
 async function runAnalyzeTarget(
-  rootsFetcher: RootsFetcher,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
+  rootsFetcher: ToolRootsFetcher,
   fileWork: ReturnType<typeof createAnalyzeFileWork>,
   args: AnalyzeInput,
   ctx: ServerContext,
@@ -450,13 +436,11 @@ async function runAnalyzeTarget(
         ...(args.fileSearch ? { fileSearch: args.fileSearch } : {}),
       },
       ctx,
-      workspaceCacheManager,
     );
   }
 
   return await analyzeMultiFileWork(
     rootsFetcher,
-    workspaceCacheManager,
     args.filePaths,
     args.goal,
     args.thinkingLevel,
@@ -550,12 +534,9 @@ function buildAnalyzeStructuredContent(
   }) as unknown as z.infer<typeof AnalyzeOutputSchema>;
 }
 
-export function registerAnalyzeTool(
-  server: McpServer,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
-  rootsFetcher: RootsFetcher,
-): void {
-  const fileWork = createAnalyzeFileWork(rootsFetcher, workspaceCacheManager);
+export function registerAnalyzeTool(server: McpServer, services?: ToolServices): void {
+  const resolvedServices = services ?? createDefaultToolServices();
+  const fileWork = createAnalyzeFileWork(resolvedServices.rootsFetcher);
 
   registerWorkTool<AnalyzeInput>({
     server,
@@ -568,6 +549,12 @@ export function registerAnalyzeTool(
       outputSchema: AnalyzeOutputSchema,
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
-    work: (args, ctx) => analyzeWork(rootsFetcher, workspaceCacheManager, fileWork, args, ctx),
+    work: (args, ctx) =>
+      analyzeWork(
+        resolvedServices.rootsFetcher,
+        fileWork,
+        args,
+        bindToolServices(ctx, resolvedServices),
+      ),
   });
 }

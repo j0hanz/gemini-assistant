@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  buildDiscoveryEntries,
   findDiscoveryEntry,
   findWorkflowEntry,
   listDiscoveryEntries,
@@ -201,5 +202,16 @@ describe('catalog', () => {
       .filter((entry) => entry.kind === 'tool')
       .map((entry) => entry.name);
     assert.deepStrictEqual(toolNames, [...PUBLIC_TOOL_NAMES].sort());
+  });
+
+  it('derives discovery entries from live tool, prompt, and resource registries', () => {
+    const built = buildDiscoveryEntries();
+
+    assert.deepStrictEqual(
+      built.map((entry) => `${entry.kind}:${entry.name}`).sort(),
+      listDiscoveryEntries()
+        .map((entry) => `${entry.kind}:${entry.name}`)
+        .sort(),
+    );
   });
 });

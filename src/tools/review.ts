@@ -10,18 +10,22 @@ import { z } from 'zod/v4';
 import { withUploadsAndPipeline } from '../lib/file.js';
 import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
 import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
-import { ProgressReporter } from '../lib/progress.js';
 import {
   buildSuccessfulStructuredContent,
   JSON_CODE_BLOCK_PATTERN,
-  safeValidateStructuredContent,
   tryParseJsonResponse,
 } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
-import { executor } from '../lib/tool-executor.js';
-import { isPathWithinRoot, type RootsFetcher } from '../lib/validation.js';
-import type { WorkspaceCacheManagerImpl } from '../lib/workspace-context.js';
-import { SCAN_FILE_NAMES } from '../lib/workspace-context.js';
+import {
+  bindToolServices,
+  createDefaultToolServices,
+  findToolServices,
+  isPathWithinRoot,
+  type ToolRootsFetcher,
+  type ToolServices,
+  type ToolWorkspaceCacheManager,
+} from '../lib/tool-context.js';
+import { createToolContext, executor } from '../lib/tool-executor.js';
 import {
   type AnalyzePrInput,
   type CompareFilesInput,
@@ -221,10 +225,7 @@ interface GitDiffArgsOptions {
   staged?: boolean;
 }
 
-function createCompareFileWork(
-  rootsFetcher: RootsFetcher,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
-) {
+function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
   return async function compareFileWork(
     {
       filePathA,
@@ -245,7 +246,7 @@ function createCompareFileWork(
     },
     ctx: ServerContext,
   ): Promise<CallToolResult> {
-    const progress = new ProgressReporter(ctx, TOOL_LABELS.compareFiles);
+    const { progress } = createToolContext('compareFiles', ctx);
 
     return await withUploadsAndPipeline(
       ctx,
@@ -268,7 +269,6 @@ function createCompareFileWork(
             urls,
             ...(fileSearch ? { fileSearch } : {}),
           },
-          workspaceCacheManager,
           buildContents: () => {
             const prompt = buildDiffReviewPrompt({
               focus: question,
@@ -322,7 +322,6 @@ async function diagnoseFailureWork(
   focus: string | undefined,
   thinkingLevel: ReviewInput['thinkingLevel'],
   ctx: ServerContext,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
 ): Promise<CallToolResult> {
   const {
     urls,
@@ -346,7 +345,7 @@ async function diagnoseFailureWork(
     urls,
   });
 
-  const progress = new ProgressReporter(ctx, TOOL_LABELS.reviewFailure);
+  const { progress } = createToolContext('reviewFailure', ctx);
   await progress.send(0, undefined, 'Diagnosing');
   await mcpLog(ctx, 'info', `Review failure: ${error.length} chars`);
 
@@ -358,7 +357,6 @@ async function diagnoseFailureWork(
       urls,
       ...(fileSearch ? { fileSearch } : {}),
     },
-    workspaceCacheManager,
     buildContents: () => ({
       contents: [prompt.promptText],
       systemInstruction: prompt.systemInstruction,
@@ -1039,7 +1037,7 @@ export async function buildLocalDiffSnapshot(
 }
 
 export async function resolveReviewWorkingDirectory(
-  rootsFetcher: RootsFetcher,
+  rootsFetcher: ToolRootsFetcher,
   log: ScopedLogger,
 ): Promise<string> {
   const roots = await rootsFetcher();
@@ -1089,17 +1087,21 @@ export async function analyzePrWork(
     safetySettings?: ReviewInput['safetySettings'];
   },
   ctx: ServerContext,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
-  rootsFetcher: RootsFetcher = () => Promise.resolve([]),
+  workspaceCacheManagerOrRootsFetcher?: ToolWorkspaceCacheManager | ToolRootsFetcher,
+  rootsFetcher: ToolRootsFetcher = () => Promise.resolve([]),
 ): Promise<CallToolResult> {
-  const progress = new ProgressReporter(ctx, TOOL_LABELS.review);
+  const resolvedRootsFetcher =
+    typeof workspaceCacheManagerOrRootsFetcher === 'function'
+      ? workspaceCacheManagerOrRootsFetcher
+      : rootsFetcher;
+  const { progress } = createToolContext('review', ctx);
   await progress.step(0, 3, 'Inspecting local changes');
   const log = logger.child('review');
 
   let snapshot: LocalDiffSnapshot;
   let workingDirectory: string;
   try {
-    workingDirectory = await resolveReviewWorkingDirectory(rootsFetcher, log);
+    workingDirectory = await resolveReviewWorkingDirectory(resolvedRootsFetcher, log);
     snapshot = await buildLocalDiffSnapshot(workingDirectory, ctx.mcpReq.signal);
   } catch (err) {
     return buildAnalyzePrErrorResult(err);
@@ -1141,7 +1143,8 @@ export async function analyzePrWork(
   await logSnapshotStats(ctx, snapshot, budgetedDiff.truncated);
 
   const envDocs = getReviewDocs();
-  const docPathsToCheck = envDocs ?? Array.from(SCAN_FILE_NAMES);
+  const toolServices = findToolServices(ctx);
+  const docPathsToCheck = envDocs ?? [...(toolServices?.workspace.scanFileNames() ?? [])];
   const docContexts = await readDocFiles(workingDirectory, docPathsToCheck);
 
   const prompt = buildAnalysisPrompt(
@@ -1166,7 +1169,6 @@ export async function analyzePrWork(
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'analyze_pr',
     label: TOOL_LABELS.review,
-    workspaceCacheManager,
     buildContents: () => ({
       contents: [modelPrompt.promptText],
       systemInstruction: modelPrompt.systemInstruction,
@@ -1267,8 +1269,7 @@ function requireReviewField(
 
 async function reviewWork(
   compareWork: ReturnType<typeof createCompareFileWork>,
-  rootsFetcher: RootsFetcher,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
+  rootsFetcher: ToolRootsFetcher,
   args: ReviewInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -1286,7 +1287,6 @@ async function reviewWork(
         safetySettings: args.safetySettings,
       },
       ctx,
-      workspaceCacheManager,
       rootsFetcher,
     );
   } else if (args.subjectKind === 'comparison') {
@@ -1327,7 +1327,6 @@ async function reviewWork(
       args.focus,
       args.thinkingLevel,
       ctx,
-      workspaceCacheManager,
     );
   }
 
@@ -1336,20 +1335,16 @@ async function reviewWork(
   }
 
   const structured = result.structuredContent ?? {};
-  return safeValidateStructuredContent(
-    'review',
+  return createToolContext('review', ctx).validateOutput(
     ReviewOutputSchema,
     buildReviewStructuredContent(ctx.task?.id, args.subjectKind, structured),
     result,
   );
 }
 
-export function registerReviewTool(
-  server: McpServer,
-  workspaceCacheManager: WorkspaceCacheManagerImpl,
-  rootsFetcher: RootsFetcher,
-): void {
-  const compareWork = createCompareFileWork(rootsFetcher, workspaceCacheManager);
+export function registerReviewTool(server: McpServer, services?: ToolServices): void {
+  const resolvedServices = services ?? createDefaultToolServices();
+  const compareWork = createCompareFileWork(resolvedServices.rootsFetcher);
 
   registerWorkTool<ReviewInput>({
     server,
@@ -1361,6 +1356,12 @@ export function registerReviewTool(
       outputSchema: ReviewOutputSchema,
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
-    work: (args, ctx) => reviewWork(compareWork, rootsFetcher, workspaceCacheManager, args, ctx),
+    work: (args, ctx) =>
+      reviewWork(
+        compareWork,
+        resolvedServices.rootsFetcher,
+        args,
+        bindToolServices(ctx, resolvedServices),
+      ),
   });
 }

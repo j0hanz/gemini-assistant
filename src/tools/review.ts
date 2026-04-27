@@ -10,11 +10,7 @@ import { z } from 'zod/v4';
 import { withUploadsAndPipeline } from '../lib/file.js';
 import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
 import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
-import {
-  buildSuccessfulStructuredContent,
-  JSON_CODE_BLOCK_PATTERN,
-  tryParseJsonResponse,
-} from '../lib/response.js';
+import { buildSuccessfulStructuredContent, tryParseJsonResponse } from '../lib/response.js';
 import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import {
   bindToolServices,
@@ -29,6 +25,7 @@ import { createToolContext, executor } from '../lib/tool-executor.js';
 import {
   type AnalyzePrInput,
   type CompareFilesInput,
+  type GeminiResponseSchema,
   type ReviewInput,
   ReviewInputSchema,
 } from '../schemas/inputs.js';
@@ -38,11 +35,13 @@ import { getReviewDocs } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
 
 const execFileAsync = promisify(execFile);
+let reviewGitRunner = execFileAsync;
 
 const GIT_TIMEOUT_MS = 30_000;
 const GIT_MAX_BUFFER = 10 * 1024 * 1024;
 const MAX_DIFF_CHARS = 200_000;
 const MAX_UNTRACKED_FILE_BYTES = 1024 * 1024;
+const TRUNCATED_DIFF_NOTICE = '\n# Review truncated to fit diff budget.';
 const EMPTY_DIFF_STATS: DiffStats = { files: 0, additions: 0, deletions: 0 };
 const DIFF_HEADER_PATTERN = /^diff --git (?:"a\/(.+?)"|a\/(.+?)) (?:"b\/(.+?)"|b\/(.+?))$/;
 const UTF8_DECODER = new TextDecoder('utf-8');
@@ -217,6 +216,65 @@ interface BudgetedSnapshotDiff {
   reviewedPaths: string[];
   summary: string;
   truncated: boolean;
+}
+
+type ReviewCompareWork = ReturnType<typeof createCompareFileWork>;
+type ReviewDiagnoseFailureWork = typeof diagnoseFailureWork;
+type ReviewAnalyzePrWork = typeof analyzePrWork;
+
+const AnalyzePrModelOutputSchema = z.strictObject({
+  summary: z.string(),
+  documentationDrift: z.array(DocumentationDriftSchema).optional(),
+});
+
+const AnalyzePrModelResponseSchema = {
+  type: 'object',
+  description:
+    'Structured review result with a required summary and optional documentation drift findings.',
+  properties: {
+    summary: {
+      type: 'string',
+      description: 'Concise review summary for the analyzed diff.',
+    },
+    documentationDrift: {
+      type: 'array',
+      description: 'Documentation files made outdated or misleading by the diff.',
+      items: {
+        type: 'object',
+        properties: {
+          file: {
+            type: 'string',
+            description: 'Documentation file path that needs an update.',
+          },
+          driftDescription: {
+            type: 'string',
+            description: 'Why the current documentation no longer matches the code changes.',
+          },
+          suggestedUpdate: {
+            type: 'string',
+            description: 'Brief suggestion for the documentation change.',
+          },
+        },
+        required: ['file', 'driftDescription', 'suggestedUpdate'],
+      },
+    },
+  },
+  required: ['summary'],
+} satisfies GeminiResponseSchema;
+
+export interface ReviewWorkDeps {
+  compareWork: ReviewCompareWork;
+  rootsFetcher: ToolRootsFetcher;
+  analyzePrWork?: ReviewAnalyzePrWork;
+  diagnoseFailureWork?: ReviewDiagnoseFailureWork;
+}
+
+export function __setReviewGitRunnerForTests(mockRunner: typeof execFileAsync): () => void {
+  const previousRunner = reviewGitRunner;
+  reviewGitRunner = mockRunner;
+  return () => {
+    reviewGitRunner = previousRunner;
+  };
 }
 
 interface GitDiffArgsOptions {
@@ -503,7 +561,7 @@ function uniqueSortedPaths(paths: Iterable<string>): string[] {
 
 async function findGitRoot(signal?: AbortSignal): Promise<string> {
   const cwd = process.cwd();
-  const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+  const { stdout } = await reviewGitRunner('git', ['rev-parse', '--show-toplevel'], {
     cwd,
     encoding: 'utf8',
     timeout: GIT_TIMEOUT_MS,
@@ -516,7 +574,7 @@ async function findGitRootFromDirectory(
   workingDirectory: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+  const { stdout } = await reviewGitRunner('git', ['rev-parse', '--show-toplevel'], {
     cwd: workingDirectory,
     encoding: 'utf8',
     timeout: GIT_TIMEOUT_MS,
@@ -526,7 +584,7 @@ async function findGitRootFromDirectory(
 }
 
 async function runGit(gitRoot: string, args: string[], signal?: AbortSignal): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
+  const { stdout } = await reviewGitRunner('git', args, {
     cwd: gitRoot,
     encoding: 'utf8',
     maxBuffer: GIT_MAX_BUFFER,
@@ -754,12 +812,27 @@ export function budgetDiffUnits(
   const keptUnits: DiffUnit[] = [];
   const omittedPaths: string[] = [];
   let currentLength = 0;
+  let partiallyTruncated = false;
 
-  for (const unit of orderedUnits) {
+  for (const [index, unit] of orderedUnits.entries()) {
     const separatorLength = keptUnits.length > 0 ? 1 : 0;
     const nextLength = currentLength + separatorLength + unit.text.length;
 
     if (nextLength > maxChars) {
+      const remainingChars = maxChars - currentLength - separatorLength;
+      if (keptUnits.length > 0 && remainingChars > TRUNCATED_DIFF_NOTICE.length + 1) {
+        const truncatedText = buildTruncatedDiffUnitText(unit.text, remainingChars);
+        if (truncatedText) {
+          keptUnits.push({
+            ...unit,
+            text: truncatedText,
+          });
+          partiallyTruncated = true;
+          omittedPaths.push(...orderedUnits.slice(index + 1).map((candidate) => candidate.path));
+          break;
+        }
+      }
+
       omittedPaths.push(unit.path);
       continue;
     }
@@ -772,8 +845,26 @@ export function budgetDiffUnits(
     diff: keptUnits.map((unit) => unit.text).join('\n'),
     ...(omittedPaths.length > 0 ? { omittedPaths: omittedPaths.sort() } : { omittedPaths: [] }),
     reviewedPaths: keptUnits.map((unit) => unit.path).sort(),
-    truncated: omittedPaths.length > 0,
+    truncated: partiallyTruncated || omittedPaths.length > 0,
   };
+}
+
+function buildTruncatedDiffUnitText(text: string, remainingChars: number): string | undefined {
+  const contentBudget = remainingChars - TRUNCATED_DIFF_NOTICE.length;
+  if (contentBudget <= 0) {
+    return undefined;
+  }
+
+  const slicedText = text.slice(0, contentBudget);
+  const lastNewlineIndex = slicedText.lastIndexOf('\n');
+  const preservedText = lastNewlineIndex > 0 ? slicedText.slice(0, lastNewlineIndex) : slicedText;
+  const normalizedText = preservedText.trimEnd();
+
+  if (!normalizedText) {
+    return undefined;
+  }
+
+  return `${normalizedText}${TRUNCATED_DIFF_NOTICE}`;
 }
 
 export function formatGitError(err: unknown): string {
@@ -1177,6 +1268,7 @@ export async function analyzePrWork(
       costProfile: 'review.diff',
       thinkingLevel,
       thinkingBudget,
+      responseSchema: AnalyzePrModelResponseSchema,
       maxOutputTokens,
       safetySettings,
     },
@@ -1187,23 +1279,41 @@ export async function analyzePrWork(
         | { file: string; driftDescription: string; suggestedUpdate: string }[]
         | undefined;
 
-      const parsedData = tryParseJsonResponse(finalSummary) as
-        | { documentationDrift?: unknown }
-        | undefined;
-      if (parsedData?.documentationDrift !== undefined) {
-        const parsedDocumentationDrift = z
-          .array(DocumentationDriftSchema)
-          .safeParse(parsedData.documentationDrift);
-        if (parsedDocumentationDrift.success && parsedDocumentationDrift.data.length > 0) {
-          documentationDrift = parsedDocumentationDrift.data;
-        } else if (!parsedDocumentationDrift.success) {
-          schemaWarnings.push(
-            `documentationDrift JSON failed schema validation: ${z.prettifyError(parsedDocumentationDrift.error)}`,
-          );
+      const parsedData = AnalyzePrModelOutputSchema.safeParse(tryParseJsonResponse(textContent));
+      if (parsedData.success) {
+        finalSummary = parsedData.data.summary.trim();
+        if (parsedData.data.documentationDrift?.length) {
+          documentationDrift = parsedData.data.documentationDrift;
+        }
+      } else {
+        schemaWarnings.push(
+          `review structured output failed schema validation: ${z.prettifyError(parsedData.error)}`,
+        );
+
+        const parsedFallback = z
+          .strictObject({
+            summary: z.string().optional(),
+            documentationDrift: z.unknown().optional(),
+          })
+          .safeParse(tryParseJsonResponse(textContent));
+
+        if (parsedFallback.success) {
+          finalSummary = parsedFallback.data.summary?.trim() ?? finalSummary;
+
+          if (parsedFallback.data.documentationDrift !== undefined) {
+            const parsedDocumentationDrift = z
+              .array(DocumentationDriftSchema)
+              .safeParse(parsedFallback.data.documentationDrift);
+            if (parsedDocumentationDrift.success && parsedDocumentationDrift.data.length > 0) {
+              documentationDrift = parsedDocumentationDrift.data;
+            } else if (!parsedDocumentationDrift.success) {
+              schemaWarnings.push(
+                `documentationDrift structured output failed schema validation: ${z.prettifyError(parsedDocumentationDrift.error)}`,
+              );
+            }
+          }
         }
       }
-
-      finalSummary = finalSummary.replace(JSON_CODE_BLOCK_PATTERN, '').trim();
 
       if (documentationDrift && documentationDrift.length > 0) {
         finalSummary = `⚠️ **Documentation Drift Detected**\n\nThe following documentation files may need updates based on this diff:\n${documentationDrift.map((d) => `- **${d.file}**: ${d.driftDescription} (Suggestion: ${d.suggestedUpdate})`).join('\n')}\n\n---\n\n${finalSummary}`;
@@ -1267,16 +1377,19 @@ function requireReviewField(
   throw new Error(`${field} is required when subjectKind=${subjectKind}.`);
 }
 
-async function reviewWork(
-  compareWork: ReturnType<typeof createCompareFileWork>,
-  rootsFetcher: ToolRootsFetcher,
+export async function reviewWork(
+  deps: ReviewWorkDeps,
   args: ReviewInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
+  const compareWork = deps.compareWork;
+  const rootsFetcher = deps.rootsFetcher;
+  const runAnalyzePrWork = deps.analyzePrWork ?? analyzePrWork;
+  const runDiagnoseFailureWork = deps.diagnoseFailureWork ?? diagnoseFailureWork;
   let result: CallToolResult;
 
   if (args.subjectKind === 'diff') {
-    result = await analyzePrWork(
+    result = await runAnalyzePrWork(
       {
         dryRun: args.dryRun,
         language: args.language,
@@ -1311,7 +1424,7 @@ async function reviewWork(
   } else {
     const error = requireReviewField(args.error, 'error', args.subjectKind);
 
-    result = await diagnoseFailureWork(
+    result = await runDiagnoseFailureWork(
       {
         error,
         codeContext: args.codeContext,
@@ -1358,8 +1471,10 @@ export function registerReviewTool(server: McpServer, services?: ToolServices): 
     },
     work: (args, ctx) =>
       reviewWork(
-        compareWork,
-        resolvedServices.rootsFetcher,
+        {
+          compareWork,
+          rootsFetcher: resolvedServices.rootsFetcher,
+        },
         args,
         bindToolServices(ctx, resolvedServices),
       ),

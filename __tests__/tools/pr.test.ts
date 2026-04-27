@@ -1,4 +1,4 @@
-import type { ServerContext } from '@modelcontextprotocol/server';
+import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -23,8 +23,10 @@ const {
   buildUntrackedFilePatch,
   computeDiffStats,
   formatGitError,
+  __setReviewGitRunnerForTests,
   isSensitiveUntrackedPath,
   matchesNoisyPath,
+  reviewWork,
   resolveReviewWorkingDirectory,
   scoreDiffUnitRisk,
   splitDiffUnits,
@@ -283,6 +285,32 @@ describe('budgetDiffUnits', () => {
     assert.match(result.diff, /src\/small\.ts/);
     assert.deepStrictEqual(result.omittedPaths, ['src/large.ts']);
     assert.deepStrictEqual(result.reviewedPaths, ['src/small.ts']);
+  });
+
+  it('partially truncates the last included unit when only part of it fits', () => {
+    const diff = [
+      'diff --git a/src/auth/session.ts b/src/auth/session.ts',
+      '--- a/src/auth/session.ts',
+      '+++ b/src/auth/session.ts',
+      '+ok',
+      'diff --git a/src/second.ts b/src/second.ts',
+      '--- a/src/second.ts',
+      '+++ b/src/second.ts',
+      ...Array.from({ length: 20 }, (_, i) => `+line ${String(i)}`),
+    ].join('\n');
+    const units = splitDiffUnits(diff);
+    const authUnit = units.find((unit) => unit.path === 'src/auth/session.ts');
+    assert.ok(authUnit);
+
+    const result = budgetDiffUnits(units, authUnit.text.length + 180);
+
+    assert.strictEqual(result.truncated, true);
+    assert.match(result.diff, /src\/auth\/session\.ts/);
+    assert.match(result.diff, /src\/second\.ts/);
+    assert.match(result.diff, /Review truncated to fit diff budget\./);
+    assert.ok(result.diff.length <= authUnit.text.length + 180);
+    assert.deepStrictEqual(result.reviewedPaths, ['src/auth/session.ts', 'src/second.ts']);
+    assert.deepStrictEqual(result.omittedPaths, []);
   });
 
   it('prefers high-risk source files over larger low-signal assets', () => {
@@ -640,7 +668,7 @@ describe('analyzePrWork diff budgeting metadata', () => {
     }
   });
 
-  it('validates documentation drift payloads and strips the JSON tail from the summary', async () => {
+  it('uses structured documentation drift payloads from Gemini output', async () => {
     const repoRoot = await createTempRepo();
     const client = getAI();
     const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
@@ -648,20 +676,16 @@ describe('analyzePrWork diff budgeting metadata', () => {
     // @ts-expect-error test override
     client.models.generateContentStream = async () =>
       fakeStream(
-        [
-          'Review summary',
-          '```json',
-          JSON.stringify({
-            documentationDrift: [
-              {
-                file: 'README.md',
-                driftDescription: 'README no longer matches the new behavior.',
-                suggestedUpdate: 'Document the updated behavior.',
-              },
-            ],
-          }),
-          '```',
-        ].join('\n'),
+        JSON.stringify({
+          summary: 'Review summary',
+          documentationDrift: [
+            {
+              file: 'README.md',
+              driftDescription: 'README no longer matches the new behavior.',
+              suggestedUpdate: 'Document the updated behavior.',
+            },
+          ],
+        }),
       );
 
     try {
@@ -682,18 +706,18 @@ describe('analyzePrWork diff budgeting metadata', () => {
           suggestedUpdate: 'Document the updated behavior.',
         },
       ]);
-      assert.doesNotMatch(
+      assert.match(
         typeof structured.summary === 'string' ? structured.summary : '',
-        /```json/,
+        /Review summary/,
       );
-      assert.doesNotMatch(String(result.content[0]?.text ?? ''), /```json/);
+      assert.match(String(result.content[0]?.text ?? ''), /Documentation Drift Detected/);
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
       await rm(repoRoot, { recursive: true, force: true });
     }
   });
 
-  it('surfaces schemaWarnings when documentation drift JSON fails validation', async () => {
+  it('surfaces schemaWarnings when structured documentation drift fails validation', async () => {
     const repoRoot = await createTempRepo();
     const client = getAI();
     const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
@@ -701,19 +725,15 @@ describe('analyzePrWork diff budgeting metadata', () => {
     // @ts-expect-error test override
     client.models.generateContentStream = async () =>
       fakeStream(
-        [
-          'Review summary',
-          '```json',
-          JSON.stringify({
-            documentationDrift: [
-              {
-                file: 'README.md',
-                driftDescription: 'README no longer matches the new behavior.',
-              },
-            ],
-          }),
-          '```',
-        ].join('\n'),
+        JSON.stringify({
+          summary: 'Review summary',
+          documentationDrift: [
+            {
+              file: 'README.md',
+              driftDescription: 'README no longer matches the new behavior.',
+            },
+          ],
+        }),
       );
 
     try {
@@ -734,10 +754,14 @@ describe('analyzePrWork diff budgeting metadata', () => {
 
       assert.strictEqual(structured.documentationDrift, undefined);
       assert.ok(schemaWarnings.length > 0);
-      assert.match(schemaWarnings[0] ?? '', /documentationDrift JSON failed schema validation/);
-      assert.doesNotMatch(
+      assert.ok(
+        schemaWarnings.some((warning) =>
+          warning.includes('documentationDrift structured output failed schema validation'),
+        ),
+      );
+      assert.match(
         typeof structured.summary === 'string' ? structured.summary : '',
-        /```json/,
+        /Review summary/,
       );
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
@@ -836,5 +860,135 @@ describe('formatGitError', () => {
   it('handles non-Error values', () => {
     const msg = formatGitError('something broke');
     assert.ok(msg.includes('Failed to run git: something broke'));
+  });
+});
+
+describe('buildLocalDiffSnapshot git failures', () => {
+  it('formats mocked git child-process failures', async () => {
+    const restore = __setReviewGitRunnerForTests(async () => {
+      throw Object.assign(new Error('git failed'), {
+        code: 128,
+        stderr: 'fatal: not a git repository\n',
+      });
+    });
+
+    try {
+      await assert.rejects(
+        () => buildLocalDiffSnapshot(process.cwd()),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(
+            formatGitError(error),
+            /git exited with code 128: fatal: not a git repository/,
+          );
+          return true;
+        },
+      );
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe('reviewWork routing', () => {
+  it('routes comparison subjects to compareWork', async () => {
+    let receivedArgs: Record<string, unknown> | undefined;
+    const compareWork = async (args: Record<string, unknown>) => {
+      receivedArgs = args;
+      return {
+        content: [{ type: 'text' as const, text: 'comparison summary' }],
+        structuredContent: { summary: 'comparison summary' },
+      } satisfies CallToolResult;
+    };
+
+    const result = await reviewWork(
+      {
+        analyzePrWork: async () => ({ content: [{ type: 'text', text: 'diff' }] }),
+        compareWork,
+        diagnoseFailureWork: async () => ({ content: [{ type: 'text', text: 'failure' }] }),
+        rootsFetcher: async () => [],
+      },
+      {
+        subjectKind: 'comparison',
+        filePathA: 'src/a.ts',
+        filePathB: 'src/b.ts',
+        question: 'behavior changes',
+      },
+      makeContext(),
+    );
+
+    assert.strictEqual(result.isError, undefined);
+    assert.deepStrictEqual(receivedArgs, {
+      filePathA: 'src/a.ts',
+      filePathB: 'src/b.ts',
+      question: 'behavior changes',
+      thinkingLevel: undefined,
+      thinkingBudget: undefined,
+      googleSearch: undefined,
+      urls: undefined,
+      maxOutputTokens: undefined,
+      safetySettings: undefined,
+    });
+  });
+
+  it('routes failure subjects to diagnoseFailureWork', async () => {
+    let receivedSubject: Record<string, unknown> | undefined;
+    let receivedFocus: string | undefined;
+    const result = await reviewWork(
+      {
+        analyzePrWork: async () => ({ content: [{ type: 'text', text: 'diff' }] }),
+        compareWork: async () => ({ content: [{ type: 'text', text: 'comparison' }] }),
+        diagnoseFailureWork: async (subject, focus) => {
+          receivedSubject = subject as Record<string, unknown>;
+          receivedFocus = focus;
+          return {
+            content: [{ type: 'text' as const, text: 'failure summary' }],
+            structuredContent: { summary: 'failure summary' },
+          } satisfies CallToolResult;
+        },
+        rootsFetcher: async () => [],
+      },
+      {
+        subjectKind: 'failure',
+        error: 'ReferenceError: x is not defined',
+        codeContext: 'const y = x;',
+        focus: 'runtime behavior',
+      },
+      makeContext(),
+    );
+
+    assert.strictEqual(result.isError, undefined);
+    assert.strictEqual(receivedFocus, 'runtime behavior');
+    assert.deepStrictEqual(receivedSubject, {
+      error: 'ReferenceError: x is not defined',
+      codeContext: 'const y = x;',
+      kind: 'failure',
+      language: undefined,
+      googleSearch: undefined,
+      maxOutputTokens: undefined,
+      thinkingBudget: undefined,
+      safetySettings: undefined,
+      urls: undefined,
+    });
+  });
+
+  it('rejects missing comparison fields', async () => {
+    await assert.rejects(
+      () =>
+        reviewWork(
+          {
+            analyzePrWork: async () => ({ content: [{ type: 'text', text: 'diff' }] }),
+            compareWork: async () => ({ content: [{ type: 'text', text: 'comparison' }] }),
+            diagnoseFailureWork: async () => ({ content: [{ type: 'text', text: 'failure' }] }),
+            rootsFetcher: async () => [],
+          },
+          {
+            subjectKind: 'comparison',
+            filePathB: 'src/b.ts',
+          },
+          makeContext(),
+        ),
+      /filePathA is required when subjectKind=comparison\./,
+    );
   });
 });

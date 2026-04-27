@@ -152,14 +152,13 @@ describe('ResearchOutputSchema', () => {
 });
 
 describe('ChatOutputSchema', () => {
-  it('defaults workspaceCacheApplied to false', () => {
+  it('requires workspaceCacheApplied explicitly', () => {
     const result = ChatOutputSchema.safeParse({
       status: 'completed',
       answer: 'Done',
     });
 
-    assert.ok(result.success);
-    assert.strictEqual(result.data.workspaceCacheApplied, false);
+    assert.strictEqual(result.success, false);
   });
 
   it('accepts workspaceCacheApplied when true', () => {
@@ -177,6 +176,7 @@ describe('ChatOutputSchema', () => {
     const result = ChatOutputSchema.safeParse({
       status: 'completed',
       answer: 'Done',
+      workspaceCacheApplied: false,
       functionCalls: [
         {
           name: 'lookup',

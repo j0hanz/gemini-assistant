@@ -3,14 +3,16 @@ import { z } from 'zod/v4';
 import type { SearchEntryPointSchema } from './fields.js';
 import {
   UsageMetadataSchema as BaseUsageMetadataSchema,
+  completedStatusField,
   DIAGRAM_TYPES,
   diffStatsFields,
   enumField,
   FindingSchema,
   GroundingCitationSchema,
   GroundingSignalsSchema,
+  groundingStatusField,
   nonNegativeInt,
-  publicBaseOutputFields,
+  publicBaseOutputFieldsWithoutStatus,
   publicHttpUrlArray,
   RESEARCH_MODE_OPTIONS,
   REVIEW_SUBJECT_OPTIONS,
@@ -49,10 +51,6 @@ export type Finding = z.infer<typeof FindingSchema>;
 export type GroundingSignals = z.infer<typeof GroundingSignalsSchema>;
 export type SearchEntryPoint = z.infer<typeof SearchEntryPointSchema>;
 
-const GroundingStatusSchema = z
-  .enum(['completed', 'grounded', 'partially_grounded', 'ungrounded'])
-  .describe('Grounding status; `completed` is accepted for legacy successful outputs');
-
 const ComputationSchema = z.strictObject({
   code: z.string().describe('Executable code emitted by Gemini Code Execution'),
   language: z.string().optional().describe('Code language when provided'),
@@ -62,8 +60,8 @@ const ComputationSchema = z.strictObject({
 });
 
 const AnalyzeSummaryOutputSchema = z.strictObject({
-  ...publicBaseOutputFields,
-  status: GroundingStatusSchema,
+  ...publicBaseOutputFieldsWithoutStatus,
+  status: groundingStatusField,
   kind: z.literal('summary').describe('Analyze output selector (`summary`)'),
   targetKind: z.enum(['file', 'url', 'multi']).describe('Analyze target discriminator'),
   summary: z.string().describe('Grounded analysis summary'),
@@ -74,7 +72,8 @@ const AnalyzeSummaryOutputSchema = z.strictObject({
 });
 
 const AnalyzeDiagramOutputSchema = z.strictObject({
-  ...publicBaseOutputFields,
+  ...publicBaseOutputFieldsWithoutStatus,
+  status: completedStatusField,
   kind: z.literal('diagram').describe('Analyze output selector (`diagram`)'),
   targetKind: z.enum(['file', 'url', 'multi']).describe('Analyze target discriminator'),
   diagramType: enumField(DIAGRAM_TYPES, 'Diagram syntax used for the output'),
@@ -98,7 +97,8 @@ const SessionResourceLinksSchema = z.strictObject({
 });
 
 export const ChatOutputSchema = z.strictObject({
-  ...publicBaseOutputFields,
+  ...publicBaseOutputFieldsWithoutStatus,
+  status: completedStatusField,
   answer: z.string().describe('Chat response text'),
   data: z.unknown().describe('Structured response payload when JSON mode is used').optional(),
   session: z
@@ -118,13 +118,12 @@ export const ChatOutputSchema = z.strictObject({
     .describe('Gemini Code Execution computations surfaced from tool events'),
   workspaceCacheApplied: z
     .boolean()
-    .default(false)
     .describe('Whether automatic workspace cache was applied for this chat turn'),
 });
 
 export const ResearchOutputSchema = z.strictObject({
-  ...publicBaseOutputFields,
-  status: GroundingStatusSchema,
+  ...publicBaseOutputFieldsWithoutStatus,
+  status: groundingStatusField,
   mode: enumField(RESEARCH_MODE_OPTIONS, 'Research mode that handled the request'),
   summary: z.string().describe('Grounded research summary'),
   sources: publicHttpUrlArray({
@@ -171,7 +170,8 @@ export const DocumentationDriftSchema = z.strictObject({
 });
 
 export const ReviewOutputSchema = z.strictObject({
-  ...publicBaseOutputFields,
+  ...publicBaseOutputFieldsWithoutStatus,
+  status: completedStatusField,
   subjectKind: enumField(REVIEW_SUBJECT_OPTIONS, 'Review subject discriminator'),
   summary: z.string().describe('Review result summary'),
   schemaWarnings: z.array(z.string()).optional().describe('Schema-level review warnings.'),

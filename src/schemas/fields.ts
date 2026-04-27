@@ -429,8 +429,15 @@ const streamMetadataOutputFields = {
     .describe('Normalized tool/function event stream.'),
 };
 
-export const publicBaseOutputFields = {
-  status: z.literal('completed').describe('Stable status for successful tool executions'),
+export const completedStatusField = z
+  .literal('completed')
+  .describe('Stable status for successful tool executions');
+
+export const groundingStatusField = z
+  .enum(['completed', 'grounded', 'partially_grounded', 'ungrounded'])
+  .describe('Grounding status; `completed` is accepted for legacy successful outputs');
+
+export const publicBaseOutputFieldsWithoutStatus = {
   requestId: z.string().describe('Server-side request or task identifier').optional(),
   warnings: z.array(z.string()).describe('Non-fatal warnings for the result').optional(),
   ...streamMetadataOutputFields,

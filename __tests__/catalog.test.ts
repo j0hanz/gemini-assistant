@@ -17,8 +17,13 @@ import {
   ReviewInputSchema,
 } from '../src/schemas/inputs.js';
 
+interface SchemaFieldLike {
+  isOptional: () => boolean;
+  description?: string;
+}
+
 interface ObjectLikeSchema {
-  shape: Record<string, { isOptional: () => boolean }>;
+  shape: Record<string, SchemaFieldLike>;
   keyof: () => { options: string[] };
 }
 
@@ -42,6 +47,11 @@ function isPipeLikeSchema(schema: unknown): schema is { in: unknown; out?: unkno
   return !!schema && typeof schema === 'object' && 'in' in schema;
 }
 
+function inputAnnotation(schema: SchemaFieldLike | undefined): string {
+  const match = schema?.description?.match(/Allowed only when ([^.]+)\./);
+  return match ? ` (${match[1]})` : '';
+}
+
 function schemaInputs(schema: unknown): string[] {
   if (isPipeLikeSchema(schema)) {
     const inputKeys = schemaInputs(schema.in);
@@ -49,7 +59,11 @@ function schemaInputs(schema: unknown): string[] {
   }
 
   if (isObjectLikeSchema(schema)) {
-    return schema.keyof().options.map((key) => (schema.shape[key]?.isOptional() ? `${key}?` : key));
+    return schema.keyof().options.map((key) => {
+      const field = schema.shape[key];
+      const suffix = field?.isOptional() ? '?' : '';
+      return `${key}${suffix}${inputAnnotation(field)}`;
+    });
   }
 
   if (isUnionLikeSchema(schema)) {

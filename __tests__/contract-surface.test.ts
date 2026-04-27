@@ -149,6 +149,57 @@ describe('contract surface invariants', () => {
     );
   });
 
+  it('describes chat cache skipping with the runtime conditions', () => {
+    const chat = DISCOVERY_ENTRIES.find((entry) => entry.kind === 'tool' && entry.name === 'chat');
+    assert.ok(chat);
+
+    const cacheLimitation = chat.limitations?.find((limit) =>
+      limit.includes('Workspace cache reuse is skipped'),
+    );
+    assert.ok(cacheLimitation, 'chat limitations must include workspace cache skip guidance');
+    assert.match(cacheLimitation, /non-default temperature/);
+    assert.match(cacheLimitation, /seed/);
+    assert.match(cacheLimitation, /systemInstruction/);
+    assert.doesNotMatch(cacheLimitation, /temperature, or seed/);
+  });
+
+  it('annotates selector-gated discovery inputs', () => {
+    const analyze = DISCOVERY_ENTRIES.find(
+      (entry) => entry.kind === 'tool' && entry.name === 'analyze',
+    );
+    const research = DISCOVERY_ENTRIES.find(
+      (entry) => entry.kind === 'tool' && entry.name === 'research',
+    );
+    const review = DISCOVERY_ENTRIES.find(
+      (entry) => entry.kind === 'tool' && entry.name === 'review',
+    );
+
+    assert.ok(analyze);
+    assert.ok(research);
+    assert.ok(review);
+
+    const assertAnnotatedInput = (
+      inputs: readonly string[],
+      field: string,
+      selector: string,
+    ): void => {
+      assert.ok(
+        inputs.some((input) => input.includes(field) && input.includes(selector)),
+        `expected ${field} to include ${selector}`,
+      );
+    };
+
+    assertAnnotatedInput(analyze.inputs, 'filePath', 'targetKind=file');
+    assertAnnotatedInput(analyze.inputs, 'urls', 'targetKind=url');
+    assertAnnotatedInput(analyze.inputs, 'filePaths', 'targetKind=multi');
+    assertAnnotatedInput(analyze.inputs, 'diagramType', 'outputKind=diagram');
+    assertAnnotatedInput(research.inputs, 'searchDepth', 'mode=deep');
+    assertAnnotatedInput(research.inputs, 'deliverable', 'mode=deep');
+    assertAnnotatedInput(review.inputs, 'filePathA', 'subjectKind=comparison');
+    assertAnnotatedInput(review.inputs, 'error', 'subjectKind=failure');
+    assertAnnotatedInput(review.inputs, 'dryRun', 'subjectKind=diff');
+  });
+
   it('does not advertise resources.subscribe in the initialize capability set', async () => {
     const { MockGeminiEnvironment } = await import('./lib/mock-gemini-environment.js');
     const { createServerHarness } = await import('./lib/mcp-contract-client.js');

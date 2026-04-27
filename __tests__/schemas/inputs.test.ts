@@ -817,7 +817,7 @@ describe('AnalyzeInputSchema', () => {
     );
     assert.strictEqual(
       analyzeShape.diagramType?.description,
-      'Diagram syntax to generate when outputKind=diagram. Defaults to mermaid.',
+      'Diagram syntax to generate when outputKind=diagram. Defaults to mermaid. Allowed only when outputKind=diagram.',
     );
     assert.strictEqual(
       analyzeShape.mediaResolution?.description,

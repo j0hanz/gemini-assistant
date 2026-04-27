@@ -129,13 +129,15 @@ describe('public contract schemas', () => {
     };
 
     assert.ok(
-      ChatOutputSchema.safeParse({ ...base, answer: 'hello' }).success,
+      ChatOutputSchema.safeParse({ ...base, answer: 'hello', workspaceCacheApplied: false })
+        .success,
       'chat output should parse',
     );
     assert.ok(
       ChatOutputSchema.safeParse({
         ...base,
         answer: 'hello',
+        workspaceCacheApplied: false,
         contextUsed: {
           sources: [{ kind: 'workspace-file', name: 'README.md', tokens: 100 }],
           totalTokens: 100,
@@ -195,6 +197,34 @@ describe('public contract schemas', () => {
     assert.ok(
       ReviewOutputSchema.safeParse({ ...base, subjectKind: 'failure', summary: 'x' }).success,
       'review output should parse',
+    );
+  });
+
+  it('locks the public status shapes and required chat cache flag', () => {
+    assert.ok(
+      ChatOutputSchema.safeParse({
+        status: 'completed',
+        answer: 'x',
+        workspaceCacheApplied: false,
+      }).success,
+    );
+    assert.ok(
+      ResearchOutputSchema.safeParse({ status: 'grounded', mode: 'quick', summary: 's' }).success,
+    );
+    assert.ok(
+      ResearchOutputSchema.safeParse({ status: 'ungrounded', mode: 'quick', summary: 's' }).success,
+    );
+    assert.ok(
+      ResearchOutputSchema.safeParse({ status: 'completed', mode: 'quick', summary: 's' }).success,
+    );
+    assert.strictEqual(
+      ChatOutputSchema.safeParse({ status: 'unknown', answer: 'x', workspaceCacheApplied: false })
+        .success,
+      false,
+    );
+    assert.strictEqual(
+      ChatOutputSchema.safeParse({ status: 'completed', answer: 'x' }).success,
+      false,
     );
   });
 

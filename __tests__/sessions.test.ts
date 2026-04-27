@@ -113,7 +113,7 @@ describe('sessions', () => {
       ]);
     });
 
-    it('keeps thought parts and signed text parts in rebuilt chat contents', () => {
+    it('skips rebuilt chat contents that would start with a model turn', () => {
       const rebuilt = buildRebuiltChatContents(
         [
           {
@@ -128,15 +128,7 @@ describe('sessions', () => {
         200_000,
       );
 
-      assert.deepStrictEqual(rebuilt, [
-        {
-          role: 'model',
-          parts: [
-            { text: 'private', thought: true, thoughtSignature: 'sig-thought' },
-            { text: 'visible', thoughtSignature: 'sig-visible' },
-          ],
-        },
-      ]);
+      assert.deepStrictEqual(rebuilt, []);
     });
 
     it('drops functionCall parts without a name on replay', () => {
@@ -175,6 +167,15 @@ describe('sessions', () => {
         { functionCall: { id: 'call-1', name: 'fetch' } },
         { functionResponse: { id: 'call-1', name: 'fetch', response: { ok: true } } },
       ]);
+    });
+
+    it('drops dangling functionResponse parts when no functionCall survives in the window', () => {
+      const parts = [
+        { functionCall: { args: { stray: true } } },
+        { functionResponse: { name: 'lookup', response: { ok: true } } },
+      ];
+
+      assert.deepStrictEqual(buildReplayHistoryParts(parts as never), []);
     });
 
     it('builds transcript parts from user-visible text and media only', () => {
@@ -368,6 +369,20 @@ describe('sessions', () => {
       ]);
     });
 
+    it('redacts free-text secrets in transcript reads', () => {
+      const store = createStore();
+      store.setSession('sess-transcript-redaction', mockChat('transcript-redaction') as never);
+      store.appendSessionTranscript('sess-transcript-redaction', {
+        role: 'user',
+        text: 'Authorization: topsecret and api_key=xyz123',
+        timestamp: 1,
+      });
+
+      assert.deepStrictEqual(store.listSessionTranscriptEntries('sess-transcript-redaction'), [
+        { role: 'user', text: '[REDACTED] and [REDACTED]', timestamp: 1 },
+      ]);
+    });
+
     it('does not notify when transcript entries are appended', () => {
       const store = createStore();
       let notifications = 0;
@@ -490,21 +505,7 @@ describe('sessions', () => {
           store.listSessionContentEntries('sess-function-response') ?? [],
           200_000,
         ),
-        [
-          {
-            role: 'user',
-            parts: [
-              { functionResponse: { id: 'call-1', name: 'lookup', response: { ok: true } } },
-              {
-                functionResponse: {
-                  id: 'call-2',
-                  name: 'lookup_more',
-                  response: { value: 42 },
-                },
-              },
-            ],
-          },
-        ],
+        [],
       );
     });
   });
@@ -957,6 +958,25 @@ describe('sessions', () => {
       assert.strictEqual(store.getSession('sess-expire-on-read'), undefined);
       assert.strictEqual(store.isEvicted('sess-expire-on-read'), true);
       assert.strictEqual(store.listSessionTranscriptEntries('sess-expire-on-read'), undefined);
+    });
+
+    it('notifies asynchronously when a session expires on read', async () => {
+      const store = createStore({ ttlMs: 1 });
+      store.setSession('sess-expire-notify', mockChat('ttl-notify') as never);
+
+      const events: { listChanged: boolean }[] = [];
+      store.subscribe((event) => {
+        events.push(event);
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      assert.strictEqual(store.getSessionEntry('sess-expire-notify'), undefined);
+      assert.deepStrictEqual(events, []);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      assert.deepStrictEqual(events, [{ listChanged: true }]);
     });
 
     it('expires sessions on metadata reads before validation can treat them as active', async () => {

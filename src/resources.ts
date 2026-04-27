@@ -25,7 +25,7 @@ import {
   getWorkspaceCacheEnabled,
   getWorkspaceCacheTtl,
 } from './config.js';
-import type { SessionStore, SessionSummary } from './sessions.js';
+import { sanitizeSessionText, type SessionStore, type SessionSummary } from './sessions.js';
 
 export { PUBLIC_RESOURCE_URIS } from './public-contract.js';
 
@@ -489,7 +489,9 @@ export function getSessionTurnPartsResourceData(
     );
   }
 
-  return structuredClone(contentEntry.rawParts ?? contentEntry.parts);
+  const serialized = JSON.stringify(structuredClone(contentEntry.rawParts ?? contentEntry.parts));
+  const sanitized = sanitizeSessionText(serialized) ?? serialized;
+  return JSON.parse(sanitized) as unknown[];
 }
 
 export function readSessionTranscriptResource(

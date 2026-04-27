@@ -167,6 +167,7 @@ const TOOL_EVENT_FIELD_RULES: readonly SessionFieldRule[] = [
 ];
 
 const SESSION_FREE_TEXT_SECRET_PATTERNS: readonly RegExp[] = [
+  /("(?:api[_-]?key|authorization|password|secret|token)"\s*:\s*)"(?:\\.|[^"\\])*"/gi,
   /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi,
   /\b(?:api[_-]?key|authorization|password|secret|token)\s*[:=]\s*[^\s,;]+/gi,
 ];
@@ -232,15 +233,18 @@ export function sanitizeToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
   return toolEvents.map((toolEvent) => applySessionFieldRules(toolEvent, TOOL_EVENT_FIELD_RULES));
 }
 
-function sanitizeSessionText(text: string | undefined): string | undefined {
+export function sanitizeSessionText(text: string | undefined): string | undefined {
   if (text === undefined) {
     return undefined;
   }
 
-  return SESSION_FREE_TEXT_SECRET_PATTERNS.reduce(
-    (current, pattern) => current.replace(pattern, '[REDACTED]'),
-    text,
-  );
+  return SESSION_FREE_TEXT_SECRET_PATTERNS.reduce((current, pattern, index) => {
+    if (index === 0) {
+      return current.replace(pattern, '$1"[REDACTED]"');
+    }
+
+    return current.replace(pattern, '[REDACTED]');
+  }, text);
 }
 
 export function buildRebuiltChatContents(contents: ContentEntry[], maxBytes: number): Content[] {
@@ -457,7 +461,7 @@ export function buildReplayHistoryParts(parts: Part[]): Part[] {
     }
 
     if (!hasFunctionCallParts) {
-      return Boolean(functionResponse.id ?? functionResponse.name);
+      return false;
     }
 
     if (functionResponse.id) {
@@ -558,7 +562,10 @@ export class SessionStore {
   listSessionTranscriptEntries(id: string): TranscriptEntry[] | undefined {
     const entry = this.getActiveSessionEntry(id);
     if (!entry) return undefined;
-    return entry.transcript.map((item) => ({ ...item }));
+    return entry.transcript.map((item) => ({
+      ...item,
+      text: sanitizeSessionText(item.text) ?? item.text,
+    }));
   }
 
   listSessionEventEntries(id: string): SessionEventEntry[] | undefined {
@@ -787,10 +794,10 @@ export class SessionStore {
     if (!entry) return undefined;
     if (!this.hasExpired(entry)) return entry;
 
-    // Read-path eviction: remove silently. The periodic sweep is responsible
-    // for broadcasting eviction notifications so we do not amplify per-read
-    // TTL expirations into notification storms across connected clients.
     this.removeSession(id, true);
+    setTimeout(() => {
+      this.notifyChange(true);
+    }, 0);
     return undefined;
   }
 
@@ -868,6 +875,10 @@ export function selectReplayWindow(
 
     kept.unshift(entry);
     totalBytes = nextBytes;
+  }
+
+  while (kept[0] && kept[0].role !== 'user') {
+    kept.shift();
   }
 
   return {

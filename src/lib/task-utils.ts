@@ -55,6 +55,10 @@ function isTerminalStatusError(err: unknown): boolean {
   return err.message.includes('terminal status');
 }
 
+function isTaskNotFoundError(err: unknown): boolean {
+  return err instanceof Error && /not found/i.test(err.message);
+}
+
 export type TaskWork<TArgs> = (args: TArgs, ctx: ExtendedServerContext) => Promise<CallToolResult>;
 export type { TaskToolConfig };
 
@@ -257,7 +261,10 @@ export function bridgeTaskCancellationToSignal(
             controller.abort(new Error(`Task ${taskId} cancelled`));
           }
         }
-      } catch {
+      } catch (error) {
+        if (isTaskNotFoundError(error)) {
+          cleanup();
+        }
         // baseSignal still controls abort on poll errors.
       }
     })();

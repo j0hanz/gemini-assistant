@@ -19,6 +19,7 @@ export function createSharedTaskInfra(): SharedTaskInfra {
     taskMessageQueue,
     close: () => {
       taskStore.cleanup();
+      (taskMessageQueue as { cleanup?: () => void }).cleanup?.();
     },
   };
 }

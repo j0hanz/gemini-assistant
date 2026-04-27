@@ -548,6 +548,54 @@ describe('session turn parts resource', () => {
     });
   });
 
+  it('redacts nested secrets from raw turn parts resources', () => {
+    withSessionResourcesExposed(() => {
+      const store = createStore();
+      store.setSession('sess-resource-parts-redacted', mockChat('resource-parts-redacted'));
+      store.appendSessionContent('sess-resource-parts-redacted', {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              name: 'lookup',
+              args: {
+                password: 'secret-value',
+                nested: { token: 'hidden' },
+              },
+            },
+          },
+        ],
+        rawParts: [
+          {
+            functionCall: {
+              name: 'lookup',
+              args: {
+                password: 'secret-value',
+                nested: { token: 'hidden' },
+              },
+            },
+          },
+        ],
+        timestamp: 1,
+      });
+
+      assert.deepStrictEqual(
+        getSessionTurnPartsResourceData(store, 'sess-resource-parts-redacted', '0'),
+        [
+          {
+            functionCall: {
+              name: 'lookup',
+              args: {
+                password: '[REDACTED]',
+                nested: { token: '[REDACTED]' },
+              },
+            },
+          },
+        ],
+      );
+    });
+  });
+
   it('throws ResourceNotFound for missing session turn parts', () => {
     withSessionResourcesExposed(() => {
       const store = createStore();

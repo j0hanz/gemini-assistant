@@ -71,4 +71,34 @@ describe('selectReplayWindow', () => {
       dropped: 2,
     });
   });
+
+  it('advances the replay window to the first user turn after truncation', () => {
+    const contents = [
+      entry('user', [{ text: 'oldest prompt that should drop out' }], 1),
+      entry('model', [{ text: 'assistant reply that no longer has its prompt' }], 2),
+      entry('user', [{ text: 'follow-up' }], 3),
+    ];
+
+    const maxBytes =
+      JSON.stringify(contents[1]?.parts).length + JSON.stringify(contents[2]?.parts).length;
+
+    assert.deepStrictEqual(selectReplayWindow(contents, maxBytes), {
+      kept: [contents[2]],
+      dropped: 2,
+    });
+  });
+
+  it('drops a trailing model-only window when no user turn remains inside budget', () => {
+    const contents = [
+      entry('user', [{ text: 'initial prompt' }], 1),
+      entry('model', [{ text: 'assistant reply' }], 2),
+    ];
+
+    const modelOnlyBytes = JSON.stringify(contents[1]?.parts).length;
+
+    assert.deepStrictEqual(selectReplayWindow(contents, modelOnlyBytes), {
+      kept: [],
+      dropped: 2,
+    });
+  });
 });

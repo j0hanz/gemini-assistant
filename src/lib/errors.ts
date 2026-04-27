@@ -15,6 +15,15 @@ function hasHttpStatus(err: unknown): err is Error & { status: number } {
   return err instanceof Error && 'status' in err && typeof err.status === 'number';
 }
 
+function hasRetryableNetworkCode(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) {
+    return false;
+  }
+
+  const code = (err as { code?: unknown }).code;
+  return code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'EAI_AGAIN';
+}
+
 export function isAbortError(err: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return true;
   return (
@@ -58,6 +67,12 @@ export class AppError extends Error {
   static isRetryable(err: unknown): boolean {
     if (err instanceof AppError) {
       return err.retryable;
+    }
+    if (hasRetryableNetworkCode(err)) {
+      return true;
+    }
+    if (hasRetryableNetworkCode((err as { cause?: unknown } | undefined)?.cause)) {
+      return true;
     }
     const classified = classifyError(err);
     return classified.kind === 'http' && RETRY_POLICY.retryableStatusCodes.has(classified.status);

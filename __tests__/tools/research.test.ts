@@ -263,6 +263,138 @@ describe('research tool contracts', () => {
     }
   });
 
+  it('preserves aggregated metadata and routes planner fallback through warnings for deep research', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+    let callCount = 0;
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () => {
+      callCount++;
+      if (callCount === 1) {
+        return fakeStream([
+          {
+            candidates: [
+              {
+                content: { parts: [{ text: '{not json}' }] },
+                finishReason: 'STOP',
+              },
+            ],
+          },
+        ]);
+      }
+
+      if (callCount >= 2 && callCount <= 4) {
+        return fakeStream([
+          {
+            candidates: [
+              {
+                content: { parts: [{ text: 'retrieval evidence' }] },
+                finishReason: 'STOP',
+                safetyRatings: [{ probability: 'LOW' }],
+                citationMetadata: {
+                  citationSources: [{ startIndex: 0, endIndex: 9, uri: 'https://example.com/r1' }],
+                },
+              },
+            ],
+            usageMetadata: {
+              promptTokenCount: 10,
+              candidatesTokenCount: 5,
+              totalTokenCount: 15,
+            },
+          },
+        ]);
+      }
+
+      return fakeStream([
+        {
+          candidates: [
+            {
+              content: { parts: [{ text: 'Deep research report' }] },
+              finishReason: 'STOP',
+              groundingMetadata: {
+                groundingChunks: [{ web: { title: 'Docs', uri: 'https://example.com/docs' } }],
+                groundingSupports: [
+                  {
+                    segment: { text: 'Deep research report', startIndex: 0, endIndex: 20 },
+                    groundingChunkIndices: [0],
+                  },
+                ],
+              },
+              finishMessage: 'STOP',
+              citationMetadata: {
+                citationSources: [
+                  { startIndex: 0, endIndex: 4, uri: 'https://example.com/synthesis' },
+                ],
+              },
+            },
+          ],
+          usageMetadata: {
+            promptTokenCount: 3,
+            candidatesTokenCount: 7,
+            totalTokenCount: 10,
+          },
+        },
+      ]);
+    };
+
+    try {
+      await research.createTask(
+        {
+          goal: 'compare approaches',
+          mode: 'deep',
+          searchDepth: 3,
+        },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+
+      const structured = store.stored[0]?.result.structuredContent as Record<string, unknown>;
+      assert.ok(structured && typeof structured === 'object');
+      assert.deepStrictEqual(structured.usage, {
+        cachedContentTokenCount: 0,
+        promptTokenCount: 33,
+        candidatesTokenCount: 22,
+        thoughtsTokenCount: 0,
+        totalTokenCount: 55,
+        toolUsePromptTokenCount: 0,
+      });
+      assert.deepStrictEqual(structured.safetyRatings, [
+        { probability: 'LOW' },
+        { probability: 'LOW' },
+        { probability: 'LOW' },
+      ]);
+      assert.deepStrictEqual(structured.citationMetadata, {
+        citationSources: [
+          { startIndex: 0, endIndex: 9, uri: 'https://example.com/r1' },
+          { startIndex: 0, endIndex: 9, uri: 'https://example.com/r1' },
+          { startIndex: 0, endIndex: 9, uri: 'https://example.com/r1' },
+          { startIndex: 0, endIndex: 4, uri: 'https://example.com/synthesis' },
+        ],
+      });
+      assert.deepStrictEqual(structured.groundingMetadata, {
+        groundingChunks: [{ web: { title: 'Docs', uri: 'https://example.com/docs' } }],
+        groundingSupports: [
+          {
+            segment: { text: 'Deep research report', startIndex: 0, endIndex: 20 },
+            groundingChunkIndices: [0],
+          },
+        ],
+      });
+      assert.strictEqual(structured.finishMessage, undefined);
+      assert.ok(
+        Array.isArray(structured.warnings) &&
+          structured.warnings.includes(
+            'research: planner JSON unparseable; using fallback queries',
+          ),
+      );
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+    }
+  });
+
   it('composes fileSearch with googleSearch and urlContext', async () => {
     const { research } = getHandlers();
     const store = makeMockStore();

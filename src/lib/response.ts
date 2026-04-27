@@ -322,6 +322,7 @@ export function promptBlockedError(toolName: string, blockReason?: string): Call
 
 interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
   contextUsed?: ContextUsed;
+  warnings?: string[];
   functionCalls?: TFunctionCall[];
   thoughts?: string;
   toolEvents?: TToolEvent[];
@@ -329,6 +330,8 @@ interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
   safetyRatings?: unknown;
   finishMessage?: string | undefined;
   citationMetadata?: unknown;
+  groundingMetadata?: unknown;
+  urlContextMetadata?: unknown;
 }
 
 function isEmptyStructuredValue(value: unknown): boolean {
@@ -347,6 +350,7 @@ function isTrivialFinishMessage(finishMessage: string | undefined): boolean {
 
 export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
   contextUsed,
+  warnings,
   functionCalls,
   includeThoughts = false,
   thoughtText,
@@ -355,8 +359,11 @@ export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
   safetyRatings,
   finishMessage,
   citationMetadata,
+  groundingMetadata,
+  urlContextMetadata,
 }: {
   contextUsed?: ContextUsed;
+  warnings?: readonly string[];
   functionCalls?: readonly TFunctionCall[];
   includeThoughts?: boolean;
   thoughtText?: string;
@@ -365,11 +372,14 @@ export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
   safetyRatings?: unknown;
   finishMessage?: string | undefined;
   citationMetadata?: unknown;
+  groundingMetadata?: unknown;
+  urlContextMetadata?: unknown;
 }): SharedStructuredMetadata<TFunctionCall, TToolEvent> {
   const hasToolEvents = toolEvents && toolEvents.length > 0;
 
   return pickDefined({
     contextUsed,
+    warnings: warnings && warnings.length > 0 ? [...warnings] : undefined,
     functionCalls: hasToolEvents
       ? undefined
       : functionCalls && functionCalls.length > 0
@@ -381,6 +391,8 @@ export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
     safetyRatings: isEmptyStructuredValue(safetyRatings) ? undefined : safetyRatings,
     finishMessage: isTrivialFinishMessage(finishMessage) ? undefined : finishMessage,
     citationMetadata: isEmptyStructuredValue(citationMetadata) ? undefined : citationMetadata,
+    groundingMetadata: isEmptyStructuredValue(groundingMetadata) ? undefined : groundingMetadata,
+    urlContextMetadata: isEmptyStructuredValue(urlContextMetadata) ? undefined : urlContextMetadata,
   });
 }
 
@@ -401,6 +413,7 @@ export function buildBaseStructuredOutput(
 
 const SHARED_STRUCTURED_RESULT_KEYS = [
   'contextUsed',
+  'warnings',
   'functionCalls',
   'thoughts',
   'toolEvents',
@@ -408,6 +421,8 @@ const SHARED_STRUCTURED_RESULT_KEYS = [
   'safetyRatings',
   'finishMessage',
   'citationMetadata',
+  'groundingMetadata',
+  'urlContextMetadata',
 ] as const;
 
 type SharedStructuredResultKey = (typeof SHARED_STRUCTURED_RESULT_KEYS)[number];
@@ -430,6 +445,7 @@ export function buildStructuredResponse<
   domain: T,
   shared?: {
     contextUsed?: ContextUsed;
+    warnings?: readonly string[];
     functionCalls?: readonly TFunctionCall[];
     includeThoughts?: boolean;
     thoughtText?: string;
@@ -438,6 +454,8 @@ export function buildStructuredResponse<
     safetyRatings?: unknown;
     finishMessage?: string | undefined;
     citationMetadata?: unknown;
+    groundingMetadata?: unknown;
+    urlContextMetadata?: unknown;
   },
 ): T & SharedStructuredMetadata<TFunctionCall, TToolEvent> & Record<string, unknown> {
   return {
@@ -509,6 +527,36 @@ function buildStructuredValidationErrorResult(
   };
 }
 
+function buildStructuredValidationWarningResult(
+  toolName: string,
+  result: CallToolResult,
+  error: z.ZodError,
+): CallToolResult {
+  return {
+    ...result,
+    content: [
+      ...result.content,
+      {
+        type: 'text',
+        text:
+          `Warning: ${toolName} structuredContent did not match outputSchema and was omitted.\n` +
+          z.prettifyError(error),
+      },
+    ],
+    structuredContent: undefined,
+  };
+}
+
+function hasVisibleToolContent(result: CallToolResult): boolean {
+  return result.content.some((entry) => {
+    if (entry.type !== 'text') {
+      return true;
+    }
+
+    return typeof entry.text === 'string' && entry.text.trim().length > 0;
+  });
+}
+
 function attachValidatedStructuredContent(
   toolName: string,
   outputSchema: unknown,
@@ -533,6 +581,10 @@ function attachValidatedStructuredContent(
       toolName,
       error: z.prettifyError(parsed.error),
     });
+  }
+
+  if (hasVisibleToolContent(result)) {
+    return buildStructuredValidationWarningResult(toolName, result, parsed.error);
   }
 
   return buildStructuredValidationErrorResult(toolName, result, parsed.error);

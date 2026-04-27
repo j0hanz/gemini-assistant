@@ -614,7 +614,7 @@ describe('registerTaskTool', () => {
     };
   }
 
-  it('stores failed status when central validation rejects structured content', async () => {
+  it('stores completed status when central validation downgrades structured-content mismatch to a warning', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store });
     const { server, getHandler } = makeMockServer();
@@ -644,10 +644,13 @@ describe('registerTaskTool', () => {
     assert.strictEqual(store.stored.length, 1);
     const entry = store.stored[0];
     assert.ok(entry);
-    assert.strictEqual(entry.status, 'failed');
-    assert.strictEqual(entry.result.isError, true);
+    assert.strictEqual(entry.status, 'completed');
+    assert.strictEqual(entry.result.isError, undefined);
     assert.strictEqual(entry.result.structuredContent, undefined);
-    assert.match(entry.result.content[1]?.text ?? '', /output validation failed/i);
+    assert.match(
+      entry.result.content[1]?.text ?? '',
+      /structuredContent did not match outputSchema/i,
+    );
   });
 
   it('stores completed status when central validation accepts structured content', async () => {

@@ -725,7 +725,7 @@ describe('safeValidateStructuredContent', () => {
     assert.strictEqual(result.isError, undefined);
   });
 
-  it('returns a generic error when structured content does not match', () => {
+  it('returns a warning when structured content does not match but visible content exists', () => {
     const result = safeValidateStructuredContent(
       'test-tool',
       z.strictObject({
@@ -748,15 +748,39 @@ describe('safeValidateStructuredContent', () => {
       },
     );
 
-    assert.strictEqual(result.isError, true);
-    assert.ok(
-      !('structuredContent' in (result as Record<string, unknown>)),
-      'failed result must not contain a structuredContent key',
-    );
+    assert.strictEqual(result.isError, undefined);
+    assert.strictEqual(result.structuredContent, undefined);
     assert.strictEqual(result.content[0]?.text, 'ok');
     assert.strictEqual(result.content[1]?.text, 'link');
     assert.match(
       result.content[2]?.text ?? '',
+      /Warning: test-tool structuredContent did not match outputSchema and was omitted\./,
+    );
+  });
+
+  it('still errors when structured content mismatches and there is no visible content', () => {
+    const result = safeValidateStructuredContent(
+      'test-tool',
+      z.strictObject({
+        status: z.literal('completed'),
+        summary: z.string(),
+      }),
+      {
+        status: 'completed',
+        explanation: 'wrong field',
+      },
+      {
+        content: [{ type: 'text', text: '' }],
+        structuredContent: {
+          status: 'completed',
+          explanation: 'wrong field',
+        },
+      },
+    );
+
+    assert.strictEqual(result.isError, true);
+    assert.match(
+      result.content[1]?.text ?? '',
       /Internal test-tool output validation failed: structuredContent did not match outputSchema\./,
     );
   });
@@ -809,7 +833,7 @@ describe('validateStructuredToolResult', () => {
     assert.strictEqual(result.isError, undefined);
   });
 
-  it('converts invalid structured content into a normal tool error', () => {
+  it('converts invalid structured content into a warning when visible content exists', () => {
     const result = validateStructuredToolResult(
       'test-tool',
       z.strictObject({
@@ -825,12 +849,12 @@ describe('validateStructuredToolResult', () => {
       },
     );
 
-    assert.strictEqual(result.isError, true);
+    assert.strictEqual(result.isError, undefined);
     assert.strictEqual(result.structuredContent, undefined);
     assert.strictEqual(result.content[0]?.text, 'ok');
     assert.match(
       result.content[1]?.text ?? '',
-      /Internal test-tool output validation failed: structuredContent did not match outputSchema\./,
+      /Warning: test-tool structuredContent did not match outputSchema and was omitted\./,
     );
   });
 
@@ -858,7 +882,7 @@ describe('validateStructuredToolResult', () => {
     assert.deepStrictEqual(validateStructuredToolResult('test-tool', {}, nonSchema), nonSchema);
   });
 
-  it('retains original content, appends a validation-failure entry, and omits structuredContent key', () => {
+  it('retains original content, appends a validation warning entry, and omits structuredContent key', () => {
     const result = validateStructuredToolResult(
       'test-tool',
       z.strictObject({
@@ -874,16 +898,13 @@ describe('validateStructuredToolResult', () => {
       },
     );
 
-    assert.strictEqual(result.isError, true);
-    assert.ok(
-      !('structuredContent' in (result as Record<string, unknown>)),
-      'downgraded result must not contain a structuredContent key',
-    );
+    assert.strictEqual(result.isError, undefined);
+    assert.strictEqual(result.structuredContent, undefined);
     assert.strictEqual(result.content[0]?.text, 'first');
     assert.strictEqual(result.content[1]?.text, 'second');
     assert.match(
       result.content[2]?.text ?? '',
-      /Internal test-tool output validation failed: structuredContent did not match outputSchema\./,
+      /Warning: test-tool structuredContent did not match outputSchema and was omitted\./,
     );
   });
 });

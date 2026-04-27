@@ -1,11 +1,6 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import type {
-  GroundingChunk,
-  GroundingMetadata,
-  GroundingSupport,
-  UrlContextMetadata,
-} from '@google/genai';
+import type { GroundingMetadata, UrlContextMetadata } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
 import { parseJson } from '../lib/json.js';
@@ -28,6 +23,7 @@ import {
   appendUrlStatus,
   auditClaimedToolUsage,
   buildDroppedSupportWarnings,
+  buildSharedStructuredMetadata,
   buildSourceReportMessage,
   buildStructuredResponse,
   buildSuccessfulStructuredContent,
@@ -51,6 +47,7 @@ import {
 import {
   deriveComputationsFromToolEvents,
   executeToolStream,
+  extractUsage,
   type StreamResult,
 } from '../lib/streaming.js';
 import {
@@ -317,6 +314,16 @@ function buildAgenticSearchResult(
         computations: context.computations.length > 0 ? context.computations : undefined,
         warnings: warnings.length > 0 ? warnings : undefined,
       }),
+      {
+        functionCalls: streamResult.functionCalls,
+        toolEvents: streamResult.toolEvents,
+        usage: streamResult.usageMetadata ? extractUsage(streamResult.usageMetadata) : undefined,
+        safetyRatings: streamResult.safetyRatings,
+        finishMessage: streamResult.finishMessage,
+        citationMetadata: streamResult.citationMetadata,
+        groundingMetadata: streamResult.groundingMetadata,
+        urlContextMetadata: streamResult.urlContextMetadata,
+      },
     ),
     reportMessage: buildSourceReportMessage(context.groundedSources.length),
   };
@@ -414,7 +421,7 @@ function parsePlannedSubQueries(
   text: string,
   fallbackTopic: string,
   searchDepth: number,
-): string[] {
+): { queries: string[]; warnings: string[] } {
   const maxQueries = Math.min(searchDepth, 5);
   const parsed = parseJson(text);
   const candidates = Array.isArray(parsed)
@@ -427,16 +434,21 @@ function parsePlannedSubQueries(
       .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
       .map((entry) => entry.trim())
       .slice(0, maxQueries);
-    if (queries.length > 0) return queries;
+    if (queries.length > 0) {
+      return { queries, warnings: [] };
+    }
   }
 
-  return [
-    fallbackTopic,
-    `${fallbackTopic} evidence and sources`,
-    `${fallbackTopic} recent developments`,
-    `${fallbackTopic} comparisons and tradeoffs`,
-    `${fallbackTopic} open questions`,
-  ].slice(0, maxQueries);
+  return {
+    queries: [
+      fallbackTopic,
+      `${fallbackTopic} evidence and sources`,
+      `${fallbackTopic} recent developments`,
+      `${fallbackTopic} comparisons and tradeoffs`,
+      `${fallbackTopic} open questions`,
+    ].slice(0, maxQueries),
+    warnings: ['research: planner JSON unparseable; using fallback queries'],
+  };
 }
 
 function dedupeGroundingSupports(
@@ -477,36 +489,66 @@ function mergeStreamMetadata<K extends keyof StreamResult>(
   return combine(values);
 }
 
-function combineGroundingMetadata(
-  metadatas: readonly GroundingMetadata[],
-): GroundingMetadata | undefined {
-  const groundingChunks: GroundingChunk[] = [];
-  const groundingSupports: GroundingSupport[] = [];
-  let searchEntryPoint: GroundingMetadata['searchEntryPoint'];
-
-  for (const metadata of metadatas) {
-    const offset = groundingChunks.length;
-    groundingChunks.push(...(metadata.groundingChunks ?? []));
-    for (const support of metadata.groundingSupports ?? []) {
-      groundingSupports.push({
-        ...support,
-        groundingChunkIndices: (support.groundingChunkIndices ?? []).map((index) => index + offset),
-      });
+function combineCitationMetadata(
+  results: readonly StreamResult[],
+): StreamResult['citationMetadata'] {
+  const citationSources: unknown[] = results.flatMap((result) => {
+    const metadata = result.citationMetadata;
+    if (
+      typeof metadata !== 'object' ||
+      metadata === null ||
+      !('citationSources' in metadata) ||
+      !Array.isArray((metadata as { citationSources?: unknown }).citationSources)
+    ) {
+      return [];
     }
-    searchEntryPoint ??= metadata.searchEntryPoint;
+
+    return (metadata as { citationSources: unknown[] }).citationSources;
+  });
+
+  return citationSources.length > 0 ? { citationSources } : undefined;
+}
+
+function sumUsageMetadata(results: readonly StreamResult[]): StreamResult['usageMetadata'] {
+  let usageMetadata: StreamResult['usageMetadata'];
+
+  for (const result of results) {
+    const usage = result.usageMetadata;
+    if (!usage) {
+      continue;
+    }
+
+    const merged: NonNullable<StreamResult['usageMetadata']> = {
+      promptTokenCount: (usageMetadata?.promptTokenCount ?? 0) + (usage.promptTokenCount ?? 0),
+      candidatesTokenCount:
+        (usageMetadata?.candidatesTokenCount ?? 0) + (usage.candidatesTokenCount ?? 0),
+      totalTokenCount: (usageMetadata?.totalTokenCount ?? 0) + (usage.totalTokenCount ?? 0),
+      cachedContentTokenCount:
+        (usageMetadata?.cachedContentTokenCount ?? 0) + (usage.cachedContentTokenCount ?? 0),
+      thoughtsTokenCount:
+        (usageMetadata?.thoughtsTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0),
+      toolUsePromptTokenCount:
+        (usageMetadata?.toolUsePromptTokenCount ?? 0) + (usage.toolUsePromptTokenCount ?? 0),
+    };
+
+    const promptTokensDetails = usage.promptTokensDetails ?? usageMetadata?.promptTokensDetails;
+    if (promptTokensDetails) {
+      merged.promptTokensDetails = promptTokensDetails;
+    }
+    const cacheTokensDetails = usage.cacheTokensDetails ?? usageMetadata?.cacheTokensDetails;
+    if (cacheTokensDetails) {
+      merged.cacheTokensDetails = cacheTokensDetails;
+    }
+    const candidatesTokensDetails =
+      usage.candidatesTokensDetails ?? usageMetadata?.candidatesTokensDetails;
+    if (candidatesTokensDetails) {
+      merged.candidatesTokensDetails = candidatesTokensDetails;
+    }
+
+    usageMetadata = merged;
   }
 
-  if (groundingChunks.length === 0 && groundingSupports.length === 0 && !searchEntryPoint) {
-    return undefined;
-  }
-
-  return dedupeGroundingSupports(
-    pickDefined({
-      groundingChunks,
-      groundingSupports,
-      searchEntryPoint,
-    }),
-  );
+  return usageMetadata;
 }
 
 function combineUrlContextMetadata(
@@ -519,26 +561,46 @@ function combineUrlContextMetadata(
 function aggregateStreamResults(
   results: readonly StreamResult[],
   text: string,
+  synthesisResult: StreamResult,
   warnings: readonly string[],
-): StreamResult {
-  return pickDefined({
-    text,
-    textByWave: results.flatMap((result) => result.textByWave),
-    thoughtText: results.map((result) => result.thoughtText).join('\n'),
-    parts: results.flatMap((result) => result.parts),
-    toolsUsed: [...new Set(results.flatMap((result) => result.toolsUsed))],
-    toolsUsedOccurrences: results.flatMap((result) => result.toolsUsedOccurrences),
-    functionCalls: results.flatMap((result) => result.functionCalls),
-    toolEvents: results.flatMap((result) => result.toolEvents),
-    hadCandidate: results.some((result) => result.hadCandidate),
-    groundingMetadata: mergeStreamMetadata(results, 'groundingMetadata', combineGroundingMetadata),
-    urlContextMetadata: mergeStreamMetadata(
-      results,
-      'urlContextMetadata',
-      combineUrlContextMetadata,
-    ),
-    finishMessage: warnings.length > 0 ? warnings.join('\n') : undefined,
-  });
+): { streamResult: StreamResult; warnings: string[] } {
+  return {
+    streamResult: pickDefined({
+      text,
+      textByWave: results.flatMap((result) => result.textByWave),
+      thoughtText: results.map((result) => result.thoughtText).join('\n'),
+      parts: results.flatMap((result) => result.parts),
+      toolsUsed: [...new Set(results.flatMap((result) => result.toolsUsed))],
+      toolsUsedOccurrences: results.flatMap((result) => result.toolsUsedOccurrences),
+      functionCalls: results.flatMap((result) => result.functionCalls),
+      toolEvents: results.flatMap((result) => result.toolEvents),
+      hadCandidate: results.some((result) => result.hadCandidate),
+      finishReason: synthesisResult.finishReason,
+      finishMessage: synthesisResult.finishMessage,
+      promptFeedback: synthesisResult.promptFeedback,
+      promptBlockReason: synthesisResult.promptBlockReason,
+      groundingMetadata: synthesisResult.groundingMetadata
+        ? dedupeGroundingSupports(synthesisResult.groundingMetadata)
+        : undefined,
+      urlContextMetadata: mergeStreamMetadata(
+        results,
+        'urlContextMetadata',
+        combineUrlContextMetadata,
+      ),
+      usageMetadata: sumUsageMetadata(results),
+      safetyRatings: results.reduce<unknown[]>((ratings, result) => {
+        if (Array.isArray(result.safetyRatings)) {
+          for (const rating of result.safetyRatings) {
+            ratings.push(rating);
+          }
+        }
+        return ratings;
+      }, []),
+      citationMetadata: combineCitationMetadata(results),
+      warnings: warnings.length > 0 ? [...warnings] : undefined,
+    }),
+    warnings: [...warnings],
+  };
 }
 
 async function runDeepResearchTurn(
@@ -599,11 +661,13 @@ async function runDeepResearchPlan(
   if (planTurn.result.isError) return planTurn.result;
   results.push(planTurn.streamResult);
 
-  const subQueries = parsePlannedSubQueries(
+  const plannedQueries = parsePlannedSubQueries(
     planTurn.streamResult.text,
     args.topic,
     args.searchDepth,
   );
+  warnings.push(...plannedQueries.warnings);
+  const subQueries = plannedQueries.queries;
   const requestedRetrievalBudget = Math.max(1, Math.min(args.searchDepth, subQueries.length));
   const maxRetrievalTurns = Math.min(subQueries.length, args.searchDepth, MAX_DEEP_RESEARCH_TURNS);
   if (maxRetrievalTurns < requestedRetrievalBudget) {
@@ -730,21 +794,49 @@ async function runDeepResearchPlan(
     results.push(contradictionTurn.streamResult);
   }
 
-  const aggregate = aggregateStreamResults(results, synthesisTurn.streamResult.text, warnings);
+  const aggregate = aggregateStreamResults(
+    results,
+    synthesisTurn.streamResult.text,
+    synthesisTurn.streamResult,
+    warnings,
+  );
   const built = buildAgenticSearchResult(
-    aggregate,
+    aggregate.streamResult,
     synthesisTurn.streamResult.text,
     ctx,
     args.searchDepth,
     maxRetrievalTurns,
-    warnings,
+    aggregate.warnings,
     maxRetrievalTurns,
   );
   const overlay = built.resultMod(synthesisTurn.result);
+  const sharedMetadata = buildSharedStructuredMetadata({
+    functionCalls: aggregate.streamResult.functionCalls,
+    includeThoughts: true,
+    thoughtText: aggregate.streamResult.thoughtText,
+    toolEvents: aggregate.streamResult.toolEvents,
+    usage: aggregate.streamResult.usageMetadata
+      ? extractUsage(aggregate.streamResult.usageMetadata)
+      : undefined,
+    safetyRatings: aggregate.streamResult.safetyRatings,
+    finishMessage: aggregate.streamResult.finishMessage,
+    citationMetadata: aggregate.streamResult.citationMetadata,
+    groundingMetadata: aggregate.streamResult.groundingMetadata,
+    urlContextMetadata: aggregate.streamResult.urlContextMetadata,
+  });
+
+  const structuredContent = built.structuredContent;
+
   return {
     ...synthesisTurn.result,
     ...overlay,
-    structuredContent: built.structuredContent,
+    structuredContent:
+      typeof structuredContent === 'object'
+        ? {
+            ...structuredContent,
+            ...sharedMetadata,
+          }
+        : structuredContent,
   };
 }
 

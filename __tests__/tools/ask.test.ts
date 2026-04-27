@@ -1152,6 +1152,52 @@ describe('ask contract', () => {
     }
   });
 
+  it('retries once after MAX_TOKENS when the initial JSON response is truncated', async () => {
+    const originalCache = process.env.CACHE;
+    process.env.CACHE = 'false';
+    const stub = withGeminiStreamStub([
+      async function* () {
+        yield {
+          candidates: [
+            {
+              content: { parts: [{ text: '{"count":' }] },
+              finishReason: FinishReason.MAX_TOKENS,
+            },
+          ],
+        };
+      },
+      '{"count":2}',
+    ]);
+
+    try {
+      const askWork = createAskWork();
+      const result = await askWork(
+        {
+          message: 'Return a count',
+          maxOutputTokens: 100,
+          responseSchema: {
+            type: 'object',
+            properties: { count: { type: 'integer' } },
+            required: ['count'],
+          },
+        },
+        createContext(),
+      );
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      assert.strictEqual(result.isError, undefined);
+      assert.deepStrictEqual(structured.data, { count: 2 });
+      assert.strictEqual(stub.calls.length, 2);
+      assert.strictEqual(
+        (stub.calls[1]?.config as { maxOutputTokens?: number } | undefined)?.maxOutputTokens,
+        200,
+      );
+    } finally {
+      process.env.CACHE = originalCache;
+      stub.restore();
+    }
+  });
+
   it('surfaces schemaWarnings after single retry exhaustion', async () => {
     const originalCache = process.env.CACHE;
     process.env.CACHE = 'false';
@@ -1216,7 +1262,64 @@ describe('ask contract', () => {
     }
   });
 
-  it('passes only per-turn config fields to chat.sendMessageStream', async () => {
+  it('forwards repair config fields on in-session JSON repair turns', async () => {
+    const originalCache = process.env.CACHE;
+    process.env.CACHE = 'false';
+    const observedConfigs: Record<string, unknown>[] = [];
+    let sendCalls = 0;
+    const chat = {
+      sendMessageStream: async (request: { config?: Record<string, unknown> }) => {
+        sendCalls++;
+        observedConfigs.push(request.config ?? {});
+        if (sendCalls === 1) {
+          return (async function* () {
+            yield {
+              candidates: [
+                {
+                  content: { parts: [{ text: '{"count":' }] },
+                  finishReason: FinishReason.MAX_TOKENS,
+                },
+              ],
+            };
+          })();
+        }
+
+        return fakeStream('{"count":2}');
+      },
+    };
+
+    try {
+      const askResult = await askWithoutSession(
+        {
+          message: 'Need JSON',
+          sessionId: 'sess-json-repair',
+          maxOutputTokens: 100,
+          responseSchema: {
+            type: 'object',
+            properties: { count: { type: 'integer' } },
+            required: ['count'],
+          },
+        },
+        createContext(),
+        chat as never,
+      );
+
+      const structured = askResult.result.structuredContent as Record<string, unknown>;
+      assert.strictEqual(sendCalls, 2);
+      assert.deepStrictEqual(structured.data, { count: 2 });
+      assert.strictEqual(observedConfigs[1]?.responseMimeType, 'application/json');
+      assert.deepStrictEqual(observedConfigs[1]?.responseJsonSchema, {
+        type: 'object',
+        properties: { count: { type: 'integer' } },
+        required: ['count'],
+      });
+      assert.strictEqual(observedConfigs[1]?.maxOutputTokens, 200);
+    } finally {
+      process.env.CACHE = originalCache;
+    }
+  });
+
+  it('passes repair-relevant per-turn config fields to chat.sendMessageStream', async () => {
     const originalCache = process.env.CACHE;
     process.env.CACHE = 'false';
     let observedConfig: Record<string, unknown> | undefined;
@@ -1251,7 +1354,13 @@ describe('ask contract', () => {
       );
 
       assert.ok(observedConfig);
-      assert.deepStrictEqual(Object.keys(observedConfig).sort(), ['abortSignal', 'thinkingConfig']);
+      assert.deepStrictEqual(Object.keys(observedConfig).sort(), [
+        'abortSignal',
+        'maxOutputTokens',
+        'responseJsonSchema',
+        'responseMimeType',
+        'thinkingConfig',
+      ]);
     } finally {
       process.env.CACHE = originalCache;
     }

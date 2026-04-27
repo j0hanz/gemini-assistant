@@ -125,6 +125,16 @@ describe('AppError', () => {
     assert.strictEqual(AppError.isRetryable(new CancelledError('chat')), false);
     assert.strictEqual(AppError.isRetryable(new SafetyError('chat', 'response_blocked')), false);
   });
+
+  it('treats transient network error codes as retryable', () => {
+    const socketReset = Object.assign(new Error('socket reset'), { code: 'ECONNRESET' });
+    const dnsRetry = Object.assign(new Error('dns retry'), {
+      cause: { code: 'EAI_AGAIN' },
+    });
+
+    assert.strictEqual(AppError.isRetryable(socketReset), true);
+    assert.strictEqual(AppError.isRetryable(dnsRetry), true);
+  });
 });
 
 describe('SafetyError', () => {
@@ -500,6 +510,20 @@ describe('withRetry', () => {
       if (calls < 2) throw createStatusError(503);
       return Promise.resolve('recovered');
     });
+    assert.strictEqual(result, 'recovered');
+    assert.strictEqual(calls, 2);
+  });
+
+  it('retries on transient network codes and succeeds', async () => {
+    let calls = 0;
+    const result = await withRetry(() => {
+      calls++;
+      if (calls < 2) {
+        throw Object.assign(new Error('socket reset'), { code: 'ECONNRESET' });
+      }
+      return Promise.resolve('recovered');
+    });
+
     assert.strictEqual(result, 'recovered');
     assert.strictEqual(calls, 2);
   });

@@ -50,6 +50,7 @@ export interface ContentEntry {
 export interface SessionGenerationContract {
   model: string;
   systemInstruction?: GenerateContentConfig['systemInstruction'];
+  cachedContent?: GenerateContentConfig['cachedContent'];
   tools?: ToolListUnion;
   toolConfig?: ToolConfig;
   functionCallingMode?: unknown;

@@ -93,6 +93,34 @@ interface GeminiStreamRequest<T extends Record<string, unknown>> {
   toolName: string;
 }
 
+function getStructuredWarnings(value: unknown): string[] {
+  if (!value || typeof value !== 'object' || !('warnings' in value)) {
+    return [];
+  }
+
+  const warnings = (value as { warnings?: unknown }).warnings;
+  return Array.isArray(warnings)
+    ? warnings.filter((warning): warning is string => typeof warning === 'string')
+    : [];
+}
+
+function appendWarningsToContent(
+  content: CallToolResult['content'],
+  warnings: readonly string[],
+): CallToolResult['content'] {
+  if (warnings.length === 0) {
+    return content;
+  }
+
+  return [
+    ...content,
+    {
+      type: 'text',
+      text: `Warnings:\n${warnings.map((warning) => `- ${warning}`).join('\n')}`,
+    },
+  ];
+}
+
 export interface GeminiPipelineRequest<T extends Record<string, unknown>> {
   toolName: string;
   label: string;
@@ -108,6 +136,75 @@ export interface GeminiPipelineRequest<T extends Record<string, unknown>> {
 
 export class ToolExecutor {
   constructor(private readonly scopedLogger: ScopedLogger) {}
+
+  private finalizeStreamExecution<T extends Record<string, unknown>>(
+    result: CallToolResult,
+    streamResult: StreamResult,
+    responseBuilder: StreamResponseBuilder<T>,
+  ): { result: CallToolResult; reportMessage?: string | undefined } {
+    if (result.isError) {
+      return { result };
+    }
+
+    const text = extractTextContent(result.content);
+    const built = responseBuilder(streamResult, text);
+    const resultOverlay = built.resultMod ? built.resultMod(result) : {};
+    const overlayStructuredContent =
+      resultOverlay.structuredContent && typeof resultOverlay.structuredContent === 'object'
+        ? resultOverlay.structuredContent
+        : undefined;
+    const baseStructuredContent =
+      result.structuredContent && typeof result.structuredContent === 'object'
+        ? result.structuredContent
+        : undefined;
+    const usage = extractUsage(streamResult.usageMetadata);
+    const sharedStructuredContent = buildSharedStructuredMetadata({
+      functionCalls: streamResult.functionCalls,
+      includeThoughts: getExposeThoughts(),
+      thoughtText: streamResult.thoughtText,
+      toolEvents: streamResult.toolEvents,
+      usage,
+      safetyRatings: streamResult.safetyRatings,
+      finishMessage: streamResult.finishMessage,
+      citationMetadata: streamResult.citationMetadata,
+      groundingMetadata: streamResult.groundingMetadata,
+      urlContextMetadata: streamResult.urlContextMetadata,
+      ...(streamResult.warnings ? { warnings: streamResult.warnings } : {}),
+    });
+    const mergedWarnings = [
+      ...getStructuredWarnings(baseStructuredContent),
+      ...getStructuredWarnings(overlayStructuredContent),
+      ...getStructuredWarnings(built.structuredContent),
+      ...getStructuredWarnings(sharedStructuredContent),
+    ];
+    const finalResult: CallToolResult = {
+      ...result,
+      ...resultOverlay,
+      content: appendWarningsToContent(
+        resultOverlay.content ?? result.content,
+        streamResult.warnings ?? [],
+      ),
+    };
+
+    const mergedStructuredContent =
+      baseStructuredContent || overlayStructuredContent || built.structuredContent
+        ? {
+            ...(baseStructuredContent ?? {}),
+            ...(overlayStructuredContent ?? {}),
+            ...(built.structuredContent ?? {}),
+            ...sharedStructuredContent,
+            ...(mergedWarnings.length > 0 ? { warnings: mergedWarnings } : {}),
+          }
+        : undefined;
+
+    return {
+      result: {
+        ...finalResult,
+        ...(mergedStructuredContent ? { structuredContent: mergedStructuredContent } : {}),
+      },
+      reportMessage: built.reportMessage,
+    };
+  }
 
   private async executeWithTracing(
     ctx: ServerContext,
@@ -271,53 +368,7 @@ export class ToolExecutor {
           streamGenerator,
           getWorkSignal(ctx),
         );
-        if (result.isError) {
-          return { result };
-        }
-
-        const text = extractTextContent(result.content);
-        const built = responseBuilder(streamResult, text);
-        const resultOverlay = built.resultMod ? built.resultMod(result) : {};
-        const overlayStructuredContent =
-          resultOverlay.structuredContent && typeof resultOverlay.structuredContent === 'object'
-            ? resultOverlay.structuredContent
-            : undefined;
-        const finalResult: CallToolResult = {
-          ...result,
-          ...resultOverlay,
-        };
-
-        const usage = extractUsage(streamResult.usageMetadata);
-        const baseStructuredContent =
-          result.structuredContent && typeof result.structuredContent === 'object'
-            ? result.structuredContent
-            : undefined;
-
-        const mergedStructuredContent =
-          baseStructuredContent || overlayStructuredContent || built.structuredContent
-            ? {
-                ...(baseStructuredContent ?? {}),
-                ...(overlayStructuredContent ?? {}),
-                ...(built.structuredContent ?? {}),
-                ...buildSharedStructuredMetadata({
-                  functionCalls: streamResult.functionCalls,
-                  includeThoughts: getExposeThoughts(),
-                  thoughtText: streamResult.thoughtText,
-                  toolEvents: streamResult.toolEvents,
-                  usage,
-                  safetyRatings: streamResult.safetyRatings,
-                  finishMessage: streamResult.finishMessage,
-                  citationMetadata: streamResult.citationMetadata,
-                }),
-              }
-            : undefined;
-
-        const mergedResult: CallToolResult = {
-          ...finalResult,
-          ...(mergedStructuredContent ? { structuredContent: mergedStructuredContent } : {}),
-        };
-
-        return { result: mergedResult, reportMessage: built.reportMessage };
+        return this.finalizeStreamExecution(result, streamResult, responseBuilder);
       },
       true,
     );
@@ -337,53 +388,7 @@ export class ToolExecutor {
       streamGenerator,
       getWorkSignal(ctx),
     );
-    if (result.isError) {
-      return { result };
-    }
-
-    const text = extractTextContent(result.content);
-    const built = responseBuilder(streamResult, text);
-    const resultOverlay = built.resultMod ? built.resultMod(result) : {};
-    const overlayStructuredContent =
-      resultOverlay.structuredContent && typeof resultOverlay.structuredContent === 'object'
-        ? resultOverlay.structuredContent
-        : undefined;
-    const finalResult: CallToolResult = {
-      ...result,
-      ...resultOverlay,
-    };
-
-    const usage = extractUsage(streamResult.usageMetadata);
-    const baseStructuredContent =
-      result.structuredContent && typeof result.structuredContent === 'object'
-        ? result.structuredContent
-        : undefined;
-
-    const mergedStructuredContent =
-      baseStructuredContent || overlayStructuredContent || built.structuredContent
-        ? {
-            ...(baseStructuredContent ?? {}),
-            ...(overlayStructuredContent ?? {}),
-            ...(built.structuredContent ?? {}),
-            ...buildSharedStructuredMetadata({
-              functionCalls: streamResult.functionCalls,
-              includeThoughts: getExposeThoughts(),
-              thoughtText: streamResult.thoughtText,
-              toolEvents: streamResult.toolEvents,
-              usage,
-              safetyRatings: streamResult.safetyRatings,
-              finishMessage: streamResult.finishMessage,
-              citationMetadata: streamResult.citationMetadata,
-            }),
-          }
-        : undefined;
-
-    const mergedResult: CallToolResult = {
-      ...finalResult,
-      ...(mergedStructuredContent ? { structuredContent: mergedStructuredContent } : {}),
-    };
-
-    return { result: mergedResult, reportMessage: built.reportMessage };
+    return this.finalizeStreamExecution(result, streamResult, responseBuilder);
   }
 
   async runGeminiStream<T extends Record<string, unknown>>(
@@ -400,6 +405,22 @@ export class ToolExecutor {
         const resolved = await resolveOrchestration(request.orchestration, ctx, request.toolName);
         if (resolved.error) {
           return { result: resolved.error };
+        }
+
+        const fileSearchStoreNames = request.orchestration.builtInToolSpecs
+          ?.filter(
+            (spec): spec is Extract<BuiltInToolSpec, { kind: 'fileSearch' }> =>
+              spec.kind === 'fileSearch',
+          )
+          .flatMap((spec) => spec.fileSearchStoreNames);
+        const preflightError = validateGeminiRequest({
+          activeCapabilities: resolved.config.activeCapabilities,
+          responseSchema: request.config.responseSchema,
+          jsonMode: request.config.jsonMode,
+          fileSearchStoreNames,
+        });
+        if (preflightError) {
+          return { result: preflightError };
         }
 
         const { contents, systemInstruction } = request.buildContents(

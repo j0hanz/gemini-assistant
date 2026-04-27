@@ -11,6 +11,7 @@ import { resetProgressThrottle } from '../../src/lib/progress.js';
 import {
   advanceProgress,
   consumeStreamWithProgress,
+  executeToolStream,
   extractUsage,
   PROGRESS_CAP,
   PROGRESS_TOTAL,
@@ -302,6 +303,28 @@ describe('consumeStreamWithProgress', () => {
     assert.strictEqual(result.usageMetadata?.totalTokenCount, 15);
   });
 
+  it('preserves the max cumulative usage values across chunks', async () => {
+    const { ctx } = makeMockContext();
+    const first = makeChunk([{ text: 'part' }]);
+    first.usageMetadata = {
+      promptTokenCount: 10,
+      candidatesTokenCount: 5,
+      totalTokenCount: 15,
+    };
+    const second = makeChunk([{ text: 'ial' }], FinishReason.STOP);
+    second.usageMetadata = {
+      promptTokenCount: 8,
+      candidatesTokenCount: 3,
+      totalTokenCount: 11,
+    };
+
+    const result = await consumeStreamWithProgress(fakeStream([first, second]), ctx);
+
+    assert.strictEqual(result.usageMetadata?.promptTokenCount, 10);
+    assert.strictEqual(result.usageMetadata?.candidatesTokenCount, 5);
+    assert.strictEqual(result.usageMetadata?.totalTokenCount, 15);
+  });
+
   it('captures candidate observability metadata and expanded usage details', async () => {
     const { ctx } = makeMockContext();
     const usage = {
@@ -333,6 +356,19 @@ describe('consumeStreamWithProgress', () => {
     assert.deepStrictEqual(extracted, usage);
   });
 
+  it('preserves all-negligible safety ratings', async () => {
+    const { ctx } = makeMockContext();
+    const chunk = makeChunk([{ text: 'result' }], FinishReason.STOP);
+    const candidate = chunk.candidates?.[0] as Record<string, unknown> | undefined;
+    if (candidate) {
+      candidate['safetyRatings'] = [{ probability: 'NEGLIGIBLE' }];
+    }
+
+    const result = await consumeStreamWithProgress(fakeStream([chunk]), ctx);
+
+    assert.deepStrictEqual(result.safetyRatings, [{ probability: 'NEGLIGIBLE' }]);
+  });
+
   it('stops consuming when signal is aborted', async () => {
     const controller = new AbortController();
     const ctx = {
@@ -358,6 +394,51 @@ describe('consumeStreamWithProgress', () => {
     const result = await consumeStreamWithProgress(abortingStream(), ctx);
 
     assert.strictEqual(result.text, 'first');
+  });
+
+  it('retries a mid-stream retryable failure when no text has been emitted', async () => {
+    const { ctx } = makeMockContext();
+    let attempts = 0;
+
+    async function* flakyStream(): AsyncGenerator<GenerateContentResponse> {
+      attempts++;
+      if (attempts === 1) {
+        throw Object.assign(new Error('try again'), { status: 503 });
+      }
+      yield makeChunk([{ text: 'answer' }], FinishReason.STOP);
+    }
+
+    const { result } = await executeToolStream(ctx, 'research', 'Research', async () =>
+      flakyStream(),
+    );
+
+    assert.strictEqual(attempts, 2);
+    assert.strictEqual(result.isError, undefined);
+    assert.strictEqual(result.content[0]?.text, 'answer');
+  });
+
+  it('returns a partial result with a warning after a retryable mid-stream failure', async () => {
+    const { ctx } = makeMockContext();
+
+    async function* flakyStream(): AsyncGenerator<GenerateContentResponse> {
+      yield makeChunk([{ text: 'partial answer' }]);
+      throw Object.assign(new Error('try again'), { status: 503 });
+    }
+
+    const { streamResult, result } = await executeToolStream(
+      ctx,
+      'research',
+      'Research',
+      async () => flakyStream(),
+    );
+
+    assert.strictEqual(result.isError, undefined);
+    assert.strictEqual(result.content[0]?.text, 'partial answer');
+    assert.ok(Array.isArray(streamResult.warnings));
+    assert.match(
+      streamResult.warnings?.[0] ?? '',
+      /returning partial result after stream interruption/i,
+    );
   });
 
   it('stops consuming when an explicit work signal is aborted', async () => {

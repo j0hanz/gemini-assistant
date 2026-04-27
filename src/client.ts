@@ -7,6 +7,7 @@ import type {
 } from '@google/genai';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
+import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
 import type { GeminiResponseSchema } from './schemas/inputs.js';
 
@@ -121,7 +122,11 @@ function normalizeSafetySettings(
 
   return safetySettings.map((setting) => {
     if (setting.category === undefined || setting.threshold === undefined) {
-      throw new Error('safetySettings entries require category and threshold.');
+      throw new AppError(
+        'client',
+        'safetySettings entries require category and threshold.',
+        'client',
+      );
     }
 
     return {
@@ -139,7 +144,7 @@ function resolveCostProfile(costProfile: string | undefined) {
   if (costProfile in DEFAULT_TOOL_COST_PROFILES) {
     return DEFAULT_TOOL_COST_PROFILES[costProfile as ToolCostProfileName];
   }
-  throw new Error(`Unknown Gemini cost profile: ${costProfile}`);
+  throw new AppError('client', `Unknown Gemini cost profile: ${costProfile}`, 'client');
 }
 
 function buildResponseConfig(

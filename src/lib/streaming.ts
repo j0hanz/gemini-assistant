@@ -79,6 +79,7 @@ export interface StreamResult {
   promptFeedback?: GenerateContentResponsePromptFeedback;
   urlContextMetadata?: UrlContextMetadata;
   usageMetadata?: GenerateContentResponseUsageMetadata;
+  warnings?: string[];
 }
 
 export interface StreamAnomalies {
@@ -174,6 +175,66 @@ interface StreamMetadata {
   promptFeedback?: GenerateContentResponsePromptFeedback;
   urlContextMetadata?: UrlContextMetadata;
   usageMetadata?: GenerateContentResponseUsageMetadata;
+  warnings?: string[];
+}
+
+class PartialStreamError extends Error {
+  constructor(
+    readonly streamResult: StreamResult,
+    readonly cause: unknown,
+  ) {
+    super('Stream interrupted after partial output');
+    this.name = 'PartialStreamError';
+  }
+}
+
+function mergeUsageMetadata(
+  current: GenerateContentResponseUsageMetadata | undefined,
+  next: GenerateContentResponseUsageMetadata,
+): GenerateContentResponseUsageMetadata {
+  if (!current) {
+    return next;
+  }
+
+  const merged: GenerateContentResponseUsageMetadata = {
+    promptTokenCount: Math.max(current.promptTokenCount ?? 0, next.promptTokenCount ?? 0),
+    candidatesTokenCount: Math.max(
+      current.candidatesTokenCount ?? 0,
+      next.candidatesTokenCount ?? 0,
+    ),
+    totalTokenCount: Math.max(current.totalTokenCount ?? 0, next.totalTokenCount ?? 0),
+    cachedContentTokenCount: Math.max(
+      current.cachedContentTokenCount ?? 0,
+      next.cachedContentTokenCount ?? 0,
+    ),
+  };
+
+  const promptTokensDetails = next.promptTokensDetails ?? current.promptTokensDetails;
+  if (promptTokensDetails) {
+    merged.promptTokensDetails = promptTokensDetails;
+  }
+  const cacheTokensDetails = next.cacheTokensDetails ?? current.cacheTokensDetails;
+  if (cacheTokensDetails) {
+    merged.cacheTokensDetails = cacheTokensDetails;
+  }
+  const candidatesTokensDetails = next.candidatesTokensDetails ?? current.candidatesTokensDetails;
+  if (candidatesTokensDetails) {
+    merged.candidatesTokensDetails = candidatesTokensDetails;
+  }
+  if (current.toolUsePromptTokenCount !== undefined || next.toolUsePromptTokenCount !== undefined) {
+    merged.toolUsePromptTokenCount = Math.max(
+      current.toolUsePromptTokenCount ?? 0,
+      next.toolUsePromptTokenCount ?? 0,
+    );
+  }
+  if (current.thoughtsTokenCount !== undefined || next.thoughtsTokenCount !== undefined) {
+    merged.thoughtsTokenCount = Math.max(
+      current.thoughtsTokenCount ?? 0,
+      next.thoughtsTokenCount ?? 0,
+    );
+  }
+
+  return merged;
 }
 
 function updateStreamMetadata(
@@ -211,7 +272,7 @@ function updateStreamMetadata(
   }
 
   if (chunk.usageMetadata) {
-    metadata.usageMetadata = chunk.usageMetadata;
+    metadata.usageMetadata = mergeUsageMetadata(metadata.usageMetadata, chunk.usageMetadata);
   }
 }
 
@@ -764,17 +825,6 @@ function finalizeStreamResult(state: StreamProcessingState): StreamResult {
 
   const filteredToolEvents = state.toolEvents.filter((event) => event.kind !== 'model_text');
 
-  let defaultSafetyRatings = state.safetyRatings;
-  if (Array.isArray(defaultSafetyRatings)) {
-    const filtered = defaultSafetyRatings.filter((r: unknown) => {
-      if (typeof r === 'object' && r !== null && 'probability' in r) {
-        return (r as Record<string, unknown>).probability !== 'NEGLIGIBLE';
-      }
-      return true;
-    });
-    defaultSafetyRatings = filtered.length > 0 ? filtered : undefined;
-  }
-
   return {
     text: state.text,
     textByWave: state.textByWave,
@@ -788,7 +838,7 @@ function finalizeStreamResult(state: StreamProcessingState): StreamResult {
     ...pickDefined({
       aborted: state.aborted,
       finishReason: state.finishReason,
-      safetyRatings: defaultSafetyRatings,
+      safetyRatings: state.safetyRatings,
       finishMessage: state.finishMessage,
       citationMetadata: state.citationMetadata,
       groundingMetadata: state.groundingMetadata,
@@ -798,6 +848,7 @@ function finalizeStreamResult(state: StreamProcessingState): StreamResult {
       promptFeedback: state.promptFeedback,
       urlContextMetadata: state.urlContextMetadata,
       usageMetadata: state.usageMetadata,
+      warnings: state.warnings,
     }),
   };
 }
@@ -887,25 +938,34 @@ export async function consumeStreamWithProgress(
 
   await advanceAndSendProgress(ctx, state, msg, 'Evaluating prompt');
 
-  for await (const chunk of stream) {
-    if (signal.aborted) {
-      state.aborted = true;
-      break;
+  try {
+    for await (const chunk of stream) {
+      if (signal.aborted) {
+        state.aborted = true;
+        break;
+      }
+
+      if (chunk.promptFeedback?.blockReason) {
+        state.promptBlockReason = chunk.promptFeedback.blockReason;
+      }
+
+      const candidate = chunk.candidates?.[0];
+      if (!candidate) continue;
+
+      updateStreamMetadata(chunk, candidate, state);
+      await maybeReportBuiltInToolProgress(ctx, candidate, state, msg);
+
+      for (const part of candidate.content?.parts ?? []) {
+        await handleStreamPart(ctx, state, msg, part);
+      }
+    }
+  } catch (error) {
+    const partialResult = finalizeStreamResult(state);
+    if (partialResult.text.length > 0) {
+      throw new PartialStreamError(partialResult, error);
     }
 
-    if (chunk.promptFeedback?.blockReason) {
-      state.promptBlockReason = chunk.promptFeedback.blockReason;
-    }
-
-    const candidate = chunk.candidates?.[0];
-    if (!candidate) continue;
-
-    updateStreamMetadata(chunk, candidate, state);
-    await maybeReportBuiltInToolProgress(ctx, candidate, state, msg);
-
-    for (const part of candidate.content?.parts ?? []) {
-      await handleStreamPart(ctx, state, msg, part);
-    }
+    throw error;
   }
 
   if (state.namelessFunctionCallCount > 0) {
@@ -976,18 +1036,37 @@ export async function executeToolStream(
   streamGenerator: () => Promise<AsyncGenerator<GenerateContentResponse>>,
   signal: AbortSignal = ctx.mcpReq.signal,
 ): Promise<{ streamResult: StreamResult; result: CallToolResult }> {
-  const stream = await withRetry(streamGenerator, {
-    signal,
-    onRetry: async (attempt, max, delayMs) => {
-      await sendProgress(
-        ctx,
-        0,
-        undefined,
-        `${toolLabel}: Retrying (${attempt}/${max}, ~${Math.round(delayMs / 1000)}s)`,
-      );
-    },
-  });
-  const streamResult = await consumeStreamWithProgress(stream, ctx, toolLabel, signal);
-  const result = validateStreamResult(streamResult, toolName);
-  return { streamResult, result };
+  try {
+    const streamResult = await withRetry(
+      async () => {
+        const stream = await streamGenerator();
+        return await consumeStreamWithProgress(stream, ctx, toolLabel, signal);
+      },
+      {
+        signal,
+        onRetry: async (attempt, max, delayMs) => {
+          await sendProgress(
+            ctx,
+            0,
+            undefined,
+            `${toolLabel}: Retrying (${attempt}/${max}, ~${Math.round(delayMs / 1000)}s)`,
+          );
+        },
+      },
+    );
+    const result = validateStreamResult(streamResult, toolName);
+    return { streamResult, result };
+  } catch (error) {
+    if (error instanceof PartialStreamError && AppError.isRetryable(error.cause)) {
+      const warning = `${toolName}: returning partial result after stream interruption (${AppError.formatMessage(error.cause)})`;
+      const streamResult: StreamResult = {
+        ...error.streamResult,
+        warnings: [...(error.streamResult.warnings ?? []), warning],
+      };
+      const result = validateStreamResult(streamResult, toolName);
+      return { streamResult, result };
+    }
+
+    throw error instanceof PartialStreamError ? error.cause : error;
+  }
 }

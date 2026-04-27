@@ -516,6 +516,45 @@ describe('ToolExecutor', () => {
     }
   });
 
+  it('runGeminiStream runs Gemini preflight before model calls', async () => {
+    const executor = createExecutor();
+    const { ctx } = makeMockContext();
+    const client = getAI();
+    const originalGenerate = client.models.generateContentStream.bind(client.models);
+    let modelCalled = false;
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () => {
+      modelCalled = true;
+      return fakeStream([makeChunk([{ text: 'unexpected' }], FinishReason.STOP)]);
+    };
+
+    try {
+      const result = await executor.runGeminiStream(ctx, {
+        toolName: 'search',
+        label: 'Web Search',
+        orchestration: { builtInToolNames: ['codeExecution'] },
+        buildContents: () => ({ contents: 'prompt' }),
+        config: {
+          costProfile: 'research.quick',
+          responseSchema: {
+            type: 'object',
+            properties: { answer: { type: 'string' } },
+          },
+        },
+      });
+
+      assert.strictEqual(result.isError, true);
+      assert.strictEqual(modelCalled, false);
+      assert.strictEqual(
+        result.content[0]?.type === 'text' ? result.content[0].text : '',
+        'chat: responseSchema cannot be combined with codeExecution',
+      );
+    } finally {
+      client.models.generateContentStream = originalGenerate;
+    }
+  });
+
   it('registerTaskTool emits a single terminal completion from the inner stream executor', async () => {
     const store = makeMockTaskStore();
     const { ctx, progressCalls } = makeMockTaskContext(store);

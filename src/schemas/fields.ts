@@ -419,6 +419,11 @@ const streamMetadataOutputFields = {
   safetyRatings: z.array(z.unknown()).describe('Candidate safety ratings').optional(),
   finishMessage: z.string().describe('Candidate finish message when present').optional(),
   citationMetadata: z.unknown().describe('Candidate citation metadata when present').optional(),
+  groundingMetadata: z.unknown().describe('Candidate grounding metadata when present').optional(),
+  urlContextMetadata: z
+    .unknown()
+    .describe('Candidate URL Context metadata when present')
+    .optional(),
   functionCalls: z
     .array(FunctionCallEntrySchema)
     .optional()

@@ -294,6 +294,9 @@ export function buildAskStructuredContent(
     | 'safetyRatings'
     | 'finishMessage'
     | 'citationMetadata'
+    | 'groundingMetadata'
+    | 'urlContextMetadata'
+    | 'warnings'
   >,
   jsonMode?: boolean,
   responseSchema?: GeminiResponseSchema,
@@ -311,6 +314,9 @@ export function buildAskStructuredContent(
       ...(parsedData !== undefined ? { data: parsedData } : {}),
       ...(computations.length > 0 ? { computations } : {}),
       ...(warnings.length > 0 ? { schemaWarnings: warnings } : {}),
+      ...(streamResult.warnings && streamResult.warnings.length > 0
+        ? { warnings: [...streamResult.warnings] }
+        : {}),
     },
     {
       ...(contextUsed ? { contextUsed } : {}),
@@ -322,6 +328,8 @@ export function buildAskStructuredContent(
       safetyRatings: streamResult.safetyRatings,
       finishMessage: streamResult.finishMessage,
       citationMetadata: streamResult.citationMetadata,
+      groundingMetadata: streamResult.groundingMetadata,
+      urlContextMetadata: streamResult.urlContextMetadata,
     },
   );
 }
@@ -356,6 +364,14 @@ export function formatStructuredResult(
     content: [
       { type: 'text', text: structured.answer },
       ...result.content.filter((content) => content.type !== 'text'),
+      ...(Array.isArray(structured.warnings) && structured.warnings.length > 0
+        ? [
+            {
+              type: 'text' as const,
+              text: `Warnings:\n${structured.warnings.map((warning) => `- ${warning}`).join('\n')}`,
+            },
+          ]
+        : []),
     ],
     structuredContent: structured,
   };
@@ -625,6 +641,9 @@ function buildPerTurnConfig(config: ReturnType<typeof buildGenerateContentConfig
   return pickDefined({
     abortSignal: config.abortSignal,
     thinkingConfig: config.thinkingConfig,
+    responseMimeType: config.responseMimeType,
+    responseJsonSchema: config.responseJsonSchema,
+    maxOutputTokens: config.maxOutputTokens,
   });
 }
 
@@ -637,6 +656,7 @@ function buildSessionGenerationContract(
   return pickDefined({
     model,
     systemInstruction: config.systemInstruction,
+    cachedContent: config.cachedContent,
     tools: config.tools,
     toolConfig: config.toolConfig,
     functionCallingMode,
@@ -652,7 +672,9 @@ function buildConfigFromSessionContract(
   cacheName?: string,
 ): GenerateContentConfig {
   return pickDefined({
-    ...(cacheName ? { cachedContent: cacheName } : {}),
+    ...((cacheName ?? contract.cachedContent)
+      ? { cachedContent: cacheName ?? contract.cachedContent }
+      : {}),
     systemInstruction: contract.systemInstruction,
     tools: contract.tools,
     toolConfig: contract.toolConfig,
@@ -838,7 +860,10 @@ export async function askWithoutSession(
               jsonMode,
               costProfile: 'chat.jsonRepair',
               thinkingLevel: 'MINIMAL',
-              maxOutputTokens: 2_048,
+              maxOutputTokens:
+                askResult.streamResult.finishReason === FinishReason.MAX_TOKENS
+                  ? (config.maxOutputTokens ?? 2_048) * 2
+                  : 2_048,
             },
             ctx.mcpReq.signal,
           );
@@ -872,7 +897,8 @@ export async function askWithoutSession(
       attempt < maxRetries &&
       !ctx.mcpReq.signal.aborted &&
       !askResult.result.isError &&
-      askResult.streamResult.finishReason === FinishReason.STOP &&
+      (askResult.streamResult.finishReason === FinishReason.STOP ||
+        askResult.streamResult.finishReason === FinishReason.MAX_TOKENS) &&
       isRetryableSchemaFailure(warnings, parsedData, jsonMode);
 
     if (!shouldRetry) {
@@ -1157,6 +1183,7 @@ function buildRequestedSessionContract(args: AskArgs): SessionGenerationContract
       serverSideToolInvocations,
     ),
     costProfile: 'chat',
+    cacheName: args.cacheName,
   });
 
   return buildSessionGenerationContract(
@@ -1193,6 +1220,7 @@ export function createDefaultAskDependencies(
           serverSideToolInvocations,
         ),
         costProfile: 'chat',
+        cacheName: args.cacheName,
       });
       const chat = getAI().chats.create({
         model: getGeminiModel(),

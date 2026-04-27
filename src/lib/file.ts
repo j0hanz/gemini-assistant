@@ -1,7 +1,8 @@
 import type { ServerContext } from '@modelcontextprotocol/server';
 
+import { Blob } from 'node:buffer';
 import { readFile, stat } from 'node:fs/promises';
-import { extname } from 'node:path';
+import { extname, relative } from 'node:path';
 
 import { createPartFromUri, type Part } from '@google/genai';
 
@@ -9,7 +10,7 @@ import { getAI } from '../client.js';
 import { cleanupErrorLogger, withRetry } from './errors.js';
 import type { ProgressReporter } from './progress.js';
 import type { RootsFetcher } from './validation.js';
-import { resolveWorkspacePath } from './validation.js';
+import { isSensitiveUntrackedPath, resolveWorkspacePath } from './validation.js';
 
 // ── MIME / Size ───────────────────────────────────────────────────────
 
@@ -92,12 +93,10 @@ function startsWithBytes(buffer: Buffer, signature: readonly number[]): boolean 
   return signature.every((byte, index) => buffer[index] === byte);
 }
 
-async function validateUploadMimeType(resolvedPath: string, mimeType: string): Promise<void> {
+function validateUploadMimeType(resolvedPath: string, mimeType: string, content: Buffer): void {
   if (mimeType === 'application/octet-stream') {
     throw new Error(`Unsupported file type for upload: ${resolvedPath}`);
   }
-
-  const content = await readFile(resolvedPath);
 
   if (isTextLikeMimeType(mimeType)) {
     if (content.includes(0)) {
@@ -157,7 +156,18 @@ export async function uploadFile(
   signal: AbortSignal,
   rootsFetcher?: RootsFetcher,
 ): Promise<UploadedFile> {
-  const { resolvedPath, displayPath } = await resolveWorkspacePath(filePath, rootsFetcher);
+  const { resolvedPath, displayPath, workspaceRoot } = await resolveWorkspacePath(
+    filePath,
+    rootsFetcher,
+  );
+
+  const relativeWorkspacePath = workspaceRoot ? relative(workspaceRoot, resolvedPath) : undefined;
+  if (
+    isSensitiveUntrackedPath(displayPath) ||
+    (relativeWorkspacePath !== undefined && isSensitiveUntrackedPath(relativeWorkspacePath))
+  ) {
+    throw new Error(`Refusing to upload sensitive file: ${displayPath}`);
+  }
 
   const fileStat = await stat(resolvedPath);
   if (fileStat.size > MAX_FILE_SIZE) {
@@ -168,10 +178,15 @@ export async function uploadFile(
   }
 
   const mimeType = getMimeType(resolvedPath);
-  await validateUploadMimeType(resolvedPath, mimeType);
+  const fileBuffer = await readFile(resolvedPath);
+  validateUploadMimeType(resolvedPath, mimeType, fileBuffer);
 
   const uploaded = await withRetry(
-    () => getAI().files.upload({ file: resolvedPath, config: { mimeType, abortSignal: signal } }),
+    () =>
+      getAI().files.upload({
+        file: new Blob([fileBuffer], { type: mimeType }),
+        config: { mimeType, abortSignal: signal },
+      }),
     { signal },
   );
 

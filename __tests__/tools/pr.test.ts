@@ -841,6 +841,32 @@ describe('analyzePrWork roots handling', () => {
     assert.strictEqual(warnings.length, 1);
     assert.deepStrictEqual(warnings[0], { rootCount: 2, selectedRoot: 'C:\\first' });
   });
+
+  it('returns an error before invoking git when the selected review root is outside ROOTS', async () => {
+    const allowedRoot = await mkdtemp(join(tmpdir(), 'gemini-review-allowed-'));
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'gemini-review-outside-'));
+    const restore = __setReviewGitRunnerForTests(async () => {
+      throw new Error('git should not run');
+    });
+    process.env.ROOTS = allowedRoot;
+
+    try {
+      const result = await analyzePrWork(
+        { dryRun: true },
+        makeContext(),
+        workspaceCacheManager,
+        async () => [outsideRoot],
+      );
+
+      assert.strictEqual(result.isError, true);
+      assert.match(String(result.content[0]?.text ?? ''), /outside ROOTS allow-list/i);
+    } finally {
+      restore();
+      delete process.env.ROOTS;
+      await rm(allowedRoot, { recursive: true, force: true });
+      await rm(outsideRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('formatGitError', () => {

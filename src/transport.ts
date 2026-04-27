@@ -15,6 +15,7 @@ import {
 import { Buffer } from 'node:buffer';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import { isIP } from 'node:net';
 
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
@@ -135,9 +136,14 @@ function resolveTransportRuntimeConfig(): ResolvedTransportConfig {
     token,
     trustProxy,
   } = getTransportConfig();
+  const resolvedAllowedHosts =
+    token === undefined && allowUnauthenticatedLoopbackHttp && isLoopbackBindHost(host)
+      ? (resolveAllowedHosts(host) ?? ['localhost', '127.0.0.1', '[::1]'])
+      : resolveAllowedHosts(host);
+
   return {
     allowUnauthenticatedLoopbackHttp,
-    allowedHosts: resolveAllowedHosts(host),
+    allowedHosts: resolvedAllowedHosts,
     corsOrigin,
     host,
     isStateless,
@@ -209,7 +215,11 @@ function parseForwardedForHeader(value: string | null | undefined): string | und
     .map((entry) => entry.trim())
     .find((entry) => entry.length > 0);
 
-  return first ?? undefined;
+  if (!first || isIP(first) === 0) {
+    return undefined;
+  }
+
+  return first;
 }
 
 function extractBearerIdentity(authorization: string | undefined | null): string | undefined {

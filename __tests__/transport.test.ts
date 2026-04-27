@@ -703,4 +703,46 @@ describe('startHttpTransport', () => {
       }
     });
   });
+
+  it('ignores invalid x-forwarded-for values when trust proxy is enabled', async () => {
+    await withAvailablePort(async (port) => {
+      process.env.HOST = '127.0.0.1';
+      process.env.PORT = String(port);
+      process.env.MCP_TRUST_PROXY = 'true';
+      process.env.MCP_HTTP_RATE_LIMIT_RPS = '1';
+      process.env.MCP_HTTP_RATE_LIMIT_BURST = '1';
+
+      const transport = await startHttpTransport(() => createServerInstance());
+
+      try {
+        const first = await sendHttpRequest({
+          method: 'POST',
+          port,
+          headers: {
+            host: `127.0.0.1:${String(port)}`,
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+            'x-forwarded-for': 'junk-spoofed-a',
+          },
+          body: createInitializeBody(),
+        });
+        const second = await sendHttpRequest({
+          method: 'POST',
+          port,
+          headers: {
+            host: `127.0.0.1:${String(port)}`,
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+            'x-forwarded-for': 'junk-spoofed-b',
+          },
+          body: createInitializeBody(),
+        });
+
+        assert.strictEqual(first.status, 200);
+        assert.strictEqual(second.status, 429);
+      } finally {
+        await transport.close();
+      }
+    });
+  });
 });

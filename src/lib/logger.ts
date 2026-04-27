@@ -199,7 +199,7 @@ export class Logger {
       ...(traceId ? { traceId } : {}),
       context,
       message,
-      ...(data !== undefined ? { data } : {}),
+      ...(data !== undefined ? { data: maybeSummarizePayload(data, this.verbosePayloads) } : {}),
     };
   }
 

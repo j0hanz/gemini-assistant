@@ -228,6 +228,23 @@ describe('transport HTTP protection', () => {
     }
   });
 
+  it('rejects mismatched Host headers for unauthenticated loopback binds', async () => {
+    process.env.HOST = '127.0.0.1';
+    process.env.MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP = 'true';
+    const transport = await startWebStandardTransport(() => createNoopServerInstance());
+    try {
+      const response = await transport.handler(
+        request({ host: 'evil.example:3000', 'x-request-url': 'http://127.0.0.1:3000/mcp' }),
+      );
+
+      assert.strictEqual(response.status, 403);
+    } finally {
+      await transport.close();
+      delete process.env.HOST;
+      delete process.env.MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP;
+    }
+  });
+
   it('trusts x-forwarded-for only when MCP_TRUST_PROXY=true', async () => {
     const token = VALID_TOKEN;
     process.env.HOST = '0.0.0.0';

@@ -23,6 +23,10 @@ import {
 } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
 import {
+  getAllowedRoots,
+  isSensitiveUntrackedPath as isSensitiveUntrackedPathFromValidation,
+} from '../lib/validation.js';
+import {
   type AnalyzePrInput,
   type CompareFilesInput,
   type GeminiResponseSchema,
@@ -141,25 +145,6 @@ const NOISY_EXACT_BASENAMES = new Set([
   'bun.lockb',
 ]);
 const NOISY_SUFFIXES = ['.map', '.min.js', '.min.css'];
-const SENSITIVE_UNTRACKED_BASENAMES = new Set([
-  '.env',
-  '.env.local',
-  '.env.development',
-  '.env.production',
-  '.env.test',
-  '.npmrc',
-  '.pypirc',
-  '.netrc',
-  'credentials',
-  'credentials.json',
-  'id_ed25519',
-  'id_rsa',
-  'secrets.json',
-]);
-const SENSITIVE_UNTRACKED_EXTENSIONS = new Set(['.key', '.p12', '.pfx', '.pem']);
-const SENSITIVE_UNTRACKED_SEGMENTS = new Set(['.aws', '.gnupg', '.ssh', 'credentials', 'secrets']);
-const SENSITIVE_UNTRACKED_BASENAME_PARTS = ['credential', 'password', 'secret', 'token'];
-
 const NOISY_EXCLUDE_PATHSPECS = [
   ...[...NOISY_EXACT_BASENAMES].map((basename) => `:!${basename}`),
   ...NOISY_SUFFIXES.map((suffix) => `:!*${suffix}`),
@@ -439,7 +424,7 @@ export function matchesNoisyPath(filePath: string): boolean {
 }
 
 export function isSensitiveUntrackedPath(relativePath: string): boolean {
-  return PATH_RULES.isSensitive(relativePath);
+  return isSensitiveUntrackedPathFromValidation(relativePath);
 }
 
 const PATH_RULES = {
@@ -449,18 +434,6 @@ const PATH_RULES = {
     return (
       NOISY_EXACT_BASENAMES.has(basename) ||
       NOISY_SUFFIXES.some((suffix) => basename.endsWith(suffix))
-    );
-  },
-  isSensitive(relativePath: string): boolean {
-    const normalized = relativePath.replaceAll('\\', '/').toLowerCase();
-    const segments = normalized.split('/').filter(Boolean);
-    const basename = segments.at(-1) ?? normalized;
-    return (
-      SENSITIVE_UNTRACKED_BASENAMES.has(basename) ||
-      basename.startsWith('.env.') ||
-      SENSITIVE_UNTRACKED_EXTENSIONS.has(getExtension(basename)) ||
-      segments.some((segment) => SENSITIVE_UNTRACKED_SEGMENTS.has(segment)) ||
-      SENSITIVE_UNTRACKED_BASENAME_PARTS.some((part) => basename.includes(part))
     );
   },
   isHighRiskBasename(basename: string): boolean {
@@ -1142,6 +1115,11 @@ export async function resolveReviewWorkingDirectory(
       rootCount: roots.length,
       selectedRoot,
     });
+  }
+
+  const allowedRoots = await getAllowedRoots(rootsFetcher);
+  if (!allowedRoots.some((root) => isPathWithinRoot(selectedRoot, root))) {
+    throw new Error('Review root is outside ROOTS allow-list.');
   }
 
   return selectedRoot;

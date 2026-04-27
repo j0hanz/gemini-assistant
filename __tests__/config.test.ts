@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
 import {
+  getApiKey,
   getExposeSessionResources,
   getExposeThoughts,
   getGeminiModel,
   getMaxOutputTokens,
   getSafetySettings,
   getSessionLimits,
+  getSessionRedactionPatterns,
   getSlimSessionEvents,
   getThinkingBudgetCap,
   getTransportConfig,
@@ -206,6 +208,13 @@ describe('config parsing', () => {
     assert.strictEqual(getTransportConfig().corsOrigin, '*');
   });
 
+  it('rejects wildcard CORS when bearer auth is enabled', () => {
+    process.env.CORS_ORIGIN = '*';
+    process.env.MCP_HTTP_TOKEN = '0123456789abcdef0123456789abcdef';
+
+    assert.throws(() => getTransportConfig(), /wildcard CORS|CORS_ORIGIN/i);
+  });
+
   it('accepts a strict bare http(s) origin', () => {
     process.env.CORS_ORIGIN = 'https://example.com';
     assert.strictEqual(getTransportConfig().corsOrigin, 'https://example.com');
@@ -241,6 +250,27 @@ describe('config parsing', () => {
     process.env.TRANSPORT_SESSION_TTL_MS = '1000';
     process.env.MCP_TRUST_PROXY = 'yes';
     assert.throws(() => getTransportConfig(), /MCP_TRUST_PROXY/);
+  });
+
+  it('rejects weak low-entropy HTTP tokens', () => {
+    process.env.MCP_HTTP_TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab';
+
+    assert.throws(() => getTransportConfig(), /48 chars|16 distinct/i);
+  });
+
+  it('accepts short tokens when they contain enough distinct characters', () => {
+    process.env.MCP_HTTP_TOKEN = '0123456789abcdef0123456789abcdef';
+
+    assert.strictEqual(getTransportConfig().token, '0123456789abcdef0123456789abcdef');
+  });
+
+  it('accepts longer tokens even when uniqueness is lower', () => {
+    process.env.MCP_HTTP_TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbb';
+
+    assert.strictEqual(
+      getTransportConfig().token,
+      'aaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbb',
+    );
   });
 
   it('returns default session limits', () => {
@@ -372,6 +402,36 @@ describe('config parsing', () => {
     ]);
 
     assert.throws(() => getSafetySettings(), /unknown keys: extra/);
+  });
+
+  it('trims API_KEY values', () => {
+    process.env.API_KEY = '  abc123  ';
+
+    assert.strictEqual(getApiKey(), 'abc123');
+  });
+
+  it('rejects API_KEY values with control characters', () => {
+    process.env.API_KEY = 'abc\tdef';
+
+    assert.throws(() => getApiKey(), /API_KEY/);
+  });
+
+  it('rejects unsafe session redaction regexes', () => {
+    process.env.GEMINI_SESSION_REDACT_KEYS = '/(a+)+$/';
+
+    assert.throws(() => getSessionRedactionPatterns(), /regex|pattern|unsafe/i);
+  });
+
+  it('rejects overlong session redaction regexes', () => {
+    process.env.GEMINI_SESSION_REDACT_KEYS = `/${'a'.repeat(257)}/`;
+
+    assert.throws(() => getSessionRedactionPatterns(), /256|pattern/i);
+  });
+
+  it('accepts safe session redaction regexes with supported flags', () => {
+    process.env.GEMINI_SESSION_REDACT_KEYS = '/^foo$/i';
+
+    assert.ok(getSessionRedactionPatterns().some((pattern) => pattern.source === '^foo$'));
   });
 
   it('returns the configured CACHE_TTL when set', () => {

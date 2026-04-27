@@ -53,6 +53,8 @@ let cachedSafetySettings: SafetySetting[] | undefined;
 let cachedSafetySettingsSource: string | undefined;
 let cachedSessionRedactionPatterns: RegExp[] | undefined;
 let cachedSessionRedactionPatternsSource: string | undefined;
+const MAX_REDACTION_REGEX_LENGTH = 256;
+const ALLOWED_REDACTION_REGEX_FLAGS = new Set(['i', 'u']);
 
 function parseBooleanEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
@@ -106,6 +108,9 @@ function parseOptionalTokenEnv(name: string): string | undefined {
   }
   if (isTriviallyRepeatedToken(trimmed)) {
     throw new Error(`${name} must not be a trivially repeated pattern.`);
+  }
+  if (trimmed.length < 48 && new Set(trimmed).size < 16) {
+    throw new Error(`${name} must be >=48 chars or use >=16 distinct characters.`);
   }
   return trimmed;
 }
@@ -174,7 +179,20 @@ export function getApiKey(): string {
   if (raw === undefined || raw.trim() === '') {
     throw new Error('API_KEY environment variable is required.');
   }
-  return raw;
+
+  const trimmed = raw.trim();
+  if (!trimmed || containsNonPrintableAscii(trimmed)) {
+    throw new Error('API_KEY must contain printable non-whitespace characters only.');
+  }
+
+  return trimmed;
+}
+
+function containsNonPrintableAscii(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 0x20 || codePoint === 0x7f;
+  });
 }
 
 export function getGeminiModel(): string {
@@ -207,13 +225,20 @@ export function getStatelessTransportFlag(): boolean {
 export function getTransportConfig(): TransportConfig {
   const host = parseNonEmptyStringEnv('HOST', DEFAULT_HTTP_HOST);
   const token = parseOptionalTokenEnv('MCP_HTTP_TOKEN');
+  const corsOrigin = parseCorsOriginEnv();
+
+  if (corsOrigin === '*' && token !== undefined) {
+    throw new Error(
+      'CORS_ORIGIN cannot be "*" when MCP_HTTP_TOKEN is set. Refuse wildcard CORS with bearer auth.',
+    );
+  }
 
   return {
     allowUnauthenticatedLoopbackHttp: parseBooleanEnv(
       'MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP',
       false,
     ),
-    corsOrigin: parseCorsOriginEnv(),
+    corsOrigin,
     host,
     isStateless: parseBooleanEnv('STATELESS', false),
     maxSessions: parseIntEnv('MAX_TRANSPORT_SESSIONS', DEFAULT_MAX_TRANSPORT_SESSIONS, {
@@ -326,13 +351,39 @@ function parseRegexPattern(raw: string): RegExp {
   if (!trimmed) {
     throw new Error('GEMINI_SESSION_REDACT_KEYS entries must be non-empty regex patterns.');
   }
+  if (trimmed.length > MAX_REDACTION_REGEX_LENGTH) {
+    throw new Error(
+      `GEMINI_SESSION_REDACT_KEYS entries must be <= ${String(MAX_REDACTION_REGEX_LENGTH)} characters.`,
+    );
+  }
 
   const literalMatch = /^\/(.+)\/([a-z]*)$/i.exec(trimmed);
   if (literalMatch?.[1] !== undefined) {
-    return new RegExp(literalMatch[1], literalMatch[2] ?? undefined);
+    const flags = literalMatch[2] ?? '';
+    if (Array.from(flags).some((flag) => !ALLOWED_REDACTION_REGEX_FLAGS.has(flag))) {
+      throw new Error('GEMINI_SESSION_REDACT_KEYS only supports the i and u regex flags.');
+    }
+    if (containsNestedQuantifierShape(literalMatch[1])) {
+      throw new Error(
+        'GEMINI_SESSION_REDACT_KEYS contains an unsafe nested-quantifier regex pattern.',
+      );
+    }
+    return new RegExp(literalMatch[1], flags);
+  }
+
+  if (containsNestedQuantifierShape(trimmed)) {
+    throw new Error(
+      'GEMINI_SESSION_REDACT_KEYS contains an unsafe nested-quantifier regex pattern.',
+    );
   }
 
   return new RegExp(trimmed);
+}
+
+function containsNestedQuantifierShape(pattern: string): boolean {
+  return /\((?:[^()\\]|\\.)*(?:\+|\*|\{\d+(?:,\d*)?\})(?:[^()\\]|\\.)*\)(?:\+|\*|\{\d+(?:,\d*)?\})/u.test(
+    pattern,
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

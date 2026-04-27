@@ -94,6 +94,43 @@ interface ResolvedWorkspacePath {
   workspaceRoot: string | undefined;
 }
 
+const SENSITIVE_UNTRACKED_BASENAMES = new Set([
+  '.env',
+  '.env.local',
+  '.env.development',
+  '.env.production',
+  '.env.test',
+  '.npmrc',
+  '.pypirc',
+  '.netrc',
+  'credentials',
+  'credentials.json',
+  'id_ed25519',
+  'id_rsa',
+  'secrets.json',
+]);
+const SENSITIVE_UNTRACKED_EXTENSIONS = new Set(['.key', '.p12', '.pfx', '.pem']);
+const SENSITIVE_UNTRACKED_SEGMENTS = new Set(['.aws', '.gnupg', '.ssh', 'credentials', 'secrets']);
+const SENSITIVE_UNTRACKED_BASENAME_PARTS = ['credential', 'password', 'secret', 'token'];
+
+function getPathExtension(basename: string): string {
+  return basename.includes('.') ? `.${basename.split('.').pop() ?? ''}` : '';
+}
+
+export function isSensitiveUntrackedPath(relativePath: string): boolean {
+  const normalized = relativePath.replaceAll('\\', '/').toLowerCase();
+  const segments = normalized.split('/').filter(Boolean);
+  const basename = segments.at(-1) ?? normalized;
+
+  return (
+    SENSITIVE_UNTRACKED_BASENAMES.has(basename) ||
+    basename.startsWith('.env.') ||
+    SENSITIVE_UNTRACKED_EXTENSIONS.has(getPathExtension(basename)) ||
+    segments.some((segment) => SENSITIVE_UNTRACKED_SEGMENTS.has(segment)) ||
+    SENSITIVE_UNTRACKED_BASENAME_PARTS.some((part) => basename.includes(part))
+  );
+}
+
 function getConfiguredRoots(): string[] | undefined {
   const allowedFileRootsEnv = getRootsEnv();
   if (!allowedFileRootsEnv) {
@@ -396,8 +433,103 @@ export function buildServerRootsFetcher(server: McpServer): RootsFetcher {
 
 // ── URL Validation ────────────────────────────────────────────────────
 
+function normalizeIpv4Hostname(hostname: string): string | undefined {
+  if (/^\d+$/.test(hostname)) {
+    const value = Number(hostname);
+    if (!Number.isSafeInteger(value) || value < 0 || value > 0xffff_ffff) {
+      return undefined;
+    }
+
+    return [24, 16, 8, 0].map((shift) => String((value >>> shift) & 0xff)).join('.');
+  }
+
+  const parts = hostname.split('.');
+  if (parts.length < 2 || parts.length > 4) {
+    return undefined;
+  }
+
+  const values = parts.map((part) => Number(part));
+  if (values.some((part) => !Number.isInteger(part) || part < 0)) {
+    return undefined;
+  }
+
+  const limits = [255, 255, 255, 255];
+  if (parts.length === 2) {
+    limits[1] = 0xff_ff_ff;
+  } else if (parts.length === 3) {
+    limits[2] = 0xff_ff;
+  }
+
+  if (values.some((part, index) => part > (limits[index] ?? 255))) {
+    return undefined;
+  }
+
+  if (parts.length === 4) {
+    return hostname;
+  }
+
+  const numericValue =
+    parts.length === 2
+      ? ((values[0] ?? 0) << 24) | ((values[1] ?? 0) & 0xff_ff_ff)
+      : ((values[0] ?? 0) << 24) | ((values[1] ?? 0) << 16) | ((values[2] ?? 0) & 0xff_ff);
+
+  return [24, 16, 8, 0].map((shift) => String((numericValue >>> shift) & 0xff)).join('.');
+}
+
+function expandIpv6Groups(hostname: string): string[] | undefined {
+  const normalized = hostname.toLowerCase();
+  if (normalized.includes('.')) {
+    return undefined;
+  }
+
+  const [left, right] = normalized.split('::');
+  if (normalized.includes('::') && right === undefined) {
+    return undefined;
+  }
+
+  const parseSide = (value: string): string[] =>
+    value === '' ? [] : value.split(':').map((part) => part.padStart(4, '0'));
+  const leftGroups = parseSide(left ?? normalized);
+  const rightGroups = parseSide(right ?? '');
+  const hasCompression = normalized.includes('::');
+  const totalGroups = leftGroups.length + rightGroups.length;
+
+  if ((!hasCompression && totalGroups !== 8) || totalGroups > 8) {
+    return undefined;
+  }
+
+  const allGroups = hasCompression
+    ? [...leftGroups, ...Array.from({ length: 8 - totalGroups }, () => '0000'), ...rightGroups]
+    : leftGroups;
+
+  if (allGroups.length !== 8 || allGroups.some((part) => !/^[0-9a-f]{4}$/u.test(part))) {
+    return undefined;
+  }
+
+  return allGroups;
+}
+
+function isIpv6LoopbackOrUnspecified(hostname: string): boolean {
+  const groups = expandIpv6Groups(hostname);
+  if (!groups) {
+    return false;
+  }
+
+  const isUnspecified = groups.every((group) => group === '0000');
+  if (isUnspecified) {
+    return true;
+  }
+
+  return groups.slice(0, -1).every((group) => group === '0000') && groups.at(-1) === '0001';
+}
+
 function isPrivateIpv4(hostname: string): boolean {
-  const parts = hostname.split('.').map((part) => Number(part));
+  const normalizedHostname = normalizeIpv4Hostname(hostname);
+  if (!normalizedHostname) {
+    return false;
+  }
+
+  const parts = normalizedHostname.split('.').map((part) => Number(part));
   if (
     parts.length !== 4 ||
     parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
@@ -446,7 +578,7 @@ const PRIVATE_IPV6_PREFIXES = ['fc', 'fd', 'fe8', 'fe9', 'fea', 'feb', 'ff', '::
 
 function isPrivateIpv6(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
-  if (normalized === '::1') return true;
+  if (isIpv6LoopbackOrUnspecified(normalized)) return true;
   return PRIVATE_IPV6_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
@@ -462,6 +594,11 @@ function isRejectedHost(hostname: string): boolean {
   }
 
   const cleanHost = normalized.replace(/^\[(.*)\]$/, '$1');
+  const normalizedIpv4 = normalizeIpv4Hostname(cleanHost);
+  if (normalizedIpv4) {
+    return isPrivateIpv4(normalizedIpv4);
+  }
+
   const ipVersion = isIP(cleanHost);
   if (ipVersion === 4) return isPrivateIpv4(cleanHost);
   if (ipVersion === 6) return isPrivateIpv6(cleanHost);

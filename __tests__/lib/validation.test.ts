@@ -7,6 +7,7 @@ import { afterEach, describe, it } from 'node:test';
 import {
   getAllowedRoots,
   isPathWithinRoot,
+  isPublicHttpUrl,
   parseAllowedHosts,
   resolveAllowedHosts,
   resolveAndValidatePath,
@@ -467,6 +468,22 @@ describe('validateUrls', () => {
     ];
 
     for (const url of rejectedUrls) {
+      const result = validateUrls([url]);
+      assert.strictEqual(result?.isError, true, url);
+      assert.match(firstTextContent(result), /Private, loopback, and localhost URLs/);
+    }
+  });
+
+  it('rejects numeric and shorthand loopback host forms', () => {
+    const rejectedUrls = [
+      'http://2130706433/',
+      'http://127.1/',
+      'http://[0:0:0:0:0:0:0:1]/',
+      'http://[::]/',
+    ];
+
+    for (const url of rejectedUrls) {
+      assert.strictEqual(isPublicHttpUrl(url), false, url);
       const result = validateUrls([url]);
       assert.strictEqual(result?.isError, true, url);
       assert.match(firstTextContent(result), /Private, loopback, and localhost URLs/);

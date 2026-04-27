@@ -93,9 +93,12 @@ export class MockGeminiEnvironment {
       return next;
     };
 
-    this.client.files.upload = async (opts: { file: string }) => {
+    this.client.files.upload = async (opts: { file: Blob | string }) => {
       this.uploadCounter += 1;
-      const fileName = opts.file.split(/[\\/]/).pop() ?? `upload-${String(this.uploadCounter)}`;
+      const fileName =
+        typeof opts.file === 'string'
+          ? (opts.file.split(/[\\/]/).pop() ?? `upload-${String(this.uploadCounter)}`)
+          : `upload-${String(this.uploadCounter)}`;
       return {
         mimeType: 'text/plain',
         name: `uploaded-${String(this.uploadCounter)}`,

@@ -149,6 +149,31 @@ describe('maybeSummarizePayload', () => {
 });
 
 describe('Logger forwarding', () => {
+  it('redacts persisted and broadcast payload data at the logger chokepoint', async () => {
+    const { logger, readEntries } = createBufferedLogger(true);
+    const server = createMockServer();
+    logger.attachServer(server.server);
+
+    logger.info('system', 'hello', {
+      api_key: 'secret-key',
+      authorization: 'Bearer secret-token',
+      nested: { cookie: 'session-cookie', ok: true },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const entry = readEntries()[0] as { data?: Record<string, unknown> } | undefined;
+    assert.deepStrictEqual(entry?.data, {
+      api_key: '[redacted]',
+      authorization: '[redacted]',
+      nested: { cookie: '[redacted]', ok: true },
+    });
+    assert.deepStrictEqual(server.messages[0], {
+      level: 'info',
+      logger: 'system',
+      data: readEntries()[0],
+    });
+  });
+
   it('forwards entries to all attached connected servers and detaches cleanly', async () => {
     const { logger } = createBufferedLogger();
     const serverA = createMockServer();
@@ -205,7 +230,7 @@ describe('Logger forwarding', () => {
 
     assert.strictEqual(healthyServer.messages.length, 1);
     assert.strictEqual(failureWarnings.length, 1);
-    assert.deepStrictEqual(failureWarnings[0]?.data, { count: 1 });
+    assert.deepStrictEqual(failureWarnings[0]?.data, { type: 'object', keys: ['count'] });
   });
 
   it('does not broadcast request-traced entries to attached servers', async () => {

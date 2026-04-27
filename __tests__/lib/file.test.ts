@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
+import { readFile as readFileAsync, writeFile as writeFileAsync } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -218,7 +219,7 @@ describe('uploadFile', () => {
     const client = getAI();
     const original = client.files.upload.bind(client.files);
 
-    client.files.upload = async (opts: { file: string }) => ({
+    client.files.upload = async (opts: { file: Blob | string }) => ({
       uri: 'gs://files/abc',
       mimeType: 'application/json',
       name: 'uploaded-package',
@@ -277,5 +278,65 @@ describe('uploadFile', () => {
     await assert.rejects(() => uploadFile(filePath, controller.signal, async () => [tempDir]), {
       message: /binary data/,
     });
+  });
+
+  it('rejects sensitive upload paths before invoking Gemini uploads', async () => {
+    const controller = new AbortController();
+    const tempDir = mkdtempSync(join(tmpdir(), 'gemini-sensitive-upload-'));
+    const filePath = join(tempDir, '.env');
+    writeFileSync(filePath, 'API_KEY=secret\n');
+
+    const client = getAI();
+    const original = client.files.upload.bind(client.files);
+    let uploadCalled = false;
+    client.files.upload = async () => {
+      uploadCalled = true;
+      return {
+        uri: 'gs://files/ignored',
+        mimeType: 'text/plain',
+        name: 'ignored',
+      };
+    };
+
+    try {
+      await assert.rejects(() => uploadFile(filePath, controller.signal, async () => [tempDir]), {
+        message: /sensitive file/i,
+      });
+      assert.strictEqual(uploadCalled, false);
+    } finally {
+      client.files.upload = original;
+    }
+  });
+
+  it('uploads the originally validated bytes even if the file changes before SDK submission', async () => {
+    const controller = new AbortController();
+    const tempDir = mkdtempSync(join(tmpdir(), 'gemini-upload-buffer-'));
+    const filePath = join(tempDir, 'payload.txt');
+    writeFileSync(filePath, 'original payload\n');
+
+    const client = getAI();
+    const original = client.files.upload.bind(client.files);
+    let uploadedText = '';
+
+    client.files.upload = async (opts: { file: Blob | string }) => {
+      await writeFileAsync(filePath, 'mutated payload\n');
+      uploadedText =
+        typeof opts.file === 'string'
+          ? await readFileAsync(opts.file, 'utf8')
+          : await opts.file.text();
+
+      return {
+        uri: 'gs://files/payload',
+        mimeType: 'text/plain',
+        name: 'payload',
+      };
+    };
+
+    try {
+      await uploadFile(filePath, controller.signal, async () => [tempDir]);
+      assert.strictEqual(uploadedText, 'original payload\n');
+    } finally {
+      client.files.upload = original;
+    }
   });
 });

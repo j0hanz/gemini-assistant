@@ -181,10 +181,10 @@ describe('analyze diagram progress', () => {
     let uploadCount = 0;
 
     // @ts-expect-error test override
-    client.files.upload = async (opts: { file: string; config?: { mimeType?: string } }) => {
+    client.files.upload = async (opts: { file: Blob | string; config?: { mimeType?: string } }) => {
       uploadCount += 1;
       return {
-        uri: `gs://files/${basename(opts.file)}`,
+        uri: `gs://files/${typeof opts.file === 'string' ? basename(opts.file) : `blob-${String(uploadCount)}`}`,
         mimeType: opts.config?.mimeType ?? 'text/plain',
         name: `uploaded-${uploadCount}`,
       };
@@ -310,10 +310,10 @@ describe('analyze diagram progress', () => {
     let uploadCount = 0;
 
     // @ts-expect-error test override
-    client.files.upload = async (opts: { file: string; config?: { mimeType?: string } }) => {
+    client.files.upload = async (opts: { file: Blob | string; config?: { mimeType?: string } }) => {
       uploadCount += 1;
       return {
-        uri: `gs://files/${basename(opts.file)}`,
+        uri: `gs://files/${typeof opts.file === 'string' ? basename(opts.file) : `blob-${String(uploadCount)}`}`,
         mimeType: opts.config?.mimeType ?? 'text/plain',
         name: `uploaded-${uploadCount}`,
       };

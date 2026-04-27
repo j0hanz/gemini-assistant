@@ -85,6 +85,8 @@ describe('contract surface invariants', () => {
 
     assert.match(SERVER_INSTRUCTIONS, /discover:\/\/catalog/);
     assert.match(SERVER_INSTRUCTIONS, /discover:\/\/workflows/);
+    assert.match(SERVER_INSTRUCTIONS, /STATELESS=true/);
+    assert.match(SERVER_INSTRUCTIONS, /task-aware tools\/call requests are unavailable/i);
   });
 
   it('exposes new tool parameters only on intended public surfaces', () => {
@@ -114,7 +116,7 @@ describe('contract surface invariants', () => {
       (analyze?.inputs as readonly string[] | undefined)?.includes('functions?'),
       false,
     );
-    assert.ok(review?.inputs.includes('fileSearch?'));
+    assert.ok(review?.inputs.includes('fileSearch? (subjectKind=comparison or failure)'));
     assert.strictEqual(
       (review?.inputs as readonly string[] | undefined)?.includes('functions?'),
       false,
@@ -198,6 +200,45 @@ describe('contract surface invariants', () => {
     assertAnnotatedInput(review.inputs, 'filePathA', 'subjectKind=comparison');
     assertAnnotatedInput(review.inputs, 'error', 'subjectKind=failure');
     assertAnnotatedInput(review.inputs, 'dryRun', 'subjectKind=diff');
+    assertAnnotatedInput(review.inputs, 'fileSearch', 'subjectKind=comparison or failure');
+  });
+
+  it('documents the current resource payloads and input caps in discovery metadata', () => {
+    const discoverContext = DISCOVERY_ENTRIES.find(
+      (entry) => entry.kind === 'resource' && entry.name === 'discover://context',
+    );
+    const sessionList = DISCOVERY_ENTRIES.find(
+      (entry) => entry.kind === 'resource' && entry.name === 'session://',
+    );
+    const chat = DISCOVERY_ENTRIES.find((entry) => entry.kind === 'tool' && entry.name === 'chat');
+    const research = DISCOVERY_ENTRIES.find(
+      (entry) => entry.kind === 'tool' && entry.name === 'research',
+    );
+    const review = DISCOVERY_ENTRIES.find(
+      (entry) => entry.kind === 'tool' && entry.name === 'review',
+    );
+
+    assert.ok(discoverContext);
+    assert.ok(sessionList);
+    assert.ok(chat);
+    assert.ok(research);
+    assert.ok(review);
+
+    assert.strictEqual(discoverContext.returns, 'JSON snapshot of the server context state.');
+    assert.match(sessionList.returns, /active session summaries/i);
+    assert.match(sessionList.returns, /lastAccess/i);
+
+    const assertCap = (entry: (typeof DISCOVERY_ENTRIES)[number], value: string): void => {
+      assert.ok(
+        entry.limitations?.some((limit) => limit.includes(value)),
+        `expected ${entry.name} limitations to mention ${value}`,
+      );
+    };
+
+    assertCap(chat, 'goal max 100000 chars');
+    assertCap(research, 'goal max 100000 chars');
+    assertCap(review, 'error max 32000 chars');
+    assertCap(review, 'codeContext max 16000 chars');
   });
 
   it('does not advertise resources.subscribe in the initialize capability set', async () => {

@@ -158,6 +158,7 @@ describe('ChatInputSchema', () => {
     assert.strictEqual(result.success, false);
     if (!result.success) {
       assert.strictEqual(result.error.issues[0]?.message, 'responseSchemaJson must be valid JSON.');
+      assert.deepStrictEqual(result.error.issues[0]?.params, { reason: 'json_syntax' });
     }
   });
 
@@ -187,6 +188,7 @@ describe('ChatInputSchema', () => {
         result.error.issues[0]?.message ?? '',
         /properties\.ok\.type|properties\["ok"\]\.type/i,
       );
+      assert.deepStrictEqual(result.error.issues[0]?.params, { reason: 'shape_mismatch' });
     }
   });
 
@@ -213,6 +215,20 @@ describe('ChatInputSchema', () => {
         ),
       (error) => error instanceof AppError && error.message.includes('$ref is not supported'),
     );
+  });
+
+  it('reports unsupported Gemini schema keywords with a stable discriminator', () => {
+    const result = ChatInputSchema.safeParse({
+      goal: 'return JSON',
+      responseSchemaJson: JSON.stringify({
+        oneOf: [{ type: 'string' }, { type: 'number' }],
+      }),
+    });
+
+    assert.strictEqual(result.success, false);
+    if (!result.success) {
+      assert.deepStrictEqual(result.error.issues[0]?.params, { reason: 'unsupported_keyword' });
+    }
   });
 
   it('rejects temperature above the bounded range', () => {
@@ -913,6 +929,18 @@ describe('ReviewInputSchema', () => {
         issue.code === 'invalid_type' &&
         JSON.stringify(issue.path) === '["error"]' &&
         issue.message === 'Invalid input: expected string, received undefined',
+    );
+    assertSchemaIssueMessage(
+      ReviewInputSchema.safeParse({
+        subjectKind: 'diff',
+        fileSearch: { fileSearchStoreNames: ['fileSearchStores/review'] },
+      }),
+      (issue) =>
+        issue.code === 'unrecognized_keys' &&
+        JSON.stringify(issue.path) === '[]' &&
+        'keys' in issue &&
+        Array.isArray(issue.keys) &&
+        issue.keys.includes('fileSearch'),
     );
     assertSchemaIssueMessage(
       ReviewInputSchema.safeParse({ subjectKind: 'diff', googleSearch: true }),

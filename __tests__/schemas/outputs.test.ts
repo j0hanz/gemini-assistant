@@ -152,13 +152,16 @@ describe('ResearchOutputSchema', () => {
 });
 
 describe('ChatOutputSchema', () => {
-  it('requires workspaceCacheApplied explicitly', () => {
+  it('accepts missing workspaceCacheApplied for compatibility', () => {
     const result = ChatOutputSchema.safeParse({
       status: 'completed',
       answer: 'Done',
     });
 
-    assert.strictEqual(result.success, false);
+    assert.ok(result.success);
+    if (result.success) {
+      assert.strictEqual(result.data.workspaceCacheApplied, undefined);
+    }
   });
 
   it('accepts workspaceCacheApplied when true', () => {

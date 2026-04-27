@@ -118,6 +118,7 @@ export const ChatOutputSchema = z.strictObject({
     .describe('Gemini Code Execution computations surfaced from tool events'),
   workspaceCacheApplied: z
     .boolean()
+    .optional()
     .describe('Whether automatic workspace cache was applied for this chat turn'),
 });
 

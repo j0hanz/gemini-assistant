@@ -308,8 +308,8 @@ export const OptionalFileSearchSpecSchema = z
       }
     }
     return value;
-  }, FileSearchSpecSchema.optional())
-  .optional();
+  }, z.unknown())
+  .pipe(FileSearchSpecSchema.optional());
 
 /**
  * Tolerant wrapper around `FunctionsSpecSchema.optional()` that treats a
@@ -324,8 +324,8 @@ export const OptionalFunctionsSpecSchema = z
       }
     }
     return value;
-  }, FunctionsSpecSchema.optional())
-  .optional();
+  }, z.unknown())
+  .pipe(FunctionsSpecSchema.optional());
 
 export const ServerSideToolInvocationsSchema = withFieldMetadata(
   z.enum(SERVER_SIDE_TOOL_INVOCATIONS_OPTIONS).default('auto'),

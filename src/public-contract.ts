@@ -153,6 +153,7 @@ const TOOL_DISCOVERY_DETAILS = {
       'Sessions, task state, and task message queues are process-local memory state; restarts or stateless deployments lose continuity.',
       'Sessions require a stateful server connection path. Stateless transport rejects chat calls that include sessionId.',
       'Stateless transport (STATELESS=true) does not advertise the tasks capability — task-aware tools/call requests are unavailable; clients must rely on the synchronous return path.',
+      'Input caps: goal max 100000 chars.',
       'Progress notifications truncate streamed text to ~80 characters per update; full text is delivered in the final response only.',
       'Sessions started before raw `Part[]` capture cannot serve `gemini://sessions/.../parts`.',
       'Transcript, events, and raw turn-parts resources require MCP_EXPOSE_SESSION_RESOURCES=true.',
@@ -188,6 +189,7 @@ const TOOL_DISCOVERY_DETAILS = {
       'A summary with grounding status, grounding signals, claim-linked source attributions, Google Search sources, URL Context provenance, warnings, and tool-usage details from the multi-step research path.',
     limitations: [
       'Mode defaults to quick; this contract does not accept legacy top-level query or topic fields.',
+      'Input caps: goal max 100000 chars.',
       'Grounding uses Google Search, optional URL Context, and optional Gemini File Search stores.',
       'Claim-level findings and citations reflect source attribution from retrieved metadata, not independent verification of truth.',
     ],
@@ -243,7 +245,7 @@ const TOOL_DISCOVERY_DETAILS = {
       'error? (subjectKind=failure)',
       'codeContext? (subjectKind=failure)',
       'googleSearch? (subjectKind=comparison or failure)',
-      'fileSearch?',
+      'fileSearch? (subjectKind=comparison or failure)',
       'urls? (subjectKind=comparison or failure)',
       'focus?',
       'thinkingLevel?',
@@ -255,6 +257,7 @@ const TOOL_DISCOVERY_DETAILS = {
       'A review summary plus diff stats, comparison output, or failure guidance depending on the selected subjectKind.',
     limitations: [
       'The diff mode inspects the local repository only; it does not fetch remote GitHub state.',
+      'Input caps: goal max 100000 chars via focus-bearing review prompts, error max 32000 chars, codeContext max 16000 chars.',
       'Failure review can use optional search/URL context, but only from explicit subject fields.',
     ],
     related: [
@@ -315,7 +318,7 @@ const RESOURCE_DISCOVERY_DETAILS = {
     bestFor: 'Inspecting the server knowledge state: workspace files, sessions, and config.',
     whenToUse: 'Use to understand available server context.',
     inputs: [],
-    returns: 'JSON and Markdown snapshot of the server context state.',
+    returns: 'JSON snapshot of the server context state.',
     related: [
       { kind: 'resource', name: 'discover://catalog' },
       { kind: 'resource', name: 'workspace://context' },
@@ -334,7 +337,7 @@ const RESOURCE_DISCOVERY_DETAILS = {
     bestFor: 'Browsing active in-memory chat sessions.',
     whenToUse: 'Use to inspect or resume a chat session.',
     inputs: [],
-    returns: 'JSON list of active session IDs and their last access timestamps.',
+    returns: 'JSON list of active session summaries (id, lastAccess, and related metadata).',
     related: [{ kind: 'tool', name: 'chat' }],
   },
   'session://{sessionId}': {

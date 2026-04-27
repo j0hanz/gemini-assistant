@@ -87,6 +87,7 @@ export const SERVER_INSTRUCTIONS =
   'analyze (file, URL, small file-set analysis, or diagram generation), ' +
   'review (diff review, file comparison, or failure diagnosis). ' +
   'Tasks (the tools/call task-aware path) are process-local and lost across restarts; ' +
+  'when STATELESS=true, task-aware tools/call requests are unavailable because the tasks capability is not advertised. ' +
   'deep research tasks may take several minutes — poll tasks/get until terminal. ' +
   'Use discover://catalog and discover://workflows for the canonical public surface.';
 

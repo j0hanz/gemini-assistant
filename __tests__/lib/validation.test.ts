@@ -489,4 +489,21 @@ describe('validateUrls', () => {
       assert.match(firstTextContent(result), /Private, loopback, and localhost URLs/);
     }
   });
+
+  it('rejects cloud metadata, IPv6-mapped IPv4, and punycode localhost lookalikes', () => {
+    const rejectedUrls = [
+      'http://169.254.169.254/latest/meta-data/',
+      'http://100.100.100.200/latest/meta-data/',
+      'http://[fd00:ec2::254]/latest/meta-data/',
+      'http://[::ffff:169.254.169.254]/latest/meta-data/',
+      'http://xn--ocalhost-9za/',
+    ];
+
+    for (const url of rejectedUrls) {
+      assert.strictEqual(isPublicHttpUrl(url), false, url);
+      const result = validateUrls([url]);
+      assert.strictEqual(result?.isError, true, url);
+      assert.match(firstTextContent(result), /Private, loopback, and localhost URLs/);
+    }
+  });
 });

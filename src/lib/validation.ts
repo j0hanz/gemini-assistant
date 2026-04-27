@@ -3,7 +3,7 @@ import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
 import { realpath, stat } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { dirname, isAbsolute, normalize, parse, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { domainToUnicode, fileURLToPath } from 'node:url';
 
 import { getAllowedHostsEnv, getRootsEnv } from '../config.js';
 import { AppError } from './errors.js';
@@ -523,6 +523,22 @@ function isIpv6LoopbackOrUnspecified(hostname: string): boolean {
   return groups.slice(0, -1).every((group) => group === '0000') && groups.at(-1) === '0001';
 }
 
+function getIpv6MappedIpv4(hostname: string): string | undefined {
+  const groups = expandIpv6Groups(hostname);
+  if (!groups) {
+    return undefined;
+  }
+
+  const isMapped = groups.slice(0, 5).every((group) => group === '0000') && groups[5] === 'ffff';
+  if (!isMapped) {
+    return undefined;
+  }
+
+  const high = Number.parseInt(groups[6] ?? '0', 16);
+  const low = Number.parseInt(groups[7] ?? '0', 16);
+  return [high >>> 8, high & 0xff, low >>> 8, low & 0xff].join('.');
+}
+
 function isPrivateIpv4(hostname: string): boolean {
   const normalizedHostname = normalizeIpv4Hostname(hostname);
   if (!normalizedHostname) {
@@ -579,7 +595,52 @@ const PRIVATE_IPV6_PREFIXES = ['fc', 'fd', 'fe8', 'fe9', 'fea', 'feb', 'ff', '::
 function isPrivateIpv6(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
   if (isIpv6LoopbackOrUnspecified(normalized)) return true;
+  const mappedIpv4 = getIpv6MappedIpv4(normalized);
+  if (mappedIpv4) {
+    return isPrivateIpv4(mappedIpv4);
+  }
   return PRIVATE_IPV6_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+function isUnicodeLocalhostLookalike(hostname: string): boolean {
+  if (!hostname.includes('xn--')) {
+    return false;
+  }
+
+  const unicodeHost = domainToUnicode(hostname);
+  if (!unicodeHost || unicodeHost === hostname) {
+    return false;
+  }
+
+  const normalizedUnicode = unicodeHost
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .toLowerCase();
+
+  const labels = normalizedUnicode.split('.');
+  const distanceToLocalhost = (value: string): number => {
+    const target = 'localhost';
+    const rows = Array.from({ length: value.length + 1 }, (_, index) => index);
+
+    for (let targetIndex = 1; targetIndex <= target.length; targetIndex += 1) {
+      let previous = rows[0] ?? 0;
+      rows[0] = targetIndex;
+      for (let valueIndex = 1; valueIndex <= value.length; valueIndex += 1) {
+        const current = rows[valueIndex] ?? valueIndex;
+        const substitutionCost = value[valueIndex - 1] === target[targetIndex - 1] ? 0 : 1;
+        rows[valueIndex] = Math.min(
+          (rows[valueIndex] ?? valueIndex) + 1,
+          (rows[valueIndex - 1] ?? valueIndex - 1) + 1,
+          previous + substitutionCost,
+        );
+        previous = current;
+      }
+    }
+
+    return rows[value.length] ?? target.length;
+  };
+
+  return labels.some((label) => label.includes('localhost') || distanceToLocalhost(label) <= 2);
 }
 
 function isRejectedHost(hostname: string): boolean {
@@ -590,6 +651,10 @@ function isRejectedHost(hostname: string): boolean {
     normalized === '[::1]' ||
     normalized === '0.0.0.0'
   ) {
+    return true;
+  }
+
+  if (isUnicodeLocalhostLookalike(normalized)) {
     return true;
   }
 

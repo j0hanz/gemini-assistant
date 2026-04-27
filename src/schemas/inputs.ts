@@ -150,9 +150,19 @@ function validateResponseSchemaJson(payload: ParsePayload<string>): void {
     parseResponseSchemaJsonValue(payload.value);
     return;
   } catch (error) {
+    const reason =
+      error instanceof SyntaxError
+        ? 'json_syntax'
+        : error instanceof AppError
+          ? 'unsupported_keyword'
+          : error instanceof z.ZodError
+            ? 'shape_mismatch'
+            : 'json_syntax';
+
     payload.issues.push({
       code: 'custom',
       input: payload.value,
+      params: { reason },
       message:
         error instanceof SyntaxError
           ? 'responseSchemaJson must be valid JSON.'
@@ -549,7 +559,7 @@ const ReviewInputBaseSchema = z.strictObject({
   ),
   fileSearch: withFieldMetadata(
     OptionalFileSearchSpecSchema,
-    'Enable Gemini File Search over named stores during comparison or failure review. Ignored for subjectKind=diff.',
+    'Enable Gemini File Search over named stores during comparison or failure review. Allowed only when subjectKind=comparison or failure.',
   ),
   ...createUrlContextFields({
     itemDescription: 'Public URL to include via URL Context',
@@ -568,10 +578,6 @@ const ReviewDiffSchema = z.strictObject({
   ),
   dryRun: withFieldMetadata(z.boolean().optional(), 'Skip model review for subjectKind=diff.'),
   language: optionalField(textField('Primary language hint for diff or failure review.')),
-  fileSearch: withFieldMetadata(
-    OptionalFileSearchSpecSchema,
-    'Enable Gemini File Search over named stores during comparison or failure review. Ignored for subjectKind=diff.',
-  ),
   ...reviewCommonShape,
 });
 

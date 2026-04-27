@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { z } from 'zod/v4';
+
 import {
   AnalyzeInputSchema,
   ChatInputSchema,
@@ -14,6 +16,39 @@ import {
   ReviewOutputSchema,
 } from '../../src/schemas/outputs.js';
 import type { SessionEventEntry } from '../../src/sessions.js';
+
+function findDiscriminatorBranches(
+  schema: unknown,
+  discriminator: string,
+): Record<string, unknown> {
+  if (!schema || typeof schema !== 'object') {
+    return {};
+  }
+
+  const branches = Array.isArray((schema as { oneOf?: unknown[] }).oneOf)
+    ? ((schema as { oneOf?: unknown[] }).oneOf ?? [])
+    : [];
+  const result: Record<string, unknown> = {};
+
+  for (const branch of branches) {
+    if (!branch || typeof branch !== 'object') {
+      continue;
+    }
+
+    const properties = (branch as { properties?: Record<string, unknown> }).properties;
+    const propertySchema = properties?.[discriminator];
+    if (
+      propertySchema &&
+      typeof propertySchema === 'object' &&
+      'const' in propertySchema &&
+      typeof propertySchema.const === 'string'
+    ) {
+      result[propertySchema.const] = branch;
+    }
+  }
+
+  return result;
+}
 
 describe('public contract schemas', () => {
   it('keeps SessionEventEntry audit shape stable', () => {
@@ -200,7 +235,7 @@ describe('public contract schemas', () => {
     );
   });
 
-  it('locks the public status shapes and required chat cache flag', () => {
+  it('locks the public status shapes and keeps the chat cache flag optional', () => {
     assert.ok(
       ChatOutputSchema.safeParse({
         status: 'completed',
@@ -222,10 +257,23 @@ describe('public contract schemas', () => {
         .success,
       false,
     );
-    assert.strictEqual(
-      ChatOutputSchema.safeParse({ status: 'completed', answer: 'x' }).success,
-      false,
+    assert.ok(ChatOutputSchema.safeParse({ status: 'completed', answer: 'x' }).success);
+  });
+
+  it('keeps discriminated oneOf JSON schema branches for public variant inputs', () => {
+    const researchBranches = findDiscriminatorBranches(z.toJSONSchema(ResearchInputSchema), 'mode');
+    const analyzeBranches = findDiscriminatorBranches(
+      z.toJSONSchema(AnalyzeInputSchema),
+      'targetKind',
     );
+    const reviewBranches = findDiscriminatorBranches(
+      z.toJSONSchema(ReviewInputSchema),
+      'subjectKind',
+    );
+
+    assert.deepStrictEqual(Object.keys(researchBranches).sort(), ['deep', 'quick']);
+    assert.deepStrictEqual(Object.keys(analyzeBranches).sort(), ['file', 'multi', 'url']);
+    assert.deepStrictEqual(Object.keys(reviewBranches).sort(), ['comparison', 'diff', 'failure']);
   });
 
   it('keeps new optional fields backward-compatible on inputs and outputs', () => {

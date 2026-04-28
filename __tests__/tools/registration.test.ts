@@ -45,6 +45,7 @@ const toolServices = {
   rootsFetcher,
   session: toToolSessionAccess(sessionStore),
   workspace: toToolWorkspaceAccess(workspaceCacheManager),
+  clientCapabilities: () => undefined,
 };
 
 describe('tool registration', () => {

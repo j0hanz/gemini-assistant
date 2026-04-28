@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { getAI } from '../../src/client.js';
+import { createDefaultToolServices } from '../../src/lib/tool-context.js';
 import { ResearchOutputSchema } from '../../src/schemas/outputs.js';
 import { registerResearchTool } from '../../src/tools/research.js';
 
@@ -119,7 +120,10 @@ function getHandlers() {
     },
   } as never;
 
-  registerResearchTool(server);
+  registerResearchTool(server, {
+    ...createDefaultToolServices(),
+    clientCapabilities: () => ({ sampling: {} }),
+  });
 
   return {
     research: handlers.research as ToolTaskHandler<{

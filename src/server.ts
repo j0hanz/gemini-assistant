@@ -186,6 +186,7 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
   const { taskStore, taskMessageQueue } = taskInfra;
   const workspaceCacheManager = createWorkspaceCacheManager();
   const isStateless = getStatelessTransportFlag();
+  const exposeSessionResources = getExposeSessionResources();
   const server = new McpServer(
     {
       name: 'gemini-assistant',
@@ -210,6 +211,14 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
               },
             }),
       },
+      ...(exposeSessionResources
+        ? {
+            debouncedNotificationMethods: [
+              'notifications/resources/list_changed',
+              'notifications/resources/updated',
+            ],
+          }
+        : {}),
       instructions: SERVER_INSTRUCTIONS,
     },
   );
@@ -241,6 +250,7 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
     rootsFetcher,
     session: createSessionAccess(sessionStore),
     workspace: createWorkspaceAccess(workspaceCacheManager, rootsFetcher),
+    clientCapabilities: () => server.server.getClientCapabilities(),
   };
 
   registerServerTools(server, {

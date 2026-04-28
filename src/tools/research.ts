@@ -73,26 +73,35 @@ async function enrichTopicWithSampling(
   topic: string,
   searchDepth: number,
   ctx: ServerContext,
+  services: ToolServices,
 ): Promise<string> {
   if (searchDepth < 3) {
     log.debug('Sampling skipped for shallow research');
     return topic;
   }
 
+  if (!services.clientCapabilities()?.sampling) {
+    log.debug('Sampling skipped: client does not advertise sampling capability');
+    return topic;
+  }
+
   try {
-    const samplingRes = await ctx.mcpReq.requestSampling({
-      messages: [
-        {
-          role: 'user',
-          content: {
-            type: 'text',
-            text: `Topic: "${topic}"\nGive brief starting keywords or angles to research.`,
+    const samplingRes = await ctx.mcpReq.requestSampling(
+      {
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: `Topic: "${topic}"\nGive brief starting keywords or angles to research.`,
+            },
           },
-        },
-      ],
-      maxTokens: 500,
-      systemPrompt: 'Help an agent choose research angles.',
-    });
+        ],
+        maxTokens: 500,
+        systemPrompt: 'Help an agent choose research angles.',
+      },
+      { signal: ctx.mcpReq.signal },
+    );
 
     const sampledText = extractSampledText(samplingRes.content);
     if (!sampledText) {
@@ -930,7 +939,7 @@ async function agenticSearchWork(
   }
 
   await tasks.phase('enriching-topic');
-  const enrichedTopic = await enrichTopicWithSampling(topic, searchDepth, ctx);
+  const enrichedTopic = await enrichTopicWithSampling(topic, searchDepth, ctx, services);
 
   if (searchDepth >= 3) {
     return runDeepResearchPlan(

@@ -1,3 +1,5 @@
+import type { ClientCapabilities } from '@modelcontextprotocol/server';
+
 import {
   createSessionAccess,
   createSessionStore,
@@ -15,10 +17,13 @@ import {
   type WorkspaceCacheManagerImpl,
 } from './workspace-context.js';
 
+export type ClientCapabilitiesAccessor = () => ClientCapabilities | undefined;
+
 export interface ToolServices {
   rootsFetcher: RootsFetcher;
   session: SessionAccess;
   workspace: WorkspaceAccess;
+  clientCapabilities: ClientCapabilitiesAccessor;
 }
 
 export type ToolRootsFetcher = ToolServices['rootsFetcher'];
@@ -46,6 +51,7 @@ export function createDefaultToolServices(): ToolServices {
     rootsFetcher: () => Promise.resolve([]),
     session: createSessionAccess(createSessionStore()),
     workspace: createWorkspaceAccess(createWorkspaceCacheManager()),
+    clientCapabilities: () => undefined,
   };
 }
 

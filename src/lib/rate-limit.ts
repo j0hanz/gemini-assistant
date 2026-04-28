@@ -2,7 +2,7 @@ export interface RateLimiter {
   take: (key: string) => boolean;
 }
 
-export interface RateLimiterOptions {
+interface RateLimiterOptions {
   burst: number;
   idleTtlMs?: number;
   maxBuckets?: number;

@@ -1,4 +1,4 @@
-export interface ParseJsonOptions<T> {
+interface ParseJsonOptions<T> {
   candidates?: readonly string[];
   fallback?: T;
 }

@@ -22,8 +22,6 @@ import type { AskThinkingLevel } from './public-contract.js';
 
 // ── Config Utilities ──────────────────────────────────────────────────
 
-export { DEFAULT_TEMPERATURE } from './public-contract.js';
-
 const DEFAULT_TOOL_COST_PROFILES = {
   chat: { thinkingLevel: 'LOW', maxOutputTokens: 2_048 },
   'research.quick': { thinkingLevel: 'LOW', maxOutputTokens: 4_096 },
@@ -76,7 +74,7 @@ interface SafetySettingInput {
   threshold: NonNullable<SafetySetting['threshold']>;
 }
 
-export function buildMergedToolConfig(
+function buildMergedToolConfig(
   toolConfig: ToolConfig | undefined,
   functionCallingMode: FunctionCallingConfigMode | undefined,
 ): ToolConfig | undefined {

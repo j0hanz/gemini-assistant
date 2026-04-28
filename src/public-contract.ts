@@ -1,11 +1,10 @@
-export type PublicJobName = 'chat' | 'research' | 'analyze' | 'review';
+type PublicJobName = 'chat' | 'research' | 'analyze' | 'review';
 export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
 export type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
-export const DEFAULT_TEMPERATURE = 1.0;
 
 export type PublicPromptName = 'discover' | 'research' | 'review';
 export type PublicWorkflowName = 'start-here' | 'chat' | 'research' | 'analyze' | 'review';
-export type PublicResourceUri =
+type PublicResourceUri =
   | 'discover://catalog'
   | 'discover://context'
   | 'discover://workflows'
@@ -47,13 +46,6 @@ export interface WorkflowEntry {
   relatedResources: PublicResourceUri[];
 }
 
-interface JobMetadata {
-  name: PublicJobName;
-  title: string;
-  summary: string;
-  recommendedPrompt?: PublicPromptName;
-}
-
 export const PUBLIC_TOOL_NAMES = [
   'chat',
   'research',
@@ -77,7 +69,7 @@ export const PUBLIC_STATIC_RESOURCE_URIS = [
   'workspace://cache',
 ] as const satisfies readonly PublicResourceUri[];
 
-export const PUBLIC_RESOURCE_TEMPLATES = [
+const PUBLIC_RESOURCE_TEMPLATES = [
   'session://{sessionId}',
   'session://{sessionId}/transcript',
   'session://{sessionId}/events',
@@ -96,31 +88,6 @@ export const PUBLIC_WORKFLOW_NAMES = [
   'analyze',
   'review',
 ] as const satisfies readonly PublicWorkflowName[];
-
-export const JOB_METADATA = [
-  {
-    name: 'chat',
-    title: 'Chat',
-    summary: 'Direct Gemini chat with optional in-memory server-managed sessions.',
-  },
-  {
-    name: 'research',
-    title: 'Research',
-    summary: 'Quick grounded lookup or deeper multi-step research with explicit mode selection.',
-    recommendedPrompt: 'research',
-  },
-  {
-    name: 'analyze',
-    title: 'Analyze',
-    summary: 'Reason over local files, public URLs, or a small set of files with one focused goal.',
-  },
-  {
-    name: 'review',
-    title: 'Review',
-    summary: 'Review local diffs, compare files, or diagnose failures under one job-first surface.',
-    recommendedPrompt: 'review',
-  },
-] as const satisfies readonly JobMetadata[];
 
 type DiscoveryEntryMetadata = Omit<DiscoveryEntry, 'kind' | 'name'>;
 

@@ -364,10 +364,6 @@ export function getThinkingBudgetCap(): number {
   });
 }
 
-export function getMessageMaxChars(): number {
-  return parseIntEnv('CHAT_MESSAGE_MAX_CHARS', 100_000, { min: 1_000, max: 1_000_000 });
-}
-
 export function getSlimSessionEvents(): boolean {
   return !parseBooleanEnv('SESSION_EVENTS_VERBOSE', false);
 }

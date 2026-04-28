@@ -18,8 +18,6 @@ export const RESEARCH_MODE_OPTIONS = ['quick', 'deep'] as const;
 const ANALYZE_TARGET_KIND_OPTIONS = ['file', 'url', 'multi'] as const;
 const ANALYZE_OUTPUT_KIND_OPTIONS = ['summary', 'diagram'] as const;
 export const REVIEW_SUBJECT_OPTIONS = ['diff', 'comparison', 'failure'] as const;
-const SERVER_SIDE_TOOL_INVOCATIONS_OPTIONS = ['auto', 'always', 'never'] as const;
-const FUNCTION_CALLING_MODE_OPTIONS = ['AUTO', 'ANY', 'NONE', 'VALIDATED'] as const;
 
 function buildTextSchema(maxLength?: number) {
   const schema = z.string().trim().min(1);
@@ -52,10 +50,6 @@ export const PublicJobNameSchema = enumField(PUBLIC_TOOL_NAMES, 'Public job name
 
 export function textField(description: string, maxLength?: number) {
   return withFieldMetadata(buildTextSchema(maxLength), description);
-}
-
-export function requiredText(description: string, maxLength?: number) {
-  return textField(description, maxLength);
 }
 
 export function goalText(description = 'User goal or requested outcome', maxLength = 100_000) {
@@ -158,12 +152,6 @@ export function sessionId(description: string) {
   return textField(description, 256);
 }
 
-export function temperatureField(
-  description = 'Sampling temperature 0-2. When omitted, the server uses default 1.',
-) {
-  return withFieldMetadata(z.number().min(0).max(2).multipleOf(0.1).optional(), description);
-}
-
 export function thinkingLevel(
   description = 'Optional reasoning depth override. Omit to use the job default.',
 ) {
@@ -198,26 +186,6 @@ export function mediaResolution(description: string) {
     description,
   );
 }
-
-const FileSearchSpecSchema = z.strictObject({
-  fileSearchStoreNames: withFieldMetadata(
-    z
-      .array(
-        z
-          .string()
-          .min(1)
-          .max(256)
-          .regex(/^[A-Za-z0-9_\-/]+$/),
-      )
-      .min(1)
-      .max(32),
-    'Gemini File Search store names to retrieve from.',
-  ),
-  metadataFilter: withFieldMetadata(
-    z.unknown().optional(),
-    'Optional Gemini File Search metadata filter.',
-  ),
-});
 
 const FunctionDeclarationSchema = z.strictObject({
   name: withFieldMetadata(
@@ -259,17 +227,6 @@ const FunctionDeclarationSchema = z.strictObject({
   ),
 });
 
-const FunctionsSpecSchema = z.strictObject({
-  declarations: withFieldMetadata(
-    z.array(FunctionDeclarationSchema).min(1).max(32),
-    'Typed function declarations exposed to Gemini. The MCP client executes calls.',
-  ),
-  mode: withFieldMetadata(
-    z.enum(FUNCTION_CALLING_MODE_OPTIONS).optional(),
-    'Gemini function-calling mode. `AUTO` (default model choice), `ANY` (must call a declared function), `NONE` (disable calling), `VALIDATED` (stronger default for mixed tool + structured-output flows).',
-  ),
-});
-
 const FunctionResponseSchema = z.strictObject({
   id: withFieldMetadata(
     z.string().trim().min(1),
@@ -288,50 +245,6 @@ const FunctionResponseSchema = z.strictObject({
 export const FunctionResponsesSchema = withFieldMetadata(
   z.array(FunctionResponseSchema).min(1).max(32),
   'Caller-executed Gemini function responses for an existing session.',
-);
-
-/**
- * Tolerant wrapper around `FileSearchSpecSchema.optional()` that treats a
- * wrapper object carrying an empty `fileSearchStoreNames` array as "unset",
- * i.e. equivalent to omitting the `fileSearch` field. This makes the surface
- * friendlier to clients that emit placeholder objects for optional wrappers.
- */
-export const OptionalFileSearchSpecSchema = z
-  .preprocess((value) => {
-    if (
-      value &&
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      'fileSearchStoreNames' in value
-    ) {
-      const names = (value as { fileSearchStoreNames?: unknown }).fileSearchStoreNames;
-      if (Array.isArray(names) && names.length === 0) {
-        return undefined;
-      }
-    }
-    return value;
-  }, z.unknown())
-  .pipe(FileSearchSpecSchema.optional());
-
-/**
- * Tolerant wrapper around `FunctionsSpecSchema.optional()` that treats a
- * wrapper object carrying an empty `declarations` array as "unset".
- */
-export const OptionalFunctionsSpecSchema = z
-  .preprocess((value) => {
-    if (value && typeof value === 'object' && !Array.isArray(value) && 'declarations' in value) {
-      const declarations = (value as { declarations?: unknown }).declarations;
-      if (Array.isArray(declarations) && declarations.length === 0) {
-        return undefined;
-      }
-    }
-    return value;
-  }, z.unknown())
-  .pipe(FunctionsSpecSchema.optional());
-
-export const ServerSideToolInvocationsSchema = withFieldMetadata(
-  z.enum(SERVER_SIDE_TOOL_INVOCATIONS_OPTIONS).default('auto'),
-  'Server-side Gemini tool trace policy. `auto` (default): enabled whenever built-in Gemini tools are active. `always`: forces traces regardless of tool mix. `never`: omits traces.',
 );
 
 const usageMetadataFields = {
@@ -360,7 +273,7 @@ const SafetySettingSchema = z.strictObject({
   threshold: z.enum(HarmBlockThreshold).describe('Gemini harm block threshold'),
 });
 
-export const SafetySettingsSchema = z
+const SafetySettingsSchema = z
   .array(SafetySettingSchema)
   .optional()
   .describe('Gemini SafetySetting[]');
@@ -525,13 +438,6 @@ export const diffStatsFields = {
   deletions: nonNegativeInt('Lines deleted'),
 };
 
-export function createFilePairFields(firstDescription: string, secondDescription: string) {
-  return {
-    filePathA: workspacePath(firstDescription),
-    filePathB: workspacePath(secondDescription),
-  };
-}
-
 interface UrlContextFieldOptions {
   description: string;
   itemDescription: string;
@@ -571,14 +477,12 @@ export function createGenerationConfigFields() {
   };
 }
 
-export { FunctionDeclarationSchema };
-
-export const ProfileNameSchema = withFieldMetadata(
+const ProfileNameSchema = withFieldMetadata(
   z.enum(TOOL_PROFILE_NAMES),
   'Gemini tool profile name. Selects the combination of built-in tools and thinking defaults.',
 );
 
-export const ProfileThinkingLevelSchema = withFieldMetadata(
+const ProfileThinkingLevelSchema = withFieldMetadata(
   z.enum(['minimal', 'low', 'medium', 'high'] as const),
   'Thinking depth for this profile. Overrides the profile default.',
 );
@@ -589,7 +493,7 @@ const FileSearchStoreNameSchema = z
   .max(256)
   .regex(/^[A-Za-z0-9_\-/]+$/);
 
-export const OverridesSchema = z.strictObject({
+const OverridesSchema = z.strictObject({
   urls: publicHttpUrlArray({
     description:
       'Public URLs to analyze via URL Context. Only valid with profiles that include urlContext.',
@@ -624,5 +528,3 @@ export const ToolsSpecSchema = z.strictObject({
   thinkingLevel: ProfileThinkingLevelSchema.optional(),
   overrides: OverridesSchema.optional(),
 });
-
-export type ToolsSpec = z.infer<typeof ToolsSpecSchema>;

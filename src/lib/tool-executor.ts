@@ -121,7 +121,7 @@ function appendWarningsToContent(
   ];
 }
 
-export interface GeminiPipelineRequest<T extends Record<string, unknown>> {
+interface GeminiPipelineRequest<T extends Record<string, unknown>> {
   toolName: string;
   label: string;
   cacheName?: string | undefined;

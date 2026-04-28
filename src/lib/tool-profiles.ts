@@ -3,11 +3,11 @@ import type { ToolConfig, ToolListUnion } from '@google/genai';
 
 import type { AskThinkingLevel } from '../public-contract.js';
 
-export type BuiltInCapability = 'googleSearch' | 'urlContext' | 'codeExecution' | 'fileSearch';
+type BuiltInCapability = 'googleSearch' | 'urlContext' | 'codeExecution' | 'fileSearch';
 export type CapabilityKey = BuiltInCapability | 'functions';
 
 /** Lowercase thinking levels used in the public ToolsSpec input. */
-export type ProfileThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
+type ProfileThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
 
 export const TOOL_PROFILE_NAMES = [
   'plain',
@@ -25,7 +25,7 @@ export const TOOL_PROFILE_NAMES = [
 
 export type ToolProfileName = (typeof TOOL_PROFILE_NAMES)[number];
 
-export interface ProfileDefinition {
+interface ProfileDefinition {
   name: ToolProfileName;
   builtIns: readonly BuiltInCapability[];
   defaultThinkingLevel: ProfileThinkingLevel;
@@ -155,7 +155,7 @@ export const COMBO_MATRIX: Readonly<
 
 // ── Error types ───────────────────────────────────────────────────────────────
 
-export type ProfileErrorCode =
+type ProfileErrorCode =
   | 'FILE_SEARCH_EXCLUSIVE'
   | 'FUNCTIONS_REQUIRED_FOR_PROFILE'
   | 'RESPONSE_SCHEMA_REQUIRED_FOR_PROFILE'
@@ -177,15 +177,15 @@ export class ProfileValidationError extends Error {
 
 // ── Input / resolved types ────────────────────────────────────────────────────
 
-export interface FunctionDeclarationInput {
+interface FunctionDeclarationInput {
   name: string;
   description: string;
   parametersJsonSchema?: Record<string, unknown>;
 }
 
-export type FunctionCallingModeValue = 'AUTO' | 'ANY' | 'NONE' | 'VALIDATED';
+type FunctionCallingModeValue = 'AUTO' | 'ANY' | 'NONE' | 'VALIDATED';
 
-export interface ToolsSpecOverrides {
+interface ToolsSpecOverrides {
   urls?: string[] | undefined;
   fileSearchStores?: string[] | undefined;
   functions?: FunctionDeclarationInput[] | undefined;
@@ -200,9 +200,9 @@ export interface ToolsSpecInput {
   overrides?: ToolsSpecOverrides | undefined;
 }
 
-export type ToolKey = 'chat' | 'research' | 'analyze' | 'review';
+type ToolKey = 'chat' | 'research' | 'analyze' | 'review';
 
-export type ToolMode =
+type ToolMode =
   | 'quick'
   | 'deep'
   | 'file'

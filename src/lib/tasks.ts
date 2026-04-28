@@ -193,7 +193,7 @@ export function getTaskEmitter(ctx: ServerContext): {
   };
 }
 
-export type TaskEvent =
+type TaskEvent =
   | { type: 'status'; taskId: string; status: TaskStatus; statusMessage?: string }
   | { type: 'result'; taskId: string; status: 'completed' | 'failed' };
 
@@ -298,10 +298,9 @@ function isTerminalStatusError(err: unknown): boolean {
   return err.message.includes('terminal status');
 }
 
-export type TaskWork<TArgs> = (args: TArgs, ctx: ExtendedServerContext) => Promise<CallToolResult>;
-export type { TaskToolConfig };
+type TaskWork<TArgs> = (args: TArgs, ctx: ExtendedServerContext) => Promise<CallToolResult>;
 
-export interface TaskToolOverrides {
+interface TaskToolOverrides {
   defaultTtlMs?: number;
 }
 

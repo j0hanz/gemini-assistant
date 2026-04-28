@@ -782,7 +782,12 @@ describe('ObservableTaskStore', () => {
     const store = new ObservableTaskStore(inner);
     const task = await store.createTask({ ttl: 5000 }, 'req-1', {} as never);
 
-    const events: import('../../src/lib/tasks.js').TaskEvent[] = [];
+    const events: {
+      type: 'status' | 'result';
+      taskId: string;
+      status: string;
+      statusMessage?: string;
+    }[] = [];
     store.emitter.on('task', (ev) => {
       events.push(ev);
     });
@@ -805,7 +810,12 @@ describe('ObservableTaskStore', () => {
     const store = new ObservableTaskStore(inner);
     const task = await store.createTask({ ttl: 5000 }, 'req-1', {} as never);
 
-    const events: import('../../src/lib/tasks.js').TaskEvent[] = [];
+    const events: {
+      type: 'status' | 'result';
+      taskId: string;
+      status: string;
+      statusMessage?: string;
+    }[] = [];
     store.emitter.on('task', (ev) => {
       events.push(ev);
     });

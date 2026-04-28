@@ -242,7 +242,7 @@ export async function deleteUploadedFiles(
   }
 }
 
-export interface UploadedFilesCleanupTracker {
+interface UploadedFilesCleanupTracker {
   readonly names: readonly string[];
   addName(name: string): void;
   addUploadedFile(file: Pick<UploadedFile, 'name'>): void;
@@ -272,7 +272,7 @@ export async function withUploadedFilesCleanup<T>(
   }
 }
 
-export async function uploadFilesBatch(
+async function uploadFilesBatch(
   filePaths: string[],
   ctx: ServerContext,
   rootsFetcher: RootsFetcher,

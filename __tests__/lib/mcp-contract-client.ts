@@ -14,13 +14,13 @@ interface JsonRpcRequest extends JsonRpcNotification {
   id: number;
 }
 
-export interface JsonRpcSuccess {
+interface JsonRpcSuccess {
   id: number;
   jsonrpc: '2.0';
   result: Record<string, unknown>;
 }
 
-export interface JsonRpcFailure {
+interface JsonRpcFailure {
   error: { code: number; message: string; data?: unknown };
   id: number | null;
   jsonrpc: '2.0';

@@ -254,7 +254,7 @@ const AnalyzePrModelResponseSchema = {
   required: ['summary'],
 } satisfies GeminiResponseSchema;
 
-export interface ReviewWorkDeps {
+interface ReviewWorkDeps {
   compareWork: ReviewCompareWork;
   rootsFetcher: ToolRootsFetcher;
   analyzePrWork?: ReviewAnalyzePrWork;

@@ -84,7 +84,7 @@ const SERVER_TOOL_REGISTRARS = [
   },
 ] as const satisfies readonly ServerRegistrar[];
 
-export const SERVER_INSTRUCTIONS =
+const SERVER_INSTRUCTIONS =
   `Public tools: ${PUBLIC_TOOL_NAMES.join(', ')}. ` +
   'chat (direct Gemini chat with optional in-memory sessions; ' +
   'chat sessions are server-memory only, expire/evict over time, and require a stateful transport path), ' +
@@ -122,7 +122,7 @@ export function sendResourceChangedForServer(server: McpServer, listUri: string 
   server.sendResourceListChanged();
 }
 
-export function sendResourceUpdatedForServer(server: McpServer, uri: string): void {
+function sendResourceUpdatedForServer(server: McpServer, uri: string): void {
   if (!server.isConnected()) return;
   if (!isKnownResourceUri(uri)) {
     log.warn(`Blocked resource updated notification with unregistered URI: ${uri}`);
@@ -175,9 +175,6 @@ function throwCloseErrors(closeErrors: Error[]): void {
     throw new AggregateError(closeErrors, 'Server instance shutdown failed');
   }
 }
-
-export { createSharedTaskInfra };
-export type { SharedTaskInfra };
 
 export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerInstance {
   const sessionStore = createSessionStore();

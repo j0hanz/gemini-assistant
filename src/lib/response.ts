@@ -86,12 +86,12 @@ export function mergeStructured(
   };
 }
 
-export interface CollectedItems<T> {
+interface CollectedItems<T> {
   items: T[];
   droppedNonPublic: number;
 }
 
-export const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
+const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
 
 export function tryParseJsonResponse(text: string): unknown {
   const candidates = [text.trim()];
@@ -283,8 +283,8 @@ export function deriveFindingsFromCitations(citations: readonly GroundingCitatio
   return [...findings.values()];
 }
 
-export const GROUNDING_MEDIUM_CONFIDENCE_SUPPORTS = 1;
-export const GROUNDING_HIGH_CONFIDENCE_SUPPORTS = 3;
+const GROUNDING_MEDIUM_CONFIDENCE_SUPPORTS = 1;
+const GROUNDING_HIGH_CONFIDENCE_SUPPORTS = 3;
 
 export function deriveDiagramSyntaxValidation(toolEvents: readonly ToolEvent[]): {
   syntaxValid?: boolean;

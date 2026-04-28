@@ -49,7 +49,7 @@ export interface ToolEvent {
   toolType?: string;
 }
 
-export interface CodeComputation {
+interface CodeComputation {
   code: string;
   language?: string;
   outcome?: string;

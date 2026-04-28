@@ -17,7 +17,7 @@ import {
   type WorkspaceCacheManagerImpl,
 } from './workspace-context.js';
 
-export type ClientCapabilitiesAccessor = () => ClientCapabilities | undefined;
+type ClientCapabilitiesAccessor = () => ClientCapabilities | undefined;
 
 export interface ToolServices {
   rootsFetcher: RootsFetcher;

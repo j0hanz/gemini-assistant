@@ -120,7 +120,7 @@ export function buildConfigFromSessionContract(
   };
 }
 
-export function canonicalizeSessionContractValue(value: unknown): unknown {
+function canonicalizeSessionContractValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => canonicalizeSessionContractValue(item));
   }
@@ -134,7 +134,7 @@ export function canonicalizeSessionContractValue(value: unknown): unknown {
   return value;
 }
 
-export function sameSessionContractValue(left: unknown, right: unknown): boolean {
+function sameSessionContractValue(left: unknown, right: unknown): boolean {
   return (
     JSON.stringify(canonicalizeSessionContractValue(left)) ===
     JSON.stringify(canonicalizeSessionContractValue(right))
@@ -217,7 +217,7 @@ interface SessionTurnStreamResult {
   urlContextMetadata?: UrlContextMetadata;
 }
 
-export interface SessionTurnInput {
+interface SessionTurnInput {
   result: SessionTurnResult;
   sentMessage?: string;
   streamResult: SessionTurnStreamResult;
@@ -315,7 +315,7 @@ function shouldRedactSessionValue(keyContext?: string): boolean {
   return getSessionRedactionPatterns().some((pattern) => pattern.test(keyContext));
 }
 
-export function sanitizeSessionValue(value: unknown, keyContext?: string): unknown {
+function sanitizeSessionValue(value: unknown, keyContext?: string): unknown {
   if (shouldRedactSessionValue(keyContext)) {
     return '[REDACTED]';
   }
@@ -361,13 +361,13 @@ function applySessionFieldRules<T extends object>(item: T, rules: readonly Sessi
   return out as T;
 }
 
-export function sanitizeFunctionCalls(functionCalls: FunctionCallEntry[]): FunctionCallEntry[] {
+function sanitizeFunctionCalls(functionCalls: FunctionCallEntry[]): FunctionCallEntry[] {
   return functionCalls.map((functionCall) =>
     applySessionFieldRules(functionCall, FUNCTION_CALL_FIELD_RULES),
   );
 }
 
-export function sanitizeToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
+function sanitizeToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
   return toolEvents.map((toolEvent) => applySessionFieldRules(toolEvent, TOOL_EVENT_FIELD_RULES));
 }
 
@@ -547,7 +547,7 @@ function cloneContentEntry(item: ContentEntry): ContentEntry {
  * parts, nameless `functionCall`s, and `thoughtSignature` values are preserved
  * so replay-safe orchestration retains Gemini-native structure.
  */
-export function capRawParts(parts: Part[]): Part[] {
+function capRawParts(parts: Part[]): Part[] {
   const inlineDataMaxBytes = getSessionLimits().replayInlineDataMaxBytes;
   return parts.filter((part) => {
     if (part.inlineData?.data && part.inlineData.data.length > inlineDataMaxBytes) {
@@ -633,7 +633,7 @@ function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {
   };
 }
 
-export function appendTranscriptPair(
+function appendTranscriptPair(
   sessionId: string,
   message: string,
   result: SessionTurnResult,
@@ -1126,7 +1126,7 @@ export function createSessionStore(options?: SessionStoreOptions): SessionStore 
   return new SessionStore(options);
 }
 
-export interface ReplayWindowSelection {
+interface ReplayWindowSelection {
   dropped: number;
   kept: ContentEntry[];
 }

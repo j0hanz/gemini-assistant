@@ -5,7 +5,7 @@ import { FinishReason } from '@google/genai';
 
 type AppErrorCategory = 'client' | 'server' | 'safety' | 'cancelled' | 'internal';
 
-export function assertNever(value: never, label = 'unreachable'): never {
+function assertNever(value: never, label = 'unreachable'): never {
   throw new Error(`${label}: ${String(value)}`);
 }
 

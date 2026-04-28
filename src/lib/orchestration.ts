@@ -20,14 +20,9 @@ import { validateUrls } from './validation.js';
 
 // ── Legacy types (kept for backward compatibility with tool-executor.ts) ──────
 
-export const BUILT_IN_TOOL_NAMES = [
-  'googleSearch',
-  'urlContext',
-  'codeExecution',
-  'fileSearch',
-] as const;
-export type BuiltInToolName = (typeof BUILT_IN_TOOL_NAMES)[number];
-export type ActiveCapability = BuiltInToolName | 'functions';
+const BUILT_IN_TOOL_NAMES = ['googleSearch', 'urlContext', 'codeExecution', 'fileSearch'] as const;
+type BuiltInToolName = (typeof BUILT_IN_TOOL_NAMES)[number];
+type ActiveCapability = BuiltInToolName | 'functions';
 
 export type BuiltInToolSpec =
   | { kind: 'googleSearch' }
@@ -38,16 +33,6 @@ export type BuiltInToolSpec =
       fileSearchStoreNames: readonly string[];
       metadataFilter?: unknown;
     };
-
-export function selectSearchAndUrlContextTools(
-  googleSearch?: boolean,
-  urls?: readonly string[],
-): BuiltInToolName[] {
-  return [
-    ...(googleSearch ? (['googleSearch'] as const) : []),
-    ...((urls?.length ?? 0) > 0 ? (['urlContext'] as const) : []),
-  ];
-}
 
 const BUILT_IN_TOOL_FACTORIES: Record<
   BuiltInToolName,
@@ -90,7 +75,7 @@ function hasTool(tools: ToolListUnion, key: BuiltInToolName): boolean {
   return tools.some((tool) => Object.hasOwn(tool, key));
 }
 
-export function buildToolProfile(tools: ToolListUnion | undefined): string {
+function buildToolProfile(tools: ToolListUnion | undefined): string {
   if (!tools || tools.length === 0) return 'none';
   const keys = new Set<string>();
   for (const tool of tools) {
@@ -102,7 +87,7 @@ export function buildToolProfile(tools: ToolListUnion | undefined): string {
   return [...keys].sort().join('+');
 }
 
-export type ServerSideToolInvocationsPolicy = 'auto' | 'always' | 'never';
+type ServerSideToolInvocationsPolicy = 'auto' | 'always' | 'never';
 
 export interface OrchestrationRequest {
   builtInToolSpecs?: readonly BuiltInToolSpec[] | undefined;
@@ -170,14 +155,14 @@ export function buildUrlContextFallbackPart(
   return { text: `Context URLs:\n${urls.join('\n')}` };
 }
 
-export interface ToolProfileDetails {
+interface ToolProfileDetails {
   fileSearchStoreCount?: number;
   functionCount?: number;
   functionCallingMode?: string;
   serverSideToolInvocations?: boolean;
 }
 
-export interface OrchestrationConfig {
+interface OrchestrationConfig {
   functionCallingMode?: FunctionCallingConfigMode;
   toolConfig?: ToolConfig;
   toolProfile: string;
@@ -187,7 +172,7 @@ export interface OrchestrationConfig {
   resolvedProfile?: ResolvedProfile;
 }
 
-export function resolveServerSideToolInvocations(
+function resolveServerSideToolInvocations(
   policy: ServerSideToolInvocationsPolicy | undefined,
   activeCapabilities: ReadonlySet<string>,
 ): boolean | undefined {
@@ -214,7 +199,7 @@ function resolveFunctionCallingModeInternal(
     : undefined;
 }
 
-export function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationConfig {
+function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationConfig {
   const specs = request.builtInToolSpecs ?? specsFromNames(request.builtInToolNames ?? []);
   const builtInTools = buildBuiltInTools(specs);
   const functionTools: ToolListUnion =
@@ -276,7 +261,7 @@ export function buildOrchestrationConfig(request: OrchestrationRequest): Orchest
   return config;
 }
 
-export type ResolveOrchestrationResult =
+type ResolveOrchestrationResult =
   | { config: OrchestrationConfig; error?: undefined }
   | { config?: undefined; error: CallToolResult };
 
@@ -417,4 +402,4 @@ export async function resolveOrchestration(
 }
 
 // Re-export profile types for callers that need them
-export type { ResolvedProfile, ResolveProfileContext, ToolsSpecInput } from './tool-profiles.js';
+export type { ToolsSpecInput } from './tool-profiles.js';

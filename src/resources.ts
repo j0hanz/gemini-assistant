@@ -33,7 +33,7 @@ export { PUBLIC_RESOURCE_URIS } from './public-contract.js';
 export const DISCOVER_CATALOG_URI = 'discover://catalog' as const;
 export const DISCOVER_WORKFLOWS_URI = 'discover://workflows' as const;
 export const DISCOVER_CONTEXT_URI = 'discover://context' as const;
-export const GEMINI_PROFILES_URI = 'gemini://profiles' as const;
+const GEMINI_PROFILES_URI = 'gemini://profiles' as const;
 export const SESSIONS_LIST_URI = 'session://' as const;
 export const WORKSPACE_CONTEXT_URI = 'workspace://context' as const;
 export const WORKSPACE_CACHE_URI = 'workspace://cache' as const;
@@ -748,7 +748,7 @@ function buildProfilesResourceData(): unknown {
   };
 }
 
-export function readGeminiProfilesResource(uri: URL | string): ReadResourceResult {
+function readGeminiProfilesResource(uri: URL | string): ReadResourceResult {
   return jsonResource(toResourceUri(uri), buildProfilesResourceData());
 }
 

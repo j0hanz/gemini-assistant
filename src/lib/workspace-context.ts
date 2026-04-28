@@ -213,7 +213,7 @@ const WORKSPACE_CACHE_DISPLAY = 'gemini-assistant-workspace';
 const HASH_CHECK_INTERVAL_MS = 120_000;
 const log = logger.child('workspace');
 
-export const SCAN_FILE_NAMES = new Set([
+const SCAN_FILE_NAMES = new Set([
   'readme.md',
   'package.json',
   'tsconfig.json',
@@ -685,7 +685,7 @@ export function createWorkspaceAccess(
   };
 }
 
-export async function getWorkspaceCacheName(
+async function getWorkspaceCacheName(
   ctx: ServerContext,
   manager: WorkspaceCacheManagerImpl,
   rootsFetcher?: RootsFetcher,

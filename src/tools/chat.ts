@@ -126,7 +126,7 @@ interface AskStructuredContent extends Record<string, unknown> {
   warnings?: string[];
 }
 
-export interface AskDependencies {
+interface AskDependencies {
   appendSessionContent: (sessionId: string, item: ContentEntry) => boolean;
   appendSessionEvent: (sessionId: string, item: SessionEventEntry) => boolean;
   appendSessionTranscript: (sessionId: string, item: TranscriptEntry) => boolean;
@@ -152,7 +152,7 @@ export interface AskDependencies {
   ) => void;
 }
 
-export interface AskExecutionResult {
+interface AskExecutionResult {
   result: CallToolResult;
   sentMessage?: string;
   streamResult: StreamResult;

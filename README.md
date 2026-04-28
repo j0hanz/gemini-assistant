@@ -2,8 +2,6 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](#license) [![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org) [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org) [![MCP](https://img.shields.io/badge/MCP-2.0--alpha-7e3aaf?style=for-the-badge)](https://modelcontextprotocol.io) [![Last Commit](https://img.shields.io/github/last-commit/j0hanz/gemini-assistant?style=for-the-badge)](https://github.com/j0hanz/gemini-assistant/commits/master)
 
----
-
 Workflow-first Model Context Protocol server for Google Gemini — chat, research, file analysis, and review under one job-first surface.
 
 ## Overview

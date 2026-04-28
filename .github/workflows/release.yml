@@ -1,0 +1,196 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+      custom_version:
+        description: 'Custom version (overrides bump, e.g. 2.0.0-beta.1)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  # ─────────────────────────────────────────
+  # 1. Bump versions, validate, tag & release
+  # ─────────────────────────────────────────
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine version
+        id: ver
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          if [ -n "${{ inputs.custom_version }}" ]; then
+            NEW="${{ inputs.custom_version }}"
+          else
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+            case "${{ inputs.bump }}" in
+              major) NEW="$((MAJOR + 1)).0.0" ;;
+              minor) NEW="$MAJOR.$((MINOR + 1)).0" ;;
+              patch) NEW="$MAJOR.$MINOR.$((PATCH + 1))" ;;
+            esac
+          fi
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "### Version: $CURRENT → $NEW" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bump package.json and server.json
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          const path = 'server.json';
+          const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+
+          data.version = process.env.VERSION;
+
+          if (Array.isArray(data.packages)) {
+            for (const pkg of data.packages) {
+              if (pkg && typeof pkg === 'object') {
+                if (pkg.registryType === 'oci') {
+                  const idBase = pkg.identifier.split(':')[0];
+                  pkg.identifier = `${idBase}:${process.env.VERSION}`;
+                  delete pkg.version;
+                } else {
+                  pkg.version = process.env.VERSION;
+                }
+              }
+            }
+          }
+
+          fs.writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
+          NODE
+          npm install --package-lock-only --ignore-scripts
+
+      - name: Install & validate
+        run: |
+          npm ci
+          npm run check
+
+      - name: Commit, tag & push
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          git add package.json package-lock.json server.json
+          git commit -m "release: v$VERSION"
+          git tag -a "v$VERSION" -m "v$VERSION"
+          git push origin main --follow-tags
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: gh release create "v$VERSION" --title "v$VERSION" --generate-notes
+
+  # ─────────────────────────────────────────
+  # 2. Publish to npm
+  # ─────────────────────────────────────────
+  publish-npm:
+    name: npm
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install & build
+        run: npm ci
+
+      - name: Publish
+        run: |
+          npm publish --access public --provenance --ignore-scripts || {
+            if npm view "@j0hanz/gemini-assistant@$VERSION" version 2>/dev/null; then
+              echo "::notice::v$VERSION already on npm — skipped"
+            else
+              exit 1
+            fi
+          }
+
+      - name: Summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## 📦 Published to npm
+          | | |
+          |---|---|
+          | **Package** | [\`@j0hanz/gemini-assistant@$VERSION\`](https://www.npmjs.com/package/@j0hanz/gemini-assistant) |
+          | **Auth** | Trusted Publishing (OIDC) |
+          | **Provenance** | ✓ |
+          EOF
+
+  # ─────────────────────────────────────────
+  # 3. Publish to MCP Registry
+  # ─────────────────────────────────────────
+  publish-mcp:
+    name: MCP Registry
+    needs: [release, publish-npm]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - name: Publish
+        run: |
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_${OS}_${ARCH}.tar.gz" \
+            | tar xz mcp-publisher
+          chmod +x mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
+
+      - name: Summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## 🟡 Published to MCP Registry
+          | | |
+          |---|---|
+          | **Server** | \`io.github.j0hanz/gemini-assistant@$VERSION\` |
+          | **Registry** | [registry.modelcontextprotocol.io](https://registry.modelcontextprotocol.io) |
+          EOF

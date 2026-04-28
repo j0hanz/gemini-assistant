@@ -4,7 +4,7 @@
 
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org) [![TypeScript](https://img.shields.io/badge/TypeScript-v6-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 
-Workflow-first MCP server that exposes Google Gemini as four focused jobs — chat, research, analyze, and review — over stdio, HTTP, or web-standard transports.
+An MCP server implementation on top of the Google Gemini API, with a fixed public surface of tools and prompts, server-managed sessions and workspace context caching.
 
 ## Overview
 

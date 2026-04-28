@@ -1,0 +1,50 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.j0hanz/gemini-assistant",
+  "description": "Workflow-first MCP server for Google Gemini with sessions and workspace context",
+  "repository": {
+    "url": "https://github.com/j0hanz/gemini-assistant",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@j0hanz/gemini-assistant",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "API_KEY",
+          "description": "Google Gemini API key — obtain from Google AI Studio (aistudio.google.com)",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "MODEL",
+          "description": "Gemini model to use. Defaults to gemini-3-flash-preview",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "TRANSPORT",
+          "description": "Transport mode: stdio (default), http, or web-standard",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "MCP_HTTP_TOKEN",
+          "description": "Bearer token for HTTP transport (minimum 32 characters). Required when TRANSPORT=http without MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

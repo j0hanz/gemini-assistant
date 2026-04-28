@@ -77,18 +77,6 @@ interface SafeParseSchema {
 interface ParseSchema {
   parse: (value: unknown) => unknown;
 }
-interface JsonSchemaProvider {
-  input: (options: { target: string }) => unknown;
-  output?: (options: { target: string }) => unknown;
-}
-interface StandardSchemaLike {
-  '~standard': {
-    vendor: string;
-    version: number;
-    jsonSchema: JsonSchemaProvider;
-    validate: (value: unknown) => { value: unknown };
-  };
-}
 
 function hasSafeParse(schema: unknown): schema is SafeParseSchema {
   return (
@@ -108,40 +96,8 @@ function hasParse(schema: unknown): schema is ParseSchema {
   );
 }
 
-function hasStandardSchema(schema: unknown): schema is StandardSchemaLike {
-  return (
-    typeof schema === 'object' &&
-    schema !== null &&
-    '~standard' in schema &&
-    typeof schema['~standard'] === 'object' &&
-    schema['~standard'] !== null
-  );
-}
-
-// Bypass SDK input-schema validation so schema-invalid args still record a
-// `failed` task result rather than rejecting at the `tools/call` boundary.
-function createSdkPassthroughInputSchema(
-  schema: TaskToolConfig['inputSchema'],
-): TaskRegistrationConfig['inputSchema'] {
-  if (!hasStandardSchema(schema)) {
-    return schema;
-  }
-
-  const standard = schema['~standard'];
-  return {
-    '~standard': {
-      ...standard,
-      validate: (value: unknown) => ({ value }),
-    },
-  } satisfies StandardSchemaLike;
-}
-
 function createTaskRegistrationConfig(config: TaskToolConfig): TaskRegistrationConfig {
-  return {
-    ...config,
-    inputSchema: createSdkPassthroughInputSchema(config.inputSchema),
-    execution: TASK_EXECUTION,
-  };
+  return { ...config, execution: TASK_EXECUTION };
 }
 
 function parseTaskInput(schema: unknown, args: unknown): unknown {

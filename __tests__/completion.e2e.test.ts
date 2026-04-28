@@ -90,4 +90,52 @@ describe('MCP completion/complete for parameterized resources', () => {
       await harness.close();
     }
   });
+
+  it('returns matching job values for discover prompt job arg', async () => {
+    const harness = await createHarness();
+
+    try {
+      const response = await harness.client.request('completion/complete', {
+        argument: { name: 'job', value: 'c' },
+        ref: { type: 'ref/prompt', name: 'discover' },
+      });
+      const result = response.result as unknown as CompletionResult;
+
+      assert.deepStrictEqual(result.completion.values, ['chat']);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('returns matching mode values for research prompt mode arg', async () => {
+    const harness = await createHarness();
+
+    try {
+      const response = await harness.client.request('completion/complete', {
+        argument: { name: 'mode', value: 'q' },
+        ref: { type: 'ref/prompt', name: 'research' },
+      });
+      const result = response.result as unknown as CompletionResult;
+
+      assert.deepStrictEqual(result.completion.values, ['quick']);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('returns matching subject values for review prompt subject arg', async () => {
+    const harness = await createHarness();
+
+    try {
+      const response = await harness.client.request('completion/complete', {
+        argument: { name: 'subject', value: 'd' },
+        ref: { type: 'ref/prompt', name: 'review' },
+      });
+      const result = response.result as unknown as CompletionResult;
+
+      assert.deepStrictEqual(result.completion.values, ['diff']);
+    } finally {
+      await harness.close();
+    }
+  });
 });

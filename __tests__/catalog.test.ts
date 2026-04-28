@@ -8,7 +8,12 @@ import {
   listDiscoveryEntries,
   listWorkflowEntries,
 } from '../src/catalog.js';
-import { createPromptDefinitions } from '../src/prompts.js';
+import {
+  DiscoverPromptSchema,
+  PUBLIC_PROMPT_NAMES,
+  ResearchPromptSchema,
+  ReviewPromptSchema,
+} from '../src/prompts.js';
 import { PUBLIC_RESOURCE_URIS, PUBLIC_TOOL_NAMES } from '../src/public-contract.js';
 import {
   AnalyzeInputSchema,
@@ -100,12 +105,11 @@ const toolSchemas = new Map<string, string[]>([
   ['review', schemaInputs(ReviewInputSchema)],
 ]);
 
-const promptSchemas = new Map(
-  createPromptDefinitions().map((definition) => [
-    definition.name,
-    definition.argsSchema ? schemaInputs(definition.argsSchema) : [],
-  ]),
-);
+const promptSchemas = new Map<string, string[]>([
+  ['discover', schemaInputs(DiscoverPromptSchema)],
+  ['research', schemaInputs(ResearchPromptSchema)],
+  ['review', schemaInputs(ReviewPromptSchema)],
+]);
 
 describe('catalog', () => {
   it('keeps discovery entries uniquely named within each kind', () => {
@@ -189,6 +193,8 @@ describe('catalog', () => {
         `Catalog prompt inputs drifted for ${entry.name}`,
       );
     }
+
+    assert.deepStrictEqual([...promptSchemas.keys()], [...PUBLIC_PROMPT_NAMES]);
   });
 
   it('keeps resource input metadata aligned with URI templates', () => {

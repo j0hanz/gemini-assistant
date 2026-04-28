@@ -29,7 +29,6 @@ import {
   safeValidateStructuredContent,
 } from './response.js';
 import { executeToolStream, extractUsage, type StreamResult } from './streaming.js';
-import { findToolServices } from './tool-context.js';
 import { type GeminiRequestPreflight, validateGeminiRequest, validateUrls } from './validation.js';
 import { getWorkSignal } from './work-signal.js';
 
@@ -125,6 +124,7 @@ function appendWarningsToContent(
 export interface GeminiPipelineRequest<T extends Record<string, unknown>> {
   toolName: string;
   label: string;
+  cacheName?: string | undefined;
   commonInputs?: CommonToolInputs | undefined;
   builtInToolSpecs?: readonly BuiltInToolSpec[] | undefined;
   buildContents: (activeCapabilities: Set<string>) => {
@@ -463,9 +463,6 @@ export class ToolExecutor {
     ctx: ServerContext,
     request: GeminiPipelineRequest<T>,
   ): Promise<CallToolResult> {
-    const toolServices = findToolServices(ctx);
-    const cacheName = toolServices ? await toolServices.workspace.resolveCacheName(ctx) : undefined;
-
     const baseOrchestration = buildOrchestrationRequestFromInputs(request.commonInputs ?? {});
     const mergedSpecs: BuiltInToolSpec[] = [
       ...(baseOrchestration.builtInToolSpecs ?? []),
@@ -484,7 +481,7 @@ export class ToolExecutor {
       buildContents: request.buildContents,
       config: {
         ...request.config,
-        cacheName,
+        cacheName: request.cacheName,
       },
       ...(request.responseBuilder ? { responseBuilder: request.responseBuilder } : {}),
     });

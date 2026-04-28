@@ -399,7 +399,7 @@ describe('public MCP task lifecycle', () => {
     }
   });
 
-  it('surfaces input validation failures through tasks/result instead of JSON-RPC', async () => {
+  it('rejects malformed task input at the tools/call boundary', async () => {
     const harness = await createHarness();
 
     try {
@@ -412,23 +412,12 @@ describe('public MCP task lifecycle', () => {
         task: { ttl: 60_000 },
       });
 
-      assert.equal(isJsonRpcFailure(response), false);
-      if (isJsonRpcFailure(response)) {
-        assert.fail(`Unexpected JSON-RPC failure: ${response.error.message}`);
+      assert.equal(isJsonRpcFailure(response), true);
+      if (!isJsonRpcFailure(response)) {
+        assert.fail('Expected malformed task input to fail before task creation');
       }
 
-      const taskId = (response.result as { task?: { taskId?: string } }).task?.taskId;
-      assert.ok(taskId, 'Expected invalid task input to still return a task ID');
-
-      const failedTask = await harness.client.request('tasks/get', { taskId });
-      assert.equal(failedTask.result.status, 'failed');
-
-      const failedResult = await getTaskResult(harness.client, taskId);
-      assert.equal(failedResult.isError, true);
-      assert.match(
-        failedResult.content[0]?.text ?? '',
-        /Input validation error|Invalid arguments|research failed/i,
-      );
+      assert.match(response.error.message, /invalid|mode|quick|deep/i);
     } finally {
       await harness.close();
     }

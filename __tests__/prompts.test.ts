@@ -5,28 +5,55 @@ import {
   buildDiscoverPrompt,
   buildResearchPrompt,
   buildReviewPrompt,
-  createPromptDefinitions,
   DiscoverPromptSchema,
   PUBLIC_JOB_OPTIONS,
   PUBLIC_PROMPT_NAMES,
+  registerPrompts,
   renderWorkflowSection,
   ResearchPromptSchema,
   ReviewPromptSchema,
 } from '../src/prompts.js';
 
-const promptDefinitions = createPromptDefinitions();
+function createPromptCaptureServer() {
+  const prompts: { description?: string; name: string; title?: string }[] = [];
 
-describe('prompt definitions', () => {
-  it('exports the full public prompt surface', () => {
+  return {
+    prompts,
+    server: {
+      registerPrompt: (
+        name: string,
+        config: { description?: string; title?: string },
+        _cb: unknown,
+      ) => {
+        prompts.push({
+          name,
+          ...(config.title ? { title: config.title } : {}),
+          ...(config.description ? { description: config.description } : {}),
+        });
+      },
+    },
+  };
+}
+
+describe('prompt registration', () => {
+  it('registers exactly the public prompt names in order', () => {
+    const { prompts, server } = createPromptCaptureServer();
+
+    registerPrompts(server as never);
+
     assert.deepStrictEqual(
-      promptDefinitions.map((definition) => definition.name),
+      prompts.map((prompt) => prompt.name),
       [...PUBLIC_PROMPT_NAMES],
     );
   });
 
-  it('keeps prompt titles aligned with stable prompt ordering', () => {
+  it('registers prompts with correct titles', () => {
+    const { prompts, server } = createPromptCaptureServer();
+
+    registerPrompts(server as never);
+
     assert.deepStrictEqual(
-      promptDefinitions.map((definition) => definition.title),
+      prompts.map((prompt) => prompt.title),
       ['Discover', 'Research', 'Review'],
     );
   });

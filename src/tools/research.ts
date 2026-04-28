@@ -51,12 +51,7 @@ import {
   READONLY_NON_IDEMPOTENT_ANNOTATIONS,
   registerWorkTool,
 } from '../lib/task-utils.js';
-import {
-  bindToolServices,
-  createDefaultToolServices,
-  findToolServices,
-  type ToolServices,
-} from '../lib/tool-context.js';
+import { createDefaultToolServices, type ToolServices } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
 import type { ToolsSpecInput } from '../lib/tool-profiles.js';
 import { type AnalyzeInput, type ResearchInput, ResearchInputSchema } from '../schemas/inputs.js';
@@ -595,6 +590,7 @@ async function runDeepResearchPlan(
     safetySettings?: ResearchInput['safetySettings'] | undefined;
   },
   ctx: ServerContext,
+  services: ToolServices,
 ): Promise<CallToolResult> {
   const warnings: string[] = [];
   const results: StreamResult[] = [];
@@ -693,7 +689,7 @@ async function runDeepResearchPlan(
     mode: 'deep',
   });
   if (resolvedSynthesis.error) return resolvedSynthesis.error;
-  const cacheName = await findToolServices(ctx)?.workspace.resolveCacheName(ctx);
+  const cacheName = await services.workspace.resolveCacheName(ctx);
   const synthesisCanRetrieve =
     resolvedSynthesis.config.activeCapabilities.has('googleSearch') ||
     resolvedSynthesis.config.activeCapabilities.has('urlContext') ||
@@ -851,6 +847,7 @@ async function searchWork(
 export async function analyzeUrlWork(
   { urls, goal, thinkingLevel, thinkingBudget, maxOutputTokens, safetySettings }: AnalyzeUrlInput,
   ctx: ServerContext,
+  services?: ToolServices,
 ): Promise<CallToolResult> {
   const prompt = buildFileAnalysisPrompt({
     goal,
@@ -865,6 +862,7 @@ export async function analyzeUrlWork(
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'analyze_url',
     label: TOOL_LABELS.analyzeUrl,
+    cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
     commonInputs: { urls },
     buildContents: () => ({
       contents: [prompt.promptText],
@@ -893,6 +891,7 @@ async function agenticSearchWork(
     safetySettings,
   }: DeepResearchInput,
   ctx: ServerContext,
+  services: ToolServices,
 ): Promise<CallToolResult> {
   let topic = goal;
   if (searchDepth >= 5 || (searchDepth >= 4 && !deliverable)) {
@@ -926,6 +925,7 @@ async function agenticSearchWork(
         safetySettings,
       },
       ctx,
+      services,
     );
   }
 
@@ -984,6 +984,7 @@ async function runQuickResearch(
 async function runDeepResearch(
   args: Extract<ResearchInput, { mode: 'deep' }>,
   ctx: ServerContext,
+  services: ToolServices,
 ): Promise<CallToolResult> {
   const searchDepth = args.searchDepth ?? 2;
   const hasExplicitThinkingLevel = Object.hasOwn(args, 'thinkingLevel');
@@ -996,6 +997,7 @@ async function runDeepResearch(
       ...(thinkingLevel ? { thinkingLevel } : {}),
     },
     ctx,
+    services,
   );
 }
 
@@ -1047,11 +1049,15 @@ function buildResearchStructuredContent(
   });
 }
 
-async function researchWork(args: ResearchInput, ctx: ServerContext): Promise<CallToolResult> {
+async function researchWork(
+  args: ResearchInput,
+  ctx: ServerContext,
+  services: ToolServices,
+): Promise<CallToolResult> {
   const result = isQuickResearchInput(args)
     ? await runQuickResearch(args, ctx)
     : isDeepResearchInput(args)
-      ? await runDeepResearch(args, ctx)
+      ? await runDeepResearch(args, ctx, services)
       : await runQuickResearch(args, ctx);
 
   if (result.isError) {
@@ -1079,6 +1085,6 @@ export function registerResearchTool(server: McpServer, services?: ToolServices)
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
     overrides: { defaultTtlMs: 900_000 },
-    work: (args, ctx) => researchWork(args, bindToolServices(ctx, resolvedServices)),
+    work: (args, ctx) => researchWork(args, ctx, resolvedServices),
   });
 }

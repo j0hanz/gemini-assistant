@@ -1,12 +1,9 @@
-import type { ServerContext } from '@modelcontextprotocol/server';
-
 import {
   createSessionAccess,
   createSessionStore,
   type SessionAccess,
   type SessionStore,
 } from '../sessions.js';
-import { AppError } from './errors.js';
 import { isPathWithinRoot, type RootsFetcher } from './validation.js';
 import {
   buildContextUsed,
@@ -17,8 +14,6 @@ import {
   type WorkspaceAccess,
   type WorkspaceCacheManagerImpl,
 } from './workspace-context.js';
-
-const TOOL_SERVICES_KEY = Symbol('gemini-assistant.tool-services');
 
 export interface ToolServices {
   rootsFetcher: RootsFetcher;
@@ -44,27 +39,6 @@ export function toToolWorkspaceAccess(
   return workspaceOrManager !== undefined && 'allowedRoots' in workspaceOrManager
     ? workspaceOrManager
     : createWorkspaceAccess(workspaceOrManager ?? createWorkspaceCacheManager());
-}
-
-type BoundToolContext = ServerContext & {
-  [TOOL_SERVICES_KEY]?: ToolServices;
-};
-
-export function bindToolServices(ctx: ServerContext, services: ToolServices): ServerContext {
-  (ctx as BoundToolContext)[TOOL_SERVICES_KEY] = services;
-  return ctx;
-}
-
-export function getToolServices(ctx: ServerContext): ToolServices {
-  const services = findToolServices(ctx);
-  if (!services) {
-    throw new AppError('server', 'Tool services are unavailable on the current server context.');
-  }
-  return services;
-}
-
-export function findToolServices(ctx: ServerContext): ToolServices | undefined {
-  return (ctx as BoundToolContext)[TOOL_SERVICES_KEY];
 }
 
 export function createDefaultToolServices(): ToolServices {

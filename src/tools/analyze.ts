@@ -22,7 +22,6 @@ import {
   registerWorkTool,
 } from '../lib/task-utils.js';
 import {
-  bindToolServices,
   createDefaultToolServices,
   type ToolRootsFetcher,
   type ToolServices,
@@ -115,7 +114,7 @@ function collectDiagramSourceFiles(
   return [...(sourceFilePath ? [sourceFilePath] : []), ...(sourceFilePaths ?? [])];
 }
 
-function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher) {
+function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher, services?: ToolServices) {
   return async function analyzeFileWork(
     {
       filePath,
@@ -143,6 +142,7 @@ function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher) {
         return await executor.executeGeminiPipeline(ctx, {
           toolName: 'analyze_file',
           label: TOOL_LABELS.analyzeFile,
+          cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
           commonInputs: {},
           buildContents: () => {
             const { promptText, systemInstruction } = buildFileAnalysisPrompt({
@@ -259,6 +259,7 @@ async function analyzeDiagramWork(
   rootsFetcher: ToolRootsFetcher,
   args: AnalyzeDiagramInput,
   ctx: ServerContext,
+  services?: ToolServices,
 ): Promise<CallToolResult> {
   const { progress } = createToolContext('analyzeDiagram', ctx);
 
@@ -299,6 +300,7 @@ async function analyzeDiagramWork(
       return await executor.executeGeminiPipeline(ctx, {
         toolName: 'analyze_diagram',
         label: TOOL_LABELS.analyzeDiagram,
+        cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
         builtInToolSpecs: diagramSpecs,
         buildContents: () => {
           const prompt = buildDiagramGenerationPrompt({
@@ -369,11 +371,12 @@ async function analyzeWork(
   fileWork: ReturnType<typeof createAnalyzeFileWork>,
   args: AnalyzeInput,
   ctx: ServerContext,
+  services?: ToolServices,
 ): Promise<CallToolResult> {
   const result =
     args.outputKind === 'diagram'
-      ? await analyzeDiagramWork(rootsFetcher, args as AnalyzeDiagramInput, ctx)
-      : await runAnalyzeTarget(rootsFetcher, fileWork, args, ctx);
+      ? await analyzeDiagramWork(rootsFetcher, args as AnalyzeDiagramInput, ctx, services)
+      : await runAnalyzeTarget(rootsFetcher, fileWork, args, ctx, services);
 
   if (result.isError) {
     return result;
@@ -392,13 +395,14 @@ async function runAnalyzeTarget(
   fileWork: ReturnType<typeof createAnalyzeFileWork>,
   args: AnalyzeInput,
   ctx: ServerContext,
+  services?: ToolServices,
 ): Promise<CallToolResult> {
   if (args.targetKind === 'file') {
     return await fileWork(args, ctx);
   }
 
   if (args.targetKind === 'url') {
-    return await analyzeUrlWork(args, ctx);
+    return await analyzeUrlWork(args, ctx, services);
   }
 
   return await analyzeMultiFileWork(
@@ -496,7 +500,7 @@ function buildAnalyzeStructuredContent(
 
 export function registerAnalyzeTool(server: McpServer, services?: ToolServices): void {
   const resolvedServices = services ?? createDefaultToolServices();
-  const fileWork = createAnalyzeFileWork(resolvedServices.rootsFetcher);
+  const fileWork = createAnalyzeFileWork(resolvedServices.rootsFetcher, resolvedServices);
 
   registerWorkTool<AnalyzeInput>({
     server,
@@ -510,11 +514,6 @@ export function registerAnalyzeTool(server: McpServer, services?: ToolServices):
       annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     },
     work: (args, ctx) =>
-      analyzeWork(
-        resolvedServices.rootsFetcher,
-        fileWork,
-        args,
-        bindToolServices(ctx, resolvedServices),
-      ),
+      analyzeWork(resolvedServices.rootsFetcher, fileWork, args, ctx, resolvedServices),
   });
 }

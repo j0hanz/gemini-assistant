@@ -18,9 +18,7 @@ import {
   registerWorkTool,
 } from '../lib/task-utils.js';
 import {
-  bindToolServices,
   createDefaultToolServices,
-  findToolServices,
   isPathWithinRoot,
   type ToolRootsFetcher,
   type ToolServices,
@@ -1231,6 +1229,7 @@ export async function analyzePrWork(
   ctx: ServerContext,
   workspaceCacheManagerOrRootsFetcher?: ToolWorkspaceCacheManager | ToolRootsFetcher,
   rootsFetcher: ToolRootsFetcher = () => Promise.resolve([]),
+  services?: ToolServices,
 ): Promise<CallToolResult> {
   const resolvedRootsFetcher =
     typeof workspaceCacheManagerOrRootsFetcher === 'function'
@@ -1285,8 +1284,7 @@ export async function analyzePrWork(
   await logSnapshotStats(ctx, snapshot, budgetedDiff.truncated);
 
   const envDocs = getReviewDocs();
-  const toolServices = findToolServices(ctx);
-  const docPathsToCheck = envDocs ?? [...(toolServices?.workspace.scanFileNames() ?? [])];
+  const docPathsToCheck = envDocs ?? [...(services?.workspace.scanFileNames() ?? [])];
   const docContexts = await readDocFiles(workingDirectory, docPathsToCheck);
 
   const prompt = buildAnalysisPrompt(
@@ -1311,6 +1309,7 @@ export async function analyzePrWork(
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'analyze_pr',
     label: TOOL_LABELS.review,
+    cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
     buildContents: () => ({
       contents: [modelPrompt.promptText],
       systemInstruction: modelPrompt.systemInstruction,
@@ -1394,6 +1393,7 @@ export async function reviewWork(
   deps: ReviewWorkDeps,
   args: ReviewInput,
   ctx: ServerContext,
+  services?: ToolServices,
 ): Promise<CallToolResult> {
   const compareWork = deps.compareWork;
   const rootsFetcher = deps.rootsFetcher;
@@ -1415,6 +1415,8 @@ export async function reviewWork(
       },
       ctx,
       rootsFetcher,
+      undefined,
+      services,
     );
   } else if (args.subjectKind === 'comparison') {
     const filePathA = requireReviewField(args.filePathA, 'filePathA', args.subjectKind);
@@ -1486,7 +1488,8 @@ export function registerReviewTool(server: McpServer, services?: ToolServices): 
           rootsFetcher: resolvedServices.rootsFetcher,
         },
         args,
-        bindToolServices(ctx, resolvedServices),
+        ctx,
+        resolvedServices,
       ),
   });
 }

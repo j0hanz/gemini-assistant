@@ -13,8 +13,7 @@ const { registerAnalyzeTool } = await import('../../src/tools/analyze.js');
 const { registerChatTool } = await import('../../src/tools/chat.js');
 const { registerResearchTool } = await import('../../src/tools/research.js');
 const { registerReviewTool } = await import('../../src/tools/review.js');
-const { createPromptDefinitions, PUBLIC_PROMPT_NAMES, registerPrompts } =
-  await import('../../src/prompts.js');
+const { PUBLIC_PROMPT_NAMES, registerPrompts } = await import('../../src/prompts.js');
 const { PUBLIC_RESOURCE_URIS, registerResources } = await import('../../src/resources.js');
 const { createSessionStore } = await import('../../src/sessions.js');
 const { PUBLIC_TOOL_NAMES } = await import('../../src/public-contract.js');
@@ -92,10 +91,7 @@ describe('tool registration', () => {
   });
 
   it('keeps the exported prompt and resource surface aligned with discoverability docs', () => {
-    assert.deepStrictEqual(
-      createPromptDefinitions().map((definition) => definition.name),
-      [...PUBLIC_PROMPT_NAMES],
-    );
+    assert.deepStrictEqual([...PUBLIC_PROMPT_NAMES], ['discover', 'research', 'review']);
     assert.deepStrictEqual(
       [...PUBLIC_RESOURCE_URIS],
       [

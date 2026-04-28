@@ -37,7 +37,6 @@ import {
 } from '../lib/streaming.js';
 import { MUTABLE_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import {
-  bindToolServices,
   buildContextUsed,
   buildSessionSummary,
   emptyContextUsed,
@@ -1338,6 +1337,6 @@ export function registerChatTool(server: McpServer, services: ToolServices): voi
       outputSchema: ChatOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
     },
-    work: (args, ctx) => chatWork(askWork, args, bindToolServices(ctx, services)),
+    work: (args, ctx) => chatWork(askWork, args, ctx),
   });
 }

@@ -614,6 +614,44 @@ describe('registerTaskTool', () => {
     };
   }
 
+  it('registers the original input schema validate behavior for task tools', () => {
+    let capturedConfig: { inputSchema: unknown } | undefined;
+
+    const server = {
+      experimental: {
+        tasks: {
+          registerToolTask: (_name: string, config: { inputSchema: unknown }) => {
+            capturedConfig = config;
+          },
+        },
+      },
+    } as unknown as import('@modelcontextprotocol/server').McpServer;
+
+    registerTaskTool(
+      server,
+      'test-tool',
+      {
+        title: 'Test Tool',
+        description: 'test',
+        inputSchema: z.strictObject({ msg: z.string() }),
+        annotations: {},
+      },
+      async () => ({ content: [{ type: 'text', text: 'ok' }] }),
+    );
+
+    const standardSchema = capturedConfig?.inputSchema as {
+      '~standard': {
+        validate: (value: unknown) => {
+          issues?: unknown[];
+          value?: unknown;
+        };
+      };
+    };
+    const validation = standardSchema['~standard'].validate({ msg: 123 });
+
+    assert.ok(validation.issues && validation.issues.length > 0);
+  });
+
   it('stores completed status when central validation downgrades structured-content mismatch to a warning', async () => {
     const store = makeMockStore();
     const ctx = makeMockContext({ taskStore: store });

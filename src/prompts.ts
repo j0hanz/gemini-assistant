@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/server';
+import { completable, type McpServer } from '@modelcontextprotocol/server';
 
 import { z } from 'zod/v4';
 
@@ -18,43 +18,9 @@ export { PUBLIC_PROMPT_NAMES } from './public-contract.js';
 
 export const PUBLIC_JOB_OPTIONS = [...PublicJobNameSchema.options];
 
-type PromptMessageResult = ReturnType<typeof userPromptMessage>;
-type BuildMessageResult = PromptMessageResult | Promise<PromptMessageResult>;
-
-interface PromptDefinition {
-  name: PublicPromptName;
-  title: string;
-  description: string;
-  argsSchema?: z.ZodType;
-  buildMessage: (args: Record<string, unknown>) => BuildMessageResult;
-}
-
-function definePrompt<Schema extends z.ZodType>(config: {
-  name: PublicPromptName;
-  title: string;
-  description: string;
-  argsSchema: Schema;
-  buildMessage: (args: z.infer<Schema>) => BuildMessageResult;
-}): PromptDefinition;
-function definePrompt(config: {
-  name: PublicPromptName;
-  title: string;
-  description: string;
-  buildMessage: () => BuildMessageResult;
-}): PromptDefinition;
-function definePrompt(config: {
-  name: PublicPromptName;
-  title: string;
-  description: string;
-  argsSchema?: z.ZodType;
-  buildMessage: (args: never) => BuildMessageResult;
-}): PromptDefinition {
-  const { argsSchema, buildMessage, ...rest } = config;
-  return {
-    ...rest,
-    ...(argsSchema ? { argsSchema } : {}),
-    buildMessage: (args) => buildMessage(args as never),
-  };
+function enumComplete<T extends string>(options: readonly T[]) {
+  return (value: string | undefined): T[] =>
+    options.filter((option) => option.startsWith(value ?? ''));
 }
 
 function userPromptMessage(text: string) {
@@ -94,7 +60,10 @@ export function renderWorkflowSection(name: PublicWorkflowName): string {
 
 export const DiscoverPromptSchema = z
   .strictObject({
-    job: PublicJobNameSchema.optional().describe('Public job to focus discovery guidance on.'),
+    job: completable(
+      PublicJobNameSchema.describe('Public job to focus discovery guidance on.'),
+      enumComplete(PublicJobNameSchema.options),
+    ).optional(),
     goal: textField('User outcome to optimize for.').optional(),
   })
   .describe('Guide a client to the best public job, prompt, and resource.');
@@ -102,16 +71,19 @@ export const DiscoverPromptSchema = z
 export const ResearchPromptSchema = z
   .strictObject({
     goal: goalText('Research goal or question'),
-    mode: enumField(RESEARCH_MODE_OPTIONS, 'Research mode (quick or deep).').optional(),
+    mode: completable(
+      enumField(RESEARCH_MODE_OPTIONS, 'Research mode (quick or deep).'),
+      enumComplete(RESEARCH_MODE_OPTIONS),
+    ).optional(),
     deliverable: textField('Requested output form.').optional(),
   })
   .describe('Explain the quick-versus-deep research decision flow.');
 
 export const ReviewPromptSchema = z
   .strictObject({
-    subject: enumField(
-      REVIEW_SUBJECT_OPTIONS,
-      'Review variant (diff, comparison, failure).',
+    subject: completable(
+      enumField(REVIEW_SUBJECT_OPTIONS, 'Review variant (diff, comparison, failure).'),
+      enumComplete(REVIEW_SUBJECT_OPTIONS),
     ).optional(),
     focus: textField('Review priority (e.g. regressions, tests, security).').optional(),
   })
@@ -151,48 +123,43 @@ export function buildReviewPrompt(args: z.infer<typeof ReviewPromptSchema>) {
   );
 }
 
-export function createPromptDefinitions(): PromptDefinition[] {
-  return [
-    definePrompt({
-      name: 'discover',
+export function registerPrompts(server: McpServer): void {
+  server.registerPrompt(
+    'discover' satisfies PublicPromptName,
+    {
       title: 'Discover',
       description: 'Guide a client to the best public job, prompt, and resource.',
       argsSchema: DiscoverPromptSchema,
-      buildMessage: buildDiscoverPrompt,
+    },
+    (args) => ({
+      description: 'Guide a client to the best public job, prompt, and resource.',
+      ...buildDiscoverPrompt(args),
     }),
-    definePrompt({
-      name: 'research',
+  );
+
+  server.registerPrompt(
+    'research' satisfies PublicPromptName,
+    {
       title: 'Research',
       description: 'Explain the quick-versus-deep research decision flow.',
       argsSchema: ResearchPromptSchema,
-      buildMessage: buildResearchPrompt,
+    },
+    (args) => ({
+      description: 'Explain the quick-versus-deep research decision flow.',
+      ...buildResearchPrompt(args),
     }),
-    definePrompt({
-      name: 'review',
+  );
+
+  server.registerPrompt(
+    'review' satisfies PublicPromptName,
+    {
       title: 'Review',
       description: 'Guide diff review, file comparison, or failure triage.',
       argsSchema: ReviewPromptSchema,
-      buildMessage: buildReviewPrompt,
+    },
+    (args) => ({
+      description: 'Guide diff review, file comparison, or failure triage.',
+      ...buildReviewPrompt(args),
     }),
-  ];
-}
-
-export function registerPrompts(server: McpServer): void {
-  for (const definition of createPromptDefinitions()) {
-    server.registerPrompt(
-      definition.name,
-      {
-        title: definition.title,
-        description: definition.description,
-        ...(definition.argsSchema ? { argsSchema: definition.argsSchema } : {}),
-      },
-      async (args) => {
-        const built = await definition.buildMessage((args ?? {}) as Record<string, unknown>);
-        return {
-          description: definition.description,
-          ...built,
-        };
-      },
-    );
-  }
+  );
 }

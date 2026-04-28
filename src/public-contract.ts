@@ -151,15 +151,16 @@ const TOOL_DISCOVERY_DETAILS = {
       'A direct answer, optional structured data, usage/safety/citation metadata, and session resource links. When sessions are active, raw Gemini `Part[]` are persisted for replay-safe orchestration via the session-turn-parts resource (available only when sessions persist `Part[]`).',
     limitations: [
       'Sessions, task state, and task message queues are process-local memory state; restarts or stateless deployments lose continuity.',
+      '`readOnlyHint: true` covers only effects outside ephemeral in-memory session state; chat still mutates session state and clients must not cache or deduplicate calls.',
       'Sessions require a stateful server connection path. Stateless transport rejects chat calls that include sessionId.',
       'Stateless transport (STATELESS=true) does not advertise the tasks capability — task-aware tools/call requests are unavailable; clients must rely on the synchronous return path.',
       'Input caps: goal max 100000 chars.',
       'Progress notifications truncate streamed text to ~80 characters per update; full text is delivered in the final response only.',
       'Sessions started before raw `Part[]` capture cannot serve `gemini://sessions/.../parts`.',
       'Transcript, events, and raw turn-parts resources require MCP_EXPOSE_SESSION_RESOURCES=true.',
-      'Structured output is intended for single-turn calls and new sessions, not resumed sessions.',
+      'Structured output is allowed for single-turn calls and new sessions; resumed sessions reject responseSchemaJson.',
       'Declared functions are executed by the MCP client, not by this server; return results through functionResponses on the same sessionId.',
-      'Workspace cache reuse is skipped when a chat call sets systemInstruction, seed, or a non-default temperature; the response may include warnings when cache reuse is skipped.',
+      'Workspace cache reuse is skipped when a chat call sets systemInstruction, seed, or a caller-provided non-default temperature; the response may include warnings when cache reuse is skipped.',
       'serverSideToolInvocations=auto includes server-side tool traces whenever Gemini built-in tools are active, including built-in-only flows.',
     ],
     related: [
@@ -190,7 +191,9 @@ const TOOL_DISCOVERY_DETAILS = {
     limitations: [
       'Mode defaults to quick; this contract does not accept legacy top-level query or topic fields.',
       'Input caps: goal max 100000 chars.',
+      '`searchDepth` and `deliverable` are rejected when `mode=quick`; `systemInstruction` is rejected when `mode=deep`.',
       'Grounding uses Google Search, optional URL Context, and optional Gemini File Search stores.',
+      'Response `status` and `urlMetadata[].status` are forward-compatible open enums; clients must accept unknown string values.',
       'Claim-level findings and citations reflect source attribution from retrieved metadata, not independent verification of truth.',
     ],
     related: [
@@ -225,6 +228,7 @@ const TOOL_DISCOVERY_DETAILS = {
     limitations: [
       'Multi-target analysis is intentionally small and file-oriented to keep prompts bounded.',
       'URL targets require public http/https addresses.',
+      'Response `status` and `urlMetadata[].status` are forward-compatible open enums; clients must accept unknown string values.',
     ],
     related: [
       { kind: 'tool', name: 'research' },
@@ -258,6 +262,7 @@ const TOOL_DISCOVERY_DETAILS = {
     limitations: [
       'The diff mode inspects the local repository only; it does not fetch remote GitHub state.',
       'Input caps: goal max 100000 chars via focus-bearing review prompts, error max 32000 chars, codeContext max 16000 chars.',
+      'Subject-specific fields (`dryRun`, `filePathA`, `filePathB`, `question`, `error`, `codeContext`, `googleSearch`, `fileSearch`, `urls`) are rejected outside the matching `subjectKind` variant.',
       'Failure review can use optional search/URL context, but only from explicit subject fields.',
     ],
     related: [

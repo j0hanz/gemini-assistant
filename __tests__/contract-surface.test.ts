@@ -203,6 +203,52 @@ describe('contract surface invariants', () => {
     assertAnnotatedInput(review.inputs, 'fileSearch', 'subjectKind=comparison or failure');
   });
 
+  it('documents discovery-side selector strictness and forward-compatible enums', () => {
+    const chat = DISCOVERY_ENTRIES.find((entry) => entry.kind === 'tool' && entry.name === 'chat');
+    const research = DISCOVERY_ENTRIES.find(
+      (entry) => entry.kind === 'tool' && entry.name === 'research',
+    );
+    const analyze = DISCOVERY_ENTRIES.find(
+      (entry) => entry.kind === 'tool' && entry.name === 'analyze',
+    );
+    const review = DISCOVERY_ENTRIES.find(
+      (entry) => entry.kind === 'tool' && entry.name === 'review',
+    );
+
+    assert.ok(chat);
+    assert.ok(research);
+    assert.ok(analyze);
+    assert.ok(review);
+
+    assert.ok(
+      chat.limitations?.some((limit) => limit.includes('chat still mutates session state')),
+      'chat limitations must explain its in-memory session mutation semantics',
+    );
+    assert.ok(
+      chat.limitations?.some((limit) =>
+        limit.includes('resumed sessions reject responseSchemaJson'),
+      ),
+      'chat limitations must document resumed-session schema rejection',
+    );
+    assert.ok(
+      research.limitations?.some(
+        (limit) => limit.includes('searchDepth') && limit.includes('mode=quick'),
+      ),
+      'research limitations must document mode-specific field rejection',
+    );
+    assert.ok(
+      review.limitations?.some((limit) => limit.includes('Subject-specific fields')),
+      'review limitations must document subject-specific field rejection',
+    );
+
+    for (const entry of [research, analyze]) {
+      assert.ok(
+        entry.limitations?.some((limit) => limit.includes('forward-compatible open enums')),
+        `${entry.name} limitations must document open-enum status fields`,
+      );
+    }
+  });
+
   it('documents the current resource payloads and input caps in discovery metadata', () => {
     const discoverContext = DISCOVERY_ENTRIES.find(
       (entry) => entry.kind === 'resource' && entry.name === 'discover://context',

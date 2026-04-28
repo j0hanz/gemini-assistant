@@ -5,7 +5,7 @@ import { z } from 'zod/v4';
 
 import { isPublicHttpUrl } from '../lib/validation.js';
 
-import { DEFAULT_TEMPERATURE, PUBLIC_TOOL_NAMES, THINKING_LEVELS } from '../public-contract.js';
+import { PUBLIC_TOOL_NAMES, THINKING_LEVELS } from '../public-contract.js';
 import { validateGeminiJsonSchema } from './validators.js';
 
 const WINDOWS_DRIVE_RELATIVE_PATH_PATTERN = /^[A-Za-z]:(?![\\/])/;
@@ -155,11 +155,10 @@ export function sessionId(description: string) {
   return textField(description, 256);
 }
 
-export function temperatureField(description = 'Sampling temperature 0-2 (default 1).') {
-  return withFieldMetadata(
-    z.number().min(0).max(2).multipleOf(0.1).default(DEFAULT_TEMPERATURE),
-    description,
-  );
+export function temperatureField(
+  description = 'Sampling temperature 0-2. When omitted, the server uses default 1.',
+) {
+  return withFieldMetadata(z.number().min(0).max(2).multipleOf(0.1).optional(), description);
 }
 
 export function thinkingLevel(

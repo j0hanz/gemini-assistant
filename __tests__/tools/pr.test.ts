@@ -1022,6 +1022,7 @@ describe('reviewWork routing', () => {
 
     assert.strictEqual(result.isError, undefined);
     assert.deepStrictEqual(receivedArgs, {
+      subjectKind: 'comparison',
       filePathA: 'src/a.ts',
       filePathB: 'src/b.ts',
       question: 'behavior changes',
@@ -1065,7 +1066,6 @@ describe('reviewWork routing', () => {
     assert.deepStrictEqual(receivedSubject, {
       error: 'ReferenceError: x is not defined',
       codeContext: 'const y = x;',
-      kind: 'failure',
       language: undefined,
       googleSearch: undefined,
       maxOutputTokens: undefined,

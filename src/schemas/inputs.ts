@@ -1,6 +1,5 @@
 import { completable } from '@modelcontextprotocol/server';
 
-import type { GenerateContentConfig, SafetySetting } from '@google/genai';
 import { z } from 'zod/v4';
 import type { ParsePayload } from 'zod/v4/core';
 
@@ -178,7 +177,7 @@ function validateResponseSchemaJson(payload: ParsePayload<string>): void {
 function responseSchemaJsonField() {
   return withFieldMetadata(
     z.string().trim().min(1).check(validateResponseSchemaJson).optional(),
-    'JSON Schema (2020-12) for structured output. Single-turn / new-session only.',
+    'JSON Schema (2020-12) for structured output. Single-turn or new-session only; resumed sessions reject it.',
   );
 }
 
@@ -188,7 +187,7 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
     sessionId: completable(
       optionalField(
         sessionId(
-          'Server-managed in-memory session identifier. Omitting sessionId enables structured output (responseSchemaJson) and JSON schema-repair retry.',
+          'Server-managed in-memory session identifier. Provide it to start or resume a session; resumed sessions reject responseSchemaJson.',
         ),
       ),
       completeSessionIds,
@@ -646,111 +645,3 @@ export const ReviewInputSchema = ReviewInputBaseSchema.pipe(
   >,
 );
 export type ReviewInput = z.infer<typeof ReviewInputSchema>;
-
-export interface AskInput {
-  message: string;
-  sessionId?: string | undefined;
-  systemInstruction?: string | undefined;
-  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | undefined;
-  thinkingBudget?: number | undefined;
-  maxOutputTokens?: number | undefined;
-  safetySettings?:
-    | {
-        category: NonNullable<SafetySetting['category']>;
-        threshold: NonNullable<SafetySetting['threshold']>;
-        method?: NonNullable<SafetySetting['method']> | undefined;
-      }[]
-    | undefined;
-  responseSchema?: GeminiResponseSchema | undefined;
-  temperature?: number | undefined;
-  seed?: number | undefined;
-  codeExecution?: boolean | undefined;
-  fileSearch?:
-    | {
-        fileSearchStoreNames: string[];
-        metadataFilter?: unknown;
-      }
-    | undefined;
-  functions?:
-    | {
-        declarations: {
-          name: string;
-          description: string;
-          parametersJsonSchema?: Record<string, unknown> | undefined;
-        }[];
-        mode?: 'AUTO' | 'ANY' | 'NONE' | 'VALIDATED' | undefined;
-      }
-    | undefined;
-  functionResponses?:
-    | {
-        name: string;
-        response: Record<string, unknown>;
-        id: string;
-      }[]
-    | undefined;
-  serverSideToolInvocations?: 'auto' | 'always' | 'never' | undefined;
-  googleSearch?: boolean | undefined;
-  urls?: string[] | undefined;
-}
-
-export interface SearchInput {
-  query: string;
-  systemInstruction?: string | undefined;
-  urls?: string[] | undefined;
-  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | undefined;
-  thinkingBudget?: number | undefined;
-  maxOutputTokens?: number | undefined;
-  safetySettings?: AskInput['safetySettings'];
-  fileSearch?: AskInput['fileSearch'];
-}
-
-export interface AgenticSearchInput {
-  topic: string;
-  searchDepth?: number | undefined;
-  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | undefined;
-  thinkingBudget?: number | undefined;
-  maxOutputTokens?: number | undefined;
-  safetySettings?: AskInput['safetySettings'];
-  fileSearch?: AskInput['fileSearch'];
-}
-
-export interface AnalyzeFileInput {
-  filePath: string;
-  question: string;
-  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | undefined;
-  thinkingBudget?: number | undefined;
-  mediaResolution?: GenerateContentConfig['mediaResolution'] | undefined;
-  maxOutputTokens?: number | undefined;
-  safetySettings?: AskInput['safetySettings'];
-}
-
-export interface AnalyzeUrlInput {
-  urls: string[];
-  question: string;
-  systemInstruction?: string | undefined;
-  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | undefined;
-  thinkingBudget?: number | undefined;
-  maxOutputTokens?: number | undefined;
-  safetySettings?: AskInput['safetySettings'];
-  fileSearch?: AskInput['fileSearch'];
-}
-
-export interface AnalyzePrInput {
-  dryRun?: boolean | undefined;
-  focus?: string | undefined;
-  language?: string | undefined;
-  thinkingBudget?: ReviewInput['thinkingBudget'];
-  thinkingLevel?: ReviewInput['thinkingLevel'];
-}
-
-export interface CompareFilesInput {
-  filePathA: string;
-  filePathB: string;
-  question?: string | undefined;
-  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | undefined;
-  thinkingBudget?: number | undefined;
-  googleSearch?: boolean | undefined;
-  urls?: string[] | undefined;
-  maxOutputTokens?: number | undefined;
-  safetySettings?: AskInput['safetySettings'];
-}

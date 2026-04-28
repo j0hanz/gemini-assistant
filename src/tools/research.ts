@@ -63,13 +63,7 @@ import {
   type ToolServices,
 } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
-import {
-  type AgenticSearchInput,
-  type AnalyzeUrlInput,
-  type ResearchInput,
-  ResearchInputSchema,
-  type SearchInput,
-} from '../schemas/inputs.js';
+import { type AnalyzeInput, type ResearchInput, ResearchInputSchema } from '../schemas/inputs.js';
 import { ResearchOutputSchema } from '../schemas/outputs.js';
 
 import { buildGenerateContentConfig, getAI } from '../client.js';
@@ -79,10 +73,9 @@ import { TOOL_LABELS } from '../public-contract.js';
 const MAX_DEEP_RESEARCH_TURNS = 4;
 const log = logger.child('research');
 
-type GenerationConfigFields = Pick<
-  ResearchInput,
-  'maxOutputTokens' | 'safetySettings' | 'thinkingBudget' | 'fileSearch'
->;
+type QuickResearchInput = Extract<ResearchInput, { mode: 'quick' }>;
+type DeepResearchInput = Extract<ResearchInput, { mode: 'deep' }>;
+type AnalyzeUrlInput = Extract<AnalyzeInput, { targetKind: 'url' }>;
 
 type ResearchSpecsOptions =
   | {
@@ -842,7 +835,7 @@ async function runDeepResearchPlan(
 
 async function searchWork(
   {
-    query,
+    goal,
     systemInstruction,
     urls,
     thinkingLevel,
@@ -850,7 +843,7 @@ async function searchWork(
     maxOutputTokens,
     safetySettings,
     fileSearch,
-  }: SearchInput & GenerationConfigFields,
+  }: QuickResearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const { progress } = createToolContext('search', ctx);
@@ -867,7 +860,7 @@ async function searchWork(
     },
     buildContents: (activeCapabilities) => {
       const prompt = buildGroundedAnswerPrompt(
-        query,
+        goal,
         urls,
         undefined,
         buildPromptCapabilities(activeCapabilities, false),
@@ -891,18 +884,17 @@ async function searchWork(
 export async function analyzeUrlWork(
   {
     urls,
-    question,
-    systemInstruction,
+    goal,
     thinkingLevel,
     thinkingBudget,
     maxOutputTokens,
     safetySettings,
     fileSearch,
-  }: AnalyzeUrlInput & GenerationConfigFields,
+  }: AnalyzeUrlInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const prompt = buildFileAnalysisPrompt({
-    goal: question,
+    goal,
     kind: 'url',
     urls,
   });
@@ -920,7 +912,7 @@ export async function analyzeUrlWork(
     },
     buildContents: () => ({
       contents: [prompt.promptText],
-      systemInstruction: systemInstruction ?? prompt.systemInstruction,
+      systemInstruction: prompt.systemInstruction,
     }),
     config: {
       costProfile: 'analyze.summary',
@@ -936,7 +928,7 @@ export async function analyzeUrlWork(
 async function agenticSearchWork(
   {
     deliverable,
-    topic,
+    goal,
     searchDepth = 2,
     thinkingLevel,
     thinkingBudget,
@@ -944,14 +936,10 @@ async function agenticSearchWork(
     maxOutputTokens,
     safetySettings,
     fileSearch,
-  }: Omit<AgenticSearchInput, 'thinkingLevel'> &
-    GenerationConfigFields & {
-      deliverable?: string | undefined;
-      thinkingLevel?: ResearchInput['thinkingLevel'] | undefined;
-      urls?: readonly string[] | undefined;
-    },
+  }: DeepResearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
+  let topic = goal;
   if (searchDepth >= 5 || (searchDepth >= 4 && !deliverable)) {
     try {
       const constraint = await elicitTaskInput(
@@ -1043,19 +1031,7 @@ async function runQuickResearch(
   },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  return await searchWork(
-    {
-      query: args.goal,
-      systemInstruction: args.systemInstruction,
-      thinkingLevel: args.thinkingLevel,
-      thinkingBudget: args.thinkingBudget,
-      urls: args.urls,
-      maxOutputTokens: args.maxOutputTokens,
-      safetySettings: args.safetySettings,
-      fileSearch: args.fileSearch,
-    },
-    ctx,
-  );
+  return await searchWork(args, ctx);
 }
 
 async function runDeepResearch(
@@ -1068,15 +1044,9 @@ async function runDeepResearch(
 
   return await agenticSearchWork(
     {
-      deliverable: args.deliverable,
-      topic: args.goal,
+      ...args,
       searchDepth,
       ...(thinkingLevel ? { thinkingLevel } : {}),
-      thinkingBudget: args.thinkingBudget,
-      urls: args.urls,
-      maxOutputTokens: args.maxOutputTokens,
-      safetySettings: args.safetySettings,
-      fileSearch: args.fileSearch,
     },
     ctx,
   );

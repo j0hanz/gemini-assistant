@@ -117,7 +117,7 @@ describe('public input JSON Schema', () => {
   it('publishes declarative defaults for public inputs', () => {
     assert.strictEqual(
       jsonSchemaProperty(z.toJSONSchema(ChatInputSchema), 'temperature')?.default,
-      1,
+      undefined,
     );
   });
 

@@ -24,7 +24,7 @@ import {
   type ToolServices,
 } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
-import { type AnalyzeFileInput, type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
+import { type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 
 import { TOOL_LABELS } from '../public-contract.js';
@@ -45,6 +45,8 @@ interface AnalyzeDiagramInput {
   urls?: string[] | undefined;
   validateSyntax?: boolean | undefined;
 }
+
+type AnalyzeFileInput = Extract<AnalyzeInput, { targetKind: 'file' }>;
 
 const UNLABELED_DIAGRAM_FENCED_PATTERN = /```\s*\n([\s\S]*?)```/;
 
@@ -111,7 +113,7 @@ function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher) {
   return async function analyzeFileWork(
     {
       filePath,
-      question,
+      goal,
       thinkingLevel,
       thinkingBudget,
       mediaResolution,
@@ -120,13 +122,7 @@ function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher) {
       googleSearch,
       urls,
       fileSearch,
-    }: AnalyzeFileInput & {
-      maxOutputTokens?: AnalyzeInput['maxOutputTokens'];
-      safetySettings?: AnalyzeInput['safetySettings'];
-      googleSearch?: boolean | undefined;
-      urls?: readonly string[] | undefined;
-      fileSearch?: AnalyzeInput['fileSearch'] | undefined;
-    },
+    }: AnalyzeFileInput,
     ctx: ServerContext,
   ): Promise<CallToolResult> {
     const { progress } = createToolContext('analyzeFile', ctx);
@@ -151,7 +147,7 @@ function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher) {
           },
           buildContents: (activeCaps) => {
             const { promptText, systemInstruction } = buildFileAnalysisPrompt({
-              goal: question,
+              goal,
               kind: 'single',
             });
             const urlContextPart = buildUrlContextFallbackPart(urls, activeCaps);
@@ -407,36 +403,11 @@ async function runAnalyzeTarget(
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   if (args.targetKind === 'file') {
-    return await fileWork(
-      {
-        filePath: args.filePath,
-        question: args.goal,
-        thinkingLevel: args.thinkingLevel,
-        thinkingBudget: args.thinkingBudget,
-        mediaResolution: args.mediaResolution,
-        maxOutputTokens: args.maxOutputTokens,
-        safetySettings: args.safetySettings,
-        googleSearch: args.googleSearch,
-        urls: args.urls,
-        fileSearch: args.fileSearch,
-      },
-      ctx,
-    );
+    return await fileWork(args, ctx);
   }
 
   if (args.targetKind === 'url') {
-    return await analyzeUrlWork(
-      {
-        urls: args.urls,
-        question: args.goal,
-        thinkingLevel: args.thinkingLevel,
-        thinkingBudget: args.thinkingBudget,
-        maxOutputTokens: args.maxOutputTokens,
-        safetySettings: args.safetySettings,
-        ...(args.fileSearch ? { fileSearch: args.fileSearch } : {}),
-      },
-      ctx,
-    );
+    return await analyzeUrlWork(args, ctx);
   }
 
   return await analyzeMultiFileWork(

@@ -45,6 +45,63 @@ function assertMaterializedToolFailure(
 }
 
 describe('public MCP error taxonomy', () => {
+  it('keeps invalid tool responses free of structuredContent across the public tool surface', async () => {
+    const harness = await createHarness();
+
+    try {
+      const invalidCases: { name: string; arguments: Record<string, unknown> }[] = [
+        { name: 'chat', arguments: { goal: 'say hi', foo: 'bar' } },
+        {
+          name: 'research',
+          arguments: { goal: 'bad quick request', mode: 'quick', searchDepth: 2 },
+        },
+        {
+          name: 'analyze',
+          arguments: {
+            goal: 'Summarize this file',
+            targetKind: 'file',
+            outputKind: 'summary',
+          },
+        },
+        {
+          name: 'review',
+          arguments: {
+            subjectKind: 'comparison',
+            filePathA: 'src/client.ts',
+          },
+        },
+      ];
+
+      for (const testCase of invalidCases) {
+        const response = await harness.client.requestRaw('tools/call', {
+          arguments: testCase.arguments,
+          name: testCase.name,
+        });
+
+        assert.equal(isJsonRpcFailure(response), false);
+        if (isJsonRpcFailure(response)) {
+          assert.fail(
+            `Unexpected JSON-RPC failure for ${testCase.name}: ${response.error.message}`,
+          );
+        }
+
+        const result = response.result as ToolCallResult;
+        assert.equal(
+          result.isError,
+          true,
+          `${testCase.name} invalid input must materialize as a tool error`,
+        );
+        assert.equal(
+          (result as { structuredContent?: unknown }).structuredContent,
+          undefined,
+          `${testCase.name} invalid input must not carry structuredContent`,
+        );
+      }
+    } finally {
+      await harness.close();
+    }
+  });
+
   it('materializes invalid request shapes as tool errors', async () => {
     const harness = await createHarness();
 

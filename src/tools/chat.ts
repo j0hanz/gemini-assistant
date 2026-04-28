@@ -51,7 +51,6 @@ import {
 } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
 import {
-  type AskInput,
   type ChatInput,
   createChatInputSchema,
   parseResponseSchemaJsonValue,
@@ -96,7 +95,12 @@ import {
 export { appendToolResponseTurn, buildRebuiltChatContents };
 
 type ChatWorkInput = WithChatDefaults<ChatInput>;
-export type AskArgs = WithChatDefaults<AskInput> & {
+type InternalAskArgs = Omit<ChatWorkInput, 'goal' | 'responseSchemaJson'> & {
+  message: string;
+  responseSchema?: GeminiResponseSchema;
+};
+
+export type AskArgs = InternalAskArgs & {
   cacheName?: string;
 };
 
@@ -459,7 +463,6 @@ function validateAskRequest(
   const inputValidation = createToolContext('chat', ctx).validateInputs({
     urls,
     geminiRequest: {
-      allowExistingSessionSchema: sessionEntry?.contract !== undefined,
       hasExistingSession,
       jsonMode: responseSchema !== undefined,
       responseSchema,
@@ -474,6 +477,10 @@ function validateAskRequest(
 
   const conflicts: [boolean, string][] = [
     [hasExpiredSession(sessionId, deps), `chat: Session '${sessionId}' has expired.`],
+    [
+      hasExistingSession && responseSchema !== undefined,
+      'chat: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
+    ],
     [hasFunctionResponses && !sessionId, 'chat: functionResponses requires sessionId.'],
     [
       hasFunctionResponses && !hasExistingSession,
@@ -1325,8 +1332,8 @@ export async function chatWork(
   const result = await askWork(
     {
       message: args.goal,
-      sessionId: args.sessionId,
-      responseSchema,
+      ...(args.sessionId !== undefined ? { sessionId: args.sessionId } : {}),
+      ...(responseSchema !== undefined ? { responseSchema } : {}),
       maxOutputTokens: args.maxOutputTokens,
       seed: args.seed,
       safetySettings: args.safetySettings,
@@ -1338,7 +1345,7 @@ export async function chatWork(
       functionResponses: args.functionResponses,
       serverSideToolInvocations: args.serverSideToolInvocations,
       systemInstruction: args.systemInstruction,
-      temperature: args.temperature,
+      temperature: args.temperature ?? DEFAULT_TEMPERATURE,
       thinkingLevel: args.thinkingLevel,
       thinkingBudget: args.thinkingBudget,
     },
@@ -1360,7 +1367,7 @@ export function registerChatTool(server: McpServer, services: ToolServices): voi
       name: 'chat',
       title: 'Chat',
       description:
-        'Direct Gemini chat with optional server-managed sessions and reusable cache memory.',
+        'Direct Gemini chat with optional server-managed in-memory sessions and automatic workspace cache reuse when eligible.',
       inputSchema: createChatInputSchema((prefix) => services.session.completeSessionIds(prefix)),
       outputSchema: ChatOutputSchema,
       annotations: READ_ONLY_SESSION_ANNOTATIONS,

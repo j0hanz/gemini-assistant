@@ -247,11 +247,11 @@ describe('ChatInputSchema', () => {
     );
     assert.strictEqual(
       ChatInputSchema.shape.responseSchemaJson.description,
-      'JSON Schema (2020-12) for structured output. Single-turn / new-session only.',
+      'JSON Schema (2020-12) for structured output. Single-turn or new-session only; resumed sessions reject it.',
     );
     assert.strictEqual(
       ChatInputSchema.shape.temperature.description,
-      'Sampling temperature 0-2 (default 1).',
+      'Sampling temperature 0-2. When omitted, the server uses default 1.',
     );
     assert.strictEqual(
       ChatInputSchema.shape.seed.description,

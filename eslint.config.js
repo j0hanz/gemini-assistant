@@ -14,7 +14,15 @@ const nodeBuiltins = builtinModules.filter((m) => !m.startsWith('node:') && !m.s
 export default tseslint.config(
   {
     name: 'project/global-ignores',
-    ignores: ['dist/**', 'dist-test/**', 'coverage/**', 'node_modules/**', '.agents/**', 'logs/**'],
+    ignores: [
+      'dist/**',
+      'dist-test/**',
+      'coverage/**',
+      'node_modules/**',
+      '.agents/**',
+      '.claude/**',
+      'logs/**',
+    ],
   },
 
   {

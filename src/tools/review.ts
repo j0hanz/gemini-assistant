@@ -27,8 +27,6 @@ import {
   isSensitiveUntrackedPath as isSensitiveUntrackedPathFromValidation,
 } from '../lib/validation.js';
 import {
-  type AnalyzePrInput,
-  type CompareFilesInput,
   type GeminiResponseSchema,
   type ReviewInput,
   ReviewInputSchema,
@@ -204,8 +202,10 @@ interface BudgetedSnapshotDiff {
 }
 
 type ReviewCompareWork = ReturnType<typeof createCompareFileWork>;
+type ReviewDiffInput = Extract<ReviewInput, { subjectKind: 'diff' }>;
+type ReviewComparisonInput = Extract<ReviewInput, { subjectKind: 'comparison' }>;
+type ReviewFailureInput = Extract<ReviewInput, { subjectKind: 'failure' }>;
 
-type ReviewFileSearch = Extract<ReviewInput, { subjectKind: 'comparison' }>['fileSearch'];
 type ReviewDiagnoseFailureWork = typeof diagnoseFailureWork;
 type ReviewAnalyzePrWork = typeof analyzePrWork;
 
@@ -283,12 +283,7 @@ function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
       maxOutputTokens,
       safetySettings,
       fileSearch,
-    }: CompareFilesInput & {
-      maxOutputTokens?: ReviewInput['maxOutputTokens'];
-      safetySettings?: ReviewInput['safetySettings'];
-      thinkingBudget?: ReviewInput['thinkingBudget'];
-      fileSearch?: ReviewFileSearch | undefined;
-    },
+    }: ReviewComparisonInput,
     ctx: ServerContext,
   ): Promise<CallToolResult> {
     const { progress } = createToolContext('compareFiles', ctx);
@@ -350,16 +345,15 @@ function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
 }
 
 interface FailureReviewSubject {
-  codeContext?: string | undefined;
-  error: string;
-  fileSearch?: ReviewFileSearch | undefined;
-  googleSearch?: boolean | undefined;
-  kind: 'failure';
-  language?: string | undefined;
-  maxOutputTokens?: ReviewInput['maxOutputTokens'];
-  safetySettings?: ReviewInput['safetySettings'];
-  thinkingBudget?: ReviewInput['thinkingBudget'];
-  urls?: readonly string[] | undefined;
+  codeContext?: ReviewFailureInput['codeContext'];
+  error: ReviewFailureInput['error'];
+  fileSearch?: ReviewFailureInput['fileSearch'];
+  googleSearch?: ReviewFailureInput['googleSearch'];
+  language?: ReviewFailureInput['language'];
+  maxOutputTokens?: ReviewFailureInput['maxOutputTokens'];
+  safetySettings?: ReviewFailureInput['safetySettings'];
+  thinkingBudget?: ReviewFailureInput['thinkingBudget'];
+  urls?: ReviewFailureInput['urls'];
 }
 
 async function diagnoseFailureWork(
@@ -1220,11 +1214,7 @@ export async function analyzePrWork(
     maxOutputTokens,
     thinkingBudget,
     safetySettings,
-  }: AnalyzePrInput & {
-    maxOutputTokens?: ReviewInput['maxOutputTokens'];
-    thinkingBudget?: ReviewInput['thinkingBudget'];
-    safetySettings?: ReviewInput['safetySettings'];
-  },
+  }: ReviewDiffInput,
   ctx: ServerContext,
   workspaceCacheManagerOrRootsFetcher?: ToolWorkspaceCacheManager | ToolRootsFetcher,
   rootsFetcher: ToolRootsFetcher = () => Promise.resolve([]),
@@ -1401,6 +1391,7 @@ export async function reviewWork(
   if (args.subjectKind === 'diff') {
     result = await runAnalyzePrWork(
       {
+        subjectKind: 'diff',
         dryRun: args.dryRun,
         language: args.language,
         thinkingLevel: args.thinkingLevel,
@@ -1418,6 +1409,7 @@ export async function reviewWork(
 
     result = await compareWork(
       {
+        subjectKind: 'comparison',
         filePathA,
         filePathB,
         question: args.question ?? args.focus,
@@ -1438,7 +1430,6 @@ export async function reviewWork(
       {
         error,
         codeContext: args.codeContext,
-        kind: 'failure',
         language: args.language,
         googleSearch: args.googleSearch,
         maxOutputTokens: args.maxOutputTokens,

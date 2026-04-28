@@ -288,7 +288,7 @@ describe('ask contract', () => {
     assert.strictEqual(result.isError, undefined);
   });
 
-  it('rejects reused sessions when response schema drifts', async () => {
+  it('rejects reused sessions when response schema is provided again', async () => {
     const sessionId = 'sess-contract-schema';
     const storedArgs: AskArgs = {
       message: 'hello',
@@ -317,7 +317,7 @@ describe('ask contract', () => {
       content: [
         {
           type: 'text',
-          text: 'chat: session contract mismatch: this sessionId was created with different model, tools, system instruction, or response schema settings. Start a new session.',
+          text: 'chat: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
         },
       ],
       isError: true,
@@ -381,7 +381,7 @@ describe('ask contract', () => {
     assert.strictEqual(result.isError, undefined);
   });
 
-  it('treats key-order differences in stored contracts as compatible', async () => {
+  it('rejects reused sessions even when the response schema matches by key order', async () => {
     const sessionId = 'sess-contract-order';
     const requestArgs: AskArgs = {
       message: 'hello',
@@ -422,7 +422,15 @@ describe('ask contract', () => {
 
     const result = await askWork(requestArgs, createContext());
 
-    assert.strictEqual(result.isError, undefined);
+    assert.deepStrictEqual(result, {
+      content: [
+        {
+          type: 'text',
+          text: 'chat: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
+        },
+      ],
+      isError: true,
+    });
   });
 
   it('rejects reused sessions when tool configuration drifts', async () => {

@@ -271,17 +271,21 @@ describe('MCP tool smoke coverage', () => {
       assert.ok(sessionId);
       assert.equal(
         sessionId.description,
-        'Server-managed in-memory session identifier. Omitting sessionId enables structured output (responseSchemaJson) and JSON schema-repair retry.',
+        'Server-managed in-memory session identifier. Provide it to start or resume a session; resumed sessions reject responseSchemaJson.',
       );
 
       assert.ok(responseSchemaJson);
       assert.equal(
         responseSchemaJson.description,
-        'JSON Schema (2020-12) for structured output. Single-turn / new-session only.',
+        'JSON Schema (2020-12) for structured output. Single-turn or new-session only; resumed sessions reject it.',
       );
 
       assert.ok(temperature);
-      assert.equal(temperature.description, 'Sampling temperature 0-2 (default 1).');
+      assert.equal(
+        temperature.description,
+        'Sampling temperature 0-2. When omitted, the server uses default 1.',
+      );
+      assert.equal(temperature.default, undefined);
 
       assert.ok(seed);
       assert.equal(seed.description, 'Fixed random seed for reproducible outputs.');

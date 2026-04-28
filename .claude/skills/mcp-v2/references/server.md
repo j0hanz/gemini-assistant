@@ -172,6 +172,10 @@ Use MCP logging — never `console.log` (it corrupts stdio):
 
 ```ts
 async (args, ctx) => {
+  // Shorthand (preferred): log(level, data, logger?)
+  await ctx.mcpReq.log('info', 'starting work', 'my-tool');
+
+  // Equivalent long form:
   await ctx.mcpReq.notify({
     method: 'notifications/message',
     params: { level: 'info', logger: 'my-tool', data: 'starting work' },
@@ -331,15 +335,60 @@ app.all('/mcp', async (c) => transport.handleRequest(c.req.raw));
 
 In stateless mode, do not rely on `mcp-session-id` headers — they don't exist. Don't attempt resource subscriptions.
 
-## Tasks (long-running and interactive work)
+### Transport lifecycle hooks
 
-Tasks let a tool return immediately and continue work in the background. Clients poll or stream task updates.
-
-### Server setup
+Track session creation and destruction for per-session resource management:
 
 ```ts
+const transport = new NodeStreamableHTTPServerTransport({
+  sessionIdGenerator: () => randomUUID(),
+  onsessioninitialized: async (sessionId) => {
+    sessionRegistry.set(sessionId, { createdAt: Date.now() });
+  },
+  onsessionclosed: async (sessionId) => {
+    await cleanupSessionResources(sessionId);
+    sessionRegistry.delete(sessionId);
+  },
+});
+```
+
+`onsessionclosed` fires when the server closes a session (client sent `DELETE /mcp`). This is distinct from transport closure — in per-request transport setups the transport may close before the logical session does.
+
+Non-streaming JSON responses (useful for simple request/response deployments):
+
+```ts
+const transport = new NodeStreamableHTTPServerTransport({
+  sessionIdGenerator: undefined,
+  enableJsonResponse: true, // wait for all responses, return JSON — no SSE opened
+});
+```
+
+SSE reconnect interval for polling patterns:
+
+```ts
+const transport = new NodeStreamableHTTPServerTransport({
+  sessionIdGenerator: () => randomUUID(),
+  retryInterval: 1_000, // SSE retry header sent to client (ms)
+  eventStore: new InMemoryEventStore(), // required for resumable streams
+});
+```
+
+Pair `retryInterval` with `ctx.http?.closeSSE()` inside a tool to explicitly close the SSE stream and let the client reconnect. Useful for long-polling patterns where work produces chunks across reconnects.
+
+## Tasks (long-running and interactive work)
+
+Tasks let a tool return a task ID immediately while work continues in the background. Clients poll for status and fetch the result separately.
+
+### Server setup (required for both approaches)
+
+```ts
+import {
+  InMemoryTaskMessageQueue,
+  InMemoryTaskStore,
+  McpServer,
+} from '@modelcontextprotocol/server';
+
 const taskStore = new InMemoryTaskStore();
-const taskQueue = new InMemoryTaskMessageQueue();
 
 const server = new McpServer(
   { name: 'my-server', version: '1.0.0' },
@@ -348,38 +397,118 @@ const server = new McpServer(
       tasks: {
         requests: { tools: { call: {} } },
         taskStore,
-        taskMessageQueue: taskQueue,
+        taskMessageQueue: new InMemoryTaskMessageQueue(),
       },
     },
   },
 );
 ```
 
-`InMemoryTaskStore` is for development. Production needs durable storage.
+`InMemoryTaskStore` and `InMemoryTaskMessageQueue` are for development only. Production needs durable, persistent implementations.
 
-### Task-aware tool
+### Approach A: `registerToolTask` — explicit background task (experimental)
 
-The tool body works like a normal tool — the SDK handles task lifecycle automatically when the caller opts in via `task` parameters on `tools/call`. Inside the handler:
+Use when the tool must return a task ID immediately and continue work in the background after `tools/call` returns. Clients call `tasks/get` to poll status and `tasks/result` to fetch the final payload.
+
+All three handlers are required:
 
 ```ts
-async (args, ctx): Promise<CallToolResult> => {
-  // Update status (only meaningful when called as a task)
-  if (ctx.task) {
-    await ctx.task.updateStatus({ status: 'working', statusMessage: 'Stage 1' });
-    // ...later...
-    await ctx.task.updateStatus({ status: 'working', statusMessage: 'Stage 2' });
-  }
+server.experimental.tasks.registerToolTask(
+  'analyze-large-dataset',
+  {
+    title: 'Analyze Large Dataset',
+    description: 'Runs heavy analysis in the background.',
+    inputSchema: InputSchema,
+    outputSchema: OutputSchema,
+    // execution.taskSupport defaults to 'required' for registerToolTask
+  },
+  {
+    createTask: async (args, ctx) => {
+      // Create the task record, fire background work, return immediately.
+      const task = await ctx.task.store.createTask({ ttl: 300_000, pollInterval: 1_000 });
+      void runBackground({ taskId: task.taskId, args, store: ctx.task.store });
+      return { task };
+    },
 
-  // Returning a result automatically transitions the task to `completed`
-  return { content: [{ type: 'text', text: 'done' }], structuredContent: {...} };
-};
+    getTask: async (_args, ctx) => {
+      // Client polls this to check current status.
+      return ctx.task.store.getTask(ctx.task.id);
+    },
+
+    getTaskResult: async (_args, ctx) => {
+      // Client calls this once status is `completed`.
+      return ctx.task.store.getTaskResult(ctx.task.id);
+    },
+  },
+);
 ```
 
-Status values: `working`, `input_required`, `completed` (terminal), `failed` (terminal), `cancelled` (terminal).
+Background worker pattern — catch all errors, always reach a terminal state:
 
-### Critical task rule
+```ts
+async function runBackground({
+  taskId,
+  args,
+  store,
+}: {
+  taskId: string;
+  args: z.infer<typeof InputSchema>;
+  store: typeof taskStore;
+}) {
+  try {
+    await store.updateTask(taskId, { status: 'working', statusMessage: 'Initializing' });
+    const result = await doHeavyWork(args);
+    const structured = OutputSchema.parse(result);
+    await store.setTaskResult(taskId, {
+      content: [{ type: 'text', text: `Processed ${structured.itemCount} items` }],
+      structuredContent: structured,
+    });
+    await store.updateTask(taskId, { status: 'completed' });
+  } catch {
+    // Never expose stack traces, file paths, or secrets in statusMessage
+    await store.updateTask(taskId, { status: 'failed', statusMessage: 'Processing failed' });
+  }
+}
+```
 
-Queued task **messages** (sent via the task message queue) and the terminal task **result** are different things. Don't conflate them — clients fetch them with separate methods (`tasks/get`, `tasks/result`).
+Rules:
+
+- `createTask` must return `{ task }` immediately — never `await` background work inside it. Use `void`.
+- Background workers must catch all errors and set `failed` status. Unhandled errors leave tasks permanently in `working`.
+- `statusMessage` must not contain stack traces, file paths, internal error messages, or secrets.
+- Task IDs from `store.createTask()` are generated by the store and are already secure/unique.
+- Terminal states: `completed`, `failed`, `cancelled`. Non-terminal: `working`, `input_required`.
+- Clients fetch status and result via separate calls (`tasks/get`, `tasks/result`) — don't conflate them.
+
+### Approach B: task-aware normal tool (status updates in-handler)
+
+Use when the tool completes in one synchronous handler call but wants to report intermediate progress. The SDK manages the task lifecycle automatically when the client opts in.
+
+```ts
+server.registerTool(
+  'process-batch',
+  { inputSchema: InputSchema, outputSchema: OutputSchema },
+  async (args, ctx): Promise<CallToolResult> => {
+    if (ctx.task) {
+      await ctx.task.updateStatus({ status: 'working', statusMessage: 'Stage 1' });
+      await doStage1(args);
+      await ctx.task.updateStatus({ status: 'working', statusMessage: 'Stage 2' });
+      await doStage2(args);
+    } else {
+      await doStage1(args);
+      await doStage2(args);
+    }
+    // Returning a result automatically transitions the task to `completed`.
+    const out = buildResult(args);
+    return {
+      content: [{ type: 'text', text: `Done` }],
+      structuredContent: OutputSchema.parse(out),
+    };
+  },
+);
+```
+
+Choose A when the tool genuinely needs to return before work finishes. Choose B when the tool can complete within a single handler invocation and just wants richer status reporting.
 
 ## Elicitation (asking the user for input mid-tool)
 
@@ -562,7 +691,7 @@ if (caps?.sampling) {
 
 ## Common server pitfalls
 
-- `console.log` in stdio code corrupts JSON-RPC. Always stderr or MCP logging.
+- `console.log` in stdio code corrupts JSON-RPC. Always stderr or MCP logging (`ctx.mcpReq.log(...)`).
 - Forgetting `content` when returning `structuredContent` breaks legacy clients.
 - Loose `z.object(...)` lets typos through at the boundary.
 - Marking a destructive tool as `readOnlyHint: true`.
@@ -572,3 +701,7 @@ if (caps?.sampling) {
 - Using `StreamableHTTPServerTransport` (v1) when you should use `NodeStreamableHTTPServerTransport` (v2).
 - Putting `requestedSchema` (elicitation) in Zod — it's raw JSON Schema.
 - Treating queued task messages as the task result.
+- `await`-ing background work inside `createTask` — this blocks `tools/call`. Use `void background()` and return `{ task }` immediately.
+- Missing `getTask` or `getTaskResult` handlers in `registerToolTask` — all three are required.
+- Leaking `err.message` or `err.stack` into `statusMessage` — always use a safe generic message.
+- Using `InMemoryTaskStore` in production — it's for development only; use durable storage.

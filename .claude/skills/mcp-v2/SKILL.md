@@ -191,6 +191,34 @@ server.registerResource(
 );
 ```
 
+### Long-running tools (tasks)
+
+For tools that must return a task ID immediately while work runs in the background, use `server.experimental.tasks.registerToolTask(...)`. All three handlers are required:
+
+```ts
+server.experimental.tasks.registerToolTask(
+  'analyze-large-dataset',
+  {
+    title: 'Analyze Large Dataset',
+    inputSchema: InputSchema,
+    outputSchema: OutputSchema,
+  },
+  {
+    createTask: async (args, ctx) => {
+      const task = await ctx.task.store.createTask({ ttl: 300_000, pollInterval: 1_000 });
+      void runBackground({ taskId: task.taskId, args, store: ctx.task.store });
+      return { task }; // return immediately — do NOT await background work here
+    },
+    getTask: async (_args, ctx) => ctx.task.store.getTask(ctx.task.id),
+    getTaskResult: async (_args, ctx) => ctx.task.store.getTaskResult(ctx.task.id),
+  },
+);
+```
+
+Non-negotiables: `createTask` must not block — fire background work with `void` and return `{ task }`. `statusMessage` must never contain stack traces, file paths, or secrets. Background workers must catch all errors and set `failed` status. See [references/server.md](references/server.md) for the full pattern including server setup and background worker error handling.
+
+For tools that complete in a single synchronous handler but want to report intermediate progress, use `ctx.task?.updateStatus(...)` inside a normal `registerTool` instead.
+
 ### Bootstrap, stdio
 
 ```ts
@@ -308,7 +336,7 @@ For more — auth (bearer, client credentials, OAuth, private-key JWT, Cross-App
 
 ## Critical pitfalls (the failure modes that bite hardest)
 
-1. **`console.log` in stdio servers corrupts the protocol stream.** stdout is JSON-RPC. Use MCP logging (`server.server.sendLoggingMessage(...)`) or `console.error` (stderr). This applies to the `gemini-assistant` codebase too — use the project's `logger` instead of `console.log`.
+1. **`console.log` in stdio servers corrupts the protocol stream.** stdout is JSON-RPC. Use MCP logging (`ctx.mcpReq.log('info', ...)` or `ctx.mcpReq.notify(...)`) or `console.error` (stderr). This applies to the `gemini-assistant` codebase too — use the project's `logger` instead of `console.log`.
 2. **Mixing v1 and v2 imports.** They share class and method names but not types. If `package.json` has only v2 packages, treat any `@modelcontextprotocol/sdk` import as a bug.
 3. **Using `z.object(...)` instead of `z.strictObject(...)` at boundaries.** `z.object` silently strips unknown fields, hiding caller mistakes.
 4. **Passing raw object shapes as schemas.** v2 requires Standard Schema (Zod v4, ArkType, Valibot, or `fromJsonSchema(...)`). Plain `{ type: 'object', ... }` will not work directly — wrap it.
@@ -333,6 +361,8 @@ This repository has a frozen public surface defined in `src/public-contract.ts` 
 - Returning `structuredContent` without `content` → clients without structured-content support get nothing.
 - `import './foo'` (no `.js`) in ESM TypeScript → Node ESM rejects extensionless specifiers.
 - Reading `mcp-session-id` in stateless HTTP mode → it doesn't exist there.
+- `await heavyWork()` inside `createTask` → blocks `tools/call`; fire with `void heavyWork()` and return `{ task }` immediately.
+- `statusMessage: err.message` or `statusMessage: err.stack` in a task tool → leaks internals; use a safe generic message like `'Processing failed'`.
 
 If any of these are in your diff: stop and fix before continuing.
 

@@ -101,8 +101,12 @@ handle Zod coercions/transforms on already-validated input.
 
 **Delete:**
 - `createSdkPassthroughInputSchema()` function
-- `hasSafeParse()`, `hasParse()`, `hasStandardSchema()` helpers (exist only to support the bypass)
-- `SafeParseSchema`, `ParseSchema`, `JsonSchemaProvider`, `StandardSchemaLike` interfaces
+- `hasStandardSchema()` helper (only called by the bypass function)
+- `JsonSchemaProvider`, `StandardSchemaLike` interfaces (only referenced by `hasStandardSchema`)
+
+**Retain — used by `parseTaskInput`:**
+- `hasSafeParse()`, `hasParse()` helpers
+- `SafeParseSchema`, `ParseSchema` interfaces
 
 **Simplify `createTaskRegistrationConfig`:**
 
@@ -187,8 +191,17 @@ export function registerPrompts(server: McpServer): void {
 }
 ```
 
-Prompt name strings are `PublicPromptName` — the `satisfies` keyword or an explicit cast enforces
-this without the `definePrompt()` overload machinery.
+Prompt name strings are `PublicPromptName` — use `satisfies PublicPromptName` on each literal to
+preserve compile-time enforcement without the `definePrompt()` overload machinery:
+
+```ts
+server.registerPrompt('discover' satisfies PublicPromptName, { ... }, async (args) => ...);
+server.registerPrompt('research' satisfies PublicPromptName, { ... }, async (args) => ...);
+server.registerPrompt('review'   satisfies PublicPromptName, { ... }, async (args) => ...);
+```
+
+TypeScript evaluates `satisfies` at the call site and rejects any string that is not a member of
+`PublicPromptName` — no helper, no cast, no runtime cost.
 
 **Deleted from `src/prompts.ts`:**
 - `PromptDefinition` interface
@@ -247,7 +260,33 @@ explicitly. Remove the Symbol pattern in its entirety.
 - `getToolServices()` export
 - `findToolServices()` export
 
-**Update `src/lib/tool-executor.ts` — `executeGeminiPipeline`:**
+**Update `src/lib/tool-executor.ts` — `GeminiPipelineRequest` and `executeGeminiPipeline`:**
+
+`GeminiPipelineRequest.config` is typed as `Omit<GeminiStreamRequest<T>['config'], 'cacheName'>`,
+so `cacheName` is deliberately excluded from `config`. Add it as a dedicated top-level field:
+
+```ts
+// Before
+export interface GeminiPipelineRequest<T extends Record<string, unknown>> {
+  toolName: string;
+  label: string;
+  // ...
+  config: Omit<GeminiStreamRequest<T>['config'], 'cacheName'>;
+  responseBuilder?: StreamResponseBuilder<T>;
+}
+
+// After
+export interface GeminiPipelineRequest<T extends Record<string, unknown>> {
+  toolName: string;
+  label: string;
+  cacheName?: string | undefined;   // NEW — pre-resolved by caller from its workspace
+  // ...
+  config: Omit<GeminiStreamRequest<T>['config'], 'cacheName'>;
+  responseBuilder?: StreamResponseBuilder<T>;
+}
+```
+
+In `executeGeminiPipeline`, replace the `findToolServices` block:
 
 ```ts
 // Before
@@ -256,58 +295,85 @@ const cacheName = toolServices ? await toolServices.workspace.resolveCacheName(c
 // ...
 config: { ...request.config, cacheName }
 
-// After
-// (lines removed — cacheName comes from request.config set by the caller)
-config: request.config
+// After (remove the findToolServices lines entirely)
+config: { ...request.config, cacheName: request.cacheName }
 ```
 
-`GeminiPipelineRequest.config.cacheName` is already an optional field. Callers that need it
-pre-resolve it before building the request.
+**Update each tool's registration and internal call chain:**
 
-**Update each tool's registration function:**
+`chat.ts` — single level:
 
 ```ts
-// chat.ts — before
+// before
 work: (args, ctx) => chatWork(askWork, args, bindToolServices(ctx, services))
-
-// chat.ts — after
+// after
 work: (args, ctx) => chatWork(askWork, args, ctx, services)
 ```
 
-```ts
-// research.ts — before
-work: (args, ctx) => researchWork(args, bindToolServices(ctx, resolvedServices))
-// inside researchWork at line 696:
-const cacheName = await findToolServices(ctx)?.workspace.resolveCacheName(ctx);
+`chatWork` gains `services: ToolServices`. Where it builds a `GeminiPipelineRequest`, it adds:
+`cacheName: await services.workspace.resolveCacheName(ctx)`.
 
-// research.ts — after
-work: (args, ctx) => researchWork(args, ctx, resolvedServices)
-// inside researchWork:
-const cacheName = await resolvedServices.workspace.resolveCacheName(ctx);
-```
+`analyze.ts` — single level:
 
 ```ts
-// analyze.ts — before
+// before
 analyzeWork(rootsFetcher, fileWork, args, bindToolServices(ctx, resolvedServices))
-
-// analyze.ts — after
+// after
 analyzeWork(rootsFetcher, fileWork, args, ctx, resolvedServices)
 ```
 
-```ts
-// review.ts — before
-call site uses bindToolServices(ctx, resolvedServices)
-// inside review work at line 1288:
-const toolServices = findToolServices(ctx);
-const docPathsToCheck = envDocs ?? [...(toolServices?.workspace.scanFileNames() ?? [])];
+`analyzeWork` gains `services: ToolServices` and passes `cacheName` on any pipeline requests.
 
-// review.ts — after
-// work function threads resolvedServices explicitly
-const docPathsToCheck = envDocs ?? [...(resolvedServices.workspace.scanFileNames() ?? [])];
+`research.ts` — three levels deep. The `findToolServices` call at line 696 is inside
+`agenticSearchWork`, reached via `runDeepResearch`:
+
+```text
+researchWork          ← add services: ToolServices
+  runDeepResearch     ← add services: ToolServices
+    agenticSearchWork ← add services: ToolServices; replace findToolServices at line 696
 ```
 
-Each tool's internal work functions (`chatWork`, `researchWork`, `analyzeWork`, and the internal
-review function) gain a `services: ToolServices` parameter at the appropriate call depth.
+```ts
+// registration (before)
+work: (args, ctx) => researchWork(args, bindToolServices(ctx, resolvedServices))
+// registration (after)
+work: (args, ctx) => researchWork(args, ctx, resolvedServices)
+
+// agenticSearchWork — line 696 becomes:
+const cacheName = await services.workspace.resolveCacheName(ctx);
+// and passes cacheName on the GeminiPipelineRequest
+```
+
+`runQuickResearch` does not call `findToolServices`; its signature is unchanged.
+
+`review.ts` — two levels deep. The `findToolServices` call at line 1288 is inside
+`analyzePrWork`, called from `reviewWork`:
+
+```text
+reviewWork    ← add services: ToolServices
+  analyzePrWork ← add optional services?: ToolServices; replace findToolServices at line 1288
+```
+
+```ts
+// registration (before)
+work: (args, ctx) => reviewWork(deps, args, bindToolServices(ctx, resolvedServices))
+// registration (after)
+work: (args, ctx) => reviewWork(deps, args, ctx, resolvedServices)
+
+// reviewWork signature gains services: ToolServices, passes it to runAnalyzePrWork
+
+// analyzePrWork — new optional param appended (preserves existing test call sites):
+export async function analyzePrWork(
+  args, ctx,
+  workspaceCacheManagerOrRootsFetcher?,
+  rootsFetcher?,
+  services?: ToolServices,   // NEW
+)
+// line 1288 becomes:
+const docPathsToCheck = envDocs ?? [...(services?.workspace.scanFileNames() ?? [])];
+```
+
+`diagnoseFailureWork` and `compareFileWork` do not use `findToolServices`; unchanged.
 
 ### Verification
 

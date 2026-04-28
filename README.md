@@ -1,351 +1,241 @@
 # Gemini Assistant
 
-`gemini-assistant` is an MCP server that exposes a job-first public surface over Google Gemini.
-The public contract is four tools:
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](#license) [![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org) [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org) [![MCP](https://img.shields.io/badge/MCP-2.0--alpha-7e3aaf?style=for-the-badge)](https://modelcontextprotocol.io) [![Last Commit](https://img.shields.io/github/last-commit/j0hanz/gemini-assistant?style=for-the-badge)](https://github.com/j0hanz/gemini-assistant/commits/master)
 
-- `chat`
-- `research`
-- `analyze`
-- `review`
+---
 
-## Start Here
+Workflow-first Model Context Protocol server for Google Gemini — chat, research, file analysis, and review under one job-first surface.
 
-Recommended first-run flow:
+## Overview
 
-1. Read `discover://catalog` for the full public catalog.
-2. Read `discover://workflows` for guided entry points.
-3. Use the `discover` prompt if you want a recommendation before choosing a job.
-4. Use `chat` once the right starting point is clear.
+`gemini-assistant` is an MCP server that exposes Google Gemini behind a fixed, job-first public contract: four tools (`chat`, `research`, `analyze`, `review`), three prompts, and a small set of discovery and session resources. It supports stdio, HTTP, and web-standard transports, persists replay-safe session history, and surfaces grounding, citations, and usage metadata to the orchestrator.
 
-Public prompts:
+| Aspect       | Details                            |
+| :----------- | :--------------------------------- |
+| **Status**   | Active                             |
+| **Language** | TypeScript (strict, ESM, NodeNext) |
+| **Runtime**  | Node.js `>=24`                     |
+| **Package**  | npm                                |
+| **License**  | MIT                                |
 
-- `discover`
-- `research`
-- `review`
+## Highlights
 
-Public resources:
+| Feature             | Description                                                                                  |
+| :------------------ | :------------------------------------------------------------------------------------------- |
+| Job-first surface   | Frozen public contract: four tools, three prompts, discovery + session resources             |
+| Multi-turn sessions | In-memory chat sessions with sanitized, replay-safe history and preserved thought signatures |
+| Grounded research   | Quick or deep modes with Google Search, URL Context, and optional Gemini File Search         |
+| Multimodal analyze  | Reason over local files, public URLs, or small file sets with one focused goal               |
+| Diff-aware review   | Review local diffs, compare files, and diagnose failures behind one tool                     |
+| Tasks-capable       | Optional task-aware execution with progress notifications when transport supports it         |
 
-- `discover://catalog`
-- `discover://context`
-- `discover://workflows`
-- `session://`
-- `session://{sessionId}`
-- `session://{sessionId}/transcript`
-- `session://{sessionId}/events`
-- `gemini://sessions/{sessionId}/turns/{turnIndex}/parts`
-- `workspace://context`
-- `workspace://cache`
+## Built With
 
-Workflow entries:
+[![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org) [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org) [![Express](https://img.shields.io/badge/Express-000000?style=for-the-badge&logo=express&logoColor=white)](https://expressjs.com) [![Zod](https://img.shields.io/badge/Zod-3E67B1?style=for-the-badge)](https://zod.dev) [![Gemini](https://img.shields.io/badge/Google%20Gemini-8E75B2?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev)
 
-- `start-here`
-- `chat`
-- `research`
-- `analyze`
-- `review`
+| Layer      | Technology                                                           |
+| :--------- | :------------------------------------------------------------------- |
+| Protocol   | `@modelcontextprotocol/server` and `@modelcontextprotocol/node` (v2) |
+| Model SDK  | `@google/genai`                                                      |
+| HTTP       | `express`                                                            |
+| Validation | `zod` v4 + `@cfworker/json-schema`                                   |
+| Tooling    | `tsx`, `eslint`, `prettier`, `knip`, `typescript-eslint`             |
 
-## Common Jobs
+## Quick Start
 
-- Direct Gemini chat with optional server-managed sessions: `chat`
-- Quick or deep research with grounded results: `research`
-- Analyze a local file, public URLs, a small file set, or generate a diagram: `analyze`
-- Review a diff, compare files, or diagnose a failure through `subjectKind="failure"`: `review`
+> [!TIP]
+> Get running in under 60 seconds. Requires Node.js `>=24` and a Google Gemini API key.
 
-## Sessions And Caches
+### Prerequisites
 
-`chat` uses server-managed in-memory sessions. Session state is inspectable through:
+| Requirement    | Version / Notes                                                                         |
+| :------------- | :-------------------------------------------------------------------------------------- |
+| Node.js        | `>=24`                                                                                  |
+| npm            | Bundled with Node.js                                                                    |
+| Gemini API key | Set `API_KEY` in `.env` — get one at [aistudio.google.com](https://aistudio.google.com) |
 
-- `session://`
-- `session://{sessionId}`
-- `session://{sessionId}/transcript`
-- `session://{sessionId}/events`
-- `gemini://sessions/{sessionId}/turns/{turnIndex}/parts`
-
-`session://{sessionId}/events` is a normalized inspection summary, not a replay-ready Gemini history.
-Large event payloads may be truncated into previews.
-`gemini://sessions/{sessionId}/turns/{turnIndex}/parts` exposes the raw persisted Gemini `Part[]`
-for replay-safe orchestration of a specific model turn.
-
-Internally, sessions keep two separate records: a replay substrate made from raw Gemini `Content[]`
-parts plus the original generation contract, and a normalized audit log for session resources.
-Rebuilt sessions use only the replay substrate so thinking signatures, function/tool call pairs,
-function responses, system instructions, tool declarations, and response format settings survive
-live chat eviction without changing the public session resources.
-Non-thought signature-bearing text parts are preserved for Gemini replay; `thought: true` parts are
-not replayed.
-
-Workspace context state is exposed through `discover://context`, `workspace://context`, and `workspace://cache`.
-
-### Production Limits
-
-Runtime state is process-local by design. Chat sessions, task records, task message queues, and
-workspace cache state are kept in memory and are not durable storage. A server restart, process
-replacement, or stateless deployment path loses that state; use a stateful server connection for
-multi-turn chat and task polling. Durable persistence is a future implementation concern, not part
-of the current public contract.
-
-`API_KEY` is read once on first Gemini call and cached for the process lifetime. Rotate the
-credential by restarting the server; there is no in-process reload mechanism.
-
-## Capability Notes
-
-The job-first surface is intentionally opinionated:
-
-- `research.mode` defaults to `quick`; set `mode="deep"` for deeper multi-step research.
-- `analyze.outputKind` defaults to `summary`; set `outputKind="diagram"` for diagram generation.
-- `subjectKind="failure"` is the public failure-diagnosis path.
-- `chat.responseSchemaJson` is intended for single-turn calls and brand-new sessions.
-- The public surface does not expose the legacy `discover` callable tool or the retired standalone `search`, `analyze_url`, `agentic_search`, `explain_error`, `diagram`, or `execute_code` tools.
-- `chat` and `research` can use Gemini File Search stores; Live API sessions are not exposed.
-- `thinkingLevel` can be omitted to use each tool's job-specific cost profile. Common profiles use
-  `LOW`, while diagram and deep synthesis paths may use `MEDIUM`.
-- `thinkingBudget` is available anywhere `thinkingLevel` is accepted and maps to Gemini
-  `thinkingConfig.thinkingBudget` only when `thinkingLevel` is omitted; `thinkingLevel` takes
-  precedence when both are supplied.
-
-### Chat Function Calling
-
-`chat.functions` exposes typed Gemini function declarations to the model, but this server does not
-execute local MCP tools or host functions on the caller's behalf. When Gemini returns
-`functionCalls[]`, the MCP client is responsible for executing those calls and then calling `chat`
-again with the same `sessionId` and `functionResponses`:
-
-```json
-{
-  "goal": "Continue after the function result.",
-  "sessionId": "session-id-from-previous-turn",
-  "functionResponses": [
-    {
-      "id": "optional-call-id",
-      "name": "lookup_order",
-      "response": { "output": { "status": "shipped" } }
-    }
-  ]
-}
-```
-
-`functionResponses` is accepted only for an existing session and cannot be combined with structured
-JSON output mode. The response turn is persisted in the session replay substrate and sent to Gemini
-as the next chat message so the model can finish the function-calling loop.
-
-### Structured Output Notes
-
-Successful tool results may include these optional metadata fields in `structuredContent`:
-
-- `usage.toolUsePromptTokenCount`, `usage.promptTokensDetails`, `usage.cacheTokensDetails`, and
-  `usage.candidatesTokensDetails` when Gemini returns them.
-- `safetyRatings`, `finishMessage`, and `citationMetadata` from the selected candidate.
-- `functionCalls[]` may omit `name` if Gemini emitted a nameless function-call part; nameless calls
-  are not counted in tool usage rollups.
-
-Research results separate Google Search grounding from URL Context:
-
-- `status` is `completed` for successful calls.
-- `groundingSignals` reports whether retrieval ran, whether URL Context succeeded, the count of
-  claim-level supports, and derived confidence.
-- `sourceDetails[]`, `urlContextSources[]`, `urlMetadata[]`, `findings[]`, `citations[]`, and
-  optional `computations[]` carry source and tool-use provenance.
-- `sourceDetails[].origin` is `googleSearch`, `urlContext`, or `both`.
-- `findings[]` and `citations[]` are source attributions from retrieved metadata, not independent
-  proof that a claim is true.
-- `warnings[]` may include dropped non-public grounding-support counts and resolved retrieval-budget
-  reductions; private URLs are never surfaced.
-- Google Search Suggestions may be appended to `content[]` when Gemini provides
-  `groundingMetadata.searchEntryPoint.renderedContent`.
-
-### Tool Capability Matrix
-
-Orchestration composes server-side tool capabilities per call. Public `chat.googleSearch` and
-`chat.urls` enable direct conversation grounding; `googleSearch`, `urls`, File Search, Code
-Execution, and chat function declarations are additive when supported by the selected job.
-When `serverSideToolInvocations` is `auto`, server-side tool traces are included whenever Gemini
-built-in tools are active, including built-in-only flows.
-
-| Profile       | Google Search | URL Context | Code Execution |
-| ------------- | :-----------: | :---------: | :------------: |
-| `none`        |       -       |      -      |       -        |
-| `search`      |       ✓       |      -      |       -        |
-| `url`         |       -       |      ✓      |       -        |
-| `code`        |       -       |      -      |       ✓        |
-| `search_url`  |       ✓       |      ✓      |       -        |
-| `search_code` |       ✓       |      -      |       ✓        |
-| `url_code`    |       -       |      ✓      |       ✓        |
-
-| Tool       | `googleSearch?` | `urls?` | `fileSearch?` | `functions?` | Notes                                                         |
-| ---------- | :-------------: | :-----: | :-----------: | :----------: | ------------------------------------------------------------- |
-| `chat`     |        ✓        |    ✓    |       ✓       |      ✓       | Function execution is owned by the MCP client.                |
-| `research` |        ✓        |    ✓    |       ✓       |      -       | `mode="deep"` always enables Google Search.                   |
-| `analyze`  |        ✓        |    ✓    |       -       |      -       | Diagram + URL target auto-selects `url_code` when validating. |
-| `review`   |        ✓        |    ✓    |       -       |      -       | `urls` available on `comparison` and `failure` subjects.      |
-
-## Notification Surface
-
-The server emits four MCP notification methods with narrow, contract-stable rules:
-
-- `notifications/progress` — emitted only when the caller supplies `_meta.progressToken`. Inside a task context every progress frame also carries `_meta["io.modelcontextprotocol/related-task"] = { taskId }` so clients can correlate async progress to the owning task.
-- `notifications/resources/list_changed` — fired only when collection membership actually changes (e.g., a session is added or removed). In-place replacements of an existing entry do not trigger `list_changed`.
-- `notifications/resources/updated` — fired at the collection level (for example `session://`). Per-URI detail updates are not broadcast because the server does not advertise `resources.subscribe`. Clients should re-read the affected collection after a `list_changed` or collection-level `updated`.
-- `notifications/message` — reserved for diagnostic log output. Streaming tool content is delivered through the normal `tools/call` response (and `tasks/result` when running under a task); it is never published on the logging channel.
-
-Session-scoped resources such as `discover://context` update only the originating server/session — they are never fanned out to other concurrent clients.
-
-## Requirements
-
-- Node.js `>=24`
-- `npm`
-- Gemini API key in `API_KEY`
-
-## Environment
-
-Minimal `.env` example:
-
-```env
-API_KEY=your-gemini-api-key
-TRANSPORT=stdio
-```
-
-Useful optional variables:
-
-Model:
-
-- `MODEL`: override the default model (`gemini-3-flash-preview`)
-- `THOUGHTS`: expose Gemini thought text in outputs when set to `true`
-
-Workspace:
-
-- `ROOTS`: optional comma-separated absolute roots allowed for file tools, `workspace://context`, and automatic workspace caching; defaults to client workspace roots when advertised. Without `ROOTS`, advertised client roots, or `ROOTS_FALLBACK_CWD=true`, file inputs are rejected.
-- `ROOTS_FALLBACK_CWD`: opt-in to using the server working directory as the fallback workspace root when neither `ROOTS` nor client roots are available, default `false`
-- `CONTEXT`: optional path to a custom context file to include in workspace context
-- `AUTO_SCAN`: auto-scan workspace roots for known project files, default `true`
-
-Workspace cache:
-
-- `CACHE`: enable automatic workspace context caching for `chat` calls when set to `true`, default `true`
-- `CACHE_TTL`: Gemini cache TTL for workspace context as a `<seconds>s` string (e.g. `3600s`), default `3600s`
-- Cache reuse is skipped when a `chat` call sets `systemInstruction`, `temperature`, or `seed`; the
-  structured response may include warnings when cache eligibility is disabled.
-
-Debug and logging:
-
-- `LOG_PAYLOADS`: enable verbose payload logging when set to `true`
-- `LOG_DIR`: write log entries to `<LOG_DIR>/app.log` (created if missing); when unset, logs go to stderr
-- `LOG_TO_STDERR`: when `true`, force log output to stderr even if `LOG_DIR` is set, default `false`
-
-Optional local transport:
-
-- `TRANSPORT`: `stdio`, `http`, or `web-standard`, default `stdio`
-- `HOST`: HTTP bind host, default `127.0.0.1`
-- `PORT`: HTTP bind port, default `3000`
-- `CORS_ORIGIN`: optional CORS origin for HTTP transports; use `*` or one `http(s)` origin
-- `STATELESS`: enable stateless HTTP transport behavior when set to `true`, default `false`
-- `ALLOWED_HOSTS`: optional comma-separated Host header allow-list for HTTP transports; entries are normalized for case, ports, and bracketed IPv6 forms
-- `MCP_HTTP_TOKEN`: bearer token required for HTTP transports by default, including loopback binds; must be at least 32 characters and may not be a trivially repeated pattern. A 32-character random hex token (e.g. from `openssl rand -hex 16`) satisfies this requirement.
-- `MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP`: set to `true` only to allow loopback HTTP without `MCP_HTTP_TOKEN`
-- `MCP_HTTP_RATE_LIMIT_RPS`: per-session/IP request refill rate for `/mcp`, default `10`
-- `MCP_HTTP_RATE_LIMIT_BURST`: per-session/IP request burst for `/mcp`, default `20`
-- `MCP_TRUST_PROXY`: trust `X-Forwarded-For` for rate-limit identity when set to `true`, default `false`
-- `MAX_TRANSPORT_SESSIONS`: maximum stateful HTTP transport sessions, default `100`
-- `TRANSPORT_SESSION_TTL_MS`: idle TTL for stateful HTTP transport sessions, default `1800000`
-- `SESSION_REPLAY_MAX_BYTES`: byte budget for rebuilt chat history, default `50000`
-- `SESSION_REPLAY_INLINE_DATA_MAX_BYTES`: max inline media bytes retained in replay history, default `16384`
-
-For HTTP transports behind a reverse proxy, pair `MCP_TRUST_PROXY=true` with a strict proxy
-deployment boundary. It only affects rate-limit identity derivation; host allow-listing is still
-validated separately to reduce DNS-rebinding exposure.
-
-Booleans accept only the literal strings `true` or `false` when set. Old variable names (`GEMINI_MODEL`, `ALLOWED_FILE_ROOTS`, `WORKSPACE_*`, `MCP_TRANSPORT`, `MCP_HTTP_HOST`, `MCP_HTTP_PORT`, `LOG_VERBOSE_PAYLOADS`, etc.) are not supported and have no effect.
-
-## Run
-
-Install dependencies:
+### Install
 
 ```bash
+git clone https://github.com/j0hanz/gemini-assistant.git
+cd gemini-assistant
 npm install
-```
-
-Development entrypoint without a build:
-
-```bash
-npx tsx src/index.ts
-```
-
-Run built output:
-
-```bash
+echo "API_KEY=your-gemini-api-key" > .env
 npm run build
 npm start
 ```
 
-HTTP transport:
+### Verify Installation
 
 ```bash
-TRANSPORT=http npx tsx src/index.ts
+npm run inspector
 ```
 
-For HTTP transports, set `MCP_HTTP_TOKEN` and send requests with `Authorization: Bearer <token>`.
-Loopback binds are only exempt when `MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP=true`. Requests over
-the configured burst return `429` with `Retry-After`.
+```text
+Launches the MCP Inspector against the built server for interactive tool, prompt, and resource testing.
+```
 
-`GET /healthz` and `GET /readyz` are unauthenticated probes that always return
-`{"status":"ok"}` once the server is listening; they bypass `ALLOWED_HOSTS`,
-`MCP_HTTP_TOKEN`, and rate limiting so cloud load balancers can probe via the
-bind IP without a configured Host header. They expose no server state.
+## Usage
 
-Web-standard transport:
+Run as a stdio MCP server (default) and wire it into any MCP-compatible client:
 
-- Auto-serves only when the process is running under Bun or Deno.
-- In Node, `startWebStandardTransport()` returns a `handler` but does not start a listener.
-
-## MCP Client Setup
-
-Minimal stdio client configuration:
-
-```json
+```jsonc
 {
   "mcpServers": {
     "gemini-assistant": {
-      "command": "npx",
-      "args": ["tsx", "src/index.ts"],
-      "cwd": "/absolute/path/to/gemini-assistant",
+      "command": "node",
+      "args": ["dist/index.js"],
       "env": {
         "API_KEY": "your-gemini-api-key",
-        "TRANSPORT": "stdio"
-      }
-    }
-  }
+        "TRANSPORT": "stdio",
+      },
+    },
+  },
 }
 ```
 
-## Safety Boundaries
+### Public Tools
 
-- File inputs require workspace-relative or absolute paths inside configured roots.
-- URL inputs accept only public `http/https` URLs.
-- Sessions, transcripts, task results, and task queues are in-memory only and disappear on
-  expiry, eviction, or process restart.
-- The public surface intentionally has no backward-compatible aliases for the legacy tool names.
+| Tool       | Best For                                                                               |
+| :--------- | :------------------------------------------------------------------------------------- |
+| `chat`     | Direct Gemini chat with optional structured output, grounding, and multi-turn sessions |
+| `research` | Web-grounded lookup with explicit `quick` or `deep` mode                               |
+| `analyze`  | Reasoning over local files, public URLs, or small file sets with one focused goal      |
+| `review`   | Reviewing local diffs, comparing files, or diagnosing failures                         |
 
-## Commands
+### Public Prompts
 
-Required checks before any commit:
+| Prompt     | Purpose                                          |
+| :--------- | :----------------------------------------------- |
+| `discover` | Discover available tools, prompts, and workflows |
+| `research` | Drive a multi-step research deliverable          |
+| `review`   | Walk through a structured code or diff review    |
 
-```bash
-npm run lint
-npm run type-check
-npm run test
+## Project Structure
+
+```text
+src/
+  catalog.ts            Discovery catalog (tools, prompts, resources, workflows)
+  client.ts             Gemini client wiring
+  config.ts             Environment-variable parsing
+  index.ts              Process bootstrap and transport dispatch
+  prompts.ts            Public-prompt registration
+  public-contract.ts    Frozen public surface (tools, prompts, resources)
+  resources.ts          Discovery + session resource registration
+  server.ts             createServerInstance() — wires capabilities
+  sessions.ts           In-memory session store (parts + rawParts)
+  transport.ts          HTTP and web-standard transport setup
+  lib/                  Orchestration, streaming, response, executor, errors
+  schemas/              Zod v4 input/output schemas + JSON-Schema validators
+  tools/                analyze, chat, research, review tool implementations
+__tests__/              Colocated unit + e2e suites (Node test runner)
 ```
 
-Or run them all in one go (static analysis plus tests):
+| Path                                       | Purpose                                                       |
+| :----------------------------------------- | :------------------------------------------------------------ |
+| `src/public-contract.ts`                   | Canonical source of the frozen public surface                 |
+| `src/server.ts`                            | `createServerInstance()` — capability + handler wiring        |
+| `src/tools/`                               | One file per public tool; each exports `registerXxxTool()`    |
+| `src/lib/`                                 | Shared orchestration, streaming, validation, and task helpers |
+| `__tests__/lib/mock-gemini-environment.ts` | In-memory MCP transport for e2e tests                         |
 
-```bash
-npm run check
-```
+## Configuration
 
-`npm run check:static` runs only lint, type-check, build, prettier, and knip without the test
-suite — use it for fast pre-flight checks where the test suite is run separately.
+| Variable                                  | Required |         Default          | Purpose                                                             |
+| :---------------------------------------- | :------: | :----------------------: | :------------------------------------------------------------------ |
+| `API_KEY`                                 |    V     |            —             | Google Gemini API key                                               |
+| `MODEL`                                   |    -     | `gemini-3-flash-preview` | Default Gemini model                                                |
+| `TRANSPORT`                               |    -     |         `stdio`          | One of `stdio`, `http`, `web-standard`                              |
+| `STATELESS`                               |    -     |         `false`          | Disable sessions and the tasks capability                           |
+| `MCP_EXPOSE_SESSION_RESOURCES`            |    -     |         `false`          | Expose transcript, events, and raw turn-parts resources             |
+| `MCP_HTTP_TOKEN`                          |    -     |            —             | Bearer token for HTTP transport (≥32 chars)                         |
+| `MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP` |    -     |         `false`          | Allow loopback HTTP without `MCP_HTTP_TOKEN`                        |
+| `MCP_TRUST_PROXY`                         |    -     |         `false`          | Trust upstream proxy headers when running behind a reverse proxy    |
+| `MCP_HTTP_RATE_LIMIT_RPS`                 |    -     |        (built-in)        | Per-token request rate (requests per second)                        |
+| `MCP_HTTP_RATE_LIMIT_BURST`               |    -     |        (built-in)        | Per-token burst capacity                                            |
+| `CORS_ORIGIN`                             |    -     |            —             | CORS origin allowlist; `*` is rejected when `MCP_HTTP_TOKEN` is set |
+| `ALLOWED_HOSTS`                           |    -     |            —             | Comma-separated host allowlist for HTTP transport                   |
+| `ROOTS`                                   |    -     |            —             | Workspace roots used by file/diff tools                             |
+| `CONTEXT`                                 |    -     |            —             | Default workspace context value                                     |
+| `CACHE_TTL`                               |    -     |        (built-in)        | Workspace cache TTL                                                 |
+| `LOG_DIR`                                 |    -     |            —             | Directory for log files                                             |
+| `GEMINI_SAFETY_SETTINGS`                  |    -     |            —             | JSON-encoded default safety settings                                |
+| `GEMINI_SESSION_REDACT_KEYS`              |    -     |            —             | Comma-separated keys to redact from session payloads                |
 
-Optional:
+## Scripts
 
-```bash
-npm run format
-npm run build
-```
+| Command                | Description                                                |
+| :--------------------- | :--------------------------------------------------------- |
+| `npm run build`        | TypeScript compile to `dist/`                              |
+| `npm start`            | Run the compiled server (`dist/index.js`)                  |
+| `npm run lint`         | ESLint with `--max-warnings=0`                             |
+| `npm run lint:fix`     | ESLint auto-fix                                            |
+| `npm run format`       | Prettier write                                             |
+| `npm run format:check` | Prettier check                                             |
+| `npm run type-check`   | `tsc --noEmit`                                             |
+| `npm run knip`         | Detect unused exports, files, and dependencies             |
+| `npm run test`         | Node built-in test runner with `tsx/esm` and `.env`        |
+| `npm run check:static` | build + type-check + eslint + prettier + knip              |
+| `npm run check`        | `check:static` plus the full test suite                    |
+| `npm run inspector`    | Build and launch the MCP Inspector against `dist/index.js` |
+
+## Documentation
+
+| Resource                                                  | Description                                             |
+| :-------------------------------------------------------- | :------------------------------------------------------ |
+| [AGENTS.md](AGENTS.md)                                    | Agent guidance, safety boundaries, and change checklist |
+| [CLAUDE.md](CLAUDE.md)                                    | Architecture overview and contributor commands          |
+| [src/public-contract.ts](src/public-contract.ts)          | Canonical frozen public surface                         |
+| [Model Context Protocol](https://modelcontextprotocol.io) | MCP specification and ecosystem                         |
+| [Google Gemini API](https://ai.google.dev)                | Gemini SDK and model documentation                      |
+
+## Roadmap
+
+- [x] Frozen job-first public contract (chat, research, analyze, review)
+- [x] Replay-safe session history with raw `Part[]` resource
+- [x] HTTP and web-standard transports with bearer auth and rate limiting
+- [x] Tasks capability with progress notifications
+- [ ] Persistent session storage backend
+- [ ] Additional grounding sources beyond Google Search and URL Context
+
+## Security
+
+> [!IMPORTANT]
+> Do not commit `.env` or API keys. The server validates `MCP_HTTP_TOKEN` length and rejects wildcard CORS when authentication is enabled.
+
+| Topic             | Detail                                                                                                     |
+| :---------------- | :--------------------------------------------------------------------------------------------------------- |
+| Reporting channel | Open a private security advisory on GitHub                                                                 |
+| Auth requirement  | HTTP transport requires `MCP_HTTP_TOKEN` (≥32 chars) unless `MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP=true` |
+| Stdio safety      | Server code never writes to `stdout` outside the JSON-RPC stream — uses `logger` instead                   |
+| Input validation  | All tool inputs validated through Zod v4 `z.strictObject()` at external boundaries                         |
+
+## Contributing
+
+Contributions are welcome. Run the full check pipeline locally before opening a pull request and keep the public contract in `src/public-contract.ts` stable unless an explicit contract change is requested.
+
+| Step | Action                                             |
+| :--: | :------------------------------------------------- |
+|  1   | Fork the repository                                |
+|  2   | Create a feature branch (`git checkout -b feat/x`) |
+|  3   | Commit your changes with a clear message           |
+|  4   | Run `npm run check` locally                        |
+|  5   | Open a pull request                                |
+
+[![Contributors](https://contrib.rocks/image?repo=j0hanz/gemini-assistant)](https://github.com/j0hanz/gemini-assistant/graphs/contributors)
+
+## License
+
+Released under the MIT License. See [LICENSE](LICENSE) for details.
+
+## Acknowledgments
+
+| Credit                                                    | Reason                              |
+| :-------------------------------------------------------- | :---------------------------------- |
+| [Model Context Protocol](https://modelcontextprotocol.io) | Protocol specification and SDKs     |
+| [Google Gemini](https://ai.google.dev)                    | Underlying generative model and SDK |
+| [Zod](https://zod.dev)                                    | Runtime schema validation           |
+
+---
+
+[Back to top](#gemini-assistant)

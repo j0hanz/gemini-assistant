@@ -15,6 +15,7 @@ import { buildDiagramFencePattern, registerAnalyzeTool } from '../../src/tools/a
 process.env.API_KEY ??= 'test-key-for-analyze-progress';
 
 let originalCacheEnv: string | undefined;
+let originalRootsFallbackCwdEnv: string | undefined;
 
 interface ToolTaskHandler<TArgs> {
   createTask: (args: TArgs, ctx: ServerContext) => Promise<{ task: Task }>;
@@ -151,6 +152,8 @@ describe('analyze diagram progress', () => {
   beforeEach(() => {
     originalCacheEnv = process.env.CACHE;
     process.env.CACHE = 'false';
+    originalRootsFallbackCwdEnv = process.env.ROOTS_FALLBACK_CWD;
+    process.env.ROOTS_FALLBACK_CWD = 'true';
     resetProgressThrottle();
   });
 
@@ -159,6 +162,11 @@ describe('analyze diagram progress', () => {
       delete process.env.CACHE;
     } else {
       process.env.CACHE = originalCacheEnv;
+    }
+    if (originalRootsFallbackCwdEnv === undefined) {
+      delete process.env.ROOTS_FALLBACK_CWD;
+    } else {
+      process.env.ROOTS_FALLBACK_CWD = originalRootsFallbackCwdEnv;
     }
   });
 

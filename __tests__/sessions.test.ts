@@ -1016,6 +1016,40 @@ describe('sessions', () => {
       assert.strictEqual(calls, 0);
     });
 
+    it('emits turnPartsAdded only when appending model content entries', () => {
+      const store = createStore();
+      store.setSession('sess-turn-parts', mockChat('turn-parts') as never);
+
+      const events: {
+        listChanged: boolean;
+        turnPartsAdded?: { sessionId: string; turnIndex: number };
+      }[] = [];
+      store.subscribe((event) => {
+        events.push(event);
+      });
+
+      const appended = store.appendSessionContent('sess-turn-parts', {
+        role: 'user',
+        parts: [{ text: 'hello' }],
+        timestamp: 1,
+      });
+      assert.strictEqual(appended, true);
+      assert.strictEqual(events.length, 0, 'user-role appends must not notify');
+
+      const appendedModel = store.appendSessionContent('sess-turn-parts', {
+        role: 'model',
+        parts: [{ text: 'response' }],
+        timestamp: 2,
+      });
+      assert.strictEqual(appendedModel, true);
+      assert.strictEqual(events.length, 1);
+      assert.deepStrictEqual(events[0]?.turnPartsAdded, {
+        sessionId: 'sess-turn-parts',
+        turnIndex: 1,
+      });
+      assert.strictEqual(events[0]?.listChanged, true);
+    });
+
     it('keeps actively written sessions alive until ttl expires from the latest write', () => {
       let now = 1_000;
       const store = createStore({ ttlMs: 100, now: () => now, sweepIntervalMs: 60_000 });

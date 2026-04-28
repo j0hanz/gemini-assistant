@@ -218,6 +218,8 @@ describe('uploadFile', () => {
     const controller = new AbortController();
     const client = getAI();
     const original = client.files.upload.bind(client.files);
+    const previousFallback = process.env.ROOTS_FALLBACK_CWD;
+    process.env.ROOTS_FALLBACK_CWD = 'true';
 
     client.files.upload = async (opts: { file: Blob | string }) => ({
       uri: 'gs://files/abc',
@@ -232,24 +234,41 @@ describe('uploadFile', () => {
       assert.strictEqual(result.displayPath, 'package.json');
     } finally {
       client.files.upload = original;
+      if (previousFallback === undefined) {
+        delete process.env.ROOTS_FALLBACK_CWD;
+      } else {
+        process.env.ROOTS_FALLBACK_CWD = previousFallback;
+      }
     }
   });
 
   it('rejects paths outside allowed roots', async () => {
     const controller = new AbortController();
+    const previousFallback = process.env.ROOTS_FALLBACK_CWD;
+    process.env.ROOTS_FALLBACK_CWD = 'true';
     // Use a path that's absolute but outside any allowed root
     const outsidePath =
       process.platform === 'win32' ? 'Z:\\nonexistent\\outside\\file.txt' : '/tmp/outside/file.txt';
 
-    await assert.rejects(() => uploadFile(outsidePath, controller.signal), {
-      message: /outside allowed directories/,
-    });
+    try {
+      await assert.rejects(() => uploadFile(outsidePath, controller.signal), {
+        message: /outside allowed directories/,
+      });
+    } finally {
+      if (previousFallback === undefined) {
+        delete process.env.ROOTS_FALLBACK_CWD;
+      } else {
+        process.env.ROOTS_FALLBACK_CWD = previousFallback;
+      }
+    }
   });
 
   it('rejects incomplete upload handles without a name', async () => {
     const controller = new AbortController();
     const client = getAI();
     const original = client.files.upload.bind(client.files);
+    const previousFallback = process.env.ROOTS_FALLBACK_CWD;
+    process.env.ROOTS_FALLBACK_CWD = 'true';
 
     client.files.upload = async () => ({
       uri: 'gs://files/abc',
@@ -266,6 +285,11 @@ describe('uploadFile', () => {
       );
     } finally {
       client.files.upload = original;
+      if (previousFallback === undefined) {
+        delete process.env.ROOTS_FALLBACK_CWD;
+      } else {
+        process.env.ROOTS_FALLBACK_CWD = previousFallback;
+      }
     }
   });
 
@@ -277,6 +301,56 @@ describe('uploadFile', () => {
 
     await assert.rejects(() => uploadFile(filePath, controller.signal, async () => [tempDir]), {
       message: /binary data/,
+    });
+  });
+
+  it('accepts a clean SVG upload', async () => {
+    const controller = new AbortController();
+    const tempDir = mkdtempSync(join(tmpdir(), 'gemini-svg-upload-'));
+    const filePath = join(tempDir, 'icon.svg');
+    writeFileSync(
+      filePath,
+      '<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>\n',
+    );
+
+    const client = getAI();
+    const original = client.files.upload.bind(client.files);
+    client.files.upload = async () => ({
+      uri: 'gs://files/svg-clean',
+      mimeType: 'image/svg+xml',
+      name: 'uploaded-svg',
+    });
+
+    try {
+      const result = await uploadFile(filePath, controller.signal, async () => [tempDir]);
+      assert.strictEqual(result.mimeType, 'image/svg+xml');
+    } finally {
+      client.files.upload = original;
+    }
+  });
+
+  it('rejects an SVG upload containing script content', async () => {
+    const controller = new AbortController();
+    const tempDir = mkdtempSync(join(tmpdir(), 'gemini-svg-script-'));
+    const filePath = join(tempDir, 'icon.svg');
+    writeFileSync(
+      filePath,
+      '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+    );
+
+    await assert.rejects(() => uploadFile(filePath, controller.signal, async () => [tempDir]), {
+      message: /script content/i,
+    });
+  });
+
+  it('rejects a non-SVG payload masquerading via .svg extension', async () => {
+    const controller = new AbortController();
+    const tempDir = mkdtempSync(join(tmpdir(), 'gemini-svg-fake-'));
+    const filePath = join(tempDir, 'fake.svg');
+    writeFileSync(filePath, 'not an svg');
+
+    await assert.rejects(() => uploadFile(filePath, controller.signal, async () => [tempDir]), {
+      message: /does not start with <\?xml or <svg/,
     });
   });
 

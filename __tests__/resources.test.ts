@@ -113,21 +113,31 @@ describe('discovery resources', () => {
 
   it('reads discover://context with snapshot data and markdown rendering', async () => {
     const sessionStore = createStore();
-    const result = await readDiscoverContextResource(
-      'discover://context',
-      async () => [],
-      sessionStore,
-      workspaceCacheManager,
-    );
-    const data = parseResourceText(result) as Awaited<
-      ReturnType<typeof buildServerContextSnapshot>
-    >;
+    const previousFallback = process.env.ROOTS_FALLBACK_CWD;
+    process.env.ROOTS_FALLBACK_CWD = 'true';
+    try {
+      const result = await readDiscoverContextResource(
+        'discover://context',
+        async () => [],
+        sessionStore,
+        workspaceCacheManager,
+      );
+      const data = parseResourceText(result) as Awaited<
+        ReturnType<typeof buildServerContextSnapshot>
+      >;
 
-    assert.strictEqual(result.contents.length, 2);
-    assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
-    assert.ok(data.workspace.roots.length >= 1);
-    assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
-    assert.match(result.contents[1]?.text ?? '', /^# Server Context/m);
+      assert.strictEqual(result.contents.length, 2);
+      assert.strictEqual(result.contents[0]?.mimeType, 'application/json');
+      assert.ok(data.workspace.roots.length >= 1);
+      assert.strictEqual(result.contents[1]?.mimeType, 'text/markdown');
+      assert.match(result.contents[1]?.text ?? '', /^# Server Context/m);
+    } finally {
+      if (previousFallback === undefined) {
+        delete process.env.ROOTS_FALLBACK_CWD;
+      } else {
+        process.env.ROOTS_FALLBACK_CWD = previousFallback;
+      }
+    }
   });
 
   it('builds discover://context from lightweight filename scans and cached token metadata', async () => {

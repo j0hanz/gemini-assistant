@@ -151,7 +151,6 @@ const TOOL_DISCOVERY_DETAILS = {
       'A direct answer, optional structured data, usage/safety/citation metadata, and session resource links. When sessions are active, raw Gemini `Part[]` are persisted for replay-safe orchestration via the session-turn-parts resource (available only when sessions persist `Part[]`).',
     limitations: [
       'Sessions, task state, and task message queues are process-local memory state; restarts or stateless deployments lose continuity.',
-      '`readOnlyHint: true` covers only effects outside ephemeral in-memory session state; chat still mutates session state and clients must not cache or deduplicate calls.',
       'Sessions require a stateful server connection path. Stateless transport rejects chat calls that include sessionId.',
       'Stateless transport (STATELESS=true) does not advertise the tasks capability — task-aware tools/call requests are unavailable; clients must rely on the synchronous return path.',
       'Input caps: goal max 100000 chars.',

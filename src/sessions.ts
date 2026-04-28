@@ -268,6 +268,7 @@ export interface SessionAccess {
 
 export interface SessionChangeEvent {
   listChanged: boolean;
+  turnPartsAdded?: { sessionId: string; turnIndex: number };
 }
 
 export interface SessionStoreOptions {
@@ -859,13 +860,20 @@ export class SessionStore {
   }
 
   appendSessionContent(id: string, item: ContentEntry): boolean {
-    return this.appendSessionHistoryEntry(
-      id,
-      item,
-      (entry) => entry.contents,
-      cloneContentEntry,
-      this.maxTranscriptEntries,
-    );
+    const entry = this.getActiveSessionEntry(id);
+    if (!entry) return false;
+    entry.contents.push(cloneContentEntry(item));
+    this.trimSessionHistory(entry.contents, this.maxTranscriptEntries);
+    this.touchSessionEntry(id, entry);
+
+    if (item.role === 'model') {
+      // A new model turn exposes a new `gemini://sessions/.../turns/{turnIndex}/parts`
+      // resource URI. Notify subscribers so the resource collection refresh.
+      const turnIndex = entry.contents.length - 1;
+      this.notifyChange(true, { sessionId: id, turnIndex });
+    }
+
+    return true;
   }
 
   appendSessionEvent(id: string, item: SessionEventEntry): boolean {
@@ -950,10 +958,16 @@ export class SessionStore {
     this.notifyChange(false);
   }
 
-  private notifyChange(listChanged = true): void {
+  private notifyChange(
+    listChanged = true,
+    turnPartsAdded?: { sessionId: string; turnIndex: number },
+  ): void {
     if (this.subscribers.size === 0) return;
 
-    const event: SessionChangeEvent = { listChanged };
+    const event: SessionChangeEvent = {
+      listChanged,
+      ...(turnPartsAdded ? { turnPartsAdded } : {}),
+    };
 
     for (const subscriber of this.subscribers) {
       subscriber(event);

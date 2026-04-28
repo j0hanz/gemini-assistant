@@ -84,6 +84,9 @@ replacement, or stateless deployment path loses that state; use a stateful serve
 multi-turn chat and task polling. Durable persistence is a future implementation concern, not part
 of the current public contract.
 
+`API_KEY` is read once on first Gemini call and cached for the process lifetime. Rotate the
+credential by restarting the server; there is no in-process reload mechanism.
+
 ## Capability Notes
 
 The job-first surface is intentionally opinionated:
@@ -210,20 +213,23 @@ Model:
 
 Workspace:
 
-- `ROOTS`: optional comma-separated absolute roots allowed for file tools, `workspace://context`, and automatic workspace caching; defaults to client workspace roots when available, otherwise the server working directory
+- `ROOTS`: optional comma-separated absolute roots allowed for file tools, `workspace://context`, and automatic workspace caching; defaults to client workspace roots when advertised. Without `ROOTS`, advertised client roots, or `ROOTS_FALLBACK_CWD=true`, file inputs are rejected.
+- `ROOTS_FALLBACK_CWD`: opt-in to using the server working directory as the fallback workspace root when neither `ROOTS` nor client roots are available, default `false`
 - `CONTEXT`: optional path to a custom context file to include in workspace context
 - `AUTO_SCAN`: auto-scan workspace roots for known project files, default `true`
 
 Workspace cache:
 
 - `CACHE`: enable automatic workspace context caching for `chat` calls when set to `true`, default `true`
-- `CACHE_TTL`: Gemini cache TTL for workspace context, default `3600s`
+- `CACHE_TTL`: Gemini cache TTL for workspace context as a `<seconds>s` string (e.g. `3600s`), default `3600s`
 - Cache reuse is skipped when a `chat` call sets `systemInstruction`, `temperature`, or `seed`; the
   structured response may include warnings when cache eligibility is disabled.
 
-Debug:
+Debug and logging:
 
 - `LOG_PAYLOADS`: enable verbose payload logging when set to `true`
+- `LOG_DIR`: write log entries to `<LOG_DIR>/app.log` (created if missing); when unset, logs go to stderr
+- `LOG_TO_STDERR`: when `true`, force log output to stderr even if `LOG_DIR` is set, default `false`
 
 Optional local transport:
 
@@ -233,7 +239,7 @@ Optional local transport:
 - `CORS_ORIGIN`: optional CORS origin for HTTP transports; use `*` or one `http(s)` origin
 - `STATELESS`: enable stateless HTTP transport behavior when set to `true`, default `false`
 - `ALLOWED_HOSTS`: optional comma-separated Host header allow-list for HTTP transports; entries are normalized for case, ports, and bracketed IPv6 forms
-- `MCP_HTTP_TOKEN`: bearer token required for HTTP transports by default, including loopback binds; must be at least 32 characters and may not be a trivially repeated pattern
+- `MCP_HTTP_TOKEN`: bearer token required for HTTP transports by default, including loopback binds; must be at least 32 characters and may not be a trivially repeated pattern. A 32-character random hex token (e.g. from `openssl rand -hex 16`) satisfies this requirement.
 - `MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP`: set to `true` only to allow loopback HTTP without `MCP_HTTP_TOKEN`
 - `MCP_HTTP_RATE_LIMIT_RPS`: per-session/IP request refill rate for `/mcp`, default `10`
 - `MCP_HTTP_RATE_LIMIT_BURST`: per-session/IP request burst for `/mcp`, default `20`
@@ -280,6 +286,11 @@ For HTTP transports, set `MCP_HTTP_TOKEN` and send requests with `Authorization:
 Loopback binds are only exempt when `MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP=true`. Requests over
 the configured burst return `429` with `Retry-After`.
 
+`GET /healthz` and `GET /readyz` are unauthenticated probes that always return
+`{"status":"ok"}` once the server is listening; they bypass `ALLOWED_HOSTS`,
+`MCP_HTTP_TOKEN`, and rate limiting so cloud load balancers can probe via the
+bind IP without a configured Host header. They expose no server state.
+
 Web-standard transport:
 
 - Auto-serves only when the process is running under Bun or Deno.
@@ -315,13 +326,22 @@ Minimal stdio client configuration:
 
 ## Commands
 
-Required checks:
+Required checks before any commit:
 
 ```bash
 npm run lint
 npm run type-check
 npm run test
 ```
+
+Or run them all in one go (static analysis plus tests):
+
+```bash
+npm run check
+```
+
+`npm run check:static` runs only lint, type-check, build, prettier, and knip without the test
+suite — use it for fast pre-flight checks where the test suite is run separately.
 
 Optional:
 

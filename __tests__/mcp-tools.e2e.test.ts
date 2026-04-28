@@ -178,6 +178,13 @@ const READONLY_NON_IDEMPOTENT_ANNOTATIONS = {
   idempotentHint: false,
 } as const;
 
+const MUTABLE_ANNOTATIONS = {
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true,
+  readOnlyHint: false,
+} as const;
+
 const EXPECTED_TOOL_CONTRACTS = {
   analyze: {
     annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
@@ -187,7 +194,7 @@ const EXPECTED_TOOL_CONTRACTS = {
     title: 'Analyze',
   },
   chat: {
-    annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
+    annotations: MUTABLE_ANNOTATIONS,
     requiredInput: ['goal'],
     requiredOutput: ['status', 'answer'],
     taskSupport: 'optional',

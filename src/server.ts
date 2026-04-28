@@ -11,7 +11,7 @@ import type { ToolServices } from './lib/tool-context.js';
 import { buildServerRootsFetcher, type RootsFetcher } from './lib/validation.js';
 import { createWorkspaceAccess, createWorkspaceCacheManager } from './lib/workspace-context.js';
 
-import { getStatelessTransportFlag } from './config.js';
+import { getExposeSessionResources, getStatelessTransportFlag } from './config.js';
 import { registerPrompts } from './prompts.js';
 import { PUBLIC_STATIC_RESOURCE_URIS, PUBLIC_TOOL_NAMES } from './public-contract.js';
 import { registerResources, SESSIONS_LIST_URI } from './resources.js';
@@ -195,9 +195,19 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
   );
   let closed = false;
   const detachLogger = logger.attachServer(server);
-  const unsubscribeSessionChange = sessionStore.subscribe(({ listChanged }: SessionChangeEvent) => {
-    sendResourceChangedForServer(server, listChanged ? SESSIONS_LIST_URI : undefined);
-  });
+  const unsubscribeSessionChange = sessionStore.subscribe(
+    ({ listChanged, turnPartsAdded }: SessionChangeEvent) => {
+      if (turnPartsAdded) {
+        // New turn-parts URIs are only listed under `gemini://sessions/...`
+        // when MCP_EXPOSE_SESSION_RESOURCES=true; suppress the broadcast
+        // otherwise so non-exposed installs don't notify on every model turn.
+        if (!getExposeSessionResources()) return;
+        sendResourceChangedForServer(server, SESSIONS_LIST_URI);
+        return;
+      }
+      sendResourceChangedForServer(server, listChanged ? SESSIONS_LIST_URI : undefined);
+    },
+  );
 
   const rootsFetcher = buildServerRootsFetcher(server);
   const toolServices: ToolServices = {

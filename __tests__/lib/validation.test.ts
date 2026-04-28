@@ -20,8 +20,10 @@ import {
 
 const ROOTS_ENV_KEY = 'ROOTS';
 const ALLOWED_HOSTS_ENV_KEY = 'ALLOWED_HOSTS';
+const ROOTS_FALLBACK_CWD_ENV_KEY = 'ROOTS_FALLBACK_CWD';
 const savedAllowedFileRootsEnv = process.env[ROOTS_ENV_KEY];
 const savedAllowedHostsEnv = process.env[ALLOWED_HOSTS_ENV_KEY];
+const savedRootsFallbackCwdEnv = process.env[ROOTS_FALLBACK_CWD_ENV_KEY];
 
 function restoreAllowedFileRootsEnv(): void {
   if (savedAllowedFileRootsEnv === undefined) {
@@ -29,6 +31,19 @@ function restoreAllowedFileRootsEnv(): void {
     delete process.env[ROOTS_ENV_KEY];
   } else {
     process.env[ROOTS_ENV_KEY] = savedAllowedFileRootsEnv;
+  }
+}
+
+function enableRootsFallbackCwd(): void {
+  process.env[ROOTS_FALLBACK_CWD_ENV_KEY] = 'true';
+}
+
+function restoreRootsFallbackCwdEnv(): void {
+  if (savedRootsFallbackCwdEnv === undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete process.env[ROOTS_FALLBACK_CWD_ENV_KEY];
+  } else {
+    process.env[ROOTS_FALLBACK_CWD_ENV_KEY] = savedRootsFallbackCwdEnv;
   }
 }
 
@@ -186,25 +201,30 @@ describe('validateHostHeader', () => {
 describe('resolveAndValidatePath', () => {
   afterEach(() => {
     restoreAllowedFileRootsEnv();
+    restoreRootsFallbackCwdEnv();
   });
 
   it('accepts relative paths under cwd', async () => {
+    enableRootsFallbackCwd();
     const result = await resolveAndValidatePath('package.json');
     assert.ok(result.endsWith('package.json'));
   });
 
   it('accepts relative dot paths under cwd', async () => {
+    enableRootsFallbackCwd();
     const result = await resolveAndValidatePath('./package.json');
     assert.ok(result.endsWith('package.json'));
   });
 
   it('accepts absolute paths under cwd', async () => {
+    enableRootsFallbackCwd();
     const testPath = join(process.cwd(), 'package.json');
     const result = await resolveAndValidatePath(testPath);
     assert.ok(result.endsWith('package.json'));
   });
 
   it('rejects paths outside allowed roots', async () => {
+    enableRootsFallbackCwd();
     // Use a path that is definitely outside cwd
     const outsidePath =
       process.platform === 'win32' ? 'C:\\Windows\\System32\\cmd.exe' : '/etc/passwd';
@@ -218,6 +238,7 @@ describe('resolveAndValidatePath', () => {
   });
 
   it('resolves normalized paths', async () => {
+    enableRootsFallbackCwd();
     const testPath = join(process.cwd(), 'src', '..', 'package.json');
     const result = await resolveAndValidatePath(testPath);
     // Should resolve to the actual path without ..
@@ -226,10 +247,21 @@ describe('resolveAndValidatePath', () => {
   });
 
   it('handles non-existent files under allowed root gracefully', async () => {
+    enableRootsFallbackCwd();
     const testPath = join(process.cwd(), 'nonexistent-test-file-12345.txt');
     // Should not throw — just validate it's under allowed root
     const result = await resolveAndValidatePath(testPath);
     assert.ok(result.includes('nonexistent-test-file-12345.txt'));
+  });
+
+  it('rejects paths when no workspace roots are configured and ROOTS_FALLBACK_CWD is unset', async () => {
+    setAllowedFileRootsEnv(undefined);
+    restoreRootsFallbackCwdEnv();
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete process.env[ROOTS_FALLBACK_CWD_ENV_KEY];
+    await assert.rejects(() => resolveAndValidatePath('package.json'), {
+      message: /no workspace roots are configured/,
+    });
   });
 
   it('uses rootsFetcher roots when provided', async () => {
@@ -272,6 +304,7 @@ describe('resolveAndValidatePath', () => {
   });
 
   it('falls back to env roots when rootsFetcher returns empty', async () => {
+    enableRootsFallbackCwd();
     const testPath = join(process.cwd(), 'package.json');
     const fetcher = async () => [] as string[];
     const result = await resolveAndValidatePath(testPath, fetcher);
@@ -279,6 +312,7 @@ describe('resolveAndValidatePath', () => {
   });
 
   it('falls back to env roots when rootsFetcher throws', async () => {
+    enableRootsFallbackCwd();
     const testPath = join(process.cwd(), 'package.json');
     const fetcher = async () => {
       throw new Error('client does not support roots');
@@ -307,9 +341,11 @@ describe('resolveAndValidatePath', () => {
 describe('resolveWorkspacePath', () => {
   afterEach(() => {
     restoreAllowedFileRootsEnv();
+    restoreRootsFallbackCwdEnv();
   });
 
   it('returns a workspace-relative display path for cwd files', async () => {
+    enableRootsFallbackCwd();
     const result = await resolveWorkspacePath(join(process.cwd(), 'src', 'index.ts'));
     assert.strictEqual(result.displayPath, 'src/index.ts');
   });
@@ -324,6 +360,7 @@ describe('resolveWorkspacePath', () => {
   });
 
   it('rejects relative paths that escape the workspace root', async () => {
+    enableRootsFallbackCwd();
     await assert.rejects(() => resolveWorkspacePath('../package.json'), {
       message: /escapes the workspace root/,
     });

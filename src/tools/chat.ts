@@ -40,7 +40,7 @@ import {
   type StreamResult,
   type ToolEvent,
 } from '../lib/streaming.js';
-import { READ_ONLY_SESSION_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
+import { MUTABLE_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
 import {
   bindToolServices,
   buildContextUsed,
@@ -1370,7 +1370,7 @@ export function registerChatTool(server: McpServer, services: ToolServices): voi
         'Direct Gemini chat with optional server-managed in-memory sessions and automatic workspace cache reuse when eligible.',
       inputSchema: createChatInputSchema((prefix) => services.session.completeSessionIds(prefix)),
       outputSchema: ChatOutputSchema,
-      annotations: READ_ONLY_SESSION_ANNOTATIONS,
+      annotations: MUTABLE_ANNOTATIONS,
     },
     work: (args, ctx) => chatWork(askWork, args, bindToolServices(ctx, services)),
   });

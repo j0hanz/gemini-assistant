@@ -460,9 +460,11 @@ describe('ask transcript capture', () => {
 
   it('persists automatic workspace-cache metadata on new sessions', async () => {
     const originalEnabled = process.env.CACHE;
+    const originalRootsFallback = process.env.ROOTS_FALLBACK_CWD;
     const originalGetOrCreateCache =
       workspaceCacheManager.getOrCreateCache.bind(workspaceCacheManager);
     process.env.CACHE = 'true';
+    process.env.ROOTS_FALLBACK_CWD = 'true';
     workspaceCacheManager.getOrCreateCache = async () => 'cachedContents/workspace-1';
 
     try {
@@ -488,6 +490,11 @@ describe('ask transcript capture', () => {
       assert.strictEqual(response.workspaceCache, undefined);
     } finally {
       process.env.CACHE = originalEnabled;
+      if (originalRootsFallback === undefined) {
+        delete process.env.ROOTS_FALLBACK_CWD;
+      } else {
+        process.env.ROOTS_FALLBACK_CWD = originalRootsFallback;
+      }
       workspaceCacheManager.getOrCreateCache = originalGetOrCreateCache;
     }
   });

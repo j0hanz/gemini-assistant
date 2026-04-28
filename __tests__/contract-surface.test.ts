@@ -221,10 +221,6 @@ describe('contract surface invariants', () => {
     assert.ok(review);
 
     assert.ok(
-      chat.limitations?.some((limit) => limit.includes('chat still mutates session state')),
-      'chat limitations must explain its in-memory session mutation semantics',
-    );
-    assert.ok(
       chat.limitations?.some((limit) =>
         limit.includes('resumed sessions reject responseSchemaJson'),
       ),

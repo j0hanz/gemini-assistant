@@ -78,12 +78,13 @@ const TEXT_LIKE_MIME_TYPES = new Set([
   'application/json',
   'application/xml',
   'application/rtf',
-  'image/svg+xml',
   'text/csv',
   'text/html',
   'text/javascript',
   'text/plain',
 ]);
+
+const SVG_SCRIPT_PATTERN = /<script\b|\bjavascript:/iu;
 
 function isTextLikeMimeType(mimeType: string): boolean {
   return mimeType.startsWith('text/') || TEXT_LIKE_MIME_TYPES.has(mimeType);
@@ -93,9 +94,36 @@ function startsWithBytes(buffer: Buffer, signature: readonly number[]): boolean 
   return signature.every((byte, index) => buffer[index] === byte);
 }
 
+function validateSvgUpload(resolvedPath: string, content: Buffer): void {
+  if (content.includes(0)) {
+    throw new Error(`SVG upload contains binary data: ${resolvedPath}`);
+  }
+
+  // Strip a UTF-8 BOM and leading whitespace before checking the marker so
+  // exporters that prepend either still validate.
+  let prefix = content;
+  if (prefix.length >= 3 && prefix[0] === 0xef && prefix[1] === 0xbb && prefix[2] === 0xbf) {
+    prefix = prefix.subarray(3);
+  }
+  const head = prefix.subarray(0, 256).toString('utf8').trimStart().toLowerCase();
+  if (!head.startsWith('<?xml') && !head.startsWith('<svg')) {
+    throw new Error(`SVG upload does not start with <?xml or <svg: ${resolvedPath}`);
+  }
+
+  const text = content.toString('utf8');
+  if (SVG_SCRIPT_PATTERN.test(text)) {
+    throw new Error(`SVG upload contains script content: ${resolvedPath}`);
+  }
+}
+
 function validateUploadMimeType(resolvedPath: string, mimeType: string, content: Buffer): void {
   if (mimeType === 'application/octet-stream') {
     throw new Error(`Unsupported file type for upload: ${resolvedPath}`);
+  }
+
+  if (mimeType === 'image/svg+xml') {
+    validateSvgUpload(resolvedPath, content);
+    return;
   }
 
   if (isTextLikeMimeType(mimeType)) {

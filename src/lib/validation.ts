@@ -5,7 +5,7 @@ import { isIP } from 'node:net';
 import { dirname, isAbsolute, normalize, parse, relative, resolve } from 'node:path';
 import { domainToUnicode, fileURLToPath } from 'node:url';
 
-import { getAllowedHostsEnv, getRootsEnv } from '../config.js';
+import { getAllowedHostsEnv, getRootsEnv, getRootsFallbackCwd } from '../config.js';
 import { AppError } from './errors.js';
 
 // ── Host Validation ───────────────────────────────────────────────────
@@ -200,8 +200,13 @@ function getDefaultWorkspaceRoot(): string {
   return normalize(process.cwd());
 }
 
+function getCwdFallbackRoots(): string[] {
+  return getRootsFallbackCwd() ? [getDefaultWorkspaceRoot()] : [];
+}
+
 function getEffectiveWorkspaceRoots(clientRoots: string[]): string[] {
-  return clientRoots.length > 0 ? clientRoots : [getDefaultWorkspaceRoot()];
+  if (clientRoots.length > 0) return clientRoots;
+  return getCwdFallbackRoots();
 }
 
 function getEffectiveAllowedWorkspaceRoots(
@@ -348,7 +353,7 @@ function intersectRoots(serverRoots: string[], clientRoots: string[]): string[] 
 
 export async function getAllowedRoots(rootsFetcher?: RootsFetcher): Promise<string[]> {
   const configuredRoots = getConfiguredRoots();
-  const fallbackRoots = configuredRoots ?? [getDefaultWorkspaceRoot()];
+  const fallbackRoots = configuredRoots ?? getCwdFallbackRoots();
   if (!rootsFetcher) return fallbackRoots;
 
   try {
@@ -394,6 +399,22 @@ export async function resolveWorkspacePath(
   const clientRoots = await getClientRoots(rootsFetcher);
   const workspaceRoots = getEffectiveWorkspaceRoots(clientRoots);
   const allowedRoots = await getAllowedRoots(rootsFetcher);
+
+  if (allowedRoots.length === 0) {
+    const hasConfiguredIntent =
+      getConfiguredRoots() !== undefined || getRootsFallbackCwd() || clientRoots.length > 0;
+
+    if (!hasConfiguredIntent) {
+      throw new Error(
+        `Path '${filePath}' rejected: no workspace roots are configured. Set ROOTS to declare allowed directories, advertise client roots, or set ROOTS_FALLBACK_CWD=true to allow the server's working directory.`,
+      );
+    }
+
+    throw new Error(
+      `Path '${filePath}' is outside allowed directories. Set ROOTS to expand access.`,
+    );
+  }
+
   const allowedWorkspaceRoots = getEffectiveAllowedWorkspaceRoots(workspaceRoots, allowedRoots);
 
   let resolvedPath: string;
@@ -408,8 +429,7 @@ export async function resolveWorkspacePath(
     workspaceRoot = selected.root;
   }
 
-  const isUnderAllowedRoot =
-    allowedRoots.length > 0 && allowedRoots.some((root) => isPathWithinRoot(resolvedPath, root));
+  const isUnderAllowedRoot = allowedRoots.some((root) => isPathWithinRoot(resolvedPath, root));
 
   if (!isUnderAllowedRoot) {
     throw new Error(

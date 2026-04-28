@@ -5,7 +5,7 @@ import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Writable } from 'node:stream';
 
-import { getVerbosePayloadLogging } from '../config.js';
+import { getLogDir, getLogToStderr, getVerbosePayloadLogging } from '../config.js';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 type McpLogLevel =
@@ -214,13 +214,25 @@ export class Logger {
 
     this.logStreamInitialized = true;
 
+    if (getLogToStderr()) {
+      this.logStream = process.stderr;
+      return process.stderr;
+    }
+
+    const configuredLogDir = getLogDir();
+    if (configuredLogDir === undefined) {
+      this.logStream = process.stderr;
+      return process.stderr;
+    }
+
     try {
-      const logDir = join(process.cwd(), 'logs');
-      if (!existsSync(logDir)) {
-        mkdirSync(logDir, { recursive: true });
+      if (!existsSync(configuredLogDir)) {
+        mkdirSync(configuredLogDir, { recursive: true });
       }
 
-      const stream = createWriteStream(join(logDir, defaultLogFileName()), { flags: 'a' });
+      const stream = createWriteStream(join(configuredLogDir, defaultLogFileName()), {
+        flags: 'a',
+      });
       stream.once('error', (error) => {
         if (this.fileSinkErrorHandled) {
           return;

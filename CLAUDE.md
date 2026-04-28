@@ -14,11 +14,21 @@ npm run format
 npm run build
 ```
 
+Or run lint, type-check, build, prettier, knip, and the test suite together:
+
+```bash
+npm run check          # check:static + tests
+npm run check:static   # lint, type-check, build, prettier, knip (no tests)
+```
+
 Run a single test file:
 
 ```bash
 node --import tsx/esm --env-file=.env --test --no-warnings __tests__/path/to/test.ts
 ```
+
+The plain `npm run test` command relies on Node's built-in test discovery — it walks the project
+recursively for `*.test.ts` files and runs them. No shell glob expansion is required.
 
 Other useful commands:
 

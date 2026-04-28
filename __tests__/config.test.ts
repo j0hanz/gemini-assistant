@@ -114,16 +114,19 @@ describe('config parsing', () => {
     assert.throws(() => getExposeThoughts(), /THOUGHTS/);
   });
 
-  it('enables sensitive session resources only for explicit true or 1', () => {
+  it('enables sensitive session resources only for explicit true', () => {
     assert.strictEqual(getExposeSessionResources(), false);
     process.env.MCP_EXPOSE_SESSION_RESOURCES = 'true';
     assert.strictEqual(getExposeSessionResources(), true);
-    process.env.MCP_EXPOSE_SESSION_RESOURCES = '1';
-    assert.strictEqual(getExposeSessionResources(), true);
     process.env.MCP_EXPOSE_SESSION_RESOURCES = 'false';
     assert.strictEqual(getExposeSessionResources(), false);
+  });
+
+  it('rejects invalid MCP_EXPOSE_SESSION_RESOURCES values', () => {
+    process.env.MCP_EXPOSE_SESSION_RESOURCES = '1';
+    assert.throws(() => getExposeSessionResources(), /MCP_EXPOSE_SESSION_RESOURCES/);
     process.env.MCP_EXPOSE_SESSION_RESOURCES = 'yes';
-    assert.strictEqual(getExposeSessionResources(), false);
+    assert.throws(() => getExposeSessionResources(), /MCP_EXPOSE_SESSION_RESOURCES/);
   });
 
   it('rejects invalid CACHE boolean', () => {
@@ -252,25 +255,28 @@ describe('config parsing', () => {
     assert.throws(() => getTransportConfig(), /MCP_TRUST_PROXY/);
   });
 
-  it('rejects weak low-entropy HTTP tokens', () => {
-    process.env.MCP_HTTP_TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab';
+  it('rejects trivially repeated HTTP tokens', () => {
+    process.env.MCP_HTTP_TOKEN = 'a'.repeat(32);
 
-    assert.throws(() => getTransportConfig(), /48 chars|16 distinct/i);
+    assert.throws(() => getTransportConfig(), /trivially repeated/i);
   });
 
-  it('accepts short tokens when they contain enough distinct characters', () => {
+  it('rejects HTTP tokens shorter than 32 characters', () => {
+    process.env.MCP_HTTP_TOKEN = 'short-token';
+
+    assert.throws(() => getTransportConfig(), /at least 32/i);
+  });
+
+  it('accepts a 32-character lowercase-hex token', () => {
     process.env.MCP_HTTP_TOKEN = '0123456789abcdef0123456789abcdef';
 
     assert.strictEqual(getTransportConfig().token, '0123456789abcdef0123456789abcdef');
   });
 
-  it('accepts longer tokens even when uniqueness is lower', () => {
-    process.env.MCP_HTTP_TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbb';
+  it('accepts a 32-character random-looking token even with low character variety', () => {
+    process.env.MCP_HTTP_TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab';
 
-    assert.strictEqual(
-      getTransportConfig().token,
-      'aaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbb',
-    );
+    assert.strictEqual(getTransportConfig().token, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab');
   });
 
   it('returns default session limits', () => {
@@ -437,6 +443,26 @@ describe('config parsing', () => {
   it('returns the configured CACHE_TTL when set', () => {
     process.env.CACHE_TTL = '7200s';
     assert.strictEqual(getWorkspaceCacheTtl(), '7200s');
+  });
+
+  it('rejects CACHE_TTL without a seconds suffix', () => {
+    process.env.CACHE_TTL = '3600';
+    assert.throws(() => getWorkspaceCacheTtl(), /CACHE_TTL must be a positive integer/);
+  });
+
+  it('rejects CACHE_TTL using non-second units', () => {
+    process.env.CACHE_TTL = '1h';
+    assert.throws(() => getWorkspaceCacheTtl(), /CACHE_TTL must be a positive integer/);
+  });
+
+  it('rejects CACHE_TTL of zero seconds', () => {
+    process.env.CACHE_TTL = '0s';
+    assert.throws(() => getWorkspaceCacheTtl(), /positive number of seconds/);
+  });
+
+  it('falls back to the default when CACHE_TTL is empty', () => {
+    process.env.CACHE_TTL = '';
+    assert.strictEqual(getWorkspaceCacheTtl(), '3600s');
   });
 
   it('returns the configured CONTEXT when set', () => {

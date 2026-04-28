@@ -109,9 +109,6 @@ function parseOptionalTokenEnv(name: string): string | undefined {
   if (isTriviallyRepeatedToken(trimmed)) {
     throw new Error(`${name} must not be a trivially repeated pattern.`);
   }
-  if (trimmed.length < 48 && new Set(trimmed).size < 16) {
-    throw new Error(`${name} must be >=48 chars or use >=16 distinct characters.`);
-  }
   return trimmed;
 }
 
@@ -204,12 +201,22 @@ export function getExposeThoughts(): boolean {
 }
 
 export function getExposeSessionResources(): boolean {
-  const raw = process.env.MCP_EXPOSE_SESSION_RESOURCES;
-  return raw === 'true' || raw === '1';
+  return parseBooleanEnv('MCP_EXPOSE_SESSION_RESOURCES', false);
 }
 
 export function getVerbosePayloadLogging(): boolean {
   return parseBooleanEnv('LOG_PAYLOADS', false);
+}
+
+export function getLogDir(): string | undefined {
+  const raw = process.env.LOG_DIR;
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  return trimmed === '' ? undefined : trimmed;
+}
+
+export function getLogToStderr(): boolean {
+  return parseBooleanEnv('LOG_TO_STDERR', false);
 }
 
 export function getTransportMode(): TransportMode {
@@ -267,6 +274,10 @@ export function getRootsEnv(): string | undefined {
   return process.env.ROOTS;
 }
 
+export function getRootsFallbackCwd(): boolean {
+  return parseBooleanEnv('ROOTS_FALLBACK_CWD', false);
+}
+
 export function getSessionLimits(): {
   maxEventEntries: number;
   maxSessions: number;
@@ -294,6 +305,7 @@ export function getSessionLimits(): {
 // ── Workspace Cache ───────────────────────────────────────────────────
 
 const DEFAULT_WORKSPACE_CACHE_TTL = '3600s';
+const CACHE_TTL_PATTERN = /^(\d+)s$/;
 
 export function getWorkspaceCacheEnabled(): boolean {
   return parseBooleanEnv('CACHE', true);
@@ -304,7 +316,25 @@ export function getWorkspaceContextFile(): string | undefined {
 }
 
 export function getWorkspaceCacheTtl(): string {
-  return process.env.CACHE_TTL ?? DEFAULT_WORKSPACE_CACHE_TTL;
+  const raw = process.env.CACHE_TTL;
+  if (raw === undefined || raw.trim() === '') {
+    return DEFAULT_WORKSPACE_CACHE_TTL;
+  }
+
+  const trimmed = raw.trim();
+  const match = CACHE_TTL_PATTERN.exec(trimmed);
+  if (!match) {
+    throw new Error(
+      'CACHE_TTL must be a positive integer followed by "s" (e.g. "3600s") when set.',
+    );
+  }
+
+  const seconds = Number.parseInt(match[1] ?? '0', 10);
+  if (!Number.isSafeInteger(seconds) || seconds <= 0) {
+    throw new Error('CACHE_TTL must specify a positive number of seconds when set.');
+  }
+
+  return trimmed;
 }
 
 export function getWorkspaceAutoScan(): boolean {

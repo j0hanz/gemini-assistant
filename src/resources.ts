@@ -703,8 +703,9 @@ function isWorkspaceCacheFresh(createdAt: number | undefined, ttl: string): bool
     return false;
   }
 
-  const ttlSeconds = Number.parseInt(ttl, 10);
-  if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
+  const match = /^(\d+)s$/.exec(ttl);
+  const ttlSeconds = match ? Number.parseInt(match[1] ?? '0', 10) : 0;
+  if (ttlSeconds <= 0) {
     return false;
   }
 

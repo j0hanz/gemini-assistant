@@ -65,26 +65,67 @@ function createBufferedLogger(verbosePayloads = false) {
 
 afterEach(() => {
   delete process.env.LOG_PAYLOADS;
+  delete process.env.LOG_DIR;
+  delete process.env.LOG_TO_STDERR;
 });
 
 describe('Logger sink setup', () => {
-  it('creates the default log directory lazily on first write', async () => {
-    const originalCwd = process.cwd();
+  it('writes to stderr by default when LOG_DIR is unset', () => {
+    delete process.env.LOG_DIR;
+    delete process.env.LOG_TO_STDERR;
     const tempDir = mkdtempSync(join(tmpdir(), 'gemini-assistant-logger-'));
 
+    const originalCwd = process.cwd();
     try {
       process.chdir(tempDir);
       const logger = new Logger();
+      logger.info('system', 'hello');
+      assert.strictEqual(
+        existsSync(join(tempDir, 'logs')),
+        false,
+        'no logs directory should be created when LOG_DIR is unset',
+      );
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(tempDir, { force: true, recursive: true });
+    }
+  });
 
-      assert.strictEqual(existsSync(join(tempDir, 'logs')), false);
+  it('creates the configured LOG_DIR lazily on first write', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'gemini-assistant-logger-'));
+    const targetDir = join(tempDir, 'logs');
+
+    try {
+      process.env.LOG_DIR = targetDir;
+      const logger = new Logger();
+
+      assert.strictEqual(existsSync(targetDir), false);
 
       logger.info('system', 'hello');
       await new Promise((resolve) => setImmediate(resolve));
 
-      assert.strictEqual(existsSync(join(tempDir, 'logs')), true);
-      assert.match(readFileSync(join(tempDir, 'logs', 'app.log'), 'utf8'), /"message":"hello"/);
+      assert.strictEqual(existsSync(targetDir), true);
+      assert.match(readFileSync(join(targetDir, 'app.log'), 'utf8'), /"message":"hello"/);
     } finally {
-      process.chdir(originalCwd);
+      rmSync(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it('honours LOG_TO_STDERR=true even when LOG_DIR is set', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'gemini-assistant-logger-'));
+    const targetDir = join(tempDir, 'logs');
+
+    try {
+      process.env.LOG_DIR = targetDir;
+      process.env.LOG_TO_STDERR = 'true';
+      const logger = new Logger();
+      logger.info('system', 'hello');
+      assert.strictEqual(
+        existsSync(targetDir),
+        false,
+        'LOG_TO_STDERR should suppress LOG_DIR file sink',
+      );
+    } finally {
       rmSync(tempDir, { force: true, recursive: true });
     }
   });

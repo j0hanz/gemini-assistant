@@ -1,4 +1,3 @@
-import { createMcpExpressApp } from '@modelcontextprotocol/express';
 import type { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import { NodeStreamableHTTPServerTransport as NodeHttpTransport } from '@modelcontextprotocol/node';
 import type {
@@ -16,6 +15,8 @@ import { Buffer } from 'node:buffer';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { isIP } from 'node:net';
+
+import express, { type Express } from 'express';
 
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
@@ -803,7 +804,7 @@ async function handleManagedRequest<TTransport, TResult>({
   }
 }
 
-function applyCors(app: ReturnType<typeof createMcpExpressApp>, corsOrigin: string): void {
+function applyCors(app: Express, corsOrigin: string): void {
   if (!corsOrigin) {
     return;
   }
@@ -916,9 +917,28 @@ export async function startHttpTransport(
   assertHostValidationIsConfigured(host, allowedHosts);
   const rateLimiter = createRateLimiter({ rps: rateLimitRps, burst: rateLimitBurst });
 
-  const app = createMcpExpressApp({
-    host,
-    ...(allowedHosts ? { allowedHosts } : {}),
+  // Build the express app directly so applyCors runs before any
+  // host-validation middleware. CORS headers must be present on 403 responses
+  // so browsers surface the real status. The SDK's createMcpExpressApp
+  // auto-installs localhost-rebinding protection ahead of any user middleware,
+  // which would strip CORS from those 403s.
+  const app = express();
+  app.use(express.json());
+
+  applyCors(app, corsOrigin);
+
+  // Health and readiness endpoints. Registered before host-validation and auth
+  // so cloud load balancers and orchestrators can probe via the bind IP without
+  // a configured Host header or bearer token. Endpoints expose no state.
+  app.get('/healthz', (_req, res) => {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', APPLICATION_JSON);
+    res.end(JSON.stringify({ status: 'ok' }));
+  });
+  app.get('/readyz', (_req, res) => {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', APPLICATION_JSON);
+    res.end(JSON.stringify({ status: 'ok' }));
   });
 
   if (allowedHosts) {
@@ -935,8 +955,6 @@ export async function startHttpTransport(
       next();
     });
   }
-
-  applyCors(app, corsOrigin);
 
   if (isStateless) {
     log.warn(
@@ -1108,11 +1126,31 @@ export function startWebStandardTransport(
   const stopIdleSweep = startStatefulIdleSweep(statefulPairs, sessionTtlMs);
 
   const handler = async (req: Request): Promise<Response> => {
-    if (allowedHosts && !validateHostHeader(req.headers.get('host'), allowedHosts)) {
-      return new Response('Forbidden', { status: 403 });
+    const url = new URL(req.url);
+
+    // Health and readiness endpoints. Registered before host-validation and
+    // auth so cloud probes can hit them without a configured Host header or
+    // bearer token. Endpoints expose no state.
+    if (url.pathname === '/healthz' || url.pathname === '/readyz') {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        return withCors(
+          new Response(null, { status: 405, headers: { Allow: 'GET, HEAD' } }),
+          corsOrigin,
+        );
+      }
+      return withCors(
+        new Response(JSON.stringify({ status: 'ok' }), {
+          status: 200,
+          headers: { 'content-type': APPLICATION_JSON },
+        }),
+        corsOrigin,
+      );
     }
 
-    const url = new URL(req.url);
+    if (allowedHosts && !validateHostHeader(req.headers.get('host'), allowedHosts)) {
+      return withCors(new Response('Forbidden', { status: 403 }), corsOrigin);
+    }
+
     if (url.pathname !== '/mcp') {
       return withCors(new Response('Not Found', { status: 404 }), corsOrigin);
     }

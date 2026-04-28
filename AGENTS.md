@@ -7,7 +7,7 @@
 - **Manager**: npm
 - **Runtime**: Node.js `>=24`
 - **Languages**: TypeScript, JavaScript, Shell, PowerShell
-- **Frameworks**: express, zod, `@google/genai`, `@modelcontextprotocol/express`, `@modelcontextprotocol/node`, `@modelcontextprotocol/server`
+- **Frameworks**: express, zod, `@google/genai`, `@modelcontextprotocol/node`, `@modelcontextprotocol/server`
 - **Tooling**: typescript, eslint, prettier, tsx, knip, `@trivago/prettier-plugin-sort-imports`, `eslint-config-prettier`
 
 ## Architecture
@@ -20,8 +20,10 @@
 ## Testing Strategy
 
 - Tests are colocated under `__tests__/`.
-- `npm run test` uses Node's built-in test runner with `tsx/esm` and `.env`.
-- The repository scan found 31 test files, including end-to-end coverage.
+- `npm run test` uses Node's built-in test runner with `tsx/esm` and `.env`. Test files are
+  discovered by Node's directory walk (no shell glob expansion required), so the command runs the
+  same way under bash, PowerShell, and cmd.
+- The repository contains end-to-end coverage alongside unit suites.
 
 ## Commands
 
@@ -30,6 +32,8 @@
 - **Lint**: `npm run lint`
 - **Type Check**: `npm run type-check`
 - **Build**: `npm run build`
+- **Check (static-only)**: `npm run check:static`
+- **Check (static + tests)**: `npm run check`
 
 ## Safety Boundaries
 

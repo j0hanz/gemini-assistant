@@ -35,8 +35,9 @@
     "format:check": "prettier --check .",
     "type-check": "tsc -p tsconfig.json --noEmit",
     "knip": "knip",
-    "check": "npm run build && npm run type-check && eslint . && prettier --check . && knip",
-    "test": "node --import tsx/esm --env-file=.env --test --no-warnings __tests__/**/*.test.ts __tests__/**/**/*.test.ts",
+    "check:static": "npm run build && npm run type-check && eslint . && prettier --check . && knip",
+    "check": "npm run check:static && npm run test",
+    "test": "node --import tsx/esm --env-file=.env --test --no-warnings",
     "inspector": "npm run build && npx -y @modelcontextprotocol/inspector node --env-file=.env dist/index.js"
   },
   "engines": {
@@ -45,7 +46,6 @@
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
     "@google/genai": "^1.50.1",
-    "@modelcontextprotocol/express": "2.0.0-alpha.2",
     "@modelcontextprotocol/node": "2.0.0-alpha.2",
     "@modelcontextprotocol/server": "2.0.0-alpha.2",
     "express": "^5.2.1",

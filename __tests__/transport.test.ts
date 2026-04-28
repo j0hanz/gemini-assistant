@@ -130,6 +130,7 @@ async function sendHttpRequest(options: {
   body?: string;
   headers?: Record<string, string>;
   method: 'DELETE' | 'GET' | 'OPTIONS' | 'POST';
+  path?: string;
   port: number;
   readBody?: boolean;
 }): Promise<{
@@ -142,7 +143,7 @@ async function sendHttpRequest(options: {
       {
         host: '127.0.0.1',
         port: options.port,
-        path: '/mcp',
+        path: options.path ?? '/mcp',
         method: options.method,
         headers: options.headers,
       },
@@ -742,6 +743,95 @@ describe('startHttpTransport', () => {
         assert.strictEqual(second.status, 429);
       } finally {
         await transport.close();
+      }
+    });
+  });
+
+  it('serves /healthz without auth or rate limiting', async () => {
+    await withAvailablePort(async (port) => {
+      process.env.HOST = '127.0.0.1';
+      process.env.PORT = String(port);
+      process.env.MCP_HTTP_TOKEN = VALID_TOKEN;
+
+      const transport = await startHttpTransport(() => createServerInstance());
+
+      try {
+        const response = await sendHttpRequest({
+          method: 'GET',
+          path: '/healthz',
+          port,
+          headers: { host: `127.0.0.1:${String(port)}` },
+        });
+
+        assert.strictEqual(response.status, 200);
+        assert.match(response.body, /"status"\s*:\s*"ok"/);
+      } finally {
+        await transport.close();
+        delete process.env.MCP_HTTP_TOKEN;
+      }
+    });
+  });
+
+  it('serves /readyz without auth and outside the host allow-list', async () => {
+    await withAvailablePort(async (port) => {
+      process.env.HOST = '127.0.0.1';
+      process.env.PORT = String(port);
+      process.env.MCP_HTTP_TOKEN = VALID_TOKEN;
+      process.env.ALLOWED_HOSTS = 'example.internal';
+
+      const transport = await startHttpTransport(() => createServerInstance());
+
+      try {
+        const response = await sendHttpRequest({
+          method: 'GET',
+          path: '/readyz',
+          port,
+          headers: { host: `127.0.0.1:${String(port)}` },
+        });
+
+        assert.strictEqual(response.status, 200);
+        assert.match(response.body, /"status"\s*:\s*"ok"/);
+      } finally {
+        await transport.close();
+        delete process.env.MCP_HTTP_TOKEN;
+        delete process.env.ALLOWED_HOSTS;
+      }
+    });
+  });
+
+  it('attaches CORS headers to host-validation 403 responses', async () => {
+    await withAvailablePort(async (port) => {
+      process.env.HOST = '127.0.0.1';
+      process.env.PORT = String(port);
+      process.env.MCP_HTTP_TOKEN = VALID_TOKEN;
+      process.env.ALLOWED_HOSTS = 'example.internal';
+      process.env.CORS_ORIGIN = 'https://example.com';
+
+      const transport = await startHttpTransport(() => createServerInstance());
+
+      try {
+        const response = await sendHttpRequest({
+          method: 'POST',
+          port,
+          headers: {
+            host: `not-allowed:${String(port)}`,
+            accept: 'application/json',
+            'content-type': 'application/json',
+            authorization: `Bearer ${VALID_TOKEN}`,
+          },
+          body: createInitializeBody(),
+        });
+
+        assert.strictEqual(response.status, 403);
+        assert.strictEqual(
+          firstHeaderValue(response.headers['access-control-allow-origin']),
+          'https://example.com',
+        );
+      } finally {
+        await transport.close();
+        delete process.env.MCP_HTTP_TOKEN;
+        delete process.env.ALLOWED_HOSTS;
+        delete process.env.CORS_ORIGIN;
       }
     });
   });

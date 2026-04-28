@@ -1,12 +1,11 @@
 ---
 name: mcp-v2
 description: >-
-  Guides TypeScript MCP v2 development — correct package imports, registration patterns,
-  error model, transport setup, schema rules, tasks, and migration from v1. Use when
-  working in a codebase that imports from `@modelcontextprotocol/server`, `/client`,
-  `/node`, `/express`, or `/hono`; when registering MCP tools, prompts, or resources;
-  when configuring stdio, Streamable HTTP, or SSE transports; or when migrating from
-  the legacy `@modelcontextprotocol/sdk` package.
+  Use when working in a codebase that imports from `@modelcontextprotocol/server`,
+  `/client`, `/node`, `/express`, or `/hono`; when registering MCP tools, prompts,
+  or resources; when configuring stdio or Streamable HTTP transports (server-side SSE
+  is removed in v2); or when migrating from the legacy `@modelcontextprotocol/sdk`
+  package.
 ---
 
 # MCP v2 Development Expert

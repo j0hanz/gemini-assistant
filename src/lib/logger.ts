@@ -1,7 +1,7 @@
 import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
+import { createWriteStream, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Writable } from 'node:stream';
 
@@ -226,9 +226,7 @@ export class Logger {
     }
 
     try {
-      if (!existsSync(configuredLogDir)) {
-        mkdirSync(configuredLogDir, { recursive: true });
-      }
+      mkdirSync(configuredLogDir, { recursive: true });
 
       const stream = createWriteStream(join(configuredLogDir, defaultLogFileName()), {
         flags: 'a',

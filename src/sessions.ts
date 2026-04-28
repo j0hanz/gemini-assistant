@@ -1079,7 +1079,7 @@ export class SessionStore {
     this.removeSession(id, true);
     setTimeout(() => {
       this.notifyChange(true);
-    }, 0);
+    }, 0).unref();
     return undefined;
   }
 

@@ -240,29 +240,31 @@ export function bridgeTaskCancellationToSignal(
   };
   baseSignal.addEventListener('abort', onBaseAbort, { once: true });
 
-  const timer = setInterval(() => {
-    void (async () => {
-      try {
-        const current = await store.getTask(taskId);
-        if (
-          current.status === 'cancelled' ||
-          current.status === 'completed' ||
-          current.status === 'failed'
-        ) {
-          cleanup();
-          if (current.status === 'cancelled' && !controller.signal.aborted) {
-            controller.abort(new Error(`Task ${taskId} cancelled`));
-          }
+  const poll = async (): Promise<void> => {
+    try {
+      const current = await store.getTask(taskId);
+      if (
+        current.status === 'cancelled' ||
+        current.status === 'completed' ||
+        current.status === 'failed'
+      ) {
+        cleanup();
+        if (current.status === 'cancelled' && !controller.signal.aborted) {
+          controller.abort(new Error(`Task ${taskId} cancelled`));
         }
-      } catch (error) {
-        if (isTaskNotFoundError(error)) {
-          cleanup();
-        }
-        // baseSignal still controls abort on poll errors.
       }
-    })();
+    } catch (error) {
+      if (isTaskNotFoundError(error)) {
+        cleanup();
+      }
+      // baseSignal still controls abort on poll errors.
+    }
+  };
+
+  const timer = setInterval(() => {
+    void poll();
   }, intervalMs);
-  (timer as { unref?: () => void }).unref?.();
+  timer.unref();
 
   controller.signal.addEventListener('abort', cleanup, { once: true });
   return controller.signal;

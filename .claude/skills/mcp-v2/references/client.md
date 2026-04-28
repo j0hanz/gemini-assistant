@@ -2,7 +2,7 @@
 
 Read this when working on an MCP **client** in TypeScript with `@modelcontextprotocol/client`. Patterns assume v2 (see SKILL.md Step 1).
 
-> **Status note**: `@modelcontextprotocol/client` is v2 alpha — pin versions and verify signatures against generated TypeDoc when upgrading.
+> **Note**: `@modelcontextprotocol/client` tasks APIs (`client.experimental.tasks.*`) are experimental — pin versions and check the changelog when upgrading.
 
 ## Imports cheat sheet
 

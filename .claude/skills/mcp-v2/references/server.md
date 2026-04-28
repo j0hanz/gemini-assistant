@@ -611,7 +611,8 @@ const result = await ctx.mcpReq.requestSampling({
   modelPreferences: { intelligencePriority: 0.5, speedPriority: 0.5 },
 });
 
-console.log(result.content);
+// Use ctx.mcpReq.log (MCP logging) or console.error — never console.log in server code
+await ctx.mcpReq.log('info', JSON.stringify(result.content));
 ```
 
 Only works if the client advertised `sampling: {}` capability. Use sampling when:

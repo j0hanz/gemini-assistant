@@ -1,6 +1,12 @@
 ---
 name: mcp-v2
-description: Use when working in a TypeScript codebase that imports from `@modelcontextprotocol/server`, `/client`, `/node`, `/express`, or `/hono`; when registering MCP tools, prompts, or resources; when configuring stdio, Streamable HTTP, or SSE transports; or when migrating from the legacy `@modelcontextprotocol/sdk` package.
+description: >-
+  Guides TypeScript MCP v2 development — correct package imports, registration patterns,
+  error model, transport setup, schema rules, tasks, and migration from v1. Use when
+  working in a codebase that imports from `@modelcontextprotocol/server`, `/client`,
+  `/node`, `/express`, or `/hono`; when registering MCP tools, prompts, or resources;
+  when configuring stdio, Streamable HTTP, or SSE transports; or when migrating from
+  the legacy `@modelcontextprotocol/sdk` package.
 ---
 
 # MCP v2 Development Expert
@@ -245,7 +251,10 @@ import { McpServer } from '@modelcontextprotocol/server';
 
 import { randomUUID } from 'node:crypto';
 
-const app = createMcpExpressApp({ host: '127.0.0.1' });
+const app = createMcpExpressApp({
+  host: '127.0.0.1',
+  allowedHosts: ['127.0.0.1', 'localhost'], // DNS rebinding protection
+});
 const transport = new NodeStreamableHTTPServerTransport({
   sessionIdGenerator: () => randomUUID(), // omit / undefined for stateless
 });

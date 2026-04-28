@@ -72,7 +72,7 @@ export function getTaskEmitter(ctx: ServerContext): {
   const store = ctx.task?.store;
   const queue = store instanceof ObservableTaskStore ? storeToQueue.get(store) : undefined;
 
-  const noop = async (): Promise<void> => undefined;
+  const noop = (): Promise<void> => Promise.resolve();
 
   if (!taskId || !queue) {
     return { phase: noop, finding: noop };
@@ -536,8 +536,8 @@ export function bridgeTaskCancellationToSignal(
   void store
     .getTask(taskId)
     .then((task) => {
-      if (task !== null && TERMINAL_STATUSES.has(task.status as TaskStatus)) {
-        onTaskEvent({ type: 'status', taskId, status: task.status as TaskStatus });
+      if (task !== null && TERMINAL_STATUSES.has(task.status)) {
+        onTaskEvent({ type: 'status', taskId, status: task.status });
       }
     })
     .catch(() => {

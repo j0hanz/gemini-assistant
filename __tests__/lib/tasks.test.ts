@@ -5,11 +5,7 @@ import type {
   ServerContext,
   Task,
 } from '@modelcontextprotocol/server';
-import {
-  InMemoryTaskMessageQueue,
-  InMemoryTaskStore,
-  RELATED_TASK_META_KEY,
-} from '@modelcontextprotocol/server';
+import { InMemoryTaskStore, RELATED_TASK_META_KEY } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';

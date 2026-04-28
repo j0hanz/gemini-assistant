@@ -14,7 +14,12 @@ import { createWorkspaceAccess, createWorkspaceCacheManager } from './lib/worksp
 import { getExposeSessionResources, getStatelessTransportFlag } from './config.js';
 import { registerPrompts } from './prompts.js';
 import { PUBLIC_STATIC_RESOURCE_URIS, PUBLIC_TOOL_NAMES } from './public-contract.js';
-import { registerResources, SESSIONS_LIST_URI } from './resources.js';
+import {
+  registerResources,
+  sessionDetailUri,
+  SESSIONS_LIST_URI,
+  sessionTurnPartsUri,
+} from './resources.js';
 import {
   createSessionAccess,
   createSessionStore,
@@ -117,6 +122,20 @@ export function sendResourceChangedForServer(server: McpServer, listUri: string 
   server.sendResourceListChanged();
 }
 
+export function sendResourceUpdatedForServer(server: McpServer, uri: string): void {
+  if (!server.isConnected()) return;
+  if (!isKnownResourceUri(uri)) {
+    log.warn(`Blocked resource updated notification with unregistered URI: ${uri}`);
+    return;
+  }
+  void server.server.sendResourceUpdated({ uri }).catch((err: unknown) => {
+    log.warn('sendResourceUpdated failed', {
+      uri,
+      error: AppError.formatMessage(err),
+    });
+  });
+}
+
 function registerServerTools(server: McpServer, services: ServerServices): void {
   for (const register of SERVER_TOOL_REGISTRARS) {
     register(server, services);
@@ -172,6 +191,7 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
       name: 'gemini-assistant',
       title: 'Gemini Assistant',
       version,
+      websiteUrl: 'https://github.com/j0hanz/gemini-assistant',
     },
     {
       capabilities: {
@@ -203,6 +223,13 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
         // otherwise so non-exposed installs don't notify on every model turn.
         if (!getExposeSessionResources()) return;
         sendResourceChangedForServer(server, SESSIONS_LIST_URI);
+        // Targeted updates so subscribers to specific session resources are
+        // notified without re-listing the entire collection.
+        sendResourceUpdatedForServer(
+          server,
+          sessionTurnPartsUri(turnPartsAdded.sessionId, turnPartsAdded.turnIndex),
+        );
+        sendResourceUpdatedForServer(server, sessionDetailUri(turnPartsAdded.sessionId));
         return;
       }
       sendResourceChangedForServer(server, listChanged ? SESSIONS_LIST_URI : undefined);

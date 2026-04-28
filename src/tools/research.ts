@@ -74,15 +74,13 @@ async function enrichTopicWithSampling(
   searchDepth: number,
   ctx: ServerContext,
 ): Promise<string> {
-  type RequestSampling = NonNullable<typeof ctx.mcpReq.requestSampling>;
-  const requestSampling = ctx.mcpReq.requestSampling as RequestSampling | undefined;
-  if (searchDepth < 3 || typeof requestSampling !== 'function') {
-    log.debug('Sampling skipped for shallow research or unavailable requestSampling');
+  if (searchDepth < 3) {
+    log.debug('Sampling skipped for shallow research');
     return topic;
   }
 
   try {
-    const samplingRes = await requestSampling({
+    const samplingRes = await ctx.mcpReq.requestSampling({
       messages: [
         {
           role: 'user',

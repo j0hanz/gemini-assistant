@@ -1,4 +1,9 @@
-import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
+import {
+  type CallToolResult,
+  localhostAllowedHostnames,
+  type McpServer,
+  validateHostHeader as sdkValidateHostHeader,
+} from '@modelcontextprotocol/server';
 
 import { realpath, stat } from 'node:fs/promises';
 import { isIP } from 'node:net';
@@ -10,7 +15,6 @@ import { AppError } from './errors.js';
 
 // ── Host Validation ───────────────────────────────────────────────────
 
-const LOCALHOST_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 const LOCALHOST_BIND_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const BROAD_BIND_ADDRESSES = new Set(['0.0.0.0', '::', '']);
 
@@ -61,7 +65,7 @@ export function resolveAllowedHosts(bindHost: string): string[] | undefined {
   const explicit = parseAllowedHosts();
   if (explicit) return explicit;
   if (BROAD_BIND_ADDRESSES.has(bindHost)) return undefined;
-  if (LOCALHOST_BIND_HOSTS.has(bindHost)) return LOCALHOST_HOSTS;
+  if (LOCALHOST_BIND_HOSTS.has(bindHost)) return localhostAllowedHostnames();
   return [normalizeAllowedHost(bindHost)];
 }
 
@@ -76,12 +80,16 @@ export function isAutoDerivedAllowedHosts(bindHost: string): boolean {
 /**
  * Validates a request `Host` header against an allow-list.
  * Strips the port before comparing (case-insensitive).
+ *
+ * Pre-normalizes both the header and the allowlist (strip port, lowercase,
+ * bracket bare IPv6) so callers may pass port-bearing or bracket-less entries,
+ * then delegates to the MCP SDK's `validateHostHeader` for the actual match.
  */
 export function validateHostHeader(hostHeader: string | null, allowedHosts: string[]): boolean {
   if (!hostHeader) return false;
-
-  const normalizedHost = normalizeAllowedHostEntry(hostHeader);
-  return allowedHosts.some((host) => normalizeAllowedHostEntry(host) === normalizedHost);
+  const normalizedHeader = normalizeAllowedHostEntry(hostHeader);
+  const normalizedAllowed = allowedHosts.map(normalizeAllowedHostEntry);
+  return sdkValidateHostHeader(normalizedHeader, normalizedAllowed).ok;
 }
 
 // ── Path Validation ───────────────────────────────────────────────────

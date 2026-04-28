@@ -681,6 +681,15 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
       list: () => ({ resources: sessionTurnPartsResources(sessionStore) }),
       complete: {
         sessionId: sessionStore.completeSessionIds.bind(sessionStore),
+        turnIndex: (value, context) => {
+          const sessionId = context?.arguments?.sessionId;
+          if (!sessionId) return [];
+          const entries = sessionStore.listSessionContentEntries(sessionId);
+          if (!entries) return [];
+          return entries
+            .map((_, index) => String(index))
+            .filter((index) => index.startsWith(value));
+        },
       },
     }),
     {

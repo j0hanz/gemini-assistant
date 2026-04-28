@@ -7,6 +7,7 @@ import type {
 } from '@modelcontextprotocol/server';
 import {
   JSONRPC_VERSION,
+  localhostAllowedHostnames,
   ProtocolErrorCode,
   WebStandardStreamableHTTPServerTransport as WebHttpTransport,
 } from '@modelcontextprotocol/server';
@@ -139,7 +140,7 @@ function resolveTransportRuntimeConfig(): ResolvedTransportConfig {
   } = getTransportConfig();
   const resolvedAllowedHosts =
     token === undefined && allowUnauthenticatedLoopbackHttp && isLoopbackBindHost(host)
-      ? (resolveAllowedHosts(host) ?? ['localhost', '127.0.0.1', '[::1]'])
+      ? (resolveAllowedHosts(host) ?? localhostAllowedHostnames())
       : resolveAllowedHosts(host);
 
   return {

@@ -1,13 +1,21 @@
 ---
 name: mcp-v2
-description: Expert guidance for Model Context Protocol (MCP) v2 server and client development in TypeScript. Use this skill whenever the user is working in a codebase that imports from `@modelcontextprotocol/server`, `@modelcontextprotocol/client`, `@modelcontextprotocol/node`, `@modelcontextprotocol/express`, or `@modelcontextprotocol/hono` — or when they mention MCP, McpServer, registering tools/prompts/resources, MCP transports (stdio, streamable HTTP, SSE), MCP authentication, MCP tasks/sampling/elicitation/roots, or migrating from the legacy `@modelcontextprotocol/sdk` package. Also trigger on calls like `registerTool`, `callTool`, `McpServer`, `Client.connect`, even if the user does not explicitly say "MCP v2". This skill prevents common v1-vs-v2 mistakes, enforces Standard Schema usage, and guides correct transport, error, and task design.
+description: Use when working in a TypeScript codebase that imports from `@modelcontextprotocol/server`, `/client`, `/node`, `/express`, or `/hono`; when registering MCP tools, prompts, or resources; when configuring stdio, Streamable HTTP, or SSE transports; or when migrating from the legacy `@modelcontextprotocol/sdk` package.
 ---
 
 # MCP v2 Development Expert
 
 The MCP TypeScript SDK split into multiple packages in v2. Code that mixes v1 and v2 imports, or follows v1 patterns inside a v2 codebase, will silently misbehave or fail to compile. This skill encodes the v2 contract and the most common pitfalls so changes match what the SDK actually expects.
 
-## Step 1 — Detect the version before touching anything
+## When NOT to use
+
+- The codebase only imports from `@modelcontextprotocol/sdk/...` and is not being migrated — this is v1; consult v1 docs instead.
+- Pure protocol-spec questions unrelated to the TypeScript SDK (e.g., authoring a non-TS client) — the patterns here are SDK-specific.
+- Editing JSON Schema by hand without Zod — see [references/schemas.md](references/schemas.md) directly.
+
+If v1 patterns appear in a codebase that should be v2, jump straight to [references/migration-v1-v2.md](references/migration-v1-v2.md).
+
+## Triage 1 — Detect the version before touching anything
 
 Before adding code, identify the SDK version. The two are not interchangeable.
 
@@ -35,7 +43,7 @@ To confirm quickly:
 grep -r "@modelcontextprotocol" package.json
 ```
 
-## Step 2 — Are you in server code or client code?
+## Triage 2 — Are you in server code or client code?
 
 | Working on…                                       | Read                                                           | Most-used imports                                                        |
 | ------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------ |
@@ -315,10 +323,23 @@ For more — auth (bearer, client credentials, OAuth, private-key JWT, Cross-App
 
 This repository has a frozen public surface defined in `src/public-contract.ts` — four tools (`chat`, `research`, `analyze`, `review`), three prompts, and a set of resources. Do not add new tools, prompts, or resources outside that contract without updating `public-contract.ts`. Schemas live under `src/schemas/` using Zod v4 (`import { z } from 'zod/v4'`); reuse field builders from `src/schemas/fields.ts` instead of redefining primitives. See [CLAUDE.md](../../../CLAUDE.md) for the full project rules.
 
+## Red flags — STOP if you catch yourself doing any of these
+
+- Typing `z.object(` at a tool/prompt input boundary → use `z.strictObject(`.
+- Adding `import ... from '@modelcontextprotocol/sdk/...'` in a v2 package → wrong SDK; use the split packages.
+- Calling `server.tool(...)`, `server.prompt(...)`, or `server.resource(...)` → v1 API; use `registerTool/Prompt/Resource`.
+- Writing `console.log(...)` in a stdio server → corrupts JSON-RPC; use the project logger or `console.error`.
+- `throw` inside a tool handler for an ordinary upstream failure → return `{ content, isError: true }` instead.
+- Returning `structuredContent` without `content` → clients without structured-content support get nothing.
+- `import './foo'` (no `.js`) in ESM TypeScript → Node ESM rejects extensionless specifiers.
+- Reading `mcp-session-id` in stateless HTTP mode → it doesn't exist there.
+
+If any of these are in your diff: stop and fix before continuing.
+
 ## Workflow checklist for any MCP change
 
-1. Confirm v2 (Step 1).
-2. Confirm server vs client (Step 2).
+1. Confirm v2 (Triage 1).
+2. Confirm server vs client (Triage 2).
 3. If adding a tool/prompt/resource: define schemas under `src/schemas/`, then register with `registerTool/Prompt/Resource`.
 4. For tools: add `outputSchema` and return `structuredContent` whenever output is structured.
 5. Handle both error surfaces in clients.

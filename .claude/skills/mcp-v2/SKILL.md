@@ -217,7 +217,7 @@ server.experimental.tasks.registerToolTask(
 
 Non-negotiables: `createTask` must not block — fire background work with `void` and return `{ task }`. `statusMessage` must never contain stack traces, file paths, or secrets. Background workers must catch all errors and set `failed` status. See [references/server.md](references/server.md) for the full pattern including server setup and background worker error handling.
 
-For tools that complete in a single synchronous handler but want to report intermediate progress, use `ctx.task?.updateStatus(...)` inside a normal `registerTool` instead.
+For tools that complete in a single synchronous handler but want to report intermediate progress, push status through `ctx.task.store.updateTaskStatus(ctx.task.id, 'working', 'message')` inside a normal `registerTool`. `TaskContext` is just `{ id, store, requestedTtl }` — there is no `ctx.task.updateStatus()` shortcut.
 
 ### Bootstrap, stdio
 
@@ -363,6 +363,8 @@ This repository has a frozen public surface defined in `src/public-contract.ts` 
 - Reading `mcp-session-id` in stateless HTTP mode → it doesn't exist there.
 - `await heavyWork()` inside `createTask` → blocks `tools/call`; fire with `void heavyWork()` and return `{ task }` immediately.
 - `statusMessage: err.message` or `statusMessage: err.stack` in a task tool → leaks internals; use a safe generic message like `'Processing failed'`.
+- `store.updateTask({...})` or `store.setTaskResult(...)` → these names don't exist in v2; use `store.updateTaskStatus(id, status, msg?)` and `store.storeTaskResult(id, 'completed' | 'failed', result)`.
+- `ctx.task.updateStatus(...)` → no such method; `TaskContext` is `{ id, store, requestedTtl }`. Push status via `ctx.task.store.updateTaskStatus(ctx.task.id, ...)`.
 
 If any of these are in your diff: stop and fix before continuing.
 

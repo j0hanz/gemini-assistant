@@ -57,6 +57,27 @@ Rules:
 - Register tools/prompts/resources before `connect()` if they're static.
 - Use `instructions` to give the client/model durable context that should be in the system prompt. Keep it short — it's added to context every conversation.
 
+### Useful `ServerOptions` / `ProtocolOptions` knobs
+
+| Option                         | When to use                                                                                                               |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `enforceStrictCapabilities`    | Set to `true` to reject outbound requests the peer didn't advertise. Defaults to `false` for back-compat.                 |
+| `debouncedNotificationMethods` | Coalesce noisy notifications fired in the same tick (e.g. `['notifications/tools/list_changed']`).                        |
+| `tasks: TaskManagerOptions`    | Wires the `TaskManager`. Provide `taskStore`, `taskMessageQueue`, optional `defaultTaskPollInterval`, `maxTaskQueueSize`. |
+| `instructions`                 | One-time system-level guidance the client surfaces to the model.                                                          |
+
+### Useful `RequestOptions` knobs (for outbound `ctx.mcpReq.send` / sampling / elicitation)
+
+| Option                   | Effect                                                                                                                       |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `timeout`                | Per-request timeout. Defaults to `DEFAULT_REQUEST_TIMEOUT_MSEC` (60s). Throws `SdkError(SdkErrorCode.RequestTimeout)`.       |
+| `resetTimeoutOnProgress` | If `true`, each progress notification resets the timeout. Pair with `maxTotalTimeout` to keep an absolute cap.               |
+| `maxTotalTimeout`        | Hard ceiling regardless of progress activity.                                                                                |
+| `signal`                 | Caller-side `AbortSignal`. Pass `ctx.mcpReq.signal` through to forward inbound cancellation.                                 |
+| `task`                   | Augment a request with `TaskCreationParams` to make a request task-aware (sampling, elicitation, sub-tool calls).            |
+| `relatedTask`            | Tag this request as related to an existing task — surfaced in `_meta` for transport correlation.                             |
+| `onprogress`             | Stream progress notifications back. Continues firing during task-augmented requests until the task reaches a terminal state. |
+
 ## Tools
 
 ### Standard registration
@@ -109,6 +130,11 @@ async (args, ctx) => {
   ctx.mcpReq.elicitInput({ ... });   // request user input via the client
   ctx.mcpReq.requestSampling({ ... }); // request an LLM completion via the client
 
+  // ctx.mcpReq.send<M>(request, options) is method-typed: the result is inferred
+  // from `ResultTypeMap[M]`. Use this for related sub-requests so the transport
+  // can correlate them with the inbound request.
+  const { roots } = await ctx.mcpReq.send({ method: 'roots/list' });
+
   ctx.http?.req;                // raw HTTP request (HTTP transports only)
   ctx.http?.closeSSE();         // close the SSE channel for resumability tests
 
@@ -116,7 +142,7 @@ async (args, ctx) => {
 };
 ```
 
-`ctx.http` and `ctx.task` are optional — guard with `?.` and feature-detect.
+`ctx.http` and `ctx.task` are optional — guard with `?.` and feature-detect. `ctx.mcpReq.send` and `ctx.mcpReq.notify` route through the same request lifecycle as the inbound call, so cancellation and `relatedRequestId` are wired automatically.
 
 ### Discriminated unions for modeful tools
 
@@ -456,17 +482,20 @@ async function runBackground({
   store: typeof taskStore;
 }) {
   try {
-    await store.updateTask(taskId, { status: 'working', statusMessage: 'Initializing' });
+    await store.updateTaskStatus(taskId, 'working', 'Initializing');
     const result = await doHeavyWork(args);
     const structured = OutputSchema.parse(result);
-    await store.setTaskResult(taskId, {
+    // storeTaskResult takes the terminal status as the second arg and atomically
+    // stores the result + transitions the task. Do NOT call updateTaskStatus('completed')
+    // afterwards — storeTaskResult already did it.
+    await store.storeTaskResult(taskId, 'completed', {
       content: [{ type: 'text', text: `Processed ${structured.itemCount} items` }],
       structuredContent: structured,
     });
-    await store.updateTask(taskId, { status: 'completed' });
   } catch {
-    // Never expose stack traces, file paths, or secrets in statusMessage
-    await store.updateTask(taskId, { status: 'failed', statusMessage: 'Processing failed' });
+    // Never expose stack traces, file paths, or secrets in statusMessage.
+    // Either updateTaskStatus('failed', msg) OR storeTaskResult(id, 'failed', errResult) — not both.
+    await store.updateTaskStatus(taskId, 'failed', 'Processing failed');
   }
 }
 ```
@@ -480,6 +509,21 @@ Rules:
 - Terminal states: `completed`, `failed`, `cancelled`. Non-terminal: `working`, `input_required`.
 - Clients fetch status and result via separate calls (`tasks/get`, `tasks/result`) — don't conflate them.
 
+### `RequestTaskStore` API surface (the only methods you should call)
+
+`ctx.task.store` is a request-scoped `RequestTaskStore`, not the raw `TaskStore`. The methods are:
+
+| Method                                                  | Use for                                                                             |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `createTask(taskParams)`                                | Allocates a `taskId` + `createdAt`. Call once in `createTask`.                      |
+| `getTask(taskId)`                                       | Reads current `Task` (status, message). Used in `getTask` handler.                  |
+| `updateTaskStatus(taskId, status, statusMessage?)`      | Transition `working` → `input_required` → `failed`/`cancelled` (no payload).        |
+| `storeTaskResult(taskId, 'completed' \| 'failed', res)` | Atomically stores the result **and** flips status. Don't call updateTaskStatus too. |
+| `getTaskResult(taskId)`                                 | Reads stored payload. Used in `getTaskResult` handler.                              |
+| `listTasks(cursor?)`                                    | Paginates tasks. Rarely needed inside a tool.                                       |
+
+**There is no `store.updateTask({...})` and no `store.setTaskResult(...)`** — those names don't exist in the SDK.
+
 ### Approach B: task-aware normal tool (status updates in-handler)
 
 Use when the tool completes in one synchronous handler call but wants to report intermediate progress. The SDK manages the task lifecycle automatically when the client opts in.
@@ -489,10 +533,12 @@ server.registerTool(
   'process-batch',
   { inputSchema: InputSchema, outputSchema: OutputSchema },
   async (args, ctx): Promise<CallToolResult> => {
-    if (ctx.task) {
-      await ctx.task.updateStatus({ status: 'working', statusMessage: 'Stage 1' });
+    // ctx.task is { id, store, requestedTtl } — there's no updateStatus shortcut.
+    // Push status through ctx.task.store.updateTaskStatus(ctx.task.id, ...).
+    if (ctx.task?.id) {
+      await ctx.task.store.updateTaskStatus(ctx.task.id, 'working', 'Stage 1');
       await doStage1(args);
-      await ctx.task.updateStatus({ status: 'working', statusMessage: 'Stage 2' });
+      await ctx.task.store.updateTaskStatus(ctx.task.id, 'working', 'Stage 2');
       await doStage2(args);
     } else {
       await doStage1(args);
@@ -575,6 +621,33 @@ Only works if the client advertised `sampling: {}` capability. Use sampling when
 - Graceful degradation is OK if unsupported
 
 Don't make sampling load-bearing for non-LLM clients.
+
+### Sampling with tools (`CreateMessageRequestParamsWithTools`)
+
+When the request includes a `tools` array, the response type widens to `CreateMessageResultWithTools` and content can include `toolUse` blocks. Use this to delegate a single LLM-driven tool call back to the client without exposing your inner tools as MCP tools:
+
+```ts
+const result = await ctx.mcpReq.requestSampling({
+  messages: [{ role: 'user', content: { type: 'text', text: prompt } }],
+  maxTokens: 1000,
+  tools: [
+    {
+      name: 'lookup_record',
+      description: 'Fetch a record by id',
+      inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    },
+  ],
+  toolChoice: 'auto',
+});
+
+for (const block of result.content) {
+  if (block.type === 'toolUse') {
+    /* dispatch toolUse.name with toolUse.input */
+  }
+}
+```
+
+`tools[].inputSchema` is **raw JSON Schema**, not Zod. The MCP SDK does not validate tool-use blocks for you — validate `block.input` before dispatching.
 
 ## Roots (server requesting filesystem boundaries)
 

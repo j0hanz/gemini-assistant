@@ -19,7 +19,7 @@ import {
   type BuiltInToolSpec,
   type CommonToolInputs,
   type OrchestrationRequest,
-  resolveOrchestration,
+  resolveOrchestrationFromRequest,
 } from './orchestration.js';
 import { ProgressReporter, reportCompletion, reportFailure } from './progress.js';
 import {
@@ -404,7 +404,11 @@ export class ToolExecutor {
       'stream',
       undefined,
       async () => {
-        const resolved = await resolveOrchestration(request.orchestration, ctx, request.toolName);
+        const resolved = await resolveOrchestrationFromRequest(
+          request.orchestration,
+          ctx,
+          request.toolName,
+        );
         if (resolved.error) {
           return { result: resolved.error };
         }

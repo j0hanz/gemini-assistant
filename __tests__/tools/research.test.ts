@@ -173,7 +173,11 @@ describe('research tool contracts', () => {
 
     try {
       await research.createTask(
-        { goal: 'latest release', mode: 'quick', urls: ['https://example.com'] },
+        {
+          goal: 'latest release',
+          mode: 'quick',
+          tools: { profile: 'web-research', overrides: { urls: ['https://example.com'] } },
+        },
         makeMockContext(store),
       );
       await flushTaskWork();
@@ -395,7 +399,7 @@ describe('research tool contracts', () => {
     }
   });
 
-  it('composes fileSearch with googleSearch and urlContext', async () => {
+  it('uses rag profile for fileSearch-only research', async () => {
     const { research } = getHandlers();
     const store = makeMockStore();
     const client = getAI();
@@ -422,8 +426,10 @@ describe('research tool contracts', () => {
         {
           goal: 'test file search',
           mode: 'quick',
-          urls: ['https://example.com/context'],
-          fileSearch: { fileSearchStoreNames: ['fileSearchStores/research'] },
+          tools: {
+            profile: 'rag',
+            overrides: { fileSearchStores: ['fileSearchStores/research'] },
+          },
         },
         makeMockContext(store),
       );
@@ -431,8 +437,6 @@ describe('research tool contracts', () => {
 
       const config = observedRequest?.config as Record<string, unknown> | undefined;
       assert.deepStrictEqual(config?.tools, [
-        { googleSearch: {} },
-        { urlContext: {} },
         { fileSearch: { fileSearchStoreNames: ['fileSearchStores/research'] } },
       ]);
     } finally {
@@ -538,7 +542,11 @@ describe('research tool contracts', () => {
 
     try {
       await research.createTask(
-        { goal: 'url only', mode: 'quick', urls: ['https://example.com/context'] },
+        {
+          goal: 'url only',
+          mode: 'quick',
+          tools: { profile: 'urls-only', overrides: { urls: ['https://example.com/context'] } },
+        },
         makeMockContext(store),
       );
       await flushTaskWork();
@@ -628,7 +636,10 @@ describe('research tool contracts', () => {
           deliverable: 'return a decision memo',
           mode: 'deep',
           searchDepth: 4,
-          urls: ['https://example.com/report'],
+          tools: {
+            profile: 'deep-research',
+            overrides: { urls: ['https://example.com/report'] },
+          },
         },
         makeMockContext(store),
       );

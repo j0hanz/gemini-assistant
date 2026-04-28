@@ -11,12 +11,7 @@ import {
   buildGroundedAnswerPrompt,
   type Capabilities,
 } from '../lib/model-prompts.js';
-import {
-  type BuiltInToolName,
-  type BuiltInToolSpec,
-  resolveOrchestration,
-  selectSearchAndUrlContextTools,
-} from '../lib/orchestration.js';
+import { resolveOrchestration } from '../lib/orchestration.js';
 import {
   appendSearchEntryPointContent,
   appendSources,
@@ -63,6 +58,7 @@ import {
   type ToolServices,
 } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
+import type { ToolsSpecInput } from '../lib/tool-profiles.js';
 import { type AnalyzeInput, type ResearchInput, ResearchInputSchema } from '../schemas/inputs.js';
 import { ResearchOutputSchema } from '../schemas/outputs.js';
 
@@ -76,36 +72,6 @@ const log = logger.child('research');
 type QuickResearchInput = Extract<ResearchInput, { mode: 'quick' }>;
 type DeepResearchInput = Extract<ResearchInput, { mode: 'deep' }>;
 type AnalyzeUrlInput = Extract<AnalyzeInput, { targetKind: 'url' }>;
-
-type ResearchSpecsOptions =
-  | {
-      grounded: true;
-      urls: readonly string[] | undefined;
-      fileSearch: ResearchInput['fileSearch'] | undefined;
-      extraTools?: readonly BuiltInToolName[];
-    }
-  | {
-      grounded: false;
-      names: readonly BuiltInToolName[] | undefined;
-      fileSearch: ResearchInput['fileSearch'] | undefined;
-    };
-
-function buildResearchSpecs(options: ResearchSpecsOptions): BuiltInToolSpec[] {
-  const names: readonly BuiltInToolName[] | undefined = options.grounded
-    ? [...selectSearchAndUrlContextTools(true, options.urls), ...(options.extraTools ?? [])]
-    : options.names;
-  const specs: BuiltInToolSpec[] = (names ?? []).map((kind) => ({ kind }) as BuiltInToolSpec);
-  if (options.fileSearch) {
-    specs.push({
-      kind: 'fileSearch',
-      fileSearchStoreNames: options.fileSearch.fileSearchStoreNames,
-      ...(options.fileSearch.metadataFilter !== undefined
-        ? { metadataFilter: options.fileSearch.metadataFilter }
-        : {}),
-    });
-  }
-  return specs;
-}
 
 async function enrichTopicWithSampling(
   topic: string,
@@ -624,10 +590,9 @@ async function runDeepResearchPlan(
     searchDepth: number;
     thinkingLevel?: ResearchInput['thinkingLevel'] | undefined;
     thinkingBudget?: number | undefined;
-    urls?: readonly string[] | undefined;
+    tools?: ToolsSpecInput | undefined;
     maxOutputTokens?: number | undefined;
     safetySettings?: ResearchInput['safetySettings'] | undefined;
-    fileSearch?: ResearchInput['fileSearch'] | undefined;
   },
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -638,7 +603,6 @@ async function runDeepResearchPlan(
   await mcpLog(ctx, 'info', 'Agentic search requested');
   log.info('Agentic search requested', {
     searchDepth: args.searchDepth,
-    urlCount: args.urls?.length ?? 0,
   });
 
   const planTurn = await runDeepResearchTurn(
@@ -672,18 +636,16 @@ async function runDeepResearchPlan(
     warnings.push('deep research turn budget exceeded; returning partial retrieval coverage');
   }
 
-  const resolvedRetrieval = await resolveOrchestration(
-    {
-      builtInToolSpecs: buildResearchSpecs({
-        grounded: true,
-        urls: args.urls,
-        fileSearch: args.fileSearch,
-      }),
-      urls: args.urls,
-    },
-    ctx,
-    'agentic_search',
-  );
+  // Retrieval turns use googleSearch + urlContext only; codeExecution is reserved for synthesis.
+  // Map deep-research → web-research for retrieval to avoid codeExecution during retrieval turns.
+  const retrievalSpec: ToolsSpecInput | undefined =
+    args.tools?.profile === 'deep-research'
+      ? { profile: 'web-research', overrides: { urls: args.tools.overrides?.urls } }
+      : args.tools;
+  const resolvedRetrieval = await resolveOrchestration(retrievalSpec, ctx, {
+    toolKey: 'research',
+    mode: 'deep',
+  });
   if (resolvedRetrieval.error) return resolvedRetrieval.error;
 
   for (const [index, query] of subQueries.slice(0, maxRetrievalTurns).entries()) {
@@ -696,9 +658,10 @@ async function runDeepResearchPlan(
       undefined,
       `Retrieving source set ${String(index + 1)}`,
     );
+    const retrievalUrls = resolvedRetrieval.config.resolvedProfile?.overrides.urls;
     const prompt = buildGroundedAnswerPrompt(
       query,
-      args.urls,
+      retrievalUrls,
       undefined,
       buildPromptCapabilities(resolvedRetrieval.config.activeCapabilities, false),
     );
@@ -723,17 +686,12 @@ async function runDeepResearchPlan(
     .slice(1)
     .map((result, index) => `## Retrieval ${String(index + 1)}\n${summarizeRetrieval(result.text)}`)
     .join('\n\n');
-  const resolvedSynthesis = await resolveOrchestration(
-    {
-      builtInToolSpecs: buildResearchSpecs({
-        grounded: false,
-        names: args.searchDepth >= 4 ? (['codeExecution'] as const) : undefined,
-        fileSearch: args.fileSearch,
-      }),
-    },
-    ctx,
-    'agentic_search',
-  );
+  const synthesisToolsSpec: ToolsSpecInput | undefined =
+    args.searchDepth >= 4 ? { profile: 'code-math' } : undefined;
+  const resolvedSynthesis = await resolveOrchestration(synthesisToolsSpec, ctx, {
+    toolKey: 'research',
+    mode: 'deep',
+  });
   if (resolvedSynthesis.error) return resolvedSynthesis.error;
   const cacheName = await findToolServices(ctx)?.workspace.resolveCacheName(ctx);
   const synthesisCanRetrieve =
@@ -748,7 +706,7 @@ async function runDeepResearchPlan(
     ),
     deliverable: args.deliverable,
     topic: `${args.topic}\n\nRetrieved evidence summaries:\n${retrievalSummaries}`,
-    urls: args.urls,
+    urls: resolvedRetrieval.config.resolvedProfile?.overrides.urls,
   });
   const synthesisTurn = await runDeepResearchTurn(
     ctx,
@@ -837,12 +795,11 @@ async function searchWork(
   {
     goal,
     systemInstruction,
-    urls,
+    tools: toolsSpec,
     thinkingLevel,
     thinkingBudget,
     maxOutputTokens,
     safetySettings,
-    fileSearch,
   }: QuickResearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -850,47 +807,49 @@ async function searchWork(
   await progress.send(0, undefined, 'Starting');
   await mcpLog(ctx, 'info', 'Search requested');
 
-  return await executor.executeGeminiPipeline(ctx, {
-    toolName: 'research',
+  const resolved = await resolveOrchestration(toolsSpec as ToolsSpecInput | undefined, ctx, {
+    toolKey: 'research',
+    mode: 'quick',
+  });
+  if (resolved.error) return resolved.error;
+
+  const { tools, toolConfig } = resolved.config;
+  const resolvedUrls = resolved.config.resolvedProfile?.overrides.urls;
+  const prompt = buildGroundedAnswerPrompt(
+    goal,
+    resolvedUrls,
+    undefined,
+    buildPromptCapabilities(resolved.config.activeCapabilities, false),
+  );
+
+  return executor.runWithProgress(ctx, {
+    toolKey: 'research',
     label: TOOL_LABELS.search,
-    commonInputs: {
-      googleSearch: true,
-      urls,
-      ...(fileSearch ? { fileSearch } : {}),
-    },
-    buildContents: (activeCapabilities) => {
-      const prompt = buildGroundedAnswerPrompt(
-        goal,
-        urls,
-        undefined,
-        buildPromptCapabilities(activeCapabilities, false),
-      );
-      return {
-        contents: [prompt.promptText],
-        systemInstruction: systemInstruction ?? prompt.systemInstruction,
-      };
-    },
-    config: {
-      costProfile: 'research.quick',
-      thinkingLevel,
-      thinkingBudget,
-      maxOutputTokens,
-      safetySettings,
-    },
-    responseBuilder: buildSearchResult,
+    initialMsg: 'Starting',
+    generator: () =>
+      getAI().models.generateContentStream({
+        model: getGeminiModel(),
+        contents: prompt.promptText,
+        config: buildGenerateContentConfig(
+          {
+            systemInstruction: systemInstruction ?? prompt.systemInstruction,
+            costProfile: 'research.quick',
+            thinkingLevel,
+            thinkingBudget,
+            maxOutputTokens,
+            safetySettings,
+            tools,
+            toolConfig,
+          },
+          getWorkSignal(ctx),
+        ),
+      }),
+    responseBuilder: (streamResult, textContent) => buildSearchResult(streamResult, textContent),
   });
 }
 
 export async function analyzeUrlWork(
-  {
-    urls,
-    goal,
-    thinkingLevel,
-    thinkingBudget,
-    maxOutputTokens,
-    safetySettings,
-    fileSearch,
-  }: AnalyzeUrlInput,
+  { urls, goal, thinkingLevel, thinkingBudget, maxOutputTokens, safetySettings }: AnalyzeUrlInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   const prompt = buildFileAnalysisPrompt({
@@ -906,10 +865,7 @@ export async function analyzeUrlWork(
   return await executor.executeGeminiPipeline(ctx, {
     toolName: 'analyze_url',
     label: TOOL_LABELS.analyzeUrl,
-    commonInputs: {
-      urls,
-      ...(fileSearch ? { fileSearch } : {}),
-    },
+    commonInputs: { urls },
     buildContents: () => ({
       contents: [prompt.promptText],
       systemInstruction: prompt.systemInstruction,
@@ -932,10 +888,9 @@ async function agenticSearchWork(
     searchDepth = 2,
     thinkingLevel,
     thinkingBudget,
-    urls,
+    tools: toolsSpec,
     maxOutputTokens,
     safetySettings,
-    fileSearch,
   }: DeepResearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
@@ -966,34 +921,26 @@ async function agenticSearchWork(
         searchDepth,
         thinkingLevel,
         thinkingBudget,
-        urls,
+        tools: toolsSpec as ToolsSpecInput | undefined,
         maxOutputTokens,
         safetySettings,
-        fileSearch,
       },
       ctx,
     );
   }
 
-  const resolved = await resolveOrchestration(
-    {
-      builtInToolSpecs: buildResearchSpecs({
-        grounded: true,
-        urls,
-        fileSearch,
-      }),
-      urls,
-    },
-    ctx,
-    'agentic_search',
-  );
+  const resolved = await resolveOrchestration(toolsSpec as ToolsSpecInput | undefined, ctx, {
+    toolKey: 'research',
+    mode: 'deep',
+  });
   if (resolved.error) return resolved.error;
   const { tools, toolConfig } = resolved.config;
+  const resolvedUrls = resolved.config.resolvedProfile?.overrides.urls;
   const prompt = buildAgenticResearchPrompt({
     capabilities: buildPromptCapabilities(resolved.config.activeCapabilities, false),
     deliverable,
     topic: enrichedTopic,
-    urls,
+    urls: resolvedUrls,
   });
 
   return executor.runWithProgress(ctx, {
@@ -1001,7 +948,7 @@ async function agenticSearchWork(
     label: TOOL_LABELS.agenticSearch,
     initialMsg: 'Starting deep research',
     logMessage: 'Agentic search requested',
-    logData: { topic, searchDepth, urlCount: urls?.length ?? 0 },
+    logData: { topic, searchDepth },
     generator: () =>
       getAI().models.generateContentStream({
         model: getGeminiModel(),

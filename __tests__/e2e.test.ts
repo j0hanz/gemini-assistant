@@ -39,6 +39,7 @@ function expectedConcreteResourceUris(): string[] {
     'session://',
     'discover://catalog',
     'discover://workflows',
+    'gemini://profiles',
     'discover://context',
     'workspace://context',
     'workspace://cache',

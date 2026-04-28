@@ -3,6 +3,9 @@ import { isAbsolute, normalize } from 'node:path';
 import { HarmBlockMethod, HarmBlockThreshold, HarmCategory, MediaResolution } from '@google/genai';
 import { z } from 'zod/v4';
 
+// ── Profile-driven ToolsSpec schemas ─────────────────────────────────────────
+
+import { TOOL_PROFILE_NAMES } from '../lib/tool-profiles.js';
 import { isPublicHttpUrl } from '../lib/validation.js';
 
 import { PUBLIC_TOOL_NAMES, THINKING_LEVELS } from '../public-contract.js';
@@ -567,3 +570,59 @@ export function createGenerationConfigFields() {
     safetySettings: SafetySettingsSchema,
   };
 }
+
+export { FunctionDeclarationSchema };
+
+export const ProfileNameSchema = withFieldMetadata(
+  z.enum(TOOL_PROFILE_NAMES),
+  'Gemini tool profile name. Selects the combination of built-in tools and thinking defaults.',
+);
+
+export const ProfileThinkingLevelSchema = withFieldMetadata(
+  z.enum(['minimal', 'low', 'medium', 'high'] as const),
+  'Thinking depth for this profile. Overrides the profile default.',
+);
+
+const FileSearchStoreNameSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(/^[A-Za-z0-9_\-/]+$/);
+
+export const OverridesSchema = z.strictObject({
+  urls: publicHttpUrlArray({
+    description:
+      'Public URLs to analyze via URL Context. Only valid with profiles that include urlContext.',
+    itemDescription: 'Public URL to fetch via URL Context',
+    max: 20,
+    optional: true,
+  }),
+  fileSearchStores: withFieldMetadata(
+    z.array(FileSearchStoreNameSchema).min(1).max(32).optional(),
+    'Gemini File Search store names. Required when profile is rag.',
+  ),
+  functions: withFieldMetadata(
+    z.array(FunctionDeclarationSchema).min(1).max(20).optional(),
+    'Function declarations exposed to Gemini (max 20). Required when profile is agent.',
+  ),
+  responseSchemaJson: withFieldMetadata(
+    z.record(z.string(), z.unknown()).optional(),
+    'JSON Schema for structured output. Required when profile is structured.',
+  ),
+  functionCallingMode: withFieldMetadata(
+    z.enum(['AUTO', 'ANY', 'NONE', 'VALIDATED'] as const).optional(),
+    'Function-calling mode override. ANY and AUTO are rejected when built-in tools are active.',
+  ),
+  allowedFunctionNames: withFieldMetadata(
+    z.array(z.string()).optional(),
+    'Restrict which declared functions the model may call (VALIDATED mode).',
+  ),
+});
+
+export const ToolsSpecSchema = z.strictObject({
+  profile: ProfileNameSchema,
+  thinkingLevel: ProfileThinkingLevelSchema.optional(),
+  overrides: OverridesSchema.optional(),
+});
+
+export type ToolsSpec = z.infer<typeof ToolsSpecSchema>;

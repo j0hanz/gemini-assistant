@@ -267,10 +267,8 @@ describe('MCP tool smoke coverage', () => {
       const goal = getObjectProperty(chatSchema, 'goal');
       const sessionId = getObjectProperty(chatSchema, 'sessionId');
       const responseSchemaJson = getObjectProperty(chatSchema, 'responseSchemaJson');
-      const temperature = getObjectProperty(chatSchema, 'temperature');
       const seed = getObjectProperty(chatSchema, 'seed');
-      const googleSearch = getObjectProperty(chatSchema, 'googleSearch');
-      const urls = getObjectProperty(chatSchema, 'urls');
+      const chatTools = getObjectProperty(chatSchema, 'tools');
 
       assert.ok(goal);
       assert.equal(goal.description, 'User goal or requested outcome');
@@ -287,26 +285,18 @@ describe('MCP tool smoke coverage', () => {
         'JSON Schema (2020-12) for structured output. Single-turn or new-session only; resumed sessions reject it.',
       );
 
-      assert.ok(temperature);
-      assert.equal(
-        temperature.description,
-        'Sampling temperature 0-2. When omitted, the server uses default 1.',
-      );
-      assert.equal(temperature.default, undefined);
-
       assert.ok(seed);
       assert.equal(seed.description, 'Fixed random seed for reproducible outputs.');
 
-      assert.ok(googleSearch);
+      assert.ok(chatTools);
       assert.equal(
-        googleSearch.description,
-        'Enable Google Search grounding for chat. Optional; additive. Combine with `urls` for URL Context.',
+        chatTools.description,
+        'Tool profile and overrides for this chat turn. Selects Gemini built-in tools and thinking defaults.',
       );
 
-      assert.ok(urls);
-      assert.equal(urls.description, 'Public URLs to analyze with URL Context during chat.');
-      assert.equal(urls.minItems, 1);
-      assert.equal(urls.maxItems, 20);
+      assert.equal(getObjectProperty(chatSchema, 'temperature'), undefined);
+      assert.equal(getObjectProperty(chatSchema, 'googleSearch'), undefined);
+      assert.equal(getObjectProperty(chatSchema, 'urls'), undefined);
 
       const analyzeSchema = toolMap.get('analyze')?.inputSchema;
       const analyzeTargetKind = getObjectProperty(analyzeSchema, 'targetKind');

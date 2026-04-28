@@ -3,6 +3,7 @@ import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontex
 
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
+import { COMBO_MATRIX, PROFILES, TOOL_PROFILE_NAMES } from './lib/tool-profiles.js';
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from './lib/validation.js';
 import {
   assembleWorkspaceContext,
@@ -32,6 +33,7 @@ export { PUBLIC_RESOURCE_URIS } from './public-contract.js';
 export const DISCOVER_CATALOG_URI = 'discover://catalog' as const;
 export const DISCOVER_WORKFLOWS_URI = 'discover://workflows' as const;
 export const DISCOVER_CONTEXT_URI = 'discover://context' as const;
+export const GEMINI_PROFILES_URI = 'gemini://profiles' as const;
 export const SESSIONS_LIST_URI = 'session://' as const;
 export const WORKSPACE_CONTEXT_URI = 'workspace://context' as const;
 export const WORKSPACE_CACHE_URI = 'workspace://cache' as const;
@@ -712,6 +714,53 @@ function isWorkspaceCacheFresh(createdAt: number | undefined, ttl: string): bool
   return Date.now() - createdAt < ttlSeconds * 1000;
 }
 
+function buildProfilesResourceData(): unknown {
+  return {
+    profiles: TOOL_PROFILE_NAMES.map((name) => {
+      const def = PROFILES[name];
+      return {
+        name,
+        builtIns: [...def.builtIns],
+        defaultThinkingLevel: def.defaultThinkingLevel,
+        meta: def.meta,
+        notes: def.notes,
+      };
+    }),
+    comboMatrix: Object.fromEntries(
+      Object.entries(COMBO_MATRIX).map(([cap, allowed]) => [
+        cap,
+        Object.fromEntries(
+          Object.entries(allowed)
+            .filter(([, v]) => v)
+            .map(([k]) => [k, true]),
+        ),
+      ]),
+    ),
+  };
+}
+
+export function readGeminiProfilesResource(uri: URL | string): ReadResourceResult {
+  return jsonResource(toResourceUri(uri), buildProfilesResourceData());
+}
+
+function registerGeminiStaticResources(server: McpServer): void {
+  server.registerResource(
+    'gemini-profiles',
+    GEMINI_PROFILES_URI,
+    {
+      title: 'Tool Profiles',
+      description:
+        'Catalog of all 11 tool profiles with built-in capabilities, default thinking levels, and compatible combination rules.',
+      mimeType: MIME_JSON,
+      annotations: {
+        audience: ['assistant'],
+        priority: 0.6,
+      },
+    },
+    (uri): ReadResourceResult => readGeminiProfilesResource(uri),
+  );
+}
+
 function registerDiscoveryResources(server: McpServer): void {
   server.registerResource(
     'discover-catalog',
@@ -836,6 +885,7 @@ export function registerResources(
 ): void {
   registerSessionResources(server, sessionStore);
   registerDiscoveryResources(server);
+  registerGeminiStaticResources(server);
   registerContextResource(server, sessionStore, rootsFetcher, workspaceCacheManagerInstance);
   registerWorkspaceResources(server, rootsFetcher, workspaceCacheManagerInstance);
 }

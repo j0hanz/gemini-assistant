@@ -16,16 +16,13 @@ import {
   goalText,
   mediaResolution,
   optionalField,
-  OptionalFileSearchSpecSchema,
-  OptionalFunctionsSpecSchema,
   researchMode,
   REVIEW_SUBJECT_OPTIONS,
-  ServerSideToolInvocationsSchema,
   sessionId,
-  temperatureField,
   textField,
   thinkingBudget,
   thinkingLevel,
+  ToolsSpecSchema,
   withFieldMetadata,
   workspacePath,
   workspacePathArray,
@@ -199,49 +196,20 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
     thinkingBudget: thinkingBudgetField,
     ...generationConfigFields,
     responseSchemaJson: responseSchemaJsonField(),
-    temperature: temperatureField(),
     seed: withFieldMetadata(z.int().optional(), 'Fixed random seed for reproducible outputs.'),
-    codeExecution: withFieldMetadata(
-      z.boolean().optional(),
-      'Enable native Python code execution within the chat session. Useful for math, logic, or data processing.',
-    ),
-    googleSearch: withFieldMetadata(
-      z.boolean().optional(),
-      'Enable Google Search grounding for chat. Optional; additive. Combine with `urls` for URL Context.',
-    ),
-    ...createUrlContextFields({
-      itemDescription: 'Public URL to analyze with URL Context during chat',
-      description: 'Public URLs to analyze with URL Context during chat.',
-      min: 1,
-      max: 20,
-      optional: true,
-    }),
-    fileSearch: withFieldMetadata(
-      OptionalFileSearchSpecSchema,
-      'Enable Gemini File Search over named stores for retrieval-augmented chat.',
-    ),
-    functions: withFieldMetadata(
-      OptionalFunctionsSpecSchema,
-      'Typed Gemini function declarations. The MCP client owns function execution and returns function responses through the session.',
+    tools: withFieldMetadata(
+      ToolsSpecSchema.optional(),
+      'Tool profile and overrides for this chat turn. Selects Gemini built-in tools and thinking defaults.',
     ),
     functionResponses: withFieldMetadata(
       FunctionResponsesSchema.optional(),
       'Caller-executed Gemini function responses for an existing session. Requires sessionId and continues the model after functionCalls returned by a previous turn.',
     ),
-    serverSideToolInvocations: ServerSideToolInvocationsSchema,
   });
 }
 
 export const ChatInputSchema = createChatInputSchema();
 export type ChatInput = z.infer<typeof ChatInputSchema>;
-
-export type WithChatDefaults<
-  T extends { temperature?: unknown; serverSideToolInvocations?: unknown; urls?: unknown },
-> = Omit<T, 'temperature' | 'serverSideToolInvocations' | 'urls'> & {
-  temperature?: T['temperature'] | undefined;
-  serverSideToolInvocations?: T['serverSideToolInvocations'] | undefined;
-  urls?: string[] | undefined;
-};
 
 const RESEARCH_MODE_DESCRIPTION = 'Research mode selector (`quick` or `deep`).';
 const ANALYZE_TARGET_KIND_DESCRIPTION =
@@ -300,18 +268,12 @@ function validateAnalyzeOutputSelection(
 
 const researchSharedShape = {
   goal: goalText('Question or research goal to answer quickly'),
-  ...createUrlContextFields({
-    itemDescription: 'Public URL to analyze alongside search results',
-    description: 'Public URLs to inspect alongside web search results.',
-    max: 20,
-    optional: true,
-  }),
   thinkingLevel: thinkingLevelField,
   thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
-  fileSearch: withFieldMetadata(
-    OptionalFileSearchSpecSchema,
-    'Enable Gemini File Search over named stores alongside research retrieval.',
+  tools: withFieldMetadata(
+    ToolsSpecSchema.optional(),
+    'Tool profile and overrides for research. Defaults to web-research (quick) or deep-research (deep).',
   ),
 };
 
@@ -402,16 +364,12 @@ const AnalyzeInputBaseSchema = z.strictObject({
   thinkingLevel: thinkingLevelField,
   thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
-  googleSearch: withFieldMetadata(
-    z.boolean().optional(),
-    'Enable Google Search grounding. Optional; additive. Extra tokens when enabled.',
-  ),
-  fileSearch: withFieldMetadata(
-    OptionalFileSearchSpecSchema,
-    'Enable Gemini File Search over named stores during file/url/multi analysis.',
-  ),
   mediaResolution: mediaResolution(
     'Resolution for image/video processing. Higher = more detail, more tokens.',
+  ),
+  tools: withFieldMetadata(
+    ToolsSpecSchema.optional(),
+    'Tool profile and overrides for analysis. Defaults to code-math; auto-promotes to visual-inspect for image inputs with thinking >= medium.',
   ),
 });
 
@@ -426,17 +384,10 @@ const analyzeSharedShape = {
   thinkingLevel: thinkingLevelField,
   thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
-  googleSearch: withFieldMetadata(
-    z.boolean().optional(),
-    'Enable Google Search grounding. Optional; additive. Extra tokens when enabled.',
-  ),
-  fileSearch: withFieldMetadata(
-    OptionalFileSearchSpecSchema,
-    'Enable Gemini File Search over named stores during file/url/multi analysis.',
-  ),
   mediaResolution: mediaResolution(
     'Resolution for image/video processing. Higher = more detail, more tokens.',
   ),
+  tools: withFieldMetadata(ToolsSpecSchema.optional(), 'Tool profile and overrides for analysis.'),
 };
 
 const AnalyzeFileSchema = z
@@ -447,13 +398,6 @@ const AnalyzeFileSchema = z
     ),
     ...analyzeSharedShape,
     filePath: workspacePath('Workspace-relative or absolute path to analyze when targetKind=file'),
-    urls: createUrlContextFields({
-      itemDescription: 'Public URL to analyze',
-      description: 'Optional public URLs to include as additional URL context.',
-      min: 1,
-      max: 20,
-      optional: true,
-    }).urls,
   })
   .superRefine(validateAnalyzeOutputSelection);
 
@@ -481,13 +425,6 @@ const AnalyzeMultiSchema = z
       min: 2,
       max: 5,
     }),
-    urls: createUrlContextFields({
-      itemDescription: 'Public URL to analyze',
-      description: 'Optional public URLs to include as additional URL context.',
-      min: 1,
-      max: 20,
-      optional: true,
-    }).urls,
   })
   .superRefine(validateAnalyzeOutputSelection);
 
@@ -509,6 +446,10 @@ const reviewCommonShape = {
   thinkingLevel: thinkingLevelField,
   thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
+  tools: withFieldMetadata(
+    ToolsSpecSchema.optional(),
+    'Tool profile and overrides for review. Defaults to plain (diff), web-research (failure), or urls-only (comparison with URLs).',
+  ),
 };
 
 const ReviewInputBaseSchema = z.strictObject({
@@ -552,21 +493,6 @@ const ReviewInputBaseSchema = z.strictObject({
       16_000,
     ),
   ),
-  googleSearch: withFieldMetadata(
-    z.boolean().optional(),
-    'Enable Google Search when subjectKind=comparison or subjectKind=failure. Allowed only when subjectKind=comparison or failure.',
-  ),
-  fileSearch: withFieldMetadata(
-    OptionalFileSearchSpecSchema,
-    'Enable Gemini File Search over named stores during comparison or failure review. Allowed only when subjectKind=comparison or failure.',
-  ),
-  ...createUrlContextFields({
-    itemDescription: 'Public URL to include via URL Context',
-    description:
-      'Public URLs for additional context when subjectKind=comparison or failure. Allowed only when subjectKind=comparison or failure.',
-    max: 20,
-    optional: true,
-  }),
   ...reviewCommonShape,
 });
 
@@ -591,20 +517,6 @@ const ReviewComparisonSchema = z.strictObject({
   question: optionalField(
     textField('Comparison focus when subjectKind=comparison (behavior, APIs, security, etc.).'),
   ),
-  googleSearch: withFieldMetadata(
-    z.boolean().optional(),
-    'Enable Google Search when subjectKind=comparison or subjectKind=failure.',
-  ),
-  fileSearch: withFieldMetadata(
-    OptionalFileSearchSpecSchema,
-    'Enable Gemini File Search over named stores during comparison or failure review.',
-  ),
-  ...createUrlContextFields({
-    itemDescription: 'Public URL to include via URL Context',
-    description: 'Public URLs for additional context when subjectKind=comparison or failure.',
-    max: 20,
-    optional: true,
-  }),
   ...reviewCommonShape,
 });
 
@@ -615,20 +527,6 @@ const ReviewFailureSchema = z.strictObject({
   codeContext: optionalField(
     textField('Relevant source code context when subjectKind=failure.', 16_000),
   ),
-  googleSearch: withFieldMetadata(
-    z.boolean().optional(),
-    'Enable Google Search when subjectKind=comparison or subjectKind=failure.',
-  ),
-  fileSearch: withFieldMetadata(
-    OptionalFileSearchSpecSchema,
-    'Enable Gemini File Search over named stores during comparison or failure review.',
-  ),
-  ...createUrlContextFields({
-    itemDescription: 'Public URL to include via URL Context',
-    description: 'Public URLs for additional context when subjectKind=comparison or failure.',
-    max: 20,
-    optional: true,
-  }),
   ...reviewCommonShape,
 });
 

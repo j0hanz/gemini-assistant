@@ -1,27 +1,22 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { Validator } from '@cfworker/json-schema';
-import { FinishReason, FunctionCallingConfigMode } from '@google/genai';
+import { FinishReason } from '@google/genai';
 import type {
   Chat,
-  FunctionDeclaration,
+  FunctionCallingConfigMode,
   FunctionResponse,
   GenerateContentConfig,
   PartListUnion,
 } from '@google/genai';
 
-import { AppError, assertNever } from '../lib/errors.js';
+import { AppError } from '../lib/errors.js';
 import { logger, mcpLog } from '../lib/logger.js';
 import {
   appendFunctionCallingInstruction,
   buildFunctionCallingInstructionText,
 } from '../lib/model-prompts.js';
-import {
-  buildOrchestrationConfig,
-  buildOrchestrationRequestFromInputs,
-  resolveOrchestration,
-  resolveServerSideToolInvocations,
-} from '../lib/orchestration.js';
+import { resolveOrchestration } from '../lib/orchestration.js';
 import {
   buildBaseStructuredOutput,
   buildStructuredResponse,
@@ -51,15 +46,24 @@ import {
 } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
 import {
+  buildProfileToolConfig,
+  buildToolsArray,
+  ProfileValidationError,
+  type ResolvedProfile,
+  resolveProfile,
+  resolveProfileFunctionCallingMode,
+  type ToolsSpecInput,
+  validateProfile,
+} from '../lib/tool-profiles.js';
+import {
   type ChatInput,
   createChatInputSchema,
   parseResponseSchemaJsonValue,
-  type WithChatDefaults,
 } from '../schemas/inputs.js';
 import type { GeminiResponseSchema } from '../schemas/inputs.js';
 import { ChatOutputSchema, type ContextUsed, type UsageMetadata } from '../schemas/outputs.js';
 
-import { buildGenerateContentConfig, DEFAULT_TEMPERATURE, getAI } from '../client.js';
+import { buildGenerateContentConfig, getAI } from '../client.js';
 import {
   getExposeSessionResources,
   getExposeThoughts,
@@ -94,8 +98,7 @@ import {
 
 export { appendToolResponseTurn, buildRebuiltChatContents };
 
-type ChatWorkInput = WithChatDefaults<ChatInput>;
-type InternalAskArgs = Omit<ChatWorkInput, 'goal' | 'responseSchemaJson'> & {
+type InternalAskArgs = Omit<ChatInput, 'goal' | 'responseSchemaJson'> & {
   message: string;
   responseSchema?: GeminiResponseSchema;
 };
@@ -388,58 +391,8 @@ function hasExpiredSession(
   return sessionId !== undefined && deps.isEvicted(sessionId);
 }
 
-function getAskUrls(args: AskArgs): readonly string[] | undefined {
-  return 'urls' in args ? args.urls : undefined;
-}
-
-function buildFunctionDeclarations(args: AskArgs): FunctionDeclaration[] | undefined {
-  if (!args.functions?.declarations.length) return undefined;
-  return args.functions.declarations.map((declaration) => ({
-    name: declaration.name,
-    description: declaration.description,
-    ...(declaration.parametersJsonSchema !== undefined
-      ? { parameters: declaration.parametersJsonSchema }
-      : {}),
-  }));
-}
-
-type FunctionModeInput = NonNullable<NonNullable<AskArgs['functions']>['mode']>;
-
-function toFunctionCallingConfigMode(
-  mode: FunctionModeInput | undefined,
-): FunctionCallingConfigMode | undefined {
-  if (mode === undefined) return undefined;
-  switch (mode) {
-    case 'AUTO':
-      return FunctionCallingConfigMode.AUTO;
-    case 'ANY':
-      return FunctionCallingConfigMode.ANY;
-    case 'NONE':
-      return FunctionCallingConfigMode.NONE;
-    case 'VALIDATED':
-      return FunctionCallingConfigMode.VALIDATED;
-    default:
-      return assertNever(mode, 'FunctionModeInput');
-  }
-}
-
-function buildChatOrchestrationRequest(args: AskArgs) {
-  const urls = getAskUrls(args);
-  const functionDeclarations = buildFunctionDeclarations(args);
-  return buildOrchestrationRequestFromInputs({
-    googleSearch: args.googleSearch,
-    urls,
-    codeExecution: args.codeExecution,
-    ...(args.fileSearch ? { fileSearch: args.fileSearch } : {}),
-    ...(functionDeclarations ? { functionDeclarations } : {}),
-    ...(args.functions?.mode !== undefined
-      ? { functionCallingMode: toFunctionCallingConfigMode(args.functions.mode) }
-      : {}),
-    ...(args.responseSchema !== undefined ? { responseSchemaRequested: true } : {}),
-    ...(args.serverSideToolInvocations !== undefined
-      ? { serverSideToolInvocations: args.serverSideToolInvocations }
-      : {}),
-  });
+function buildChatResolvedProfile(args: AskArgs): ResolvedProfile {
+  return resolveProfile(args.tools as ToolsSpecInput | undefined, { toolKey: 'chat' });
 }
 
 function validateAskRequest(
@@ -454,12 +407,26 @@ function validateAskRequest(
       'sessionId is unsupported under stateless transport. Omit sessionId or run with TRANSPORT=stdio or STATELESS=false.',
     ).toToolResult();
   }
-  const urls = getAskUrls(args);
 
   const sessionEntry = sessionId ? deps.getSessionEntry(sessionId) : undefined;
   const hasExistingSession = sessionEntry !== undefined;
   const hasFunctionResponses = (args.functionResponses?.length ?? 0) > 0;
-  const orchestration = buildOrchestrationConfig(buildChatOrchestrationRequest(args));
+  const resolved = buildChatResolvedProfile(args);
+
+  try {
+    validateProfile(resolved);
+  } catch (error) {
+    if (error instanceof ProfileValidationError) {
+      return new AppError('chat', error.message).toToolResult();
+    }
+    throw error;
+  }
+
+  const activeCapabilities = new Set([
+    ...resolved.builtIns,
+    ...((resolved.overrides.functions?.length ?? 0) > 0 ? (['functions'] as const) : []),
+  ]);
+  const urls = resolved.overrides.urls;
   const inputValidation = createToolContext('chat', ctx).validateInputs({
     urls,
     geminiRequest: {
@@ -467,8 +434,8 @@ function validateAskRequest(
       jsonMode: responseSchema !== undefined,
       responseSchema,
       sessionId,
-      activeCapabilities: orchestration.activeCapabilities,
-      fileSearchStoreNames: args.fileSearch?.fileSearchStoreNames,
+      activeCapabilities,
+      fileSearchStoreNames: resolved.overrides.fileSearchStores,
     },
   });
   if (inputValidation) {
@@ -557,13 +524,15 @@ function normalizeFunctionResponses(
 }
 
 async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
-  const urls = getAskUrls(args);
-  const resolved = await resolveOrchestration(buildChatOrchestrationRequest(args), ctx, 'chat');
+  const resolved = await resolveOrchestration(args.tools as ToolsSpecInput | undefined, ctx, {
+    toolKey: 'chat',
+  });
   if (resolved.error) {
     return { error: resolved.error } as const;
   }
   const { functionCallingMode, toolProfile, tools, toolConfig } = resolved.config;
   const usesUrlContext = resolved.config.activeCapabilities.has('urlContext');
+  const urls = resolved.config.resolvedProfile?.overrides.urls;
 
   // URL Context discovers target URLs from prompt text; keep URLs visible
   // whenever a URL-capable profile is active.
@@ -576,11 +545,8 @@ async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
     tools,
     toolConfig,
     functionCallingMode,
-    serverSideToolInvocations:
-      resolveServerSideToolInvocations(
-        args.serverSideToolInvocations,
-        resolved.config.activeCapabilities,
-      ) === true,
+    serverSideToolInvocations: toolConfig?.includeServerSideToolInvocations === true,
+    resolvedProfile: resolved.config.resolvedProfile,
   } as const;
 }
 
@@ -600,12 +566,15 @@ function buildAskGenerationOptions(
   tools: GenerateContentConfig['tools'],
   functionCallingMode: FunctionCallingConfigMode | undefined,
   serverSideToolInvocations: boolean,
+  resolvedProfile?: ResolvedProfile,
 ) {
+  const declaredNames =
+    resolvedProfile?.overrides.functions?.map((declaration) => declaration.name) ?? [];
   return {
     ...args,
     systemInstruction: appendFunctionCallingInstruction(args.systemInstruction, {
       ...(functionCallingMode !== undefined ? { mode: functionCallingMode } : {}),
-      declaredNames: args.functions?.declarations.map((declaration) => declaration.name) ?? [],
+      declaredNames,
       serverSideToolInvocations,
     }),
     toolConfig,
@@ -736,7 +705,8 @@ export async function askWithoutSession(
       toolProfile: 'none',
     };
   }
-  const { prompt, toolConfig, toolProfile, tools, urls, functionCallingMode } = resolved;
+  const { prompt, toolConfig, toolProfile, tools, urls, functionCallingMode, resolvedProfile } =
+    resolved;
   const jsonMode = Boolean(args.responseSchema);
   const config = buildGenerateContentConfig(
     {
@@ -746,6 +716,7 @@ export async function askWithoutSession(
         tools,
         functionCallingMode,
         resolved.serverSideToolInvocations,
+        resolvedProfile,
       ),
       costProfile: 'chat',
     },
@@ -843,12 +814,7 @@ async function resolveWorkspaceCacheName(
   workspace: ToolWorkspaceAccess,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
-  if (
-    args.systemInstruction ||
-    (args.temperature !== undefined && args.temperature !== DEFAULT_TEMPERATURE) ||
-    args.seed !== undefined ||
-    !getWorkspaceCacheEnabled()
-  ) {
+  if (args.systemInstruction || args.seed !== undefined || !getWorkspaceCacheEnabled()) {
     return undefined;
   }
 
@@ -873,9 +839,6 @@ function buildWorkspaceCacheSkipWarnings(args: AskArgs): string[] {
   if (args.systemInstruction) {
     reasons.push('custom systemInstruction');
   }
-  if (args.temperature !== undefined && args.temperature !== DEFAULT_TEMPERATURE) {
-    reasons.push('custom temperature');
-  }
   if (args.seed !== undefined) {
     reasons.push('custom seed');
   }
@@ -888,26 +851,27 @@ function buildWorkspaceCacheSkipWarnings(args: AskArgs): string[] {
 }
 
 function buildAskToolingConfig(args: AskArgs) {
-  const orchestration = buildOrchestrationConfig(buildChatOrchestrationRequest(args));
+  const resolved = buildChatResolvedProfile(args);
+  const tools = buildToolsArray(resolved);
+  const toolConfig = buildProfileToolConfig(resolved);
+  const functionCallingMode = resolveProfileFunctionCallingMode(resolved);
   return {
-    tools: orchestration.tools,
-    toolConfig: orchestration.toolConfig,
-    functionCallingMode: orchestration.functionCallingMode,
-    serverSideToolInvocations:
-      resolveServerSideToolInvocations(
-        args.serverSideToolInvocations,
-        orchestration.activeCapabilities,
-      ) === true,
+    tools: tools.length > 0 ? tools : undefined,
+    toolConfig,
+    functionCallingMode,
+    serverSideToolInvocations: toolConfig?.includeServerSideToolInvocations === true,
+    resolvedProfile: resolved,
   };
 }
 
 function buildRequestedSessionContract(args: AskArgs): SessionGenerationContract {
-  const { toolConfig, tools, functionCallingMode, serverSideToolInvocations } =
+  const { toolConfig, tools, functionCallingMode, serverSideToolInvocations, resolvedProfile } =
     buildAskToolingConfig(args);
+  const declaredNames = resolvedProfile.overrides.functions?.map((f) => f.name) ?? [];
   const functionCallingInstructionHash = hashInstructionText(
     buildFunctionCallingInstructionText({
       ...(functionCallingMode !== undefined ? { mode: functionCallingMode } : {}),
-      declaredNames: args.functions?.declarations.map((declaration) => declaration.name) ?? [],
+      declaredNames,
       serverSideToolInvocations,
     }),
   );
@@ -918,6 +882,7 @@ function buildRequestedSessionContract(args: AskArgs): SessionGenerationContract
       tools,
       functionCallingMode,
       serverSideToolInvocations,
+      resolvedProfile,
     ),
     costProfile: 'chat',
     cacheName: args.cacheName,
@@ -940,7 +905,7 @@ export function createDefaultAskDependencies(
     appendSessionEvent: (sessionId, item) => sessionAccess.appendEvent(sessionId, item),
     appendSessionTranscript: (sessionId, item) => sessionAccess.appendTranscript(sessionId, item),
     createChat: (args) => {
-      const { toolConfig, tools, functionCallingMode, serverSideToolInvocations } =
+      const { toolConfig, tools, functionCallingMode, serverSideToolInvocations, resolvedProfile } =
         buildAskToolingConfig(args);
       const config = buildGenerateContentConfig({
         ...buildAskGenerationOptions(
@@ -949,6 +914,7 @@ export function createDefaultAskDependencies(
           tools,
           functionCallingMode,
           serverSideToolInvocations,
+          resolvedProfile,
         ),
         costProfile: 'chat',
         cacheName: args.cacheName,
@@ -993,8 +959,13 @@ export function createDefaultAskDependencies(
             cacheName && cacheName === activeCacheName ? cacheName : undefined,
           )
         : (() => {
-            const { toolConfig, tools, functionCallingMode, serverSideToolInvocations } =
-              buildAskToolingConfig(args);
+            const {
+              toolConfig,
+              tools,
+              functionCallingMode,
+              serverSideToolInvocations,
+              resolvedProfile,
+            } = buildAskToolingConfig(args);
             return buildGenerateContentConfig({
               ...buildAskGenerationOptions(
                 rebuildArgs,
@@ -1002,6 +973,7 @@ export function createDefaultAskDependencies(
                 tools,
                 functionCallingMode,
                 serverSideToolInvocations,
+                resolvedProfile,
               ),
               costProfile: 'chat',
             });
@@ -1315,7 +1287,7 @@ function assembleChatOutput(
 
 export async function chatWork(
   askWork: ReturnType<typeof createAskWork>,
-  args: ChatWorkInput,
+  args: ChatInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
   let responseSchema: GeminiResponseSchema | undefined;
@@ -1337,15 +1309,9 @@ export async function chatWork(
       maxOutputTokens: args.maxOutputTokens,
       seed: args.seed,
       safetySettings: args.safetySettings,
-      codeExecution: args.codeExecution,
-      googleSearch: args.googleSearch,
-      urls: args.urls,
-      fileSearch: args.fileSearch,
-      functions: args.functions,
+      tools: args.tools,
       functionResponses: args.functionResponses,
-      serverSideToolInvocations: args.serverSideToolInvocations,
       systemInstruction: args.systemInstruction,
-      temperature: args.temperature ?? DEFAULT_TEMPERATURE,
       thinkingLevel: args.thinkingLevel,
       thinkingBudget: args.thinkingBudget,
     },

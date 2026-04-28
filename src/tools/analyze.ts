@@ -7,16 +7,20 @@ import { withUploadsAndPipeline } from '../lib/file.js';
 import { mcpLog } from '../lib/logger.js';
 import { buildDiagramGenerationPrompt, buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import {
-  buildUrlContextFallbackPart,
-  type BuiltInToolName,
   type BuiltInToolSpec,
+  resolveOrchestration,
+  type ToolsSpecInput,
 } from '../lib/orchestration.js';
 import {
   buildSuccessfulStructuredContent,
   deriveDiagramSyntaxValidation,
   pickDefined,
 } from '../lib/response.js';
-import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
+import {
+  getWorkSignal,
+  READONLY_NON_IDEMPOTENT_ANNOTATIONS,
+  registerWorkTool,
+} from '../lib/task-utils.js';
 import {
   bindToolServices,
   createDefaultToolServices,
@@ -27,13 +31,14 @@ import { createToolContext, executor } from '../lib/tool-executor.js';
 import { type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 
+import { buildGenerateContentConfig, getAI } from '../client.js';
+import { getGeminiModel } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
 import { analyzeUrlWork } from './research.js';
 
 interface AnalyzeDiagramInput {
   goal: string;
   diagramType: 'mermaid' | 'plantuml';
-  fileSearch?: AnalyzeInput['fileSearch'] | undefined;
   filePath?: string | undefined;
   filePaths?: string[] | undefined;
   maxOutputTokens?: AnalyzeInput['maxOutputTokens'];
@@ -44,6 +49,7 @@ interface AnalyzeDiagramInput {
   thinkingLevel?: AnalyzeInput['thinkingLevel'];
   urls?: string[] | undefined;
   validateSyntax?: boolean | undefined;
+  tools?: AnalyzeInput['tools'];
 }
 
 type AnalyzeFileInput = Extract<AnalyzeInput, { targetKind: 'file' }>;
@@ -119,9 +125,6 @@ function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher) {
       mediaResolution,
       maxOutputTokens,
       safetySettings,
-      googleSearch,
-      urls,
-      fileSearch,
     }: AnalyzeFileInput,
     ctx: ServerContext,
   ): Promise<CallToolResult> {
@@ -140,23 +143,14 @@ function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher) {
         return await executor.executeGeminiPipeline(ctx, {
           toolName: 'analyze_file',
           label: TOOL_LABELS.analyzeFile,
-          commonInputs: {
-            googleSearch,
-            urls,
-            ...(fileSearch ? { fileSearch } : {}),
-          },
-          buildContents: (activeCaps) => {
+          commonInputs: {},
+          buildContents: () => {
             const { promptText, systemInstruction } = buildFileAnalysisPrompt({
               goal,
               kind: 'single',
             });
-            const urlContextPart = buildUrlContextFallbackPart(urls, activeCaps);
             return {
-              contents: [
-                ...contents,
-                { text: promptText },
-                ...(urlContextPart ? [urlContextPart] : []),
-              ],
+              contents: [...contents, { text: promptText }],
               systemInstruction,
             };
           },
@@ -181,12 +175,10 @@ function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher) {
 }
 
 interface AnalyzeMultiExtra {
-  googleSearch?: boolean | undefined;
   maxOutputTokens?: AnalyzeInput['maxOutputTokens'];
   safetySettings?: AnalyzeInput['safetySettings'];
   thinkingBudget?: AnalyzeInput['thinkingBudget'];
-  urls?: readonly string[] | undefined;
-  fileSearch?: AnalyzeInput['fileSearch'] | undefined;
+  tools?: AnalyzeInput['tools'] | undefined;
 }
 
 async function analyzeMultiFileWork(
@@ -197,7 +189,13 @@ async function analyzeMultiFileWork(
   ctx: ServerContext,
   extra: AnalyzeMultiExtra = {},
 ): Promise<CallToolResult> {
-  const { maxOutputTokens, safetySettings, googleSearch, urls, thinkingBudget, fileSearch } = extra;
+  const { maxOutputTokens, safetySettings, thinkingBudget, tools: toolsSpec } = extra;
+
+  const resolved = await resolveOrchestration(toolsSpec as ToolsSpecInput | undefined, ctx, {
+    toolKey: 'analyze',
+  });
+  if (resolved.error) return resolved.error;
+
   const { progress } = createToolContext('analyze', ctx);
 
   return await withUploadsAndPipeline(
@@ -209,52 +207,52 @@ async function analyzeMultiFileWork(
     async (contents) => {
       await progress.step(filePaths.length, filePaths.length + 1, 'Analyzing content');
 
-      return await executor.executeGeminiPipeline(ctx, {
-        toolName: 'analyze',
-        label: TOOL_LABELS.analyze,
-        commonInputs: {
-          googleSearch,
-          urls,
-          ...(fileSearch ? { fileSearch } : {}),
-        },
-        buildContents: (activeCaps) => {
-          const prompt = buildFileAnalysisPrompt({
-            attachedParts: contents,
-            goal,
-            kind: 'multi',
-          });
-          const finalParts = [...prompt.promptParts];
-          const urlContextPart = buildUrlContextFallbackPart(urls, activeCaps);
-          if (urlContextPart) {
-            finalParts.push(urlContextPart);
-          }
-          return { contents: finalParts, systemInstruction: prompt.systemInstruction };
-        },
-        config: {
-          costProfile: 'analyze.summary',
-          thinkingLevel,
-          thinkingBudget,
-          maxOutputTokens,
-          safetySettings,
-        },
-        responseBuilder: (_streamResult, textContent: string) => ({
+      const prompt = buildFileAnalysisPrompt({
+        attachedParts: contents,
+        goal,
+        kind: 'multi',
+      });
+
+      return await executor.runStream(
+        ctx,
+        'analyze',
+        TOOL_LABELS.analyze,
+        () =>
+          getAI().models.generateContentStream({
+            model: getGeminiModel(),
+            contents: prompt.promptParts,
+            config: buildGenerateContentConfig(
+              {
+                systemInstruction: prompt.systemInstruction,
+                costProfile: 'analyze.summary',
+                thinkingLevel,
+                thinkingBudget,
+                maxOutputTokens,
+                safetySettings,
+                tools: resolved.config.tools,
+                toolConfig: resolved.config.toolConfig,
+              },
+              getWorkSignal(ctx),
+            ),
+          }),
+        (_streamResult, textContent: string) => ({
           structuredContent: {
             summary: textContent || '',
-            targetKind: 'multi',
+            targetKind: 'multi' as const,
             analyzedPaths: filePaths,
           },
         }),
-      });
+      );
     },
     0,
   );
 }
 
-function pickDiagramBuiltInTools(args: AnalyzeDiagramInput): BuiltInToolName[] {
-  const names: BuiltInToolName[] = [];
-  if (args.targetKind === 'url') names.push('urlContext');
-  if (args.validateSyntax === true) names.push('codeExecution');
-  return names;
+function pickDiagramBuiltInTools(args: AnalyzeDiagramInput): BuiltInToolSpec[] {
+  const specs: BuiltInToolSpec[] = [];
+  if (args.targetKind === 'url') specs.push({ kind: 'urlContext' });
+  if (args.validateSyntax === true) specs.push({ kind: 'codeExecution' });
+  return specs;
 }
 
 async function analyzeDiagramWork(
@@ -296,18 +294,11 @@ async function analyzeDiagramWork(
       await progress.step(uploadedCount, totalSteps, `Generating ${args.diagramType} diagram`);
       await mcpLog(ctx, 'info', `Generating ${args.diagramType} diagram`);
 
-      const diagramBuiltInTools = pickDiagramBuiltInTools(args);
-      const diagramSpecs: BuiltInToolSpec[] = diagramBuiltInTools.map(
-        (kind) => ({ kind }) as BuiltInToolSpec,
-      );
+      const diagramSpecs = pickDiagramBuiltInTools(args);
 
       return await executor.executeGeminiPipeline(ctx, {
         toolName: 'analyze_diagram',
         label: TOOL_LABELS.analyzeDiagram,
-        commonInputs: {
-          urls: args.targetKind === 'url' ? args.urls : undefined,
-          ...(args.fileSearch ? { fileSearch: args.fileSearch } : {}),
-        },
         builtInToolSpecs: diagramSpecs,
         buildContents: () => {
           const prompt = buildDiagramGenerationPrompt({
@@ -420,9 +411,7 @@ async function runAnalyzeTarget(
       maxOutputTokens: args.maxOutputTokens,
       thinkingBudget: args.thinkingBudget,
       safetySettings: args.safetySettings,
-      googleSearch: args.googleSearch,
-      urls: args.urls,
-      fileSearch: args.fileSearch,
+      tools: args.tools,
     },
   );
 }

@@ -102,6 +102,7 @@ describe('tool registration', () => {
         'discover://catalog',
         'discover://context',
         'discover://workflows',
+        'gemini://profiles',
         'session://',
         'workspace://context',
         'workspace://cache',

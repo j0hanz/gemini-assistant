@@ -81,17 +81,45 @@ describe('ChatInputSchema', () => {
     }
   });
 
-  it('accepts public chat grounding inputs', () => {
+  it('accepts profile-based tool selection via tools field', () => {
     const result = ChatInputSchema.safeParse({
       goal: 'Summarize this page',
-      googleSearch: true,
-      urls: ['https://example.com/docs'],
+      tools: {
+        profile: 'web-research',
+        overrides: { urls: ['https://example.com/docs'] },
+      },
     });
     assert.ok(result.success);
-    if (result.success) {
-      assert.strictEqual(result.data.googleSearch, true);
-      assert.deepStrictEqual(result.data.urls, ['https://example.com/docs']);
-    }
+  });
+
+  it('rejects removed legacy tool flags (googleSearch, codeExecution, fileSearch, serverSideToolInvocations, temperature, urls)', () => {
+    assert.strictEqual(
+      ChatInputSchema.safeParse({ goal: 'test', googleSearch: true }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({ goal: 'test', codeExecution: true }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({
+        goal: 'test',
+        fileSearch: { fileSearchStoreNames: ['stores/x'] },
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({ goal: 'test', serverSideToolInvocations: 'never' }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({ goal: 'test', temperature: 0.5 }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({ goal: 'test', urls: ['https://example.com'] }).success,
+      false,
+    );
   });
 
   it('rejects invalid public chat URL inputs', () => {
@@ -250,100 +278,43 @@ describe('ChatInputSchema', () => {
       'JSON Schema (2020-12) for structured output. Single-turn or new-session only; resumed sessions reject it.',
     );
     assert.strictEqual(
-      ChatInputSchema.shape.temperature.description,
-      'Sampling temperature 0-2. When omitted, the server uses default 1.',
-    );
-    assert.strictEqual(
       ChatInputSchema.shape.seed.description,
       'Fixed random seed for reproducible outputs.',
     );
-    assert.strictEqual(
-      ChatInputSchema.shape.googleSearch.description,
-      'Enable Google Search grounding for chat. Optional; additive. Combine with `urls` for URL Context.',
-    );
-    assert.strictEqual(
-      ChatInputSchema.shape.urls.description,
-      'Public URLs to analyze with URL Context during chat.',
-    );
+    assert.ok(ChatInputSchema.shape.tools.description?.includes('Tool profile'));
   });
 
-  it('validates fileSearch, functions, functionResponses, and serverSideToolInvocations', () => {
+  it('accepts tools field with profile and overrides', () => {
     const result = ChatInputSchema.safeParse({
       goal: 'Use tools',
       sessionId: 'sess-1',
-      fileSearch: { fileSearchStoreNames: ['fileSearchStores/docs_1'] },
-      functions: {
-        declarations: [
-          {
-            name: 'lookup_doc',
-            description: 'Lookup a document',
-            parametersJsonSchema: { type: 'object' },
-          },
-        ],
-        mode: 'AUTO',
+      tools: {
+        profile: 'agent',
+        overrides: {
+          functions: [
+            {
+              name: 'lookup_doc',
+              description: 'Lookup a document',
+              parametersJsonSchema: { type: 'object' },
+            },
+          ],
+          functionCallingMode: 'VALIDATED',
+        },
       },
       functionResponses: [
-        {
-          id: 'call-1',
-          name: 'lookup_doc',
-          response: { output: { title: 'Doc' } },
-        },
+        { id: 'call-1', name: 'lookup_doc', response: { output: { title: 'Doc' } } },
       ],
-      serverSideToolInvocations: 'never',
     });
     assert.ok(result.success);
   });
 
-  it('rejects invalid fileSearch, functions, and serverSideToolInvocations values', () => {
-    // Empty arrays are tolerated: the wrapper object is treated as "unset"
-    // so clients that emit placeholder wrappers don't get validation errors.
-    const emptyFileSearch = ChatInputSchema.safeParse({
-      goal: 'empty stores',
-      fileSearch: { fileSearchStoreNames: [] },
-    });
-    assert.strictEqual(emptyFileSearch.success, true);
-    assert.strictEqual(
-      (emptyFileSearch as { data: { fileSearch?: unknown } }).data.fileSearch,
-      undefined,
-    );
+  it('rejects invalid function responses and validates tools.overrides.functions', () => {
     assert.strictEqual(
       ChatInputSchema.safeParse({
-        goal: 'bad store chars',
-        fileSearch: { fileSearchStoreNames: ['bad store'] },
-      }).success,
-      false,
-    );
-    assert.strictEqual(
-      ChatInputSchema.safeParse({
-        goal: 'bad store length',
-        fileSearch: { fileSearchStoreNames: ['x'.repeat(257)] },
-      }).success,
-      false,
-    );
-    assert.strictEqual(
-      ChatInputSchema.safeParse({
-        goal: 'bad function',
-        functions: {
-          declarations: [{ name: '1bad', description: 'Bad identifier' }],
-        },
-      }).success,
-      false,
-    );
-    assert.strictEqual(
-      ChatInputSchema.safeParse({
-        goal: 'bad function key',
-        functions: {
-          declarations: [{ name: 'valid', description: 'Has extra key', extra: true }],
-        },
-      }).success,
-      false,
-    );
-    assert.strictEqual(
-      ChatInputSchema.safeParse({
-        goal: 'bad mode',
-        functions: {
-          declarations: [{ name: 'valid', description: 'Valid declaration' }],
-          mode: 'FORCED',
+        goal: 'bad function in tools',
+        tools: {
+          profile: 'agent',
+          overrides: { functions: [{ name: '1bad', description: 'Bad identifier' }] },
         },
       }).success,
       false,
@@ -406,27 +377,15 @@ describe('ChatInputSchema', () => {
     );
   });
 
-  it('requires Gemini-compatible object schemas for function parameters', () => {
+  it('requires Gemini-compatible object schemas for tools.overrides.functions parameters', () => {
     assert.strictEqual(
       ChatInputSchema.safeParse({
         goal: 'missing schema type',
-        functions: {
-          declarations: [{ name: 'lookup_doc', description: 'Lookup', parametersJsonSchema: {} }],
-        },
-      }).success,
-      false,
-    );
-    assert.strictEqual(
-      ChatInputSchema.safeParse({
-        goal: 'wrong schema type',
-        functions: {
-          declarations: [
-            {
-              name: 'lookup_doc',
-              description: 'Lookup',
-              parametersJsonSchema: { type: 'string' },
-            },
-          ],
+        tools: {
+          profile: 'agent',
+          overrides: {
+            functions: [{ name: 'lookup_doc', description: 'Lookup', parametersJsonSchema: {} }],
+          },
         },
       }).success,
       false,
@@ -434,17 +393,17 @@ describe('ChatInputSchema', () => {
     assert.strictEqual(
       ChatInputSchema.safeParse({
         goal: 'unsupported gemini keyword',
-        functions: {
-          declarations: [
-            {
-              name: 'lookup_doc',
-              description: 'Lookup',
-              parametersJsonSchema: {
-                type: 'object',
-                oneOf: [{ type: 'object' }],
+        tools: {
+          profile: 'agent',
+          overrides: {
+            functions: [
+              {
+                name: 'lookup_doc',
+                description: 'Lookup',
+                parametersJsonSchema: { type: 'object', oneOf: [{ type: 'object' }] },
               },
-            },
-          ],
+            ],
+          },
         },
       }).success,
       false,
@@ -452,36 +411,35 @@ describe('ChatInputSchema', () => {
 
     const result = ChatInputSchema.safeParse({
       goal: 'valid schema',
-      functions: {
-        declarations: [
-          {
-            name: 'lookup_doc',
-            description: 'Lookup',
-            parametersJsonSchema: {
-              type: 'object',
-              properties: {
-                orderId: { type: 'string' },
+      tools: {
+        profile: 'agent',
+        overrides: {
+          functions: [
+            {
+              name: 'lookup_doc',
+              description: 'Lookup',
+              parametersJsonSchema: {
+                type: 'object',
+                properties: { orderId: { type: 'string' } },
+                required: ['orderId'],
               },
-              required: ['orderId'],
             },
-          },
-        ],
+          ],
+        },
       },
     });
-
     assert.ok(result.success);
   });
 
-  it('treats empty fileSearch.fileSearchStoreNames and functions.declarations as unset', () => {
-    const result = ChatInputSchema.safeParse({
-      goal: 'placeholder wrappers',
-      fileSearch: { fileSearchStoreNames: [] },
-      functions: { declarations: [] },
-      serverSideToolInvocations: 'auto',
-    });
-    assert.ok(result.success);
-    assert.strictEqual(result.data.fileSearch, undefined);
-    assert.strictEqual(result.data.functions, undefined);
+  it('rejects legacy placeholder wrappers for removed fields', () => {
+    assert.strictEqual(
+      ChatInputSchema.safeParse({ goal: 'test', fileSearch: { fileSearchStoreNames: [] } }).success,
+      false,
+    );
+    assert.strictEqual(
+      ChatInputSchema.safeParse({ goal: 'test', functions: { declarations: [] } }).success,
+      false,
+    );
   });
 });
 
@@ -517,13 +475,30 @@ describe('ResearchInputSchema', () => {
     assert.strictEqual(result.success, false);
   });
 
-  it('accepts URLs in deep mode and still rejects systemInstruction', () => {
-    const withUrls = ResearchInputSchema.safeParse({
+  it('accepts tools field and rejects removed legacy fields', () => {
+    const withTools = ResearchInputSchema.safeParse({
       mode: 'deep',
       goal: 'test',
-      urls: ['https://example.com'],
+      tools: {
+        profile: 'rag',
+        overrides: { fileSearchStores: ['fileSearchStores/research'] },
+      },
     });
-    assert.strictEqual(withUrls.success, true);
+    assert.strictEqual(withTools.success, true);
+
+    assert.strictEqual(
+      ResearchInputSchema.safeParse({ mode: 'quick', goal: 'test', urls: ['https://example.com'] })
+        .success,
+      false,
+    );
+    assert.strictEqual(
+      ResearchInputSchema.safeParse({
+        mode: 'quick',
+        goal: 'test',
+        fileSearch: { fileSearchStoreNames: ['stores/x'] },
+      }).success,
+      false,
+    );
 
     const result = ResearchInputSchema.safeParse({
       mode: 'deep',
@@ -531,15 +506,6 @@ describe('ResearchInputSchema', () => {
       systemInstruction: 'format as bullets',
     });
     assert.strictEqual(result.success, false);
-  });
-
-  it('accepts fileSearch on research input', () => {
-    const result = ResearchInputSchema.safeParse({
-      mode: 'quick',
-      goal: 'test',
-      fileSearch: { fileSearchStoreNames: ['fileSearchStores/research'] },
-    });
-    assert.strictEqual(result.success, true);
   });
 
   it('reports exact selector issue paths and messages', () => {

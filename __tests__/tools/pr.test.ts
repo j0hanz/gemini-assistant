@@ -1028,8 +1028,7 @@ describe('reviewWork routing', () => {
       question: 'behavior changes',
       thinkingLevel: undefined,
       thinkingBudget: undefined,
-      googleSearch: undefined,
-      urls: undefined,
+      tools: undefined,
       maxOutputTokens: undefined,
       safetySettings: undefined,
     });
@@ -1067,11 +1066,10 @@ describe('reviewWork routing', () => {
       error: 'ReferenceError: x is not defined',
       codeContext: 'const y = x;',
       language: undefined,
-      googleSearch: undefined,
+      tools: undefined,
       maxOutputTokens: undefined,
       thinkingBudget: undefined,
       safetySettings: undefined,
-      urls: undefined,
     });
   });
 

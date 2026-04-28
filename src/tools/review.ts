@@ -10,8 +10,13 @@ import { z } from 'zod/v4';
 import { withUploadsAndPipeline } from '../lib/file.js';
 import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
 import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
+import { resolveOrchestration, type ToolsSpecInput } from '../lib/orchestration.js';
 import { buildSuccessfulStructuredContent, tryParseJsonResponse } from '../lib/response.js';
-import { READONLY_NON_IDEMPOTENT_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
+import {
+  getWorkSignal,
+  READONLY_NON_IDEMPOTENT_ANNOTATIONS,
+  registerWorkTool,
+} from '../lib/task-utils.js';
 import {
   bindToolServices,
   createDefaultToolServices,
@@ -33,7 +38,8 @@ import {
 } from '../schemas/inputs.js';
 import { DocumentationDriftSchema, ReviewOutputSchema } from '../schemas/outputs.js';
 
-import { getReviewDocs } from '../config.js';
+import { buildGenerateContentConfig, getAI } from '../client.js';
+import { getGeminiModel, getReviewDocs } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
 
 const execFileAsync = promisify(execFile);
@@ -278,14 +284,18 @@ function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
       question,
       thinkingLevel,
       thinkingBudget,
-      googleSearch,
-      urls,
       maxOutputTokens,
       safetySettings,
-      fileSearch,
+      tools,
     }: ReviewComparisonInput,
     ctx: ServerContext,
   ): Promise<CallToolResult> {
+    const resolved = await resolveOrchestration(tools as ToolsSpecInput | undefined, ctx, {
+      toolKey: 'review',
+      mode: 'comparison',
+    });
+    if (resolved.error) return resolved.error;
+
     const { progress } = createToolContext('compareFiles', ctx);
 
     return await withUploadsAndPipeline(
@@ -301,43 +311,45 @@ function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
         await mcpLog(ctx, 'info', `Comparing: ${filePathA} vs ${filePathB}`);
         await progress.step(2, 3, 'Analyzing differences');
 
-        return await executor.executeGeminiPipeline(ctx, {
-          toolName: 'compare_files',
-          label: TOOL_LABELS.compareFiles,
-          commonInputs: {
-            googleSearch,
-            urls,
-            ...(fileSearch ? { fileSearch } : {}),
-          },
-          buildContents: () => {
-            const prompt = buildDiffReviewPrompt({
-              focus: question,
-              mode: 'compare',
-              promptParts: [
-                { text: `File A: ${filePathA}` },
-                fileA ?? { text: '' },
-                { text: `File B: ${filePathB}` },
-                fileB ?? { text: '' },
-              ],
-            });
-            return {
+        const prompt = buildDiffReviewPrompt({
+          focus: question,
+          mode: 'compare',
+          promptParts: [
+            { text: `File A: ${filePathA}` },
+            fileA ?? { text: '' },
+            { text: `File B: ${filePathB}` },
+            fileB ?? { text: '' },
+          ],
+        });
+
+        return await executor.runStream(
+          ctx,
+          'compare_files',
+          TOOL_LABELS.compareFiles,
+          () =>
+            getAI().models.generateContentStream({
+              model: getGeminiModel(),
               contents: prompt.promptParts,
-              systemInstruction: prompt.systemInstruction,
-            };
-          },
-          config: {
-            costProfile: 'review.comparison',
-            thinkingLevel,
-            thinkingBudget,
-            maxOutputTokens,
-            safetySettings,
-          },
-          responseBuilder: (_streamResult, textContent: string) => ({
+              config: buildGenerateContentConfig(
+                {
+                  systemInstruction: prompt.systemInstruction,
+                  costProfile: 'review.comparison',
+                  thinkingLevel,
+                  thinkingBudget,
+                  maxOutputTokens,
+                  safetySettings,
+                  tools: resolved.config.tools,
+                  toolConfig: resolved.config.toolConfig,
+                },
+                getWorkSignal(ctx),
+              ),
+            }),
+          (_streamResult, textContent: string) => ({
             structuredContent: {
               summary: textContent || '',
             },
           }),
-        });
+        );
       },
       0,
     );
@@ -347,13 +359,11 @@ function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
 interface FailureReviewSubject {
   codeContext?: ReviewFailureInput['codeContext'];
   error: ReviewFailureInput['error'];
-  fileSearch?: ReviewFailureInput['fileSearch'];
-  googleSearch?: ReviewFailureInput['googleSearch'];
   language?: ReviewFailureInput['language'];
   maxOutputTokens?: ReviewFailureInput['maxOutputTokens'];
   safetySettings?: ReviewFailureInput['safetySettings'];
   thinkingBudget?: ReviewFailureInput['thinkingBudget'];
-  urls?: ReviewFailureInput['urls'];
+  tools?: ReviewFailureInput['tools'];
 }
 
 async function diagnoseFailureWork(
@@ -362,57 +372,60 @@ async function diagnoseFailureWork(
   thinkingLevel: ReviewInput['thinkingLevel'],
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const {
-    urls,
-    error,
-    codeContext,
-    language,
-    googleSearch,
-    maxOutputTokens,
-    safetySettings,
-    thinkingBudget,
-    fileSearch,
-  } = subject;
+  const { error, codeContext, language, maxOutputTokens, safetySettings, thinkingBudget, tools } =
+    subject;
+
+  const resolved = await resolveOrchestration(tools as ToolsSpecInput | undefined, ctx, {
+    toolKey: 'review',
+    mode: 'failure',
+  });
+  if (resolved.error) return resolved.error;
+
+  const googleSearchEnabled = resolved.config.activeCapabilities.has('googleSearch');
+  const resolvedUrls = resolved.config.resolvedProfile?.overrides.urls;
 
   const prompt = buildErrorDiagnosisPrompt({
     codeContext: focus
       ? [codeContext, 'Review focus: ' + focus].filter(Boolean).join('\n\n')
       : codeContext,
     error,
-    googleSearchEnabled: googleSearch === true,
+    googleSearchEnabled,
     language,
-    urls,
+    urls: resolvedUrls,
   });
 
   const { progress } = createToolContext('reviewFailure', ctx);
   await progress.send(0, undefined, 'Diagnosing');
   await mcpLog(ctx, 'info', `Review failure: ${error.length} chars`);
 
-  return await executor.executeGeminiPipeline(ctx, {
-    toolName: 'review_failure',
-    label: TOOL_LABELS.reviewFailure,
-    commonInputs: {
-      googleSearch,
-      urls,
-      ...(fileSearch ? { fileSearch } : {}),
-    },
-    buildContents: () => ({
-      contents: [prompt.promptText],
-      systemInstruction: prompt.systemInstruction,
-    }),
-    config: {
-      costProfile: 'review.failure',
-      thinkingLevel,
-      thinkingBudget,
-      maxOutputTokens,
-      safetySettings,
-    },
-    responseBuilder: (_streamResult, textContent: string) => ({
+  return await executor.runStream(
+    ctx,
+    'review_failure',
+    TOOL_LABELS.reviewFailure,
+    () =>
+      getAI().models.generateContentStream({
+        model: getGeminiModel(),
+        contents: [prompt.promptText],
+        config: buildGenerateContentConfig(
+          {
+            systemInstruction: prompt.systemInstruction,
+            costProfile: 'review.failure',
+            thinkingLevel,
+            thinkingBudget,
+            maxOutputTokens,
+            safetySettings,
+            tools: resolved.config.tools,
+            toolConfig: resolved.config.toolConfig,
+          },
+          getWorkSignal(ctx),
+        ),
+      }),
+    (_streamResult, textContent: string) => ({
       structuredContent: {
         summary: textContent || '',
       },
     }),
-  });
+  );
 }
 
 export function matchesNoisyPath(filePath: string): boolean {
@@ -1415,11 +1428,9 @@ export async function reviewWork(
         question: args.question ?? args.focus,
         thinkingLevel: args.thinkingLevel,
         thinkingBudget: args.thinkingBudget,
-        googleSearch: args.googleSearch,
-        urls: args.urls,
         maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
-        ...(args.fileSearch ? { fileSearch: args.fileSearch } : {}),
+        tools: args.tools,
       },
       ctx,
     );
@@ -1431,12 +1442,10 @@ export async function reviewWork(
         error,
         codeContext: args.codeContext,
         language: args.language,
-        googleSearch: args.googleSearch,
         maxOutputTokens: args.maxOutputTokens,
         thinkingBudget: args.thinkingBudget,
         safetySettings: args.safetySettings,
-        urls: args.urls,
-        ...(args.fileSearch ? { fileSearch: args.fileSearch } : {}),
+        tools: args.tools,
       },
       args.focus,
       args.thinkingLevel,

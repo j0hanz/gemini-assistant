@@ -9,6 +9,7 @@ export type PublicResourceUri =
   | 'discover://catalog'
   | 'discover://context'
   | 'discover://workflows'
+  | 'gemini://profiles'
   | 'session://'
   | 'session://{sessionId}'
   | 'session://{sessionId}/transcript'
@@ -70,6 +71,7 @@ export const PUBLIC_STATIC_RESOURCE_URIS = [
   'discover://catalog',
   'discover://context',
   'discover://workflows',
+  'gemini://profiles',
   'session://',
   'workspace://context',
   'workspace://cache',
@@ -137,15 +139,9 @@ const TOOL_DISCOVERY_DETAILS = {
       'maxOutputTokens?',
       'safetySettings?',
       'responseSchemaJson?',
-      'temperature?',
       'seed?',
-      'codeExecution?',
-      'googleSearch?',
-      'urls?',
-      'fileSearch?',
-      'functions?',
+      'tools?',
       'functionResponses?',
-      'serverSideToolInvocations?',
     ],
     returns:
       'A direct answer, optional structured data, usage/safety/citation metadata, and session resource links. When sessions are active, raw Gemini `Part[]` are persisted for replay-safe orchestration via the session-turn-parts resource (available only when sessions persist `Part[]`).',
@@ -159,8 +155,7 @@ const TOOL_DISCOVERY_DETAILS = {
       'Transcript, events, and raw turn-parts resources require MCP_EXPOSE_SESSION_RESOURCES=true.',
       'Structured output is allowed for single-turn calls and new sessions; resumed sessions reject responseSchemaJson.',
       'Declared functions are executed by the MCP client, not by this server; return results through functionResponses on the same sessionId.',
-      'Workspace cache reuse is skipped when a chat call sets systemInstruction, seed, or a caller-provided non-default temperature; the response may include warnings when cache reuse is skipped.',
-      'serverSideToolInvocations=auto includes server-side tool traces whenever Gemini built-in tools are active, including built-in-only flows.',
+      'Workspace cache reuse is skipped when a chat call sets systemInstruction or seed; the response may include warnings when cache reuse is skipped.',
     ],
     related: [
       { kind: 'resource', name: 'session://' },
@@ -175,12 +170,11 @@ const TOOL_DISCOVERY_DETAILS = {
     inputs: [
       'mode?',
       'goal',
-      'urls?',
       'thinkingLevel?',
       'thinkingBudget?',
       'maxOutputTokens?',
       'safetySettings?',
-      'fileSearch?',
+      'tools?',
       'systemInstruction? (mode=quick)',
       'deliverable? (mode=deep)',
       'searchDepth? (mode=deep)',
@@ -218,9 +212,8 @@ const TOOL_DISCOVERY_DETAILS = {
       'thinkingBudget?',
       'maxOutputTokens?',
       'safetySettings?',
-      'googleSearch?',
-      'fileSearch?',
       'mediaResolution?',
+      'tools?',
     ],
     returns:
       'An analysis summary or diagram tied to the requested target kind with optional URL retrieval metadata.',
@@ -247,22 +240,20 @@ const TOOL_DISCOVERY_DETAILS = {
       'question? (subjectKind=comparison)',
       'error? (subjectKind=failure)',
       'codeContext? (subjectKind=failure)',
-      'googleSearch? (subjectKind=comparison or failure)',
-      'fileSearch? (subjectKind=comparison or failure)',
-      'urls? (subjectKind=comparison or failure)',
       'focus?',
       'thinkingLevel?',
       'thinkingBudget?',
       'maxOutputTokens?',
       'safetySettings?',
+      'tools?',
     ],
     returns:
       'A review summary plus diff stats, comparison output, or failure guidance depending on the selected subjectKind.',
     limitations: [
       'The diff mode inspects the local repository only; it does not fetch remote GitHub state.',
       'Input caps: goal max 100000 chars via focus-bearing review prompts, error max 32000 chars, codeContext max 16000 chars.',
-      'Subject-specific fields (`dryRun`, `filePathA`, `filePathB`, `question`, `error`, `codeContext`, `googleSearch`, `fileSearch`, `urls`) are rejected outside the matching `subjectKind` variant.',
-      'Failure review can use optional search/URL context, but only from explicit subject fields.',
+      'Subject-specific fields (`dryRun`, `filePathA`, `filePathB`, `question`, `error`, `codeContext`) are rejected outside the matching `subjectKind` variant.',
+      'Search and URL context for failure and comparison review are configured via the `tools` field using a grounded profile (e.g., `web-research`, `urls-only`).',
     ],
     related: [
       { kind: 'prompt', name: 'review' },
@@ -334,6 +325,17 @@ const RESOURCE_DISCOVERY_DETAILS = {
     whenToUse: 'Use to find recommended entry points for common jobs.',
     inputs: [],
     returns: 'JSON and Markdown workflow catalog content.',
+    related: [{ kind: 'resource', name: 'discover://catalog' }],
+  },
+  'gemini://profiles': {
+    title: 'Tool Profiles Resource',
+    bestFor:
+      'Discovering available tool profiles, their built-in capabilities, and valid combinations.',
+    whenToUse:
+      'Use to understand which profile to pass in the `tools.profile` field for chat, research, analyze, or review.',
+    inputs: [],
+    returns:
+      'JSON catalog of all 11 tool profiles with builtIns, defaultThinkingLevel, notes, and a comboMatrix of valid capability combinations.',
     related: [{ kind: 'resource', name: 'discover://catalog' }],
   },
   'session://': {

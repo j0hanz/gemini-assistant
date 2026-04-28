@@ -5,7 +5,20 @@ import type { FunctionDeclaration, ToolConfig, ToolListUnion } from '@google/gen
 
 import { AppError } from './errors.js';
 import { logger, mcpLog } from './logger.js';
+import {
+  buildProfileToolConfig,
+  buildToolsArray,
+  ProfileValidationError,
+  type ResolvedProfile,
+  resolveProfile,
+  type ResolveProfileContext,
+  resolveProfileFunctionCallingMode,
+  type ToolsSpecInput,
+  validateProfile,
+} from './tool-profiles.js';
 import { validateUrls } from './validation.js';
+
+// ── Legacy types (kept for backward compatibility with tool-executor.ts) ──────
 
 export const BUILT_IN_TOOL_NAMES = [
   'googleSearch',
@@ -171,6 +184,7 @@ export interface OrchestrationConfig {
   toolProfileDetails: ToolProfileDetails;
   tools?: ToolListUnion;
   activeCapabilities: Set<ActiveCapability>;
+  resolvedProfile?: ResolvedProfile;
 }
 
 export function resolveServerSideToolInvocations(
@@ -183,7 +197,7 @@ export function resolveServerSideToolInvocations(
   return hasBuiltIn ? true : undefined;
 }
 
-function resolveFunctionCallingMode(
+function resolveFunctionCallingModeInternal(
   explicitMode: FunctionCallingConfigMode | undefined,
   activeCapabilities: ReadonlySet<string>,
   responseSchemaRequested: boolean | undefined,
@@ -228,7 +242,7 @@ export function buildOrchestrationConfig(request: OrchestrationRequest): Orchest
     request.serverSideToolInvocations,
     activeCapabilities,
   );
-  const functionCallingMode = resolveFunctionCallingMode(
+  const functionCallingMode = resolveFunctionCallingModeInternal(
     request.functionCallingMode,
     activeCapabilities,
     request.responseSchemaRequested,
@@ -266,13 +280,9 @@ export type ResolveOrchestrationResult =
   | { config: OrchestrationConfig; error?: undefined }
   | { config?: undefined; error: CallToolResult };
 
-/**
- * Unified orchestration entry point for tool handlers: validates URLs,
- * resolves the composed tool list, and emits a single info log describing the
- * resolution. Emits a warning if `urls` were supplied but the resolved
- * configuration has URL Context disabled.
- */
-export async function resolveOrchestration(
+// ── Legacy request-based entry point (used by tool-executor.ts) ───────────────
+
+export async function resolveOrchestrationFromRequest(
   request: OrchestrationRequest & { urls?: readonly string[] | undefined },
   ctx: ServerContext,
   toolKey: string,
@@ -323,3 +333,88 @@ export async function resolveOrchestration(
 
   return { config };
 }
+
+// ── Profile-driven entry point (new public API) ───────────────────────────────
+
+export async function resolveOrchestration(
+  toolsSpec: ToolsSpecInput | undefined,
+  ctx: ServerContext,
+  context: ResolveProfileContext,
+): Promise<ResolveOrchestrationResult> {
+  const resolved = resolveProfile(toolsSpec, context);
+
+  try {
+    validateProfile(resolved);
+  } catch (error) {
+    if (error instanceof ProfileValidationError) {
+      return { error: new AppError('orchestration', error.message).toToolResult() };
+    }
+    throw error;
+  }
+
+  const urlError = validateUrls(resolved.overrides.urls);
+  if (urlError) {
+    return { error: urlError };
+  }
+
+  const tools = buildToolsArray(resolved);
+  const toolConfig = buildProfileToolConfig(resolved);
+  const functionCallingMode = resolveProfileFunctionCallingMode(resolved);
+
+  const activeCapabilities = new Set<ActiveCapability>();
+  for (const builtIn of resolved.builtIns) {
+    activeCapabilities.add(builtIn);
+  }
+  if ((resolved.overrides.functions?.length ?? 0) > 0) {
+    activeCapabilities.add('functions');
+  }
+
+  const fileSearchStoreCount =
+    resolved.profile === 'rag' ? (resolved.overrides.fileSearchStores?.length ?? 0) : undefined;
+  const functionCount = resolved.overrides.functions?.length;
+
+  const toolProfileDetails: ToolProfileDetails = {
+    ...(fileSearchStoreCount !== undefined ? { fileSearchStoreCount } : {}),
+    ...(functionCount !== undefined && functionCount > 0 ? { functionCount } : {}),
+    ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
+    ...(toolConfig?.includeServerSideToolInvocations === true
+      ? { serverSideToolInvocations: true }
+      : {}),
+  };
+
+  const toolProfileParts = [
+    ...resolved.builtIns,
+    ...((resolved.overrides.functions?.length ?? 0) > 0 ? ['functionDeclarations'] : []),
+  ].sort();
+  const toolProfile = toolProfileParts.length === 0 ? 'none' : toolProfileParts.join('+');
+
+  const config: OrchestrationConfig = {
+    resolvedProfile: resolved,
+    toolProfile,
+    toolProfileDetails,
+    activeCapabilities,
+    ...(tools.length > 0 ? { tools } : {}),
+    ...(toolConfig !== undefined ? { toolConfig } : {}),
+    ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
+  };
+
+  const logPayload = {
+    toolKey: context.toolKey,
+    profile: resolved.profile,
+    autoPromoted: resolved.autoPromoted,
+    builtIns: [...resolved.builtIns],
+    thinkingLevel: resolved.thinkingLevel,
+  };
+
+  await mcpLog(
+    ctx,
+    'info',
+    `orchestration resolved: ${context.toolKey} -> ${resolved.profile}${resolved.autoPromoted ? ' (auto-promoted)' : ''}`,
+  );
+  logger.child(context.toolKey).info('tool.profile.resolved', logPayload);
+
+  return { config };
+}
+
+// Re-export profile types for callers that need them
+export type { ResolvedProfile, ResolveProfileContext, ToolsSpecInput } from './tool-profiles.js';

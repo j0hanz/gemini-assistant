@@ -337,15 +337,17 @@ describe('ask contract', () => {
     const result = await askWork(
       {
         ...storedArgs,
-        functions: {
-          declarations: [
-            {
-              name: 'lookup_doc',
-              description: 'Lookup a document',
-              parametersJsonSchema: { type: 'object' },
-            },
-          ],
-          mode: 'AUTO',
+        tools: {
+          profile: 'agent',
+          overrides: {
+            functions: [
+              {
+                name: 'lookup_doc',
+                description: 'Lookup a document',
+                parametersJsonSchema: { type: 'object' },
+              },
+            ],
+          },
         },
       },
       createContext(),
@@ -364,7 +366,7 @@ describe('ask contract', () => {
       message: 'hello',
       sessionId,
       thinkingLevel: 'LOW',
-      googleSearch: true,
+      tools: { profile: 'grounded' },
     };
     const askWork = createAskWork(
       createExistingSessionDeps(sessionId, createSessionContract(storedArgs)),
@@ -446,7 +448,7 @@ describe('ask contract', () => {
     const result = await askWork(
       {
         ...storedArgs,
-        googleSearch: true,
+        tools: { profile: 'grounded' },
       },
       createContext(),
     );
@@ -489,15 +491,14 @@ describe('ask contract', () => {
     const storedArgs: AskArgs = {
       message: 'hello',
       sessionId,
-      functions: {
-        declarations: [
-          {
-            name: 'lookup_doc',
-            description: 'Lookup a document',
-            parametersJsonSchema: { type: 'object' },
-          },
-        ],
-        mode: 'AUTO',
+      tools: {
+        profile: 'agent',
+        overrides: {
+          functions: [
+            { name: 'lookup_doc', description: 'Lookup', parametersJsonSchema: { type: 'object' } },
+          ],
+          functionCallingMode: 'VALIDATED',
+        },
       },
     };
     const askWork = createAskWork(
@@ -507,9 +508,18 @@ describe('ask contract', () => {
     const result = await askWork(
       {
         ...storedArgs,
-        functions: {
-          declarations: storedArgs.functions?.declarations ?? [],
-          mode: 'ANY',
+        tools: {
+          profile: 'agent',
+          overrides: {
+            functions: [
+              {
+                name: 'lookup_doc',
+                description: 'Lookup',
+                parametersJsonSchema: { type: 'object' },
+              },
+            ],
+            functionCallingMode: 'NONE',
+          },
         },
       },
       createContext(),
@@ -700,7 +710,7 @@ describe('ask contract', () => {
     });
   });
 
-  it('allows responseSchema plus googleSearch', async () => {
+  it('allows responseSchema with web-research profile', async () => {
     const askWork = createAskWork(
       createDeps({
         runWithoutSession: async (args: Record<string, unknown>) =>
@@ -718,7 +728,7 @@ describe('ask contract', () => {
               toolsUsed: [],
               toolsUsedOccurrences: [],
             },
-            toolProfile: 'googleSearch',
+            toolProfile: 'googleSearch+urlContext',
             observedArgs: args,
           }) as never,
       }),
@@ -727,7 +737,7 @@ describe('ask contract', () => {
     const result = await askWork(
       {
         message: 'hello',
-        googleSearch: true,
+        tools: { profile: 'web-research' },
         responseSchema: {
           type: 'object',
           properties: { answer: { type: 'string' } },
@@ -739,72 +749,7 @@ describe('ask contract', () => {
     assert.strictEqual(result.isError, undefined);
   });
 
-  it('allows responseSchema plus url context', async () => {
-    const askWork = createAskWork(
-      createDeps({
-        runWithoutSession: async (args: Record<string, unknown>) =>
-          ({
-            result: {
-              content: [{ type: 'text' as const, text: '{"answer":"ok"}' }],
-              structuredContent: { answer: '', data: { answer: 'ok' } },
-            },
-            streamResult: {
-              functionCalls: [],
-              parts: [],
-              text: '{"answer":"ok"}',
-              thoughtText: '',
-              toolEvents: [],
-              toolsUsed: [],
-              toolsUsedOccurrences: [],
-            },
-            toolProfile: 'urlContext',
-            observedArgs: args,
-          }) as never,
-      }),
-    );
-
-    const result = await askWork(
-      {
-        message: 'hello',
-        responseSchema: {
-          type: 'object',
-          properties: { answer: { type: 'string' } },
-        },
-        urls: ['https://example.com'],
-      },
-      createContext(),
-    );
-
-    assert.strictEqual(result.isError, undefined);
-  });
-
-  it('returns the exact validation error for responseSchema plus codeExecution', async () => {
-    const askWork = createAskWork(createDeps());
-
-    const result = await askWork(
-      {
-        message: 'hello',
-        codeExecution: true,
-        responseSchema: {
-          type: 'object',
-          properties: { answer: { type: 'string' } },
-        },
-      },
-      createContext(),
-    );
-
-    assert.deepStrictEqual(result, {
-      content: [
-        {
-          type: 'text',
-          text: 'chat: responseSchema cannot be combined with codeExecution',
-        },
-      ],
-      isError: true,
-    });
-  });
-
-  it('resolves orchestration config with codeExecution', async () => {
+  it('resolves orchestration config with code-math profile (codeExecution)', async () => {
     const stub = withGeminiStreamStub(['ok']);
     try {
       const askWork = createAskWork(
@@ -815,7 +760,7 @@ describe('ask contract', () => {
       await askWork(
         {
           message: 'Hello',
-          codeExecution: true,
+          tools: { profile: 'code-math' },
         },
         createContext(),
       );
@@ -831,7 +776,7 @@ describe('ask contract', () => {
     }
   });
 
-  it('resolves orchestration config with googleSearch and url context', async () => {
+  it('resolves orchestration config with web-research profile (googleSearch + urlContext)', async () => {
     const stub = withGeminiStreamStub(['ok']);
     try {
       const askWork = createAskWork(
@@ -842,8 +787,10 @@ describe('ask contract', () => {
       await askWork(
         {
           message: 'Hello',
-          googleSearch: true,
-          urls: ['https://example.com/docs'],
+          tools: {
+            profile: 'web-research',
+            overrides: { urls: ['https://example.com/docs'] },
+          },
         },
         createContext(),
       );
@@ -856,48 +803,20 @@ describe('ask contract', () => {
     }
   });
 
-  it('resolves orchestration config with fileSearch and functions', async () => {
-    const stub = withGeminiStreamStub([
-      async function* () {
-        yield {
-          candidates: [
-            {
-              content: {
-                parts: [
-                  {
-                    functionCall: {
-                      name: 'lookup_doc',
-                      args: { query: 'x' },
-                    },
-                  },
-                  { text: 'Need lookup' },
-                ],
-              },
-              finishReason: 'STOP',
-            },
-          ],
-        };
-      },
-    ]);
+  it('resolves orchestration config with rag profile (fileSearch)', async () => {
+    const stub = withGeminiStreamStub(['Here is the document summary.']);
     try {
       const askWork = createAskWork(
         createDeps({
           runWithoutSession: askWithoutSession,
         }),
       );
-      const result = await askWork(
+      await askWork(
         {
           message: 'Hello',
-          fileSearch: { fileSearchStoreNames: ['fileSearchStores/docs'] },
-          functions: {
-            declarations: [
-              {
-                name: 'lookup_doc',
-                description: 'Lookup a document',
-                parametersJsonSchema: { type: 'object' },
-              },
-            ],
-            mode: 'AUTO',
+          tools: {
+            profile: 'rag',
+            overrides: { fileSearchStores: ['fileSearchStores/docs'] },
           },
         },
         createContext(),
@@ -909,22 +828,27 @@ describe('ask contract', () => {
         tools?.some((tool) => 'fileSearch' in tool),
         'fileSearch was not included',
       );
-      assert.ok(
-        tools?.some((tool) => 'functionDeclarations' in tool),
-        'function declarations were not included',
-      );
-      assert.deepStrictEqual(
-        (callConfig?.toolConfig as { functionCallingConfig?: { mode?: string } } | undefined)
-          ?.functionCallingConfig,
-        { mode: 'AUTO' },
-      );
-      const structured = result.structuredContent as Record<string, unknown>;
-      assert.deepStrictEqual(structured.toolEvents, [
-        { kind: 'function_call', name: 'lookup_doc', args: { query: 'x' } },
-      ]);
     } finally {
       stub.restore();
     }
+  });
+
+  it('rejects rag profile combined with functions (FILE_SEARCH_EXCLUSIVE)', async () => {
+    const askWork = createAskWork(createDeps());
+    const result = await askWork(
+      {
+        message: 'Hello',
+        tools: {
+          profile: 'rag',
+          overrides: {
+            fileSearchStores: ['fileSearchStores/docs'],
+            functions: [{ name: 'fn', description: 'test' }],
+          },
+        },
+      },
+      createContext(),
+    );
+    assert.strictEqual(result.isError, true);
   });
 
   it('auto-applies workspace cache metadata on single-turn calls', async () => {
@@ -1078,7 +1002,7 @@ describe('ask contract', () => {
     }
   });
 
-  it('chatWork forwards public grounding inputs to askWork', async () => {
+  it('chatWork forwards tools spec to askWork', async () => {
     let observedArgs: Record<string, unknown> | undefined;
 
     const result = await chatWork(
@@ -1091,15 +1015,19 @@ describe('ask contract', () => {
       },
       {
         goal: 'Ground this answer',
-        googleSearch: true,
-        urls: ['https://example.com/docs'],
+        tools: {
+          profile: 'web-research',
+          overrides: { urls: ['https://example.com/docs'] },
+        },
       },
       createContext(),
     );
 
     assert.strictEqual(result.isError, undefined);
-    assert.strictEqual(observedArgs?.googleSearch, true);
-    assert.deepStrictEqual(observedArgs?.urls, ['https://example.com/docs']);
+    assert.deepStrictEqual(
+      (observedArgs?.tools as { profile?: string } | undefined)?.profile,
+      'web-research',
+    );
   });
 
   it('chatWork returns a tool error for unsupported responseSchemaJson $ref usage', async () => {
@@ -1424,7 +1352,10 @@ describe('ask contract', () => {
       await askWithoutSession(
         {
           message: 'Summarize this page',
-          urls: ['https://example.com/docs'],
+          tools: {
+            profile: 'web-research',
+            overrides: { urls: ['https://example.com/docs'] },
+          },
         },
         createContext(),
       );
@@ -1599,7 +1530,7 @@ describe('ask contract', () => {
 
     try {
       const created = deps.createChat({
-        googleSearch: true,
+        tools: { profile: 'grounded' },
         message: 'start',
         sessionId: 'sess-contract',
         systemInstruction: 'original system',
@@ -1617,7 +1548,7 @@ describe('ask contract', () => {
       });
 
       deps.rebuildChat('sess-contract', {
-        googleSearch: false,
+        tools: { profile: 'plain' },
         message: 'resume',
         sessionId: 'sess-contract',
         systemInstruction: 'mutated system',

@@ -35,7 +35,7 @@ import {
   type StreamResult,
   type ToolEvent,
 } from '../lib/streaming.js';
-import { MUTABLE_ANNOTATIONS, registerWorkTool } from '../lib/task-utils.js';
+import { getTaskEmitter, MUTABLE_ANNOTATIONS, registerWorkTool } from '../lib/tasks.js';
 import {
   buildContextUsed,
   buildSessionSummary,
@@ -1289,6 +1289,8 @@ export async function chatWork(
   args: ChatInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
+  const tasks = getTaskEmitter(ctx);
+
   let responseSchema: GeminiResponseSchema | undefined;
   if (args.responseSchemaJson !== undefined) {
     try {
@@ -1300,6 +1302,7 @@ export async function chatWork(
     }
   }
 
+  await tasks.phase('streaming');
   const result = await askWork(
     {
       message: args.goal,
@@ -1317,6 +1320,7 @@ export async function chatWork(
     ctx,
   );
 
+  await tasks.phase('finalizing');
   return assembleChatOutput(result, args.sessionId, ctx.task?.id, ctx);
 }
 

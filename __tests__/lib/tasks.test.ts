@@ -1,8 +1,14 @@
 import type {
   CallToolResult,
+  Request as McpRequest,
   RequestTaskStore,
   ServerContext,
   Task,
+} from '@modelcontextprotocol/server';
+import {
+  InMemoryTaskMessageQueue,
+  InMemoryTaskStore,
+  RELATED_TASK_META_KEY,
 } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
@@ -11,14 +17,17 @@ import { afterEach, describe, it } from 'node:test';
 import { z } from 'zod/v4';
 
 import {
+  createSharedTaskInfra,
   createToolTaskHandlers,
   elicitTaskInput,
+  getTaskEmitter,
+  ObservableTaskStore,
   registerTaskTool,
   runToolAsTask,
   taskTtl,
-} from '../../src/lib/task-utils.js';
+} from '../../src/lib/tasks.js';
 
-process.env.API_KEY ??= 'test-key-for-task-utils';
+process.env.API_KEY ??= 'test-key-for-tasks';
 
 afterEach(async () => {
   // No-op placeholder to keep node:test happy if future cases add cleanup.
@@ -764,5 +773,212 @@ describe('registerTaskTool', () => {
     assert.strictEqual(entry.status, 'failed');
     assert.strictEqual(entry.result.isError, true);
     assert.match(entry.result.content[0]?.text ?? '', /test-tool failed/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ObservableTaskStore
+// ---------------------------------------------------------------------------
+
+describe('ObservableTaskStore', () => {
+  it('updateTaskStatus emits a status event after the delegate succeeds', async () => {
+    const inner = new InMemoryTaskStore();
+    const store = new ObservableTaskStore(inner);
+    const task = await store.createTask({ ttl: 5000 }, 'req-1', {} as never);
+
+    const events: import('../../src/lib/tasks.js').TaskEvent[] = [];
+    store.emitter.on('task', (ev) => {
+      events.push(ev);
+    });
+
+    await store.updateTaskStatus(task.taskId, 'working', 'in progress');
+
+    assert.strictEqual(events.length, 1);
+    const ev = events[0];
+    assert.ok(ev);
+    assert.strictEqual(ev.type, 'status');
+    assert.strictEqual(ev.taskId, task.taskId);
+    assert.strictEqual(ev.status, 'working');
+    if (ev.type === 'status') {
+      assert.strictEqual(ev.statusMessage, 'in progress');
+    }
+  });
+
+  it('storeTaskResult emits a result event after the delegate succeeds', async () => {
+    const inner = new InMemoryTaskStore();
+    const store = new ObservableTaskStore(inner);
+    const task = await store.createTask({ ttl: 5000 }, 'req-1', {} as never);
+
+    const events: import('../../src/lib/tasks.js').TaskEvent[] = [];
+    store.emitter.on('task', (ev) => {
+      events.push(ev);
+    });
+
+    await store.storeTaskResult(task.taskId, 'completed', {
+      content: [{ type: 'text', text: 'done' }],
+    });
+
+    assert.strictEqual(events.length, 1);
+    const ev = events[0];
+    assert.ok(ev);
+    assert.strictEqual(ev.type, 'result');
+    assert.strictEqual(ev.taskId, task.taskId);
+    assert.strictEqual(ev.status, 'completed');
+  });
+
+  it('cleanup removes all listeners from the emitter', async () => {
+    const inner = new InMemoryTaskStore();
+    const store = new ObservableTaskStore(inner);
+
+    store.emitter.on('task', () => {});
+    store.emitter.on('task', () => {});
+
+    assert.strictEqual(store.emitter.listenerCount('task'), 2);
+
+    store.cleanup();
+
+    assert.strictEqual(store.emitter.listenerCount('task'), 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getTaskEmitter
+// ---------------------------------------------------------------------------
+
+describe('getTaskEmitter', () => {
+  it('returns no-op functions and never touches the queue when ctx has no task id', async () => {
+    const infra = createSharedTaskInfra();
+
+    const ctx = {
+      mcpReq: {
+        signal: new AbortController().signal,
+        log: async () => {},
+        notify: async () => {},
+      },
+      // no task property
+    } as unknown as ServerContext;
+
+    const emitter = getTaskEmitter(ctx);
+
+    // Should not throw and should resolve
+    await assert.doesNotReject(() => emitter.phase('x'));
+
+    // Queue should remain empty — no tasks were created so we confirm
+    // the infra queue was never touched by verifying it returned nothing
+    // for a dummy task id that could never exist.
+    const messages = await infra.taskMessageQueue.dequeueAll('no-such-task-id');
+    assert.strictEqual(messages.length, 0);
+
+    infra.close();
+  });
+
+  it('phase enqueues exactly one notification with the correct shape', async () => {
+    const infra = createSharedTaskInfra();
+    const task = await infra.taskStore.createTask({ ttl: 5000 }, 'req-2', {} as McpRequest);
+
+    const ctx = {
+      mcpReq: {
+        signal: new AbortController().signal,
+        log: async () => {},
+        notify: async () => {},
+      },
+      task: { store: infra.taskStore, id: task.taskId },
+    } as unknown as ServerContext;
+
+    const emitter = getTaskEmitter(ctx);
+    await emitter.phase('x', 'y');
+
+    const messages = await infra.taskMessageQueue.dequeueAll(task.taskId);
+    assert.strictEqual(messages.length, 1);
+
+    const msg = messages[0];
+    assert.ok(msg);
+    assert.strictEqual(msg.type, 'notification');
+    assert.strictEqual(msg.message.method, 'notifications/gemini-assistant/phase');
+
+    const params = msg.message.params as {
+      phase: string;
+      detail: string;
+      _meta: Record<string, { taskId: string }>;
+    };
+    assert.strictEqual(params.phase, 'x');
+    assert.strictEqual(params.detail, 'y');
+    assert.strictEqual(params._meta[RELATED_TASK_META_KEY]?.taskId, task.taskId);
+
+    infra.close();
+  });
+
+  it('calling phase 17 times produces 16 phase emissions plus one truncated notification', async () => {
+    const infra = createSharedTaskInfra();
+    const task = await infra.taskStore.createTask({ ttl: 5000 }, 'req-3', {} as McpRequest);
+
+    const ctx = {
+      mcpReq: {
+        signal: new AbortController().signal,
+        log: async () => {},
+        notify: async () => {},
+      },
+      task: { store: infra.taskStore, id: task.taskId },
+    } as unknown as ServerContext;
+
+    const emitter = getTaskEmitter(ctx);
+
+    // Call phase 17 times
+    for (let i = 0; i < 17; i++) {
+      await emitter.phase(`phase-${i}`);
+    }
+
+    // Call 18 should be a no-op (already truncated)
+    await emitter.phase('should-be-ignored');
+
+    const messages = await infra.taskMessageQueue.dequeueAll(task.taskId);
+
+    // 16 real phases + 1 truncation notification = 17 total
+    assert.strictEqual(messages.length, 17);
+
+    // The last message should be the truncation
+    const lastMsg = messages[16];
+    assert.ok(lastMsg);
+    assert.strictEqual(lastMsg.type, 'notification');
+
+    const lastParams = lastMsg.message.params as { phase: string; detail: string };
+    assert.strictEqual(lastParams.phase, 'truncated');
+    assert.strictEqual(lastParams.detail, '1 dropped');
+
+    // The first 16 messages should be real phases (not truncated)
+    for (let i = 0; i < 16; i++) {
+      const m = messages[i];
+      assert.ok(m);
+      const p = m.message.params as { phase: string };
+      assert.notStrictEqual(p.phase, 'truncated');
+    }
+
+    infra.close();
+  });
+
+  it('resolves successfully and does not throw when enqueue rejects', async () => {
+    const infra = createSharedTaskInfra();
+    const task = await infra.taskStore.createTask({ ttl: 5000 }, 'req-4', {} as McpRequest);
+
+    const ctx = {
+      mcpReq: {
+        signal: new AbortController().signal,
+        log: async () => {},
+        notify: async () => {},
+      },
+      task: { store: infra.taskStore, id: task.taskId },
+    } as unknown as ServerContext;
+
+    // Override enqueue to always throw
+    (infra.taskMessageQueue as { enqueue: unknown }).enqueue = async (): Promise<never> => {
+      throw new Error('queue failure');
+    };
+
+    const emitter = getTaskEmitter(ctx);
+
+    // Should resolve without throwing
+    await assert.doesNotReject(() => emitter.phase('x'));
+
+    infra.close();
   });
 });

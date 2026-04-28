@@ -1,5 +1,7 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
+import { stat } from 'node:fs/promises';
+
 import type { Part } from '@google/genai';
 import type { z } from 'zod/v4';
 
@@ -17,10 +19,11 @@ import {
   pickDefined,
 } from '../lib/response.js';
 import {
+  getTaskEmitter,
   getWorkSignal,
   READONLY_NON_IDEMPOTENT_ANNOTATIONS,
   registerWorkTool,
-} from '../lib/task-utils.js';
+} from '../lib/tasks.js';
 import {
   createDefaultToolServices,
   type ToolRootsFetcher,
@@ -190,6 +193,7 @@ async function analyzeMultiFileWork(
   extra: AnalyzeMultiExtra = {},
 ): Promise<CallToolResult> {
   const { maxOutputTokens, safetySettings, thinkingBudget, tools: toolsSpec } = extra;
+  const tasks = getTaskEmitter(ctx);
 
   const resolved = await resolveOrchestration(toolsSpec as ToolsSpecInput | undefined, ctx, {
     toolKey: 'analyze',
@@ -197,6 +201,23 @@ async function analyzeMultiFileWork(
   if (resolved.error) return resolved.error;
 
   const { progress } = createToolContext('analyze', ctx);
+
+  await tasks.phase('loading-files');
+
+  for (const filePath of filePaths) {
+    try {
+      const fileStat = await stat(filePath);
+      await tasks.finding({
+        kind: 'file-read',
+        data: { path: filePath, bytes: fileStat.size },
+      });
+    } catch {
+      await tasks.finding({
+        kind: 'file-read',
+        data: { path: filePath, bytes: 0 },
+      });
+    }
+  }
 
   return await withUploadsAndPipeline(
     ctx,
@@ -207,13 +228,15 @@ async function analyzeMultiFileWork(
     async (contents) => {
       await progress.step(filePaths.length, filePaths.length + 1, 'Analyzing content');
 
+      await tasks.phase('analyzing');
+
       const prompt = buildFileAnalysisPrompt({
         attachedParts: contents,
         goal,
         kind: 'multi',
       });
 
-      return await executor.runStream(
+      const result = await executor.runStream(
         ctx,
         'analyze',
         TOOL_LABELS.analyze,
@@ -243,6 +266,10 @@ async function analyzeMultiFileWork(
           },
         }),
       );
+
+      await tasks.phase('finalizing');
+
+      return result;
     },
     0,
   );

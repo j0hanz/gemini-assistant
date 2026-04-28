@@ -47,10 +47,11 @@ import {
 } from '../lib/streaming.js';
 import {
   elicitTaskInput,
+  getTaskEmitter,
   getWorkSignal,
   READONLY_NON_IDEMPOTENT_ANNOTATIONS,
   registerWorkTool,
-} from '../lib/task-utils.js';
+} from '../lib/tasks.js';
 import { createDefaultToolServices, type ToolServices } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
 import type { ToolsSpecInput } from '../lib/tool-profiles.js';
@@ -592,6 +593,7 @@ async function runDeepResearchPlan(
   ctx: ServerContext,
   services: ToolServices,
 ): Promise<CallToolResult> {
+  const tasks = getTaskEmitter(ctx);
   const warnings: string[] = [];
   const results: StreamResult[] = [];
   const { progress } = createToolContext('agenticSearch', ctx);
@@ -601,6 +603,7 @@ async function runDeepResearchPlan(
     searchDepth: args.searchDepth,
   });
 
+  await tasks.phase('planning');
   const planTurn = await runDeepResearchTurn(
     ctx,
     'Research plan',
@@ -661,6 +664,7 @@ async function runDeepResearchPlan(
       undefined,
       buildPromptCapabilities(resolvedRetrieval.config.activeCapabilities, false),
     );
+    await tasks.phase('retrieving');
     const turn = await runDeepResearchTurn(
       ctx,
       `Research retrieval ${String(index + 1)}`,
@@ -676,6 +680,16 @@ async function runDeepResearchPlan(
     );
     if (turn.result.isError) return turn.result;
     results.push(turn.streamResult);
+
+    const retrievalSources = collectGroundedSourcesWithCounts(turn.streamResult.groundingMetadata);
+    for (const uri of retrievalSources.items) {
+      await tasks.finding({ kind: 'source', data: { uri } });
+    }
+    for (const ev of turn.streamResult.toolEvents) {
+      if (ev.kind === 'tool_call' || ev.kind === 'function_call') {
+        await tasks.finding({ kind: 'tool-call', data: { name: ev.name, args: ev.args } });
+      }
+    }
   }
 
   const retrievalSummaries = results
@@ -704,6 +718,7 @@ async function runDeepResearchPlan(
     topic: `${args.topic}\n\nRetrieved evidence summaries:\n${retrievalSummaries}`,
     urls: resolvedRetrieval.config.resolvedProfile?.overrides.urls,
   });
+  await tasks.phase('synthesizing');
   const synthesisTurn = await runDeepResearchTurn(
     ctx,
     'Research synthesis',
@@ -774,6 +789,7 @@ async function runDeepResearchPlan(
 
   const structuredContent = built.structuredContent;
 
+  await tasks.phase('finalizing');
   return {
     ...synthesisTurn.result,
     ...overlay,
@@ -799,6 +815,7 @@ async function searchWork(
   }: QuickResearchInput,
   ctx: ServerContext,
 ): Promise<CallToolResult> {
+  const tasks = getTaskEmitter(ctx);
   const { progress } = createToolContext('search', ctx);
   await progress.send(0, undefined, 'Starting');
   await mcpLog(ctx, 'info', 'Search requested');
@@ -818,7 +835,8 @@ async function searchWork(
     buildPromptCapabilities(resolved.config.activeCapabilities, false),
   );
 
-  return executor.runWithProgress(ctx, {
+  await tasks.phase('retrieving');
+  const result = await executor.runWithProgress(ctx, {
     toolKey: 'research',
     label: TOOL_LABELS.search,
     initialMsg: 'Starting',
@@ -842,6 +860,8 @@ async function searchWork(
       }),
     responseBuilder: (streamResult, textContent) => buildSearchResult(streamResult, textContent),
   });
+  await tasks.phase('finalizing');
+  return result;
 }
 
 export async function analyzeUrlWork(
@@ -893,6 +913,7 @@ async function agenticSearchWork(
   ctx: ServerContext,
   services: ToolServices,
 ): Promise<CallToolResult> {
+  const tasks = getTaskEmitter(ctx);
   let topic = goal;
   if (searchDepth >= 5 || (searchDepth >= 4 && !deliverable)) {
     try {
@@ -910,6 +931,7 @@ async function agenticSearchWork(
     }
   }
 
+  await tasks.phase('enriching-topic');
   const enrichedTopic = await enrichTopicWithSampling(topic, searchDepth, ctx);
 
   if (searchDepth >= 3) {
@@ -936,6 +958,7 @@ async function agenticSearchWork(
   if (resolved.error) return resolved.error;
   const { tools, toolConfig } = resolved.config;
   const resolvedUrls = resolved.config.resolvedProfile?.overrides.urls;
+  await tasks.phase('planning');
   const prompt = buildAgenticResearchPrompt({
     capabilities: buildPromptCapabilities(resolved.config.activeCapabilities, false),
     deliverable,
@@ -943,7 +966,8 @@ async function agenticSearchWork(
     urls: resolvedUrls,
   });
 
-  return executor.runWithProgress(ctx, {
+  await tasks.phase('retrieving');
+  const result = await executor.runWithProgress(ctx, {
     toolKey: 'research',
     label: TOOL_LABELS.agenticSearch,
     initialMsg: 'Starting deep research',
@@ -970,6 +994,8 @@ async function agenticSearchWork(
     responseBuilder: (streamResult, textContent) =>
       buildAgenticSearchResult(streamResult, textContent, ctx, searchDepth, searchDepth),
   });
+  await tasks.phase('finalizing');
+  return result;
 }
 
 async function runQuickResearch(

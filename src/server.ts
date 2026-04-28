@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { AppError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
-import { createSharedTaskInfra, type SharedTaskInfra } from './lib/task-infra.js';
+import { createSharedTaskInfra, type SharedTaskInfra } from './lib/tasks.js';
 import type { ToolServices } from './lib/tool-context.js';
 import { buildServerRootsFetcher, type RootsFetcher } from './lib/validation.js';
 import { createWorkspaceAccess, createWorkspaceCacheManager } from './lib/workspace-context.js';

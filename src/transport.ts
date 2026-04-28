@@ -21,7 +21,7 @@ import express, { type Express } from 'express';
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
 import { createRateLimiter, type RateLimiter } from './lib/rate-limit.js';
-import { createSharedTaskInfra, type SharedTaskInfra } from './lib/task-infra.js';
+import { createSharedTaskInfra, type SharedTaskInfra } from './lib/tasks.js';
 import { resolveAllowedHosts, validateHostHeader } from './lib/validation.js';
 
 import { getTransportConfig } from './config.js';

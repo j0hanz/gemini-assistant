@@ -1,57 +1,96 @@
-import type { RequestTaskStore } from '@modelcontextprotocol/server';
+import { InMemoryTaskStore } from '@modelcontextprotocol/server';
+import type { Request as McpRequest } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createSharedTaskInfra } from '../../src/lib/task-infra.js';
-import { bridgeTaskCancellationToSignal } from '../../src/lib/task-utils.js';
+import {
+  bridgeTaskCancellationToSignal,
+  createSharedTaskInfra,
+  ObservableTaskStore,
+} from '../../src/lib/tasks.js';
 
 describe('task lifecycle helpers', () => {
-  it('clears the cancellation poller when the task is pruned from the store', async () => {
-    const originalSetInterval = globalThis.setInterval;
-    const originalClearInterval = globalThis.clearInterval;
+  it('aborts the signal synchronously when the task is cancelled', async () => {
+    const store = new ObservableTaskStore(new InMemoryTaskStore());
+    const task = await store.createTask({ ttl: 5000 }, 'req-1', {} as McpRequest);
 
-    let intervalCallback: (() => void) | undefined;
-    let cleared = 0;
+    const signal = bridgeTaskCancellationToSignal(new AbortController().signal, task.taskId, store);
 
-    const fakeTimer = {
-      unref() {
-        return undefined;
-      },
-    } as unknown as ReturnType<typeof setInterval>;
+    // Wait for the initial getTask check to settle before counting listeners.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    globalThis.setInterval = ((callback: TimerHandler) => {
-      intervalCallback = callback as () => void;
-      return fakeTimer;
-    }) as typeof setInterval;
-    globalThis.clearInterval = ((timer: ReturnType<typeof setInterval>) => {
-      if (timer === fakeTimer) {
-        cleared += 1;
-      }
-    }) as typeof clearInterval;
+    assert.strictEqual(
+      store.emitter.listenerCount('task'),
+      1,
+      'expected 1 listener after subscribe',
+    );
 
-    try {
-      const signal = bridgeTaskCancellationToSignal(
-        new AbortController().signal,
-        'task-missing',
-        {
-          getTask: async () => {
-            throw new Error('task not found');
-          },
-        } as RequestTaskStore,
-        100,
-      );
+    await store.updateTaskStatus(task.taskId, 'cancelled');
 
-      assert.ok(intervalCallback, 'expected poller interval to be registered');
-      intervalCallback();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+    // The event fires synchronously inside updateTaskStatus; give microtasks a turn.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-      assert.strictEqual(cleared, 1);
-      assert.strictEqual(signal.aborted, false);
-    } finally {
-      globalThis.setInterval = originalSetInterval;
-      globalThis.clearInterval = originalClearInterval;
-    }
+    assert.strictEqual(signal.aborted, true, 'signal should be aborted after cancellation');
+    assert.strictEqual(
+      store.emitter.listenerCount('task'),
+      0,
+      'listener should be removed after terminal status',
+    );
+  });
+
+  it('removes the listener without aborting the signal when the task completes', async () => {
+    const store = new ObservableTaskStore(new InMemoryTaskStore());
+    const task = await store.createTask({ ttl: 5000 }, 'req-2', {} as McpRequest);
+
+    const signal = bridgeTaskCancellationToSignal(new AbortController().signal, task.taskId, store);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(
+      store.emitter.listenerCount('task'),
+      1,
+      'expected 1 listener after subscribe',
+    );
+
+    await store.updateTaskStatus(task.taskId, 'completed');
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(signal.aborted, false, 'signal should NOT be aborted for completed status');
+    assert.strictEqual(
+      store.emitter.listenerCount('task'),
+      0,
+      'listener should be removed after completed status',
+    );
+  });
+
+  it('removes the listener when a task result is stored', async () => {
+    const store = new ObservableTaskStore(new InMemoryTaskStore());
+    const task = await store.createTask({ ttl: 5000 }, 'req-3', {} as McpRequest);
+
+    const signal = bridgeTaskCancellationToSignal(new AbortController().signal, task.taskId, store);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(
+      store.emitter.listenerCount('task'),
+      1,
+      'expected 1 listener after subscribe',
+    );
+
+    await store.storeTaskResult(task.taskId, 'completed', {
+      content: [{ type: 'text', text: 'done' }],
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(signal.aborted, false, 'signal should NOT be aborted after storeTaskResult');
+    assert.strictEqual(
+      store.emitter.listenerCount('task'),
+      0,
+      'listener should be removed after result event',
+    );
   });
 
   it('cleans up the shared task message queue on shutdown', () => {

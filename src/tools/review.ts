@@ -13,10 +13,11 @@ import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-p
 import { resolveOrchestration, type ToolsSpecInput } from '../lib/orchestration.js';
 import { buildSuccessfulStructuredContent, tryParseJsonResponse } from '../lib/response.js';
 import {
+  getTaskEmitter,
   getWorkSignal,
   READONLY_NON_IDEMPOTENT_ANNOTATIONS,
   registerWorkTool,
-} from '../lib/task-utils.js';
+} from '../lib/tasks.js';
 import {
   createDefaultToolServices,
   isPathWithinRoot,
@@ -1238,6 +1239,7 @@ export async function analyzePrWork(
   const { progress } = createToolContext('review', ctx);
   await progress.step(0, 3, 'Inspecting local changes');
   const log = logger.child('review');
+  const tasks = getTaskEmitter(ctx);
 
   let snapshot: LocalDiffSnapshot;
   let workingDirectory: string;
@@ -1248,7 +1250,19 @@ export async function analyzePrWork(
     return buildAnalyzePrErrorResult(err);
   }
 
+  await tasks.phase('parsing-diff');
+  const allUnits = splitDiffUnits(snapshot.diff);
   const budgetedDiff = buildBudgetedSnapshotDiff(snapshot);
+
+  for (const unit of allUnits) {
+    if (budgetedDiff.reviewedPaths.includes(unit.path)) {
+      await tasks.finding({
+        kind: 'file-stat',
+        data: { path: unit.path, additions: unit.additions, deletions: unit.deletions },
+      });
+    }
+  }
+
   await progress.step(1, 3, budgetedDiff.summary);
 
   if (snapshot.empty) {
@@ -1283,6 +1297,8 @@ export async function analyzePrWork(
   await progress.step(2, 3, 'Analyzing generated diff');
   await logSnapshotStats(ctx, snapshot, budgetedDiff.truncated);
 
+  await tasks.phase('analyzing');
+
   const envDocs = getReviewDocs();
   const docPathsToCheck = envDocs ?? [...(services?.workspace.scanFileNames() ?? [])];
   const docContexts = await readDocFiles(workingDirectory, docPathsToCheck);
@@ -1306,7 +1322,8 @@ export async function analyzePrWork(
     docContexts,
   });
 
-  return await executor.executeGeminiPipeline(ctx, {
+  await tasks.phase('composing');
+  const result = await executor.executeGeminiPipeline(ctx, {
     toolName: 'analyze_pr',
     label: TOOL_LABELS.review,
     cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
@@ -1348,6 +1365,16 @@ export async function analyzePrWork(
       };
     },
   });
+
+  await tasks.phase('finalizing');
+  if (!result.isError && result.structuredContent) {
+    await tasks.finding({
+      kind: 'finding-summary',
+      data: result.structuredContent,
+    });
+  }
+
+  return result;
 }
 
 function buildReviewStructuredContent(

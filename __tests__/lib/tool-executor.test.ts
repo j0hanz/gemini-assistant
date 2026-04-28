@@ -14,7 +14,7 @@ import { getGeminiModel } from '../../src/config.js';
 import { Logger } from '../../src/lib/logger.js';
 import { resetProgressThrottle } from '../../src/lib/progress.js';
 import { validateStructuredToolResult } from '../../src/lib/response.js';
-import { registerTaskTool } from '../../src/lib/task-utils.js';
+import { registerTaskTool } from '../../src/lib/tasks.js';
 import { ToolExecutor } from '../../src/lib/tool-executor.js';
 
 process.env.API_KEY ??= 'test-key-for-tool-executor';

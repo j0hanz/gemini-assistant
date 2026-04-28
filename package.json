@@ -1,5 +1,5 @@
 {
-  "name": "gemini-assistant",
+  "name": "@j0hanz/gemini-assistant",
   "version": "0.1.0",
   "description": "Workflow-first Gemini MCP server for chat, research, file analysis, review, and project memory",
   "type": "module",

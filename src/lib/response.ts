@@ -39,6 +39,20 @@ export function pickDefined<T extends Record<string, unknown>>(obj: T): PickDefi
   ) as PickDefined<T>;
 }
 
+function stripEmpty(obj: unknown): unknown {
+  if (Array.isArray(obj)) return obj.map(stripEmpty);
+  if (obj !== null && typeof obj === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      if (v === null || v === undefined) continue;
+      if (Array.isArray(v) && v.length === 0) continue;
+      result[k] = stripEmpty(v);
+    }
+    return result;
+  }
+  return obj;
+}
+
 export function readStructuredObject(
   result: Pick<CallToolResult, 'isError' | 'structuredContent'>,
 ): Record<string, unknown> | undefined {
@@ -446,11 +460,14 @@ export function buildSuccessfulStructuredContent<TDomain extends Record<string, 
   domain: TDomain;
   shared?: Record<string, unknown> | undefined;
 }): TDomain & ReturnType<typeof buildBaseStructuredOutput> & Record<string, unknown> {
-  return pickDefined({
+  const merged = pickDefined({
     ...buildBaseStructuredOutput(warnings),
     ...domain,
     ...(shared ? pickSharedStructuredResultFields(shared) : {}),
-  }) as TDomain & ReturnType<typeof buildBaseStructuredOutput> & Record<string, unknown>;
+  });
+  return stripEmpty(merged) as TDomain &
+    ReturnType<typeof buildBaseStructuredOutput> &
+    Record<string, unknown>;
 }
 
 export function validateStructuredContent<TSchema extends z.ZodType>(

@@ -465,6 +465,26 @@ describe('buildSuccessfulStructuredContent', () => {
       },
     );
   });
+
+  it('stripEmpty removes empty arrays', () => {
+    const result = buildSuccessfulStructuredContent({
+      warnings: undefined,
+      domain: { status: 'completed' as const, summary: 'ok', sourceDetails: [] },
+    });
+    assert.ok(!('sourceDetails' in result), 'empty sourceDetails must be stripped');
+  });
+
+  it('stripEmpty removes null values', () => {
+    const result = buildSuccessfulStructuredContent({
+      warnings: undefined,
+      domain: {
+        status: 'completed' as const,
+        summary: 'ok',
+        explanation: null as unknown as string,
+      },
+    });
+    assert.ok(!('explanation' in result), 'null explanation must be stripped');
+  });
 });
 
 describe('collectGroundedSourceDetails', () => {

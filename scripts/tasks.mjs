@@ -309,8 +309,9 @@ function runTest() {
     let seenFirstOk = false;
     let stderrBuf = '';
 
+    child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk) => {
-      stderrBuf += chunk.toString();
+      stderrBuf += chunk;
     });
 
     function done(value) {
@@ -343,9 +344,10 @@ function runTest() {
 
     resetTimer();
 
+    child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
       resetTimer();
-      buf += chunk.toString();
+      buf += chunk;
       const lines = buf.split('\n');
       buf = lines.pop() ?? '';
       for (const line of lines) {

@@ -29,7 +29,6 @@ import {
   withRelatedTaskMeta,
 } from '../lib/response.js';
 import {
-  deriveComputationsFromToolEvents,
   extractUsage,
   type FunctionCallEntry,
   type StreamResult,
@@ -259,18 +258,22 @@ export function buildAskStructuredContent(
   const parsedData = jsonMode ? tryParseJsonResponse(text) : undefined;
   const answer = parsedData === undefined ? text : '';
   const usage = extractUsage(streamResult.usageMetadata);
-  const warnings = buildAskWarnings(parsedData, jsonMode, responseSchema);
-  const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
+  const warnings: string[] = [];
+
+  // Fold schema validation warnings into warnings array
+  const schemaWarnings = buildAskWarnings(parsedData, jsonMode, responseSchema);
+  if (schemaWarnings.length > 0) {
+    warnings.push(...schemaWarnings);
+  }
+  if (streamResult.warnings && streamResult.warnings.length > 0) {
+    warnings.push(...streamResult.warnings);
+  }
 
   return buildStructuredResponse(
     {
       answer,
       ...(parsedData !== undefined ? { data: parsedData } : {}),
-      ...(computations.length > 0 ? { computations } : {}),
-      ...(warnings.length > 0 ? { schemaWarnings: warnings } : {}),
-      ...(streamResult.warnings && streamResult.warnings.length > 0
-        ? { warnings: [...streamResult.warnings] }
-        : {}),
+      ...(warnings.length > 0 ? { warnings } : {}),
     },
     {
       ...(contextUsed ? { contextUsed } : {}),
@@ -757,7 +760,7 @@ export async function askWithoutSession(
     );
 
     const structured = getAskStructuredContent(askResult.result);
-    const warnings = structured?.schemaWarnings ?? [];
+    const warnings = structured?.warnings ?? [];
     const parsedData = structured && 'data' in structured ? structured.data : undefined;
     const shouldRetry =
       attempt < maxRetries &&

@@ -87,13 +87,29 @@ const HistoryManager = {
 
 // --- COMMAND EXECUTION ---
 const CommandRunner = {
+  // On Windows, npm/npx are .cmd shims. Spawning a .cmd file without a shell
+  // fails with EINVAL since Node's CVE-2024-27980 mitigation, but passing an
+  // `args` array together with `shell: true` triggers DEP0190 (args are
+  // concatenated unescaped). The supported workaround is to pass a single
+  // pre-quoted command string with `shell: true` and no separate `args`.
+  _quote(arg) {
+    // Quote tokens that contain whitespace or shell metacharacters.
+    if (/^[A-Za-z0-9_./:=@+-]+$/.test(arg)) return arg;
+    return `"${arg.replace(/(["\\])/g, '\\$1')}"`;
+  },
+
   exec(cmd, args) {
     const isNpm = Config.IS_WINDOWS && (cmd === 'npm' || cmd === 'npx');
-    const result = spawnSync(cmd, args, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: isNpm,
-    });
+    const result = isNpm
+      ? spawnSync([cmd, ...args].map(this._quote).join(' '), {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          shell: true,
+        })
+      : spawnSync(cmd, args, {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
 
     return {
       ok: result.status === 0 && !result.error,

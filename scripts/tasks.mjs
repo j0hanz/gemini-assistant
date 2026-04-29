@@ -29,13 +29,14 @@ const Theme = {
   RED: '\x1b[31m',
   YELLOW: '\x1b[33m',
   CYAN: '\x1b[36m',
+  BLUE: '\x1b[34m',
   CLEAR_EOL: '\x1b[K',
 };
 
 const Icons = {
   PASS: `${Theme.GREEN}✔${Theme.R}`,
   FAIL: `${Theme.RED}✖${Theme.R}`,
-  RUN: `${Theme.CYAN}❯${Theme.R}`,
+  RUN: `${Theme.BLUE}❯${Theme.R}`,
   SKIP: `${Theme.YELLOW}⊘${Theme.R}`,
   HANG: `${Theme.YELLOW}⧖${Theme.R}`,
   FIX: `${Theme.CYAN}↻${Theme.R}`,

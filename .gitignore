@@ -18,6 +18,12 @@ dist/
 .env.local
 .env.*.local
 
+# Tasks runner history
+.tasks-history.json
+
+# Test workspace-cache leftovers
+tmp-workspace-cache-*/
+
 # MCP Registry auth tokens
 .mcpregistry_*
 
@@ -69,3 +75,6 @@ scripts/*
 !scripts/build.mjs
 !scripts/validate-fetch.mjs
 !scripts/tasks.mjs
+!scripts/tasks-parse.mjs
+!scripts/tasks-render.mjs
+!scripts/tasks-history.mjs

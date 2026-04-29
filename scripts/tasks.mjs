@@ -2,8 +2,17 @@
 // Usage: node scripts/tasks.mjs [--fix] [--fast]
 //   --fix   run lint:fix instead of lint
 //   --fast  skip the test suite (static checks only)
-import { execSync } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import process from 'node:process';
+
+import { getSilenceTimeout, loadHistory, saveHistory } from './tasks-history.mjs';
+import { parseEslintJson, parseTapLine, parseTscOutput, parseYamlBlock } from './tasks-parse.mjs';
+import {
+  clearSourceCache,
+  emitLlmBlock,
+  renderRustError,
+  renderTestFailureCard,
+} from './tasks-render.mjs';
 
 const R = '\x1b[0m';
 const BOLD = '\x1b[1m';
@@ -17,19 +26,196 @@ const PASS = `${GREEN}✓${R}`;
 const FAIL = `${RED}✗${R}`;
 const RUN = `${CYAN}◆${R}`;
 const SKIP = `${YELLOW}–${R}`;
+const HANG = `${YELLOW}⏱${R}`;
 
 const args = new Set(process.argv.slice(2));
 const fix = args.has('--fix');
 const fast = args.has('--fast');
 
-/** @type {Array<{ label: string; cmd: string; skip?: boolean }>} */
+function runLint() {
+  if (fix) {
+    try {
+      execSync('npm run lint:fix', { encoding: 'utf8', stdio: 'pipe' });
+      return { ok: true };
+    } catch (err) {
+      const e = /** @type {any} */ (err);
+      return { ok: false, rawOutput: [e.stdout, e.stderr].filter(Boolean).join('\n') };
+    }
+  }
+  try {
+    execSync('npx eslint . --max-warnings=0 --format=json', { encoding: 'utf8', stdio: 'pipe' });
+    return { ok: true };
+  } catch (err) {
+    const e = /** @type {any} */ (err);
+    try {
+      const errors = parseEslintJson(e.stdout ?? '[]', process.cwd());
+      if (!errors.length) {
+        return { ok: false, rawOutput: [e.stdout, e.stderr].filter(Boolean).join('\n') };
+      }
+      const errCount = errors.filter((x) => x.severity === 'error').length;
+      const warnCount = errors.filter((x) => x.severity === 'warning').length;
+      return { ok: false, errors, counts: { errors: errCount, warnings: warnCount } };
+    } catch {
+      return { ok: false, rawOutput: [e.stdout, e.stderr].filter(Boolean).join('\n') };
+    }
+  }
+}
+
+function runTypeCheck() {
+  try {
+    execSync('npx tsc -p tsconfig.json --noEmit --pretty false', {
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    return { ok: true };
+  } catch (err) {
+    const e = /** @type {any} */ (err);
+    const text = [e.stdout, e.stderr].filter(Boolean).join('\n');
+    const errors = parseTscOutput(text);
+    if (!errors.length) return { ok: false, rawOutput: text };
+    const errCount = errors.filter((x) => x.severity === 'error').length;
+    const warnCount = errors.filter((x) => x.severity === 'warning').length;
+    return { ok: false, errors, counts: { errors: errCount, warnings: warnCount } };
+  }
+}
+
+function runTest() {
+  return new Promise((resolve) => {
+    const history = loadHistory();
+    const silenceMs = getSilenceTimeout(history);
+    // Startup budget: tsx/esm cold start + .env load + test discovery can take
+    // several seconds before the first TAP line. Use a generous budget until
+    // the first `ok` is observed; only then enforce the adaptive silence
+    // window between TAP lines.
+    const startupMs = Math.max(silenceMs, 30_000);
+
+    const child = spawn(
+      'node',
+      ['--import', 'tsx/esm', '--env-file=.env', '--test', '--no-warnings', '--test-reporter=tap'],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+
+    /** @type {{ name: string; duration: number } | null} */
+    let lastCompleted = null;
+    /** @type {Map<string, number>} */
+    const testDurations = new Map();
+    /** @type {Array<{ name: string; file: string; expected?: string; actual?: string; errorMessage?: string; frame?: string | null }>} */
+    const failures = [];
+    let currentFailName = /** @type {string | null} */ (null);
+    let inYaml = false;
+    /** @type {string[]} */
+    const yamlLines = [];
+    let buf = '';
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let silenceTimer = null;
+    let resolved = false;
+    let seenFirstOk = false;
+    let stderrBuf = '';
+
+    child.stderr.on('data', (chunk) => {
+      stderrBuf += chunk.toString();
+    });
+
+    function done(value) {
+      if (resolved) return;
+      resolved = true;
+      if (silenceTimer) clearTimeout(silenceTimer);
+      resolve(value);
+    }
+
+    function resetTimer() {
+      if (silenceTimer) clearTimeout(silenceTimer);
+      const ms = seenFirstOk ? silenceMs : startupMs;
+      silenceTimer = setTimeout(() => {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          // ignore: process may already have exited
+        }
+        const maxHistorical = Math.max(0, ...Object.values(history.test_durations).flat());
+        done({
+          ok: false,
+          timeout: true,
+          silenceMs: ms,
+          phase: seenFirstOk ? 'between-tests' : 'startup',
+          lastCompletedTest: lastCompleted,
+          suiteMaxHistoricalMs: maxHistorical,
+        });
+      }, ms);
+    }
+
+    resetTimer();
+
+    child.stdout.on('data', (chunk) => {
+      resetTimer();
+      buf += chunk.toString();
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';
+      for (const line of lines) {
+        const ev = parseTapLine(line);
+        if (ev.type === 'ok') {
+          seenFirstOk = true;
+          lastCompleted = { name: ev.name, duration: ev.duration };
+          testDurations.set(ev.name, ev.duration);
+          inYaml = false;
+          yamlLines.length = 0;
+          currentFailName = null;
+        } else if (ev.type === 'not_ok') {
+          seenFirstOk = true;
+          currentFailName = ev.name;
+          inYaml = false;
+          yamlLines.length = 0;
+        } else if (ev.type === 'yaml_start') {
+          inYaml = true;
+          yamlLines.length = 0;
+        } else if (ev.type === 'yaml_end' && inYaml) {
+          inYaml = false;
+          const yaml = parseYamlBlock([...yamlLines]);
+          if (currentFailName) {
+            failures.push({
+              name: currentFailName,
+              file: yaml.at ? yaml.at.replace(/:\d+:\d+$/, '') : '',
+              expected: yaml.expected,
+              actual: yaml.actual,
+              errorMessage: yaml.error,
+              frame: yaml.at ?? null,
+            });
+          }
+          yamlLines.length = 0;
+          currentFailName = null;
+        } else if (inYaml) {
+          yamlLines.push(line);
+        }
+      }
+    });
+
+    child.on('error', (err) => {
+      done({ ok: false, rawOutput: String(err?.message ?? err) });
+    });
+
+    child.on('close', (code) => {
+      if (failures.length) {
+        done({ ok: false, failures, testDurations });
+        return;
+      }
+      if (code !== 0) {
+        done({ ok: false, rawOutput: stderrBuf || `test runner exited with code ${code}` });
+        return;
+      }
+      saveHistory(history, testDurations);
+      done({ ok: true, testDurations });
+    });
+  });
+}
+
+/** @type {Array<{ label: string; cmd?: string; runner?: () => any | Promise<any>; skip?: boolean }>} */
 const tasks = [
   { label: 'format', cmd: 'npm run format' },
-  { label: 'lint', cmd: fix ? 'npm run lint:fix' : 'npm run lint' },
-  { label: 'type-check', cmd: 'npm run type-check' },
+  { label: 'lint', runner: runLint },
+  { label: 'type-check', runner: runTypeCheck },
   { label: 'build', cmd: 'npm run build' },
   { label: 'knip', cmd: 'npm run knip' },
-  { label: 'test', cmd: 'npm run test', skip: fast },
+  { label: 'test', runner: runTest, skip: fast },
 ];
 
 const COL = Math.max(...tasks.map((t) => t.label.length)) + 2;
@@ -44,9 +230,17 @@ function printHeader() {
   process.stdout.write(`\n  ${BOLD}gemini-assistant${R}  ${DIM}checks${R}${suffix}\n\n`);
 }
 
-function printTask(icon, label, time, skipped) {
+function printTask(icon, label, time, skipped, counts) {
   const col = label.padEnd(COL);
-  const right = skipped ? `${DIM}skipped${R}` : `${DIM}${time}${R}`;
+  let right = skipped ? `${DIM}skipped${R}` : `${DIM}${time}${R}`;
+  if (counts) {
+    const parts = [];
+    if (counts.errors)
+      parts.push(`${RED}${counts.errors} error${counts.errors !== 1 ? 's' : ''}${R}`);
+    if (counts.warnings)
+      parts.push(`${YELLOW}${counts.warnings} warning${counts.warnings !== 1 ? 's' : ''}${R}`);
+    if (parts.length) right = `${DIM}${time}${R}  ${parts.join(' · ')}`;
+  }
   process.stdout.write(`\r  ${icon}  ${BOLD}${col}${R}  ${right}\n`);
 }
 
@@ -56,9 +250,8 @@ function printOutput(raw) {
   const shown = lines.slice(0, 40);
   process.stdout.write('\n');
   for (const line of shown) process.stdout.write(`      ${DIM}${line}${R}\n`);
-  if (lines.length > 40) {
+  if (lines.length > 40)
     process.stdout.write(`      ${DIM}… ${lines.length - 40} more lines${R}\n`);
-  }
   process.stdout.write('\n');
 }
 
@@ -68,39 +261,126 @@ let passed = 0;
 let failed = 0;
 let skipped = 0;
 const wallStart = Date.now();
+let llmPayload = null;
 
 for (const task of tasks) {
   if (task.skip) {
-    printTask(SKIP, task.label, '', true);
+    printTask(SKIP, task.label, '', true, null);
     skipped++;
     continue;
   }
 
   process.stdout.write(`  ${RUN}  ${BOLD}${task.label.padEnd(COL)}${R}`);
+  clearSourceCache();
 
   const start = Date.now();
-  let output = '';
-  let ok = true;
+  let result;
 
-  try {
-    execSync(task.cmd, { encoding: 'utf8', stdio: 'pipe' });
-  } catch (err) {
-    ok = false;
-    const e = /** @type {any} */ (err);
-    output = [e.stdout, e.stderr].filter(Boolean).join('\n');
-    failed++;
+  if (task.runner) {
+    result = await task.runner();
+  } else {
+    try {
+      execSync(task.cmd, { encoding: 'utf8', stdio: 'pipe' });
+      result = { ok: true };
+    } catch (err) {
+      const e = /** @type {any} */ (err);
+      result = { ok: false, rawOutput: [e.stdout, e.stderr].filter(Boolean).join('\n') };
+    }
   }
 
   const ms = Date.now() - start;
-  printTask(ok ? PASS : FAIL, task.label, elapsed(ms), false);
 
-  if (!ok) {
-    printOutput(output);
+  if (!result.ok) {
+    const counts = result.counts ?? null;
+    printTask(result.timeout ? HANG : FAIL, task.label, elapsed(ms), false, counts);
+    failed++;
+
+    if (result.timeout) {
+      const startupPhase = result.phase === 'startup';
+      process.stdout.write('\n');
+      process.stdout.write(
+        `  ${HANG}  ${BOLD}TIMED OUT${R} — ${
+          startupPhase
+            ? `no TAP output during startup window (${elapsed(result.silenceMs)})`
+            : `no TAP output for ${elapsed(result.silenceMs)} between tests`
+        }\n\n`,
+      );
+      if (result.lastCompletedTest) {
+        process.stdout.write(`  ${DIM}Last completed test:${R}\n`);
+        process.stdout.write(`  ${GREEN}✔${R}  ${result.lastCompletedTest.name}\n\n`);
+        process.stdout.write(
+          `  ${DIM}→ The hang likely occurred in the next test after this one.\n` +
+            `    Check for: unclosed handles, unresolved promises, missing mock teardown.${R}\n\n`,
+        );
+      } else if (startupPhase) {
+        process.stdout.write(
+          `  ${DIM}→ Test process produced no TAP lines before the startup window expired.\n` +
+            `    Check for: top-level await deadlocks, missing .env / config, slow cold start.${R}\n\n`,
+        );
+      }
+      llmPayload = {
+        failed_task: task.label,
+        status: 'timeout',
+        phase: result.phase ?? 'between-tests',
+        silence_duration_ms: result.silenceMs,
+        last_completed_test: result.lastCompletedTest ?? null,
+        suite_max_historical_ms: result.suiteMaxHistoricalMs ?? 0,
+        hint: startupPhase
+          ? 'Test process produced no TAP output before the startup window expired. Likely causes: top-level await that never resolves, missing config/env, or a cold start slower than the startup budget.'
+          : 'Process produced no TAP output for the silence threshold. The next test after last_completed_test is the likely culprit. Check for unclosed handles, unresolved promises, or missing mock teardown.',
+      };
+    } else if (result.failures?.length) {
+      process.stdout.write('\n');
+      for (const f of result.failures) {
+        process.stdout.write(renderTestFailureCard(f) + '\n\n');
+      }
+      llmPayload = {
+        failed_task: task.label,
+        status: 'failed',
+        total_failures: result.failures.length,
+        failures: result.failures.map(({ name, file, expected, actual, errorMessage, frame }) => ({
+          name,
+          file,
+          ...(expected !== undefined ? { expected, received: actual } : {}),
+          ...(errorMessage ? { error: errorMessage } : {}),
+          ...(frame ? { at: frame } : {}),
+        })),
+      };
+    } else if (result.errors?.length) {
+      process.stdout.write('\n');
+      for (const err of result.errors) {
+        process.stdout.write(renderRustError(err) + '\n\n');
+      }
+      llmPayload = {
+        failed_task: task.label,
+        status: 'failed',
+        total_errors: counts?.errors ?? 0,
+        total_warnings: counts?.warnings ?? 0,
+        errors: result.errors.map(({ file, line, col, rule, severity, message }) => ({
+          file,
+          line,
+          col,
+          rule,
+          severity,
+          message,
+        })),
+      };
+    } else if (result.rawOutput) {
+      printOutput(result.rawOutput);
+      llmPayload = {
+        failed_task: task.label,
+        status: 'failed',
+        raw_output_preview: result.rawOutput.slice(0, 500),
+      };
+    }
     break;
   }
 
+  printTask(PASS, task.label, elapsed(ms), false, null);
   passed++;
 }
+
+if (llmPayload) emitLlmBlock(llmPayload);
 
 const total = tasks.length - skipped;
 const wall = elapsed(Date.now() - wallStart);

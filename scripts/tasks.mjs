@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Usage: node scripts/tasks.mjs [--fix] [--quick] [--all] [--json] [--llm] [--help]
 import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -15,6 +16,9 @@ const Config = {
   MIN_SILENCE_MS: 30_000,
   STARTUP_MIN_MS: 30_000,
   MAX_STDERR_CHARS: 256 * 1024,
+  MAX_STDOUT_CHARS: 1024 * 1024,
+  MAX_STDERR_CHARS_EXEC: 256 * 1024,
+  KILL_GRACE_MS: 5_000,
   RAW_OUTPUT_MAX_LINES: 40,
   MAX_ERRORS_IN_FILE: 1000,
   MAX_FAILURE_CARDS: 50,
@@ -133,19 +137,55 @@ const CommandRunner = {
           });
       let stdout = '';
       let stderr = '';
+      let truncatedStdout = false;
+      let truncatedStderr = false;
       child.stdout.setEncoding('utf8');
       child.stderr.setEncoding('utf8');
       child.stdout.on('data', (d) => {
-        stdout += d;
+        if (stdout.length >= Config.MAX_STDOUT_CHARS) {
+          truncatedStdout = true;
+          return;
+        }
+        const remaining = Config.MAX_STDOUT_CHARS - stdout.length;
+        if (d.length > remaining) {
+          stdout += d.slice(0, remaining);
+          truncatedStdout = true;
+        } else {
+          stdout += d;
+        }
       });
       child.stderr.on('data', (d) => {
-        stderr += d;
+        if (stderr.length >= Config.MAX_STDERR_CHARS_EXEC) {
+          truncatedStderr = true;
+          return;
+        }
+        const remaining = Config.MAX_STDERR_CHARS_EXEC - stderr.length;
+        if (d.length > remaining) {
+          stderr += d.slice(0, remaining);
+          truncatedStderr = true;
+        } else {
+          stderr += d;
+        }
       });
       child.on('close', (code) => {
-        resolve({ ok: code === 0, stdout, stderr, status: code });
+        resolve({
+          ok: code === 0,
+          stdout,
+          stderr,
+          status: code,
+          truncatedStdout,
+          truncatedStderr,
+        });
       });
       child.on('error', (err) => {
-        resolve({ ok: false, stdout: '', stderr: String(err.message), status: null });
+        resolve({
+          ok: false,
+          stdout: '',
+          stderr: String(err.message),
+          status: null,
+          truncatedStdout: false,
+          truncatedStderr: false,
+        });
       });
     });
   },
@@ -668,16 +708,37 @@ const TaskRunners = {
     const armTimer = () => {
       if (state.silenceTimer) clearTimeout(state.silenceTimer);
       const ms = state.seenFirstOk ? silenceMs : startupMs;
-      state.silenceTimer = setTimeout(() => {
+      state.silenceTimer = setTimeout(async () => {
         const maxHistorical = Math.max(0, ...Object.values(history.test_durations).flat());
-        ac.abort();
+        const phase = state.seenFirstOk ? 'between-tests' : 'startup';
+        try {
+          ac.abort(new Error('test silence timeout'));
+        } catch {
+          /* ignore abort errors */
+        }
+        // Escalate to forced kill after grace period if child does not exit.
+        const killTimer = setTimeout(() => {
+          try {
+            if (Config.IS_WINDOWS) child.kill();
+            else child.kill('SIGKILL');
+          } catch {
+            /* ignore kill errors */
+          }
+        }, Config.KILL_GRACE_MS);
+        try {
+          await once(child, 'close');
+        } catch {
+          /* ignore close errors */
+        }
+        clearTimeout(killTimer);
         settle({
           ok: false,
           timeout: true,
           silenceMs: ms,
-          phase: state.seenFirstOk ? 'between-tests' : 'startup',
+          phase,
           lastCompletedTest: state.lastCompleted,
           suiteMaxHistoricalMs: maxHistorical,
+          rawOutput: state.stderrBuf || undefined,
         });
       }, ms);
     };
@@ -731,6 +792,16 @@ const TaskRunners = {
       state.currentOkName = null;
       state.inYaml = false;
       state.yamlLines.length = 0;
+      // Record a minimal failure card immediately; if a YAML diagnostic
+      // block follows it will replace this entry with an enriched one.
+      state.failures.push({
+        name: ev.name,
+        file: '',
+        expected: undefined,
+        actual: undefined,
+        errorMessage: undefined,
+        frame: null,
+      });
     } else if (ev.type === 'yaml_start') {
       state.inYaml = true;
       state.yamlLines.length = 0;
@@ -738,14 +809,25 @@ const TaskRunners = {
       state.inYaml = false;
       const yaml = TapParser.parseYaml([...state.yamlLines]);
       if (state.currentFailName) {
-        state.failures.push({
+        const enriched = {
           name: state.currentFailName,
           file: yaml.at ? yaml.at.replace(/:\d+:\d+$/, '') : '',
           expected: yaml.expected,
           actual: yaml.actual,
           errorMessage: yaml.error,
           frame: yaml.at || null,
-        });
+        };
+        // Replace the most recent matching pending card (added on `not ok`)
+        // instead of appending to avoid double-counting failures.
+        let replaced = false;
+        for (let i = state.failures.length - 1; i >= 0; i--) {
+          if (state.failures[i].name === state.currentFailName && !state.failures[i].frame) {
+            state.failures[i] = enriched;
+            replaced = true;
+            break;
+          }
+        }
+        if (!replaced) state.failures.push(enriched);
       } else if (state.currentOkName && yaml.duration_ms !== undefined) {
         const ms = parseFloat(yaml.duration_ms);
         if (Number.isFinite(ms)) {
@@ -763,34 +845,42 @@ const TaskRunners = {
 };
 
 // --- RUN CONFIG ---
+const HELP_TEXT = [
+  'Usage: node scripts/tasks.mjs [flags]',
+  '',
+  '  --fix     Run lint:fix / knip --fix instead of check',
+  '  --quick   Skip test + rebuild',
+  '  --all     Run-all mode: continue past failures across all tasks',
+  '  --json    Emit single JSON object on stdout, suppress human output',
+  '  --llm     Echo failure detail to stdout (always written to .tasks-last-failure.json)',
+  '  --help    Show this help',
+  '',
+].join('\n');
+
 function parseConfig(args) {
-  const { values } = parseArgs({
-    args,
-    options: {
-      fix: { type: 'boolean' },
-      quick: { type: 'boolean' },
-      all: { type: 'boolean' },
-      json: { type: 'boolean' },
-      llm: { type: 'boolean' },
-      help: { type: 'boolean', short: 'h' },
-    },
-    strict: false,
-  });
+  let values;
+  try {
+    ({ values } = parseArgs({
+      args,
+      options: {
+        fix: { type: 'boolean' },
+        quick: { type: 'boolean' },
+        all: { type: 'boolean' },
+        json: { type: 'boolean' },
+        llm: { type: 'boolean' },
+        help: { type: 'boolean', short: 'h' },
+      },
+      strict: true,
+      allowPositionals: false,
+    }));
+  } catch (err) {
+    process.stderr.write(`${String(err && err.message ? err.message : err)}\n\n`);
+    process.stderr.write(HELP_TEXT);
+    process.exit(2);
+  }
 
   if (values.help) {
-    process.stdout.write(
-      [
-        'Usage: node scripts/tasks.mjs [flags]',
-        '',
-        '  --fix     Run lint:fix / knip --fix instead of check',
-        '  --quick   Skip test + rebuild',
-        '  --all     Run-all mode: continue past failures in independent tasks',
-        '  --json    Emit single JSON object on stdout, suppress human output',
-        '  --llm     Echo failure detail to stdout (always written to .tasks-last-failure.json)',
-        '  --help    Show this help',
-        '',
-      ].join('\n'),
-    );
+    process.stdout.write(HELP_TEXT);
     process.exit(0);
   }
   return {
@@ -1183,7 +1273,7 @@ function writeFailureFile(aggregate, file = Config.FAILURE_FILE) {
 }
 
 // --- SIGINT ---
-function installSigintHandler(reporter) {
+function installSigintHandler(reporter, config) {
   let interrupted = false;
   process.on('SIGINT', () => {
     const exitCode = convertProcessSignalToExitCode('SIGINT');
@@ -1194,10 +1284,24 @@ function installSigintHandler(reporter) {
     if (reporter && reporter.tickerHandle) {
       clearInterval(reporter.tickerHandle);
     }
-    process.stdout.write('\x1b[?25h'); // restore cursor
-    process.stdout.write(`\n  ${Theme.YELLOW}interrupted${Theme.R}\n\n`);
+    if (config && config.json) {
+      // Keep stdout JSON-only on interrupt.
+      process.stderr.write(`\n  interrupted\n\n`);
+      process.stdout.write(JSON.stringify({ ok: false, interrupted: true }) + '\n');
+    } else {
+      process.stdout.write('\x1b[?25h'); // restore cursor
+      process.stdout.write(`\n  ${Theme.YELLOW}interrupted${Theme.R}\n\n`);
+    }
     process.exit(exitCode);
   });
+}
+
+function clearFailureFile(file = Config.FAILURE_FILE) {
+  try {
+    rmSync(file, { force: true });
+  } catch {
+    // best-effort: never crash on cleanup
+  }
 }
 
 // --- ORCHESTRATION ---
@@ -1253,9 +1357,7 @@ class TaskOrchestrator {
   }
 
   _gatedOnFailure(task, aggregate) {
-    if (!this.all) return false;
-    if (task.label !== 'test' && task.label !== 'rebuild') return false;
-    return aggregate.failed > 0;
+    return !this.all && aggregate.failed > 0 && (task.label === 'test' || task.label === 'rebuild');
   }
 
   async _runTask(task) {
@@ -1272,7 +1374,7 @@ class TaskOrchestrator {
     const reporter = this.config.json
       ? new JsonReporter(this.config)
       : new TtyReporter(this.config, this.COL);
-    installSigintHandler(reporter);
+    installSigintHandler(reporter, this.config);
     reporter.header();
     if (this.fix) return this._runFixed(reporter);
     return this._runParallel(reporter);
@@ -1343,6 +1445,8 @@ class TaskOrchestrator {
           failureSummary: aggregate.failureSummary(),
         });
       }
+    } else {
+      clearFailureFile();
     }
     return aggregate.failed === 0 ? 0 : 1;
   }
@@ -1437,6 +1541,8 @@ class TaskOrchestrator {
           failureSummary: aggregate.failureSummary(),
         });
       }
+    } else {
+      clearFailureFile();
     }
     return aggregate.failed === 0 ? 0 : 1;
   }

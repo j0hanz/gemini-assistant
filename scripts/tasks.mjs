@@ -118,6 +118,36 @@ const CommandRunner = {
       status: result.status,
     };
   },
+
+  async execAsync(cmd, args) {
+    return new Promise((resolve) => {
+      const isNpm = Config.IS_WINDOWS && (cmd === 'npm' || cmd === 'npx');
+      const child = isNpm
+        ? spawn([cmd, ...args].map(this._quote).join(' '), {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            shell: true,
+          })
+        : spawn(cmd, args, {
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (d) => {
+        stdout += d;
+      });
+      child.stderr.on('data', (d) => {
+        stderr += d;
+      });
+      child.on('close', (code) => {
+        resolve({ ok: code === 0, stdout, stderr, status: code });
+      });
+      child.on('error', (err) => {
+        resolve({ ok: false, stdout: '', stderr: String(err.message), status: null });
+      });
+    });
+  },
 };
 
 // --- PARSERS ---
@@ -504,13 +534,18 @@ const OutputRenderer = {
 
 // --- TASK RUNNERS ---
 const TaskRunners = {
-  runLint(fix) {
+  async runLint(fix) {
     if (fix) {
-      const r = CommandRunner.exec('npm', ['run', 'lint:fix']);
+      const r = await CommandRunner.execAsync('npm', ['run', 'lint:fix']);
       return r.ok ? { ok: true } : { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
     }
 
-    const r = CommandRunner.exec('npx', ['eslint', '.', '--max-warnings=0', '--format=json']);
+    const r = await CommandRunner.execAsync('npx', [
+      'eslint',
+      '.',
+      '--max-warnings=0',
+      '--format=json',
+    ]);
     if (r.ok) return { ok: true };
 
     try {
@@ -525,8 +560,8 @@ const TaskRunners = {
     }
   },
 
-  runTypeCheck() {
-    const r = CommandRunner.exec('npx', [
+  async runTypeCheck() {
+    const r = await CommandRunner.execAsync('npx', [
       'tsc',
       '-p',
       'tsconfig.json',
@@ -545,8 +580,8 @@ const TaskRunners = {
     return { ok: false, errors, counts: { errors: errCount, warnings: warnCount } };
   },
 
-  runKnip() {
-    const r = CommandRunner.exec('npx', ['knip', '--reporter', 'json', '--no-progress']);
+  async runKnip() {
+    const r = await CommandRunner.execAsync('npx', ['knip', '--reporter', 'json', '--no-progress']);
     if (r.ok) return { ok: true };
 
     const stdout = (r.stdout || '').trim();
@@ -570,7 +605,7 @@ const TaskRunners = {
         rawOutput: `dist removal failed: ${String(err && err.message ? err.message : err)}`,
       };
     }
-    const r = CommandRunner.exec('npm', ['run', 'build']);
+    const r = await CommandRunner.execAsync('npm', ['run', 'build']);
     if (!r.ok) return { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
     return { ok: true };
   },
@@ -924,6 +959,76 @@ class TtyReporter {
     process.stdout.write(`${left}  ${right}${Theme.CLEAR_EOL}\n`);
   }
 
+  groupStart(labels) {
+    this._grpLabels = [...labels];
+    this._grpDone = new Map();
+    this._grpStartMs = Date.now();
+    if (!this.useTicker) return;
+    for (const label of labels) {
+      process.stdout.write(
+        `  ${Icons.RUN}  ${Theme.BOLD}${label.padEnd(this.col)}${Theme.R}${Theme.CLEAR_EOL}\n`,
+      );
+    }
+    this.tickerHandle = setInterval(() => this._redrawGroup(), 1000);
+  }
+
+  _buildGroupLine(label, done, elapsed) {
+    if (done) {
+      const right = done.counts
+        ? `${Theme.DIM}${done.timeStr}${Theme.R}  ${done.counts}`
+        : `${Theme.DIM}${done.timeStr}${Theme.R}`;
+      return `  ${done.icon}  ${Theme.BOLD}${label.padEnd(this.col)}${Theme.R}  ${right}${Theme.CLEAR_EOL}\n`;
+    }
+    return `  ${Icons.RUN}  ${Theme.BOLD}${label.padEnd(this.col)}${Theme.R}  ${Theme.DIM}${elapsed}${Theme.R}${Theme.CLEAR_EOL}\n`;
+  }
+
+  _redrawGroup() {
+    const elapsed = OutputRenderer.formatElapsed(Date.now() - this._grpStartMs);
+    process.stdout.write(`\x1b[${this._grpLabels.length}A`);
+    for (const label of this._grpLabels) {
+      process.stdout.write(this._buildGroupLine(label, this._grpDone.get(label) ?? null, elapsed));
+    }
+  }
+
+  groupTaskEnd(label, result, ms) {
+    const icon = result.ok ? Icons.PASS : result.timeout ? Icons.HANG : Icons.FAIL;
+    const timeStr = OutputRenderer.formatElapsed(ms);
+    let counts = null;
+    if (result.counts) {
+      const parts = [];
+      if (result.counts.errors)
+        parts.push(
+          `${Theme.RED}${result.counts.errors} error${result.counts.errors !== 1 ? 's' : ''}${Theme.R}`,
+        );
+      if (result.counts.warnings)
+        parts.push(
+          `${Theme.YELLOW}${result.counts.warnings} warning${result.counts.warnings !== 1 ? 's' : ''}${Theme.R}`,
+        );
+      counts = parts.join(' · ') || null;
+    }
+    this._grpDone.set(label, { icon, timeStr, counts });
+    if (!this.useTicker) {
+      const right = counts
+        ? `${Theme.DIM}${timeStr}${Theme.R}  ${counts}`
+        : `${Theme.DIM}${timeStr}${Theme.R}`;
+      process.stdout.write(
+        `  ${icon}  ${Theme.BOLD}${label.padEnd(this.col)}${Theme.R}  ${right}${Theme.CLEAR_EOL}\n`,
+      );
+      return;
+    }
+    this._redrawGroup();
+  }
+
+  groupEnd() {
+    if (this.tickerHandle) {
+      clearInterval(this.tickerHandle);
+      this.tickerHandle = null;
+    }
+    if (this.useTicker && this._grpLabels) this._redrawGroup();
+    this._grpLabels = null;
+    this._grpDone = null;
+  }
+
   failureDetail(failedTasks) {
     for (const t of failedTasks) {
       if (t.timeout) {
@@ -1032,6 +1137,15 @@ class JsonReporter {
     /* no-op */
   }
   failureDetail() {
+    /* no-op */
+  }
+  groupStart() {
+    /* no-op: json mode emits single payload in summary() */
+  }
+  groupTaskEnd() {
+    /* no-op */
+  }
+  groupEnd() {
     /* no-op */
   }
   summary(aggregate) {
@@ -1147,7 +1261,7 @@ class TaskOrchestrator {
     if (task.runner) return await task.runner();
     if (task.cmd) {
       const [cmd, cmdArgs] = task.cmd;
-      const r = CommandRunner.exec(cmd, cmdArgs);
+      const r = await CommandRunner.execAsync(cmd, cmdArgs);
       return r.ok ? { ok: true } : { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
     }
     return { ok: false, rawOutput: 'task has no runner' };
@@ -1157,11 +1271,13 @@ class TaskOrchestrator {
     const reporter = this.config.json
       ? new JsonReporter(this.config)
       : new TtyReporter(this.config, this.COL);
-
     installSigintHandler(reporter);
-
     reporter.header();
+    if (this.fix) return this._runFixed(reporter);
+    return this._runParallel(reporter);
+  }
 
+  async _runFixed(reporter) {
     const aggregate = new Aggregate(this.all ? 'run-all' : 'fail-fast');
     let testDurations = null;
 
@@ -1204,23 +1320,18 @@ class TaskOrchestrator {
       if (result.ok) {
         reporter.taskEnd(task.label, result, ms);
         aggregate.recordPass(task.label, ms);
-        if (task.label === 'test' && result.testDurations) {
-          testDurations = result.testDurations;
-        }
+        if (task.label === 'test' && result.testDurations) testDurations = result.testDurations;
         continue;
       }
 
       reporter.taskEnd(task.label, result, ms);
       aggregate.recordFail(task.label, result, ms);
-
       if (!this.all) break;
     }
 
     if (testDurations) aggregate.setSlowestTests(testDurations);
-
     reporter.failureDetail(aggregate.failures());
     reporter.summary(aggregate);
-
     if (aggregate.failed > 0) {
       writeFailureFile(aggregate);
       if (this.config.llm && !this.config.json) {
@@ -1232,7 +1343,100 @@ class TaskOrchestrator {
         });
       }
     }
+    return aggregate.failed === 0 ? 0 : 1;
+  }
 
+  async _runParallel(reporter) {
+    const aggregate = new Aggregate(this.all ? 'run-all' : 'fail-fast');
+    let testDurations = null;
+
+    // ── Group 1: format, lint, type-check, knip in parallel ─────────────
+    const staticTasks = this.tasks.slice(0, 4);
+    const deepTasks = this.tasks.slice(4);
+
+    reporter.groupStart(staticTasks.map((t) => t.label));
+    const g1Results = await Promise.all(
+      staticTasks.map(async (task) => {
+        OutputRenderer.clearCache();
+        const start = Date.now();
+        const result = await this._runTask(task);
+        const ms = Date.now() - start;
+        reporter.groupTaskEnd(task.label, result, ms);
+        return { task, result, ms };
+      }),
+    );
+    reporter.groupEnd();
+
+    for (const { task, result, ms } of g1Results) {
+      if (result.ok) aggregate.recordPass(task.label, ms);
+      else aggregate.recordFail(task.label, result, ms);
+    }
+
+    // ── Gate: skip G2 when G1 failed and --all not set ───────────────────
+    if (aggregate.failed > 0 && !this.all) {
+      reporter.failureDetail(aggregate.failures());
+      reporter.summary(aggregate);
+      writeFailureFile(aggregate);
+      if (this.config.llm && !this.config.json) {
+        OutputRenderer.emitLlmBlock({
+          ok: false,
+          mode: aggregate.mode,
+          tasks: aggregate.tasks,
+          failureSummary: aggregate.failureSummary(),
+        });
+      }
+      return 1;
+    }
+
+    // ── Group 2: test + rebuild in parallel ──────────────────────────────
+    const activeTasks = deepTasks.filter((task) => {
+      if (task.skip) {
+        reporter.taskStart(task.label);
+        reporter.taskEnd(task.label, { skipped: true, skipReason: 'skipped' }, 0);
+        aggregate.recordSkip(task.label, 'skipped');
+        return false;
+      }
+      return true;
+    });
+
+    if (activeTasks.length > 0) {
+      reporter.groupStart(activeTasks.map((t) => t.label));
+      const g2Results = await Promise.all(
+        activeTasks.map(async (task) => {
+          OutputRenderer.clearCache();
+          const start = Date.now();
+          const result = await this._runTask(task);
+          const ms = Date.now() - start;
+          reporter.groupTaskEnd(task.label, result, ms);
+          return { task, result, ms };
+        }),
+      );
+      reporter.groupEnd();
+
+      for (const { task, result, ms } of g2Results) {
+        if (result.ok) {
+          aggregate.recordPass(task.label, ms);
+          if (task.label === 'test' && result.testDurations) testDurations = result.testDurations;
+        } else {
+          aggregate.recordFail(task.label, result, ms);
+        }
+      }
+    }
+
+    if (testDurations) aggregate.setSlowestTests(testDurations);
+    reporter.failureDetail(aggregate.failures());
+    reporter.summary(aggregate);
+    if (aggregate.failed > 0) {
+      writeFailureFile(aggregate);
+      if (this.config.llm && !this.config.json) {
+        OutputRenderer.emitLlmBlock({
+          ok: false,
+          mode: aggregate.mode,
+          tasks: aggregate.tasks,
+          failureSummary: aggregate.failureSummary(),
+        });
+      }
+    }
     return aggregate.failed === 0 ? 0 : 1;
   }
 }

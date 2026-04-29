@@ -281,18 +281,12 @@ const ResearchInputBaseSchema = z.strictObject({
   mode: researchMode(RESEARCH_MODE_DESCRIPTION),
   ...researchSharedShape,
   systemInstruction: optionalField(
-    textField(
-      'Instructions for output presentation (format, audience, tone). Allowed only when mode=quick.',
-    ),
+    textField('Instructions for output presentation (format, audience, tone).'),
   ),
-  deliverable: optionalField(
-    textField(
-      'Requested output form (brief, report, checklist, etc.). Allowed only when mode=deep.',
-    ),
-  ),
+  deliverable: optionalField(textField('Requested output form (brief, report, checklist, etc.).')),
   searchDepth: withFieldMetadata(
     z.int().min(1).max(5).optional(),
-    'Search depth, default 2. Allowed only when mode=deep.',
+    'Search depth (1-5, default 2).',
   ),
 });
 
@@ -310,7 +304,7 @@ const ResearchDeepSchema = z.strictObject({
   deliverable: optionalField(textField('Requested output form (brief, report, checklist, etc.).')),
   searchDepth: withFieldMetadata(
     z.int().min(1).max(5).optional(),
-    'Search depth, default 2. Only used for deep research.',
+    'Search depth (1-5, default 2).',
   ),
 });
 
@@ -332,21 +326,16 @@ export type ResearchInput = z.infer<typeof ResearchInputSchema>;
 const AnalyzeInputBaseSchema = z.strictObject({
   goal: goalText('Question or analysis goal for the selected targets'),
   targetKind: analyzeTargetKind(ANALYZE_TARGET_KIND_DESCRIPTION),
-  filePath: optionalField(
-    workspacePath(
-      'Workspace-relative or absolute path to analyze when targetKind=file. Allowed only when targetKind=file.',
-    ),
-  ),
+  filePath: optionalField(workspacePath('File path to analyze.')),
   urls: createUrlContextFields({
     itemDescription: 'Public URL to analyze',
-    description: 'Public URLs to analyze when targetKind=url. Allowed only when targetKind=url.',
+    description: 'Public URLs to analyze.',
     min: 1,
     max: 20,
     optional: true,
   }).urls,
   filePaths: workspacePathArray({
-    description:
-      'Local files to analyze when targetKind=multi. Allowed only when targetKind=multi.',
+    description: 'Local files to analyze.',
     itemDescription: 'Workspace-relative or absolute path to a local file',
     min: 2,
     max: 5,
@@ -355,14 +344,12 @@ const AnalyzeInputBaseSchema = z.strictObject({
   outputKind: analyzeOutputKind(ANALYZE_OUTPUT_KIND_DESCRIPTION),
   diagramType: withFieldMetadata(
     z.enum(DIAGRAM_TYPES).optional(),
-    'Diagram syntax to generate when outputKind=diagram. Defaults to mermaid. Allowed only when outputKind=diagram.',
+    'Diagram syntax to generate when outputKind=diagram. Defaults to mermaid.',
   ),
   validateSyntax: z
     .boolean()
     .optional()
-    .describe(
-      'Validate generated diagram syntax when outputKind=diagram. Allowed only when outputKind=diagram.',
-    ),
+    .describe('Validate generated diagram syntax when outputKind=diagram.'),
   thinkingLevel: thinkingLevelField,
   thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
@@ -409,7 +396,7 @@ const AnalyzeUrlSchema = z
     ...analyzeSharedShape,
     urls: createUrlContextFields({
       itemDescription: 'Public URL to analyze',
-      description: 'Public URLs to analyze when targetKind=url.',
+      description: 'Public URLs to analyze.',
       min: 1,
       max: 20,
       optional: false,
@@ -422,7 +409,7 @@ const AnalyzeMultiSchema = z
     targetKind: withFieldMetadata(z.literal('multi'), ANALYZE_TARGET_KIND_DESCRIPTION),
     ...analyzeSharedShape,
     filePaths: workspacePathArray({
-      description: 'Local files to analyze when targetKind=multi.',
+      description: 'Local files to analyze.',
       itemDescription: 'Workspace-relative or absolute path to a local file',
       min: 2,
       max: 5,
@@ -461,40 +448,14 @@ const ReviewInputBaseSchema = z.strictObject({
   ),
   dryRun: withFieldMetadata(
     z.boolean().optional(),
-    'Skip model review for subjectKind=diff. Allowed only when subjectKind=diff.',
+    'Skip model review and return diff stats only.',
   ),
-  language: optionalField(
-    textField(
-      'Primary language hint for diff or failure review. Allowed only when subjectKind=diff or failure.',
-    ),
-  ),
-  filePathA: optionalField(
-    workspacePath(
-      'Workspace-relative or absolute path to the first file when subjectKind=comparison. Allowed only when subjectKind=comparison.',
-    ),
-  ),
-  filePathB: optionalField(
-    workspacePath(
-      'Workspace-relative or absolute path to the second file when subjectKind=comparison. Allowed only when subjectKind=comparison.',
-    ),
-  ),
-  question: optionalField(
-    textField(
-      'Comparison focus when subjectKind=comparison (behavior, APIs, security, etc.). Allowed only when subjectKind=comparison.',
-    ),
-  ),
-  error: optionalField(
-    textField(
-      'Error message or stack trace when subjectKind=failure. Allowed only when subjectKind=failure.',
-      32_000,
-    ),
-  ),
-  codeContext: optionalField(
-    textField(
-      'Relevant source code context when subjectKind=failure. Allowed only when subjectKind=failure.',
-      16_000,
-    ),
-  ),
+  language: optionalField(textField('Primary language hint for diff or failure review.')),
+  filePathA: optionalField(workspacePath('First file to compare.')),
+  filePathB: optionalField(workspacePath('Second file to compare.')),
+  question: optionalField(textField('Comparison focus (behavior, APIs, security, etc.).')),
+  error: optionalField(textField('Error message or stack trace.', 32_000)),
+  codeContext: optionalField(textField('Relevant source code context.', 16_000)),
   ...reviewCommonShape,
 });
 
@@ -503,32 +464,27 @@ const ReviewDiffSchema = z.strictObject({
     z.literal('diff').default('diff'),
     REVIEW_SUBJECT_KIND_DESCRIPTION,
   ),
-  dryRun: withFieldMetadata(z.boolean().optional(), 'Skip model review for subjectKind=diff.'),
+  dryRun: withFieldMetadata(
+    z.boolean().optional(),
+    'Skip model review and return diff stats only.',
+  ),
   language: optionalField(textField('Primary language hint for diff or failure review.')),
   ...reviewCommonShape,
 });
 
 const ReviewComparisonSchema = z.strictObject({
   subjectKind: withFieldMetadata(z.literal('comparison'), REVIEW_SUBJECT_KIND_DESCRIPTION),
-  filePathA: workspacePath(
-    'Workspace-relative or absolute path to the first file when subjectKind=comparison',
-  ),
-  filePathB: workspacePath(
-    'Workspace-relative or absolute path to the second file when subjectKind=comparison',
-  ),
-  question: optionalField(
-    textField('Comparison focus when subjectKind=comparison (behavior, APIs, security, etc.).'),
-  ),
+  filePathA: workspacePath('First file to compare.'),
+  filePathB: workspacePath('Second file to compare.'),
+  question: optionalField(textField('Comparison focus (behavior, APIs, security, etc.).')),
   ...reviewCommonShape,
 });
 
 const ReviewFailureSchema = z.strictObject({
   subjectKind: withFieldMetadata(z.literal('failure'), REVIEW_SUBJECT_KIND_DESCRIPTION),
   language: optionalField(textField('Primary language hint for diff or failure review.')),
-  error: textField('Error message or stack trace when subjectKind=failure.', 32_000),
-  codeContext: optionalField(
-    textField('Relevant source code context when subjectKind=failure.', 16_000),
-  ),
+  error: textField('Error message or stack trace.', 32_000),
+  codeContext: optionalField(textField('Relevant source code context.', 16_000)),
   ...reviewCommonShape,
 });
 

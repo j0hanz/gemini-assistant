@@ -483,7 +483,6 @@ function buildAnalyzeStructuredContent(
 
     return pickDefined({
       ...buildSuccessfulStructuredContent({
-        requestId: ctx.task?.id,
         warnings,
         domain: {
           kind: 'diagram' as const,
@@ -506,7 +505,6 @@ function buildAnalyzeStructuredContent(
 
   return pickDefined({
     ...buildSuccessfulStructuredContent({
-      requestId: ctx.task?.id,
       warnings,
       domain: {
         status: typeof structured.status === 'string' ? structured.status : 'ungrounded',

@@ -1268,11 +1268,10 @@ function assembleChatOutput(
   return createToolContext('chat', ctx).validateOutput(
     ChatOutputSchema,
     pickDefined({
-      ...buildBaseStructuredOutput(taskId, [...(warnings ?? []), ...(extraWarnings ?? [])]),
+      ...buildBaseStructuredOutput([...(warnings ?? []), ...(extraWarnings ?? [])]),
       answer,
       data: structured.data,
       session,
-      diagnostics: structured.diagnostics,
       contextUsed: structured.contextUsed,
       computations: structured.computations,
       workspaceCacheApplied:

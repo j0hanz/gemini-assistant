@@ -217,7 +217,7 @@ describe('buildSharedStructuredMetadata', () => {
     );
   });
 
-  it('retains populated envelope fields nested under diagnostics', () => {
+  it('returns empty object when no shared metadata is present', () => {
     assert.deepStrictEqual(
       buildSharedStructuredMetadata({
         toolEvents: [{ kind: 'tool_call' }],
@@ -225,14 +225,7 @@ describe('buildSharedStructuredMetadata', () => {
         citationMetadata: { citations: [{ startIndex: 0 }] },
         finishMessage: 'max tokens',
       }),
-      {
-        diagnostics: {
-          toolEvents: [{ kind: 'tool_call' }],
-          safetyRatings: [{ category: 'x' }],
-          citationMetadata: { citations: [{ startIndex: 0 }] },
-          finishMessage: 'max tokens',
-        },
-      },
+      {},
     );
   });
 });
@@ -441,31 +434,20 @@ describe('auditClaimedToolUsage', () => {
 });
 
 describe('buildSuccessfulStructuredContent', () => {
-  it('keeps request id, non-empty warnings, domain fields, and shared stream metadata', () => {
+  it('keeps non-empty warnings and domain fields', () => {
     assert.deepStrictEqual(
       buildSuccessfulStructuredContent({
-        requestId: 'task-1',
         warnings: ['check sources'],
         domain: {
           summary: 'done',
           omitted: undefined,
         },
-        shared: {
-          diagnostics: {
-            functionCalls: [{ name: 'lookup' }],
-            usage: { totalTokenCount: 10 },
-          },
-        },
+        shared: {},
       }),
       {
         status: 'completed',
-        requestId: 'task-1',
         warnings: ['check sources'],
         summary: 'done',
-        diagnostics: {
-          functionCalls: [{ name: 'lookup' }],
-          usage: { totalTokenCount: 10 },
-        },
       },
     );
   });

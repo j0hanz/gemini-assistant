@@ -1383,7 +1383,6 @@ function buildReviewStructuredContent(
   structured: Record<string, unknown>,
 ): z.infer<typeof ReviewOutputSchema> {
   return buildSuccessfulStructuredContent({
-    requestId: taskId,
     domain: {
       subjectKind,
       summary: typeof structured.summary === 'string' ? structured.summary : '',

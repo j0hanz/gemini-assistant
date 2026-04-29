@@ -783,20 +783,7 @@ async function runDeepResearchPlan(
     maxRetrievalTurns,
   );
   const overlay = built.resultMod(synthesisTurn.result);
-  const sharedMetadata = buildSharedStructuredMetadata({
-    functionCalls: aggregate.streamResult.functionCalls,
-    includeThoughts: true,
-    thoughtText: aggregate.streamResult.thoughtText,
-    toolEvents: aggregate.streamResult.toolEvents,
-    usage: aggregate.streamResult.usageMetadata
-      ? extractUsage(aggregate.streamResult.usageMetadata)
-      : undefined,
-    safetyRatings: aggregate.streamResult.safetyRatings,
-    finishMessage: aggregate.streamResult.finishMessage,
-    citationMetadata: aggregate.streamResult.citationMetadata,
-    groundingMetadata: aggregate.streamResult.groundingMetadata,
-    urlContextMetadata: aggregate.streamResult.urlContextMetadata,
-  });
+  const sharedMetadata = buildSharedStructuredMetadata({});
 
   const structuredContent = built.structuredContent;
 
@@ -1028,17 +1015,7 @@ async function agenticSearchWork(
     content: [{ type: 'text', text: textContent }],
   };
   const overlay = built.resultMod(baseResult);
-  const sharedMetadata = buildSharedStructuredMetadata({
-    functionCalls: streamResult.functionCalls,
-    includeThoughts: true,
-    thoughtText: streamResult.thoughtText,
-    toolEvents: streamResult.toolEvents,
-    safetyRatings: streamResult.safetyRatings,
-    finishMessage: streamResult.finishMessage,
-    citationMetadata: streamResult.citationMetadata,
-    groundingMetadata: streamResult.groundingMetadata,
-    urlContextMetadata: streamResult.urlContextMetadata,
-  });
+  const sharedMetadata = buildSharedStructuredMetadata({});
 
   return {
     ...baseResult,
@@ -1133,7 +1110,6 @@ function buildResearchStructuredContent(
         };
 
   return buildSuccessfulStructuredContent({
-    requestId: ctx.task?.id,
     warnings: Array.isArray(structured.warnings)
       ? structured.warnings.filter((warning): warning is string => typeof warning === 'string')
       : undefined,

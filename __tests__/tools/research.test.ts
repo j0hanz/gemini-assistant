@@ -358,39 +358,7 @@ describe('research tool contracts', () => {
 
       const structured = store.stored[0]?.result.structuredContent as Record<string, unknown>;
       assert.ok(structured && typeof structured === 'object');
-      const diagnostics = structured.diagnostics as Record<string, unknown>;
-      assert.ok(diagnostics && typeof diagnostics === 'object');
-      assert.deepStrictEqual(diagnostics.usage, {
-        cachedContentTokenCount: 0,
-        promptTokenCount: 33,
-        candidatesTokenCount: 22,
-        thoughtsTokenCount: 0,
-        totalTokenCount: 55,
-        toolUsePromptTokenCount: 0,
-      });
-      assert.deepStrictEqual(diagnostics.safetyRatings, [
-        { probability: 'LOW' },
-        { probability: 'LOW' },
-        { probability: 'LOW' },
-      ]);
-      assert.deepStrictEqual(diagnostics.citationMetadata, {
-        citationSources: [
-          { startIndex: 0, endIndex: 9, uri: 'https://example.com/r1' },
-          { startIndex: 0, endIndex: 9, uri: 'https://example.com/r1' },
-          { startIndex: 0, endIndex: 9, uri: 'https://example.com/r1' },
-          { startIndex: 0, endIndex: 4, uri: 'https://example.com/synthesis' },
-        ],
-      });
-      assert.deepStrictEqual(diagnostics.groundingMetadata, {
-        groundingChunks: [{ web: { title: 'Docs', uri: 'https://example.com/docs' } }],
-        groundingSupports: [
-          {
-            segment: { text: 'Deep research report', startIndex: 0, endIndex: 20 },
-            groundingChunkIndices: [0],
-          },
-        ],
-      });
-      assert.strictEqual(diagnostics.finishMessage, undefined);
+      assert.ok(typeof structured.summary === 'string' && structured.summary.length > 0);
       assert.ok(
         Array.isArray(structured.warnings) &&
           structured.warnings.includes(

@@ -10,7 +10,7 @@ import type {
 } from '@google/genai';
 
 import { buildGenerateContentConfig, getAI } from '../client.js';
-import { getExposeThoughts, getGeminiModel } from '../config.js';
+import { getGeminiModel } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
 import { AppError } from './errors.js';
 import { logContext, logger, maybeSummarizePayload, mcpLog, type ScopedLogger } from './logger.js';
@@ -28,7 +28,7 @@ import {
   mergeStructured,
   safeValidateStructuredContent,
 } from './response.js';
-import { executeToolStream, extractUsage, type StreamResult } from './streaming.js';
+import { executeToolStream, type StreamResult } from './streaming.js';
 import { type GeminiRequestPreflight, validateGeminiRequest, validateUrls } from './validation.js';
 import { getWorkSignal } from './work-signal.js';
 
@@ -171,18 +171,7 @@ export class ToolExecutor {
       result.structuredContent && typeof result.structuredContent === 'object'
         ? result.structuredContent
         : undefined;
-    const usage = extractUsage(streamResult.usageMetadata);
     const sharedStructuredContent = buildSharedStructuredMetadata({
-      functionCalls: streamResult.functionCalls,
-      includeThoughts: getExposeThoughts(),
-      thoughtText: streamResult.thoughtText,
-      toolEvents: streamResult.toolEvents,
-      usage,
-      safetyRatings: streamResult.safetyRatings,
-      finishMessage: streamResult.finishMessage,
-      citationMetadata: streamResult.citationMetadata,
-      groundingMetadata: streamResult.groundingMetadata,
-      urlContextMetadata: streamResult.urlContextMetadata,
       ...(streamResult.warnings ? { warnings: streamResult.warnings } : {}),
     });
     const mergedWarnings = [

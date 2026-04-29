@@ -148,21 +148,8 @@ describe('public contract schemas', () => {
 
   it('parses shared base output fields on every public output schema', () => {
     const base = {
-      requestId: 'task-1',
       status: 'completed' as const,
       warnings: ['note'],
-      diagnostics: {
-        usage: {
-          totalTokenCount: 1,
-          toolUsePromptTokenCount: 1,
-          promptTokensDetails: [{ modality: 'TEXT', tokenCount: 1 }],
-          cacheTokensDetails: [{ modality: 'TEXT', tokenCount: 1 }],
-          candidatesTokensDetails: [{ modality: 'TEXT', tokenCount: 1 }],
-        },
-        safetyRatings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT' }],
-        finishMessage: 'done',
-        citationMetadata: { citationSources: [] },
-      },
     };
 
     assert.ok(

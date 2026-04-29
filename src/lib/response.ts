@@ -376,106 +376,37 @@ export function promptBlockedError(toolName: string, blockReason?: string): Call
   return new SafetyError(toolName, 'prompt_blocked', blockReason).toToolResult();
 }
 
-interface SharedStructuredDiagnostics<TFunctionCall, TToolEvent> {
-  thoughts?: string;
-  usage?: UsageMetadata;
-  finishMessage?: string | undefined;
-  safetyRatings?: unknown;
-  citationMetadata?: unknown;
-  groundingMetadata?: unknown;
-  urlContextMetadata?: unknown;
-  functionCalls?: TFunctionCall[];
-  toolEvents?: TToolEvent[];
-}
-
-interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
+interface SharedStructuredMetadata<_TFunctionCall, _TToolEvent> {
   contextUsed?: ContextUsed;
   warnings?: string[];
-  diagnostics?: SharedStructuredDiagnostics<TFunctionCall, TToolEvent>;
-}
-
-function isEmptyStructuredValue(value: unknown): boolean {
-  if (value === undefined || value === null) return true;
-  if (Array.isArray(value)) return value.length === 0;
-  return typeof value === 'object' && Object.keys(value).length === 0;
-}
-
-function isTrivialFinishMessage(finishMessage: string | undefined): boolean {
-  return (
-    finishMessage === undefined || /^\s*$/.test(finishMessage) || /^stop$/i.test(finishMessage)
-  );
 }
 
 // ── Structured Content ────────────────────────────────────────────────
 
-export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
+export function buildSharedStructuredMetadata<_TFunctionCall, _TToolEvent>({
   contextUsed,
   warnings,
-  functionCalls,
-  includeThoughts = false,
-  thoughtText,
-  toolEvents,
-  usage,
-  safetyRatings,
-  finishMessage,
-  citationMetadata,
-  groundingMetadata,
-  urlContextMetadata,
 }: {
   contextUsed?: ContextUsed;
   warnings?: readonly string[];
-  functionCalls?: readonly TFunctionCall[];
-  includeThoughts?: boolean;
-  thoughtText?: string;
-  toolEvents?: readonly TToolEvent[];
-  usage?: UsageMetadata | undefined;
-  safetyRatings?: unknown;
-  finishMessage?: string | undefined;
-  citationMetadata?: unknown;
-  groundingMetadata?: unknown;
-  urlContextMetadata?: unknown;
-}): SharedStructuredMetadata<TFunctionCall, TToolEvent> {
-  const hasToolEvents = toolEvents && toolEvents.length > 0;
-
-  const diagnostics: SharedStructuredDiagnostics<TFunctionCall, TToolEvent> = pickDefined({
-    thoughts: includeThoughts && thoughtText ? thoughtText : undefined,
-    usage,
-    finishMessage: isTrivialFinishMessage(finishMessage) ? undefined : finishMessage,
-    safetyRatings: isEmptyStructuredValue(safetyRatings) ? undefined : safetyRatings,
-    citationMetadata: isEmptyStructuredValue(citationMetadata) ? undefined : citationMetadata,
-    groundingMetadata: isEmptyStructuredValue(groundingMetadata) ? undefined : groundingMetadata,
-    urlContextMetadata: isEmptyStructuredValue(urlContextMetadata) ? undefined : urlContextMetadata,
-    functionCalls: hasToolEvents
-      ? undefined
-      : functionCalls && functionCalls.length > 0
-        ? [...functionCalls]
-        : undefined,
-    toolEvents: hasToolEvents ? [...toolEvents] : undefined,
-  });
-
+}): SharedStructuredMetadata<_TFunctionCall, _TToolEvent> {
   return pickDefined({
     contextUsed,
     warnings: warnings && warnings.length > 0 ? [...warnings] : undefined,
-    diagnostics: Object.keys(diagnostics).length > 0 ? diagnostics : undefined,
   });
 }
 
-export function buildBaseStructuredOutput(
-  requestId?: string,
-  warnings?: readonly string[],
-): {
-  requestId?: string;
+export function buildBaseStructuredOutput(warnings?: readonly string[]): {
   status: 'completed';
   warnings?: string[];
 } {
   return pickDefined({
     status: 'completed' as const,
-    requestId,
     warnings: warnings && warnings.length > 0 ? [...warnings] : undefined,
   });
 }
 
-const SHARED_STRUCTURED_RESULT_KEYS = ['contextUsed', 'warnings', 'diagnostics'] as const;
+const SHARED_STRUCTURED_RESULT_KEYS = ['contextUsed', 'warnings'] as const;
 
 type SharedStructuredResultKey = (typeof SHARED_STRUCTURED_RESULT_KEYS)[number];
 
@@ -517,18 +448,16 @@ export function buildStructuredResponse<
 }
 
 export function buildSuccessfulStructuredContent<TDomain extends Record<string, unknown>>({
-  requestId,
   warnings,
   domain,
   shared,
 }: {
-  requestId?: string | undefined;
   warnings?: readonly string[] | undefined;
   domain: TDomain;
   shared?: Record<string, unknown> | undefined;
 }): TDomain & ReturnType<typeof buildBaseStructuredOutput> & Record<string, unknown> {
   return pickDefined({
-    ...buildBaseStructuredOutput(requestId, warnings),
+    ...buildBaseStructuredOutput(warnings),
     ...domain,
     ...(shared ? pickSharedStructuredResultFields(shared) : {}),
   }) as TDomain & ReturnType<typeof buildBaseStructuredOutput> & Record<string, unknown>;

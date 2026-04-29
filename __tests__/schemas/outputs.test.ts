@@ -57,7 +57,6 @@ describe('AnalyzeOutputSchema', () => {
       status: 'ungrounded',
       targetKind: 'file',
       summary: 'File analysis',
-      diagnostics: { usage: { totalTokenCount: 200 } },
     });
     assert.ok(result.success);
   });
@@ -174,38 +173,22 @@ describe('ChatOutputSchema', () => {
     assert.strictEqual(result.data.workspaceCacheApplied, true);
   });
 
-  it('accepts function-call signatures and thought tool events under diagnostics', () => {
+  it('accepts computations and workspaceCacheApplied', () => {
     const result = ChatOutputSchema.safeParse({
       status: 'completed',
       answer: 'Done',
       workspaceCacheApplied: false,
-      diagnostics: {
-        functionCalls: [
-          {
-            name: 'lookup',
-            args: { q: 'x' },
-            thoughtSignature: 'sig-fn',
-          },
-        ],
-        toolEvents: [
-          {
-            kind: 'thought',
-            text: 'reasoning',
-            thoughtSignature: 'sig-thought',
-          },
-        ],
-      },
       computations: [{ code: 'print(1)', output: '1' }],
     });
 
     assert.ok(result.success);
   });
 
-  it('rejects unknown tool event kinds', () => {
+  it('rejects computations array with missing required code field', () => {
     const result = ChatOutputSchema.safeParse({
       status: 'completed',
       answer: 'Done',
-      diagnostics: { toolEvents: [{ kind: 'unknown' }] },
+      computations: [{ output: '1' }],
     });
 
     assert.strictEqual(result.success, false);
@@ -216,6 +199,24 @@ describe('ChatOutputSchema', () => {
       status: 'completed',
       answer: 'Done',
       toolEvents: [{ kind: 'thought', text: 'oops' }],
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('ChatOutputSchema rejects requestId as unknown key', () => {
+    const result = ChatOutputSchema.safeParse({
+      status: 'completed',
+      answer: 'hello',
+      requestId: 'task-123',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('ChatOutputSchema rejects diagnostics as unknown key', () => {
+    const result = ChatOutputSchema.safeParse({
+      status: 'completed',
+      answer: 'hello',
+      diagnostics: { usage: { totalTokenCount: 100 } },
     });
     assert.strictEqual(result.success, false);
   });

@@ -280,9 +280,6 @@ describe('ToolExecutor', () => {
 
     assert.deepStrictEqual(result.structuredContent, {
       answer: 'answer',
-      diagnostics: {
-        toolEvents: [{ kind: 'function_call', name: 'lookupDocs', args: { topic: 'mcp' } }],
-      },
     });
   });
 
@@ -302,13 +299,6 @@ describe('ToolExecutor', () => {
       (_streamResult, text) => ({
         structuredContent: {
           answer: text,
-          diagnostics: {
-            usage: {
-              candidatesTokenCount: 2,
-              promptTokenCount: 1,
-              totalTokenCount: 3,
-            },
-          },
         },
       }),
     );
@@ -317,34 +307,6 @@ describe('ToolExecutor', () => {
       'search',
       z.strictObject({
         answer: z.string(),
-        diagnostics: z
-          .strictObject({
-            functionCalls: z
-              .array(
-                z.strictObject({
-                  name: z.string(),
-                  args: z.record(z.string(), z.unknown()),
-                }),
-              )
-              .optional(),
-            toolEvents: z
-              .array(
-                z.strictObject({
-                  kind: z.literal('function_call'),
-                  name: z.string(),
-                  args: z.record(z.string(), z.unknown()),
-                }),
-              )
-              .optional(),
-            usage: z
-              .strictObject({
-                candidatesTokenCount: z.number().optional(),
-                promptTokenCount: z.number().optional(),
-                totalTokenCount: z.number().optional(),
-              })
-              .optional(),
-          })
-          .optional(),
       }),
       result,
     );
@@ -352,14 +314,6 @@ describe('ToolExecutor', () => {
     assert.strictEqual(validated.isError, undefined);
     assert.deepStrictEqual(validated.structuredContent, {
       answer: 'answer',
-      diagnostics: {
-        toolEvents: [{ kind: 'function_call', name: 'lookupDocs', args: { topic: 'mcp' } }],
-        usage: {
-          candidatesTokenCount: 2,
-          promptTokenCount: 1,
-          totalTokenCount: 3,
-        },
-      },
     });
   });
 

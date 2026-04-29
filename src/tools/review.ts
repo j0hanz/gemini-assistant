@@ -1326,13 +1326,35 @@ export async function analyzePrWork(
 function buildReviewStructuredContent(
   structured: Record<string, unknown>,
 ): z.infer<typeof ReviewOutputSchema> {
+  const warnings: string[] = [];
+
+  // Fold truncated, empty, and schemaWarnings into warnings array
+  if (typeof structured.truncated === 'string') {
+    warnings.push(structured.truncated);
+  }
+  if (typeof structured.empty === 'string') {
+    warnings.push(structured.empty);
+  }
+  if (Array.isArray(structured.schemaWarnings)) {
+    warnings.push(
+      ...structured.schemaWarnings.filter(
+        (warning): warning is string => typeof warning === 'string',
+      ),
+    );
+  }
+  if (Array.isArray(structured.warnings)) {
+    warnings.push(
+      ...structured.warnings.filter((warning): warning is string => typeof warning === 'string'),
+    );
+  }
+
   return buildSuccessfulStructuredContent({
+    warnings: warnings.length > 0 ? warnings : undefined,
     domain: {
       summary: typeof structured.summary === 'string' ? structured.summary : '',
       stats: structured.stats,
       documentationDrift: structured.documentationDrift,
     },
-    shared: structured,
   }) as unknown as z.infer<typeof ReviewOutputSchema>;
 }
 

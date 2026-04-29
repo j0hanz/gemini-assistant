@@ -1,5 +1,31 @@
 #!/usr/bin/env node
-// Usage: node scripts/tasks.mjs [--fix] [--quick] [--all] [--json] [--llm] [--help]
+/**
+ * tasks.mjs — orchestrates the dev-loop checks (format, lint, type-check, knip, test, rebuild).
+ *
+ * Modes:
+ *   default     format → [lint, type-check, knip] parallel → [test, rebuild] parallel  (fail-fast)
+ *   --fix       sequential, auto-fix format/lint/knip then re-run
+ *   --quick     skip test + rebuild
+ *   --all       continue past failures across all tasks
+ *   --json      machine-readable single-line JSON to stdout (suppresses human output)
+ *   --llm       append failure-detail JSON block to stdout (also written to .tasks-last-failure.json)
+ *   --detail N  post-mortem source-window for the Nth test failure of the previous run
+ *
+ * Side-effect files (both .gitignored):
+ *   .tasks-history.json       rolling window of the last MAX_DURATIONS=5 test durations per test name.
+ *                             Used to derive an adaptive silence timeout: max(MIN_SILENCE_MS, 10 × max-historical).
+ *   .tasks-last-failure.json  written on any non-zero exit, deleted on a green run.
+ *                             Schema: { ok, mode, wallMs, tasks[], slowestTests[], failureSummary[], timestamp }.
+ *
+ * Exit codes: 0 ok | 1 failed | 2 cli error | 130 SIGINT | 143 SIGTERM | 128+N other signals.
+ *
+ * Honors NO_COLOR (https://no-color.org) and non-TTY stdout — ANSI escapes are suppressed in CI logs.
+ *
+ * Concurrency: not safe to run two instances in parallel against the same workspace
+ * (history / failure JSON files race). Bounded internal parallelism is the static task list (≤3).
+ *
+ * Requires Node ≥22 (Promise.withResolvers, AbortSignal.any). Repo pins Node ≥24.
+ */
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -27,16 +53,24 @@ const Config = Object.freeze({
   IS_WINDOWS: process.platform === 'win32',
 });
 
+const COLOR_ENABLED =
+  !!process.stdout.isTTY &&
+  !process.env.NO_COLOR &&
+  process.env.TERM !== 'dumb' &&
+  process.env.CI !== 'true';
+
+const ansi = (code) => (COLOR_ENABLED ? code : '');
+
 const Theme = Object.freeze({
-  R: '\x1b[0m',
-  BOLD: '\x1b[1m',
-  DIM: '\x1b[2m',
-  GREEN: '\x1b[32m',
-  RED: '\x1b[31m',
-  YELLOW: '\x1b[33m',
-  CYAN: '\x1b[36m',
-  BLUE: '\x1b[34m',
-  CLEAR_EOL: '\x1b[K',
+  R: ansi('\x1b[0m'),
+  BOLD: ansi('\x1b[1m'),
+  DIM: ansi('\x1b[2m'),
+  GREEN: ansi('\x1b[32m'),
+  RED: ansi('\x1b[31m'),
+  YELLOW: ansi('\x1b[33m'),
+  CYAN: ansi('\x1b[36m'),
+  BLUE: ansi('\x1b[34m'),
+  CLEAR_EOL: ansi('\x1b[K'),
 });
 
 const Icons = Object.freeze({
@@ -111,9 +145,18 @@ const Json = {
 
 const FileStore = {
   async readJson(file, fallback) {
+    let raw;
     try {
-      return JSON.parse(await readFile(file, 'utf8'));
+      raw = await readFile(file, 'utf8');
     } catch {
+      return fallback;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
+      process.stderr.write(
+        `${Theme.YELLOW}warning${Theme.R} corrupt JSON at ${file} (${err?.message || err}); using defaults\n`,
+      );
       return fallback;
     }
   },
@@ -729,8 +772,18 @@ class TestRunner {
     const forceKillAfterGrace = () => {
       const timer = setTimeout(() => {
         try {
-          if (Config.IS_WINDOWS) child.kill();
-          else child.kill('SIGKILL');
+          if (Config.IS_WINDOWS) {
+            if (child.pid !== undefined) {
+              spawn('taskkill', ['/F', '/T', '/PID', String(child.pid)], {
+                stdio: 'ignore',
+                windowsHide: true,
+              }).on('error', noop);
+            } else {
+              child.kill();
+            }
+          } else {
+            child.kill('SIGKILL');
+          }
         } catch {
           // ignore kill errors
         }
@@ -742,6 +795,17 @@ class TestRunner {
       const maxHistorical = Math.max(0, ...Object.values(history.test_durations).flat());
       const phase = state.seenFirstOk ? 'between-tests' : 'startup';
       const ms = state.seenFirstOk ? silenceMs : startupMs;
+
+      // Capture a diagnostic report (active handles, native stacks, event-loop state) before killing.
+      // Best-effort — must never throw out of the timeout path.
+      try {
+        if (typeof process.report?.writeReport === 'function') {
+          process.report.writeReport('.tasks-test-hang.json');
+        }
+      } catch {
+        // ignore report errors
+      }
+
       try {
         abortController.abort(new Error('test silence timeout'));
       } catch {
@@ -1554,6 +1618,7 @@ function clearFailureFile(file = Config.FAILURE_FILE) {
 }
 
 function installSigintHandler(reporter, config) {
+  if (process.listenerCount('SIGINT') > 0) return;
   let interrupted = false;
   process.on('SIGINT', () => {
     runController.abort();
@@ -1769,11 +1834,13 @@ class TaskOrchestrator {
   }
 }
 
-const config = parseCliConfig(process.argv.slice(2));
-if (config !== null) {
-  if (config.detail !== null) {
-    await renderDetailCommand(config);
-  } else {
-    process.exitCode = await new TaskOrchestrator(config).run();
+if (import.meta.main) {
+  const config = parseCliConfig(process.argv.slice(2));
+  if (config !== null) {
+    if (config.detail !== null) {
+      await renderDetailCommand(config);
+    } else {
+      process.exitCode = await new TaskOrchestrator(config).run();
+    }
   }
 }

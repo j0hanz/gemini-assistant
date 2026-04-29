@@ -148,6 +148,94 @@ function parseTscOutput(text) {
   return errors;
 }
 
+// --- KNIP PARSER ---
+
+const KNIP_RULES = {
+  files: { rule: 'unused-file', label: 'unused file' },
+  dependencies: { rule: 'unused-dep', label: 'unused dependency' },
+  devDependencies: { rule: 'unused-dev-dep', label: 'unused devDependency' },
+  optionalPeerDependencies: {
+    rule: 'unused-peer-dep',
+    label: 'unused optional peer dependency',
+  },
+  unlisted: { rule: 'unlisted-dep', label: 'unlisted dependency' },
+  binaries: { rule: 'unlisted-binary', label: 'unlisted binary' },
+  unresolved: { rule: 'unresolved-import', label: 'unresolved import' },
+  exports: { rule: 'unused-export', label: 'unused export' },
+  types: { rule: 'unused-type', label: 'unused exported type' },
+  nsExports: { rule: 'unused-ns-export', label: 'unused export in namespace' },
+  nsTypes: { rule: 'unused-ns-type', label: 'unused type in namespace' },
+  duplicates: { rule: 'duplicate-export', label: 'duplicate export' },
+  enumMembers: { rule: 'unused-enum-member', label: 'unused enum member' },
+  namespaceMembers: {
+    rule: 'unused-ns-member',
+    label: 'unused namespace member',
+  },
+  catalog: { rule: 'catalog-issue', label: 'catalog issue' },
+};
+
+function pushKnipError(errors, file, category, entry) {
+  const meta = KNIP_RULES[category];
+  if (!meta) return;
+  const line = typeof entry?.line === 'number' && entry.line > 0 ? entry.line : 1;
+  const col = typeof entry?.col === 'number' && entry.col > 0 ? entry.col : 1;
+  const name = entry?.name ?? '';
+  const namespace = entry?.namespace ? `${entry.namespace}.` : '';
+  const message =
+    category === 'files'
+      ? 'Unused file (no references found)'
+      : `${meta.label}: ${namespace}${name}`;
+  errors.push({
+    file: file.replaceAll('\\', '/'),
+    line,
+    col,
+    endCol: col + Math.max(3, String(name).length || 3),
+    rule: meta.rule,
+    severity: 'error',
+    message,
+  });
+}
+
+function parseKnipJson(jsonStr) {
+  const errors = [];
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    return errors;
+  }
+  const rows = Array.isArray(parsed?.issues) ? parsed.issues : [];
+  for (const row of rows) {
+    const file = row?.file ?? '';
+    if (!file) continue;
+    for (const category of Object.keys(KNIP_RULES)) {
+      const list = row[category];
+      if (!Array.isArray(list) || list.length === 0) continue;
+      if (category === 'duplicates') {
+        // duplicates is an array-of-arrays of IssueSymbol
+        for (const group of list) {
+          if (!Array.isArray(group) || group.length === 0) continue;
+          const names = group
+            .map((s) => s?.name)
+            .filter(Boolean)
+            .join(', ');
+          const first = group[0] ?? {};
+          pushKnipError(errors, file, category, {
+            name: names || 'duplicate',
+            line: first.line,
+            col: first.col,
+          });
+        }
+        continue;
+      }
+      for (const entry of list) {
+        pushKnipError(errors, file, category, entry);
+      }
+    }
+  }
+  return errors;
+}
+
 const TAP_OK_RE = /^\s*ok \d+ - (.+?)(?:\s+#\s+time=(\S+))?$/;
 const TAP_NOT_OK_RE = /^\s*not ok \d+ - (.+)$/;
 const YAML_KV_RE = /^(\w+):\s*(.*)$/;
@@ -329,6 +417,29 @@ function runTypeCheck() {
   return { ok: false, errors, counts: { errors: errCount, warnings: warnCount } };
 }
 
+function runKnip() {
+  const r = runCommand('npx', ['knip', '--reporter', 'json', '--no-progress']);
+  if (r.ok) return { ok: true };
+  // knip prints JSON to stdout even on non-zero exit. Extract the JSON line.
+  const stdout = r.stdout ?? '';
+  const jsonLine = stdout
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l.startsWith('{'));
+  if (!jsonLine) {
+    return { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
+  }
+  const errors = parseKnipJson(jsonLine);
+  if (!errors.length) {
+    return { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
+  }
+  return {
+    ok: false,
+    errors,
+    counts: { errors: errors.length, warnings: 0 },
+  };
+}
+
 function runTest() {
   const history = loadHistory();
   const silenceMs = getSilenceTimeout(history);
@@ -480,7 +591,7 @@ const tasks = [
   { label: 'lint', runner: runLint },
   { label: 'type-check', runner: runTypeCheck },
   { label: 'build', cmd: ['npm', ['run', 'build']] },
-  { label: 'knip', cmd: ['npm', ['run', 'knip']] },
+  { label: 'knip', runner: runKnip },
   { label: 'test', runner: runTest, skip: fast },
 ];
 

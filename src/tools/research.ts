@@ -20,7 +20,6 @@ import {
 import { resolveOrchestration } from '../lib/orchestration.js';
 import { PROGRESS_TOTAL, sendProgress } from '../lib/progress.js';
 import {
-  appendSearchEntryPointContent,
   appendSources,
   appendUrlStatus,
   auditClaimedToolUsage,
@@ -33,7 +32,6 @@ import {
   collectGroundedSourceDetailsWithCounts,
   collectGroundedSourcesWithCounts,
   collectGroundingCitations,
-  collectSearchEntryPoint,
   collectUrlContextSources,
   collectUrlMetadataWithCounts,
   computeGroundingSignals,
@@ -185,7 +183,6 @@ function computeResearchContext(streamResult: StreamResult) {
   const { citations, droppedSupportCount } = collectGroundingCitations(
     streamResult.groundingMetadata,
   );
-  const searchEntryPoint = collectSearchEntryPoint(streamResult.groundingMetadata);
   const findings = deriveFindingsFromCitations(citations);
   const groundingSignals = computeGroundingSignals(
     streamResult,
@@ -207,7 +204,6 @@ function computeResearchContext(streamResult: StreamResult) {
     urlContextSources,
     sourceDetails,
     citations,
-    searchEntryPoint,
     findings,
     groundingSignals,
     status,
@@ -257,7 +253,6 @@ function buildAgenticSearchResult(
 
   appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
   appendUrlStatus(contentAdditions, context.urlMetadata);
-  appendSearchEntryPointContent(contentAdditions, context.searchEntryPoint?.renderedContent);
 
   return {
     resultMod: (result: CallToolResult) => ({
@@ -308,7 +303,6 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
 
   appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
   appendUrlStatus(contentAdditions, context.urlMetadata);
-  appendSearchEntryPointContent(contentAdditions, context.searchEntryPoint?.renderedContent);
   if (context.status === 'ungrounded') {
     contentAdditions.unshift({
       type: 'text',
@@ -360,7 +354,6 @@ function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) 
 
   appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
   appendUrlStatus(contentAdditions, context.urlMetadata);
-  appendSearchEntryPointContent(contentAdditions, context.searchEntryPoint?.renderedContent);
 
   return {
     resultMod: (result: CallToolResult) => ({
@@ -1071,12 +1064,25 @@ function isDeepResearchInput(
   return args.mode === 'deep';
 }
 
-function extractResearchSummary(structured: Record<string, unknown>): string {
-  if (typeof structured.answer === 'string') {
-    return structured.answer;
-  }
+const SUMMARY_MAX_CHARS = 600;
 
-  return typeof structured.report === 'string' ? structured.report : '';
+function extractResearchSummary(structured: Record<string, unknown>): string {
+  const full =
+    typeof structured.answer === 'string'
+      ? structured.answer
+      : typeof structured.report === 'string'
+        ? structured.report
+        : '';
+
+  const firstParagraph =
+    full
+      .split('\n\n')
+      .find((p) => p.trim().length > 0)
+      ?.trim() ?? '';
+  if (firstParagraph.length > 0 && firstParagraph.length <= SUMMARY_MAX_CHARS) {
+    return firstParagraph;
+  }
+  return full.length <= SUMMARY_MAX_CHARS ? full : `${full.slice(0, SUMMARY_MAX_CHARS).trimEnd()}…`;
 }
 
 function buildResearchStructuredContent(

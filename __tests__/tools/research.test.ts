@@ -661,9 +661,10 @@ describe('research tool contracts', () => {
         ),
       );
       assert.ok(
-        store.stored[0]?.result.content.some((entry) =>
-          entry.text?.includes('Google Search Suggestions:\n<div>search</div>'),
+        !store.stored[0]?.result.content.some((entry) =>
+          entry.text?.includes('Google Search Suggestions:'),
         ),
+        'search suggestions HTML must not appear in content',
       );
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;

@@ -742,17 +742,6 @@ export function buildUrlContextSourceDetails(
   );
 }
 
-export function appendSearchEntryPointContent(
-  content: CallToolResult['content'],
-  renderedContent?: string,
-): void {
-  if (!renderedContent) return;
-  content.push({
-    type: 'text',
-    text: `Google Search Suggestions:\n${renderedContent}`,
-  });
-}
-
 export function buildDroppedSupportWarnings({
   droppedChunkCount,
   droppedSupportCount,

@@ -108,13 +108,10 @@ export type AskArgs = InternalAskArgs & {
 
 interface AskStructuredContent extends Record<string, unknown> {
   answer: string;
-  contextUsed?: ContextUsed;
   data?: unknown;
-  computations?: ReturnType<typeof deriveComputationsFromToolEvents>;
   schemaWarnings?: string[];
   session?: {
     id: string;
-    rebuiltAt?: number;
   };
   warnings?: string[];
   diagnostics?: {
@@ -338,20 +335,6 @@ function getAskStructuredContent(result: CallToolResult): AskStructuredContent |
   return readStructuredObject(result) as AskStructuredContent | undefined;
 }
 
-function attachContextUsed(result: CallToolResult, contextUsed?: ContextUsed): CallToolResult {
-  if (!contextUsed || result.isError) {
-    return result;
-  }
-
-  return mergeStructured(result, {
-    ...(getAskStructuredContent(result)
-      ? {}
-      : {
-          answer: extractTextContent(result.content),
-        }),
-    contextUsed,
-  });
-}
 
 function validateAskConflict(condition: boolean, message: string): CallToolResult | undefined {
   return condition ? new AppError('chat', message).toToolResult() : undefined;
@@ -1037,7 +1020,6 @@ async function askExistingSession(
   const { progress } = createToolContext('chat', ctx);
   await progress.send(0, undefined, 'Resuming session');
   const askResult = await deps.runWithoutSession(resumedArgs, ctx, chat);
-  askResult.result = attachContextUsed(askResult.result, effectiveContextUsed);
   askResult.result = attachSessionMetadata(
     askResult.result,
     args.sessionId,
@@ -1059,7 +1041,6 @@ async function askNewSession(
   const { chat, contract } = deps.createChat(args);
 
   const askResult = await deps.runWithoutSession(args, ctx, chat);
-  askResult.result = attachContextUsed(askResult.result, contextUsed);
 
   if (!askResult.result.isError) {
     deps.setSession(args.sessionId, chat, undefined, args.cacheName, contract);
@@ -1129,7 +1110,7 @@ export function createAskWork(deps: AskDependencies, workspace: ToolWorkspaceAcc
 
     if (!effectiveArgs.sessionId) {
       const askResult = await deps.runWithoutSession(effectiveArgs, ctx);
-      return appendAskWarnings(attachContextUsed(askResult.result, contextUsed), warnings);
+      return appendAskWarnings(askResult.result, warnings);
     }
 
     const sessionId = effectiveArgs.sessionId;
@@ -1194,22 +1175,6 @@ function extractSessionId(
   return undefined;
 }
 
-function sessionResources(sessionId: string) {
-  const detail = sessionDetailUri(sessionId);
-  if (!getExposeSessionResources()) {
-    return { detail };
-  }
-
-  return {
-    detail,
-    events: sessionEventsUri(sessionId),
-    transcript: sessionTranscriptUri(sessionId),
-    turnParts: sessionTurnPartsUri(sessionId, 0).replace(
-      '/turns/0/parts',
-      '/turns/{turnIndex}/parts',
-    ),
-  };
-}
 
 function attachSessionMetadata(
   result: CallToolResult,
@@ -1252,17 +1217,10 @@ function assembleChatOutput(
     sessionId && typeof structured.session === 'object' && structured.session !== null
       ? {
           id: sessionId,
-          resources: sessionResources(sessionId),
-          ...(typeof (structured.session as Record<string, unknown>).rebuiltAt === 'number'
-            ? {
-                rebuiltAt: (structured.session as Record<string, unknown>).rebuiltAt as number,
-              }
-            : {}),
         }
       : sessionId
         ? {
             id: sessionId,
-            resources: sessionResources(sessionId),
           }
         : undefined;
   return createToolContext('chat', ctx).validateOutput(
@@ -1272,10 +1230,6 @@ function assembleChatOutput(
       answer,
       data: structured.data,
       session,
-      contextUsed: structured.contextUsed,
-      computations: structured.computations,
-      workspaceCacheApplied:
-        (structured.contextUsed as ContextUsed | undefined)?.workspaceCacheApplied ?? false,
     }),
     result,
   );

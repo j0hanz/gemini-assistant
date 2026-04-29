@@ -486,17 +486,7 @@ describe('MCP tool smoke coverage', () => {
       expectSuccess(sessionResult);
       assert.deepStrictEqual(sessionResult.structuredContent.session, {
         id: encodedSessionId,
-        resources: {
-          detail: `session://${encodeURIComponent(encodedSessionId)}`,
-        },
       });
-      assert.ok(
-        !sessionResult.content.some(
-          (item) =>
-            item.type === 'resource_link' &&
-            item.uri === `gemini://sessions/${encodeURIComponent(encodedSessionId)}/turns/1/parts`,
-        ),
-      );
       assertAdvertisedOutputSchema(chatTool, sessionResult);
 
       const serverRequestMethods = harness.client.getServerRequestMethods();

@@ -153,7 +153,7 @@ describe('public contract schemas', () => {
     };
 
     assert.ok(
-      ChatOutputSchema.safeParse({ ...base, answer: 'hello', workspaceCacheApplied: false })
+      ChatOutputSchema.safeParse({ ...base, answer: 'hello' })
         .success,
       'chat output should parse',
     );
@@ -161,14 +161,9 @@ describe('public contract schemas', () => {
       ChatOutputSchema.safeParse({
         ...base,
         answer: 'hello',
-        workspaceCacheApplied: false,
-        contextUsed: {
-          sources: [{ kind: 'workspace-file', name: 'README.md', tokens: 100 }],
-          totalTokens: 100,
-          workspaceCacheApplied: false,
-        },
+        session: { id: 'session-abc' },
       }).success,
-      'chat output with contextUsed should parse',
+      'chat output with session should parse',
     );
     assert.ok(
       ResearchOutputSchema.safeParse({
@@ -218,12 +213,11 @@ describe('public contract schemas', () => {
     );
   });
 
-  it('locks the public status shapes and keeps the chat cache flag optional', () => {
+  it('locks the public status shapes and keeps session id optional', () => {
     assert.ok(
       ChatOutputSchema.safeParse({
         status: 'completed',
         answer: 'x',
-        workspaceCacheApplied: false,
       }).success,
     );
     assert.ok(
@@ -238,7 +232,7 @@ describe('public contract schemas', () => {
       'legacy completed status should be rejected on research outputs',
     );
     assert.strictEqual(
-      ChatOutputSchema.safeParse({ status: 'unknown', answer: 'x', workspaceCacheApplied: false })
+      ChatOutputSchema.safeParse({ status: 'unknown', answer: 'x' })
         .success,
       false,
     );

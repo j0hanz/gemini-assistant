@@ -86,16 +86,6 @@ const AnalyzeDiagramOutputSchema = z.strictObject({
   contextUsed: ContextUsedSchema.optional(),
 });
 
-const SessionResourceLinksSchema = z.strictObject({
-  detail: z.string().describe('Session detail resource URI'),
-  events: z.string().optional().describe('Session events resource URI'),
-  transcript: z.string().optional().describe('Session transcript resource URI'),
-  turnParts: z
-    .string()
-    .optional()
-    .describe('Templated replay-safe raw Gemini Part[] resource URI for a persisted model turn'),
-});
-
 export const ChatOutputSchema = z.strictObject({
   ...publicCoreOutputFields,
   status: completedStatusField,
@@ -103,28 +93,10 @@ export const ChatOutputSchema = z.strictObject({
   data: JsonValueSchema.describe('Structured response payload when JSON mode is used').optional(),
   session: z
     .strictObject({
-      id: z.string().describe('Server-managed in-memory session identifier'),
-      rebuiltAt: z
-        .number()
-        .int()
-        .nonnegative()
-        .optional()
-        .describe('Session rebuild timestamp (Unix ms)'),
-      resources: SessionResourceLinksSchema,
+      id: z.string().describe('Server-managed session identifier'),
     })
     .optional()
-    .describe(
-      'Session metadata for new or resumed chat sessions. Resumed sessions without persisted Part[] (e.g. pre-upgrade transcripts) cannot be resumed and must be started fresh.',
-    ),
-  contextUsed: ContextUsedSchema.optional(),
-  computations: z
-    .array(ComputationSchema)
-    .optional()
-    .describe('Gemini Code Execution computations surfaced from tool events'),
-  workspaceCacheApplied: z
-    .boolean()
-    .optional()
-    .describe('Whether automatic workspace cache was applied for this chat turn'),
+    .describe('Session metadata. Provide id to continue this session in a future call.'),
 });
 
 const ResearchSharedFields = {

@@ -115,6 +115,9 @@ function createHarness() {
       runWithoutSession: async () => ({
         result: {
           content: [{ type: 'text' as const, text: 'Assistant answer' }],
+          structuredContent: {
+            answer: 'Assistant answer',
+          },
         },
         streamResult: {
           functionCalls: [],
@@ -482,10 +485,11 @@ describe('ask transcript capture', () => {
         createContext('task-workspace'),
       );
 
+      assert.strictEqual(result.isError, undefined, `Expected success but got: ${result.error}`);
+      assert.ok(result.structuredContent, 'structuredContent should be present');
       const structured = result.structuredContent as Record<string, unknown>;
       assert.strictEqual(structured.answer, 'Assistant answer');
-      const contextUsed = structured.contextUsed as Record<string, unknown>;
-      assert.strictEqual(contextUsed.workspaceCacheApplied, true);
+      // contextUsed is no longer included in ChatOutputSchema
 
       const events = harness.sessions.get('sess-workspace')?.events ?? [];
       assert.strictEqual(events.length, 1);

@@ -897,9 +897,7 @@ describe('ask contract', () => {
       assert.deepStrictEqual(observedRoots, [allowedRoot]);
       const structured = result.structuredContent as Record<string, unknown>;
       assert.strictEqual(structured.answer, 'Assistant answer');
-      const contextUsed = structured.contextUsed as Record<string, unknown>;
-      assert.strictEqual(contextUsed.workspaceCacheApplied, true);
-      assert.ok(Array.isArray(contextUsed.sources));
+      // contextUsed is no longer included in ChatOutputSchema
     } finally {
       process.env.CACHE = originalEnabled;
       process.env.ROOTS = originalAllowedRoots;
@@ -955,8 +953,7 @@ describe('ask contract', () => {
       assert.strictEqual(observedCacheName, undefined);
       const structured = result.structuredContent as Record<string, unknown>;
       assert.strictEqual(structured.answer, 'Assistant answer');
-      const contextUsed = structured.contextUsed as Record<string, unknown>;
-      assert.strictEqual(contextUsed.workspaceCacheApplied, false);
+      // contextUsed is no longer included in ChatOutputSchema
     } finally {
       process.env.CACHE = originalEnabled;
       workspaceCacheManager.getOrCreateCache = originalGetOrCreateCache;

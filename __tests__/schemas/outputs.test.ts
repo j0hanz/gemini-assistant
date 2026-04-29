@@ -150,48 +150,33 @@ describe('ResearchOutputSchema', () => {
 });
 
 describe('ChatOutputSchema', () => {
-  it('accepts missing workspaceCacheApplied for compatibility', () => {
+  it('accepts minimal required fields', () => {
     const result = ChatOutputSchema.safeParse({
       status: 'completed',
       answer: 'Done',
     });
 
     assert.ok(result.success);
-    if (result.success) {
-      assert.strictEqual(result.data.workspaceCacheApplied, undefined);
-    }
   });
 
-  it('accepts workspaceCacheApplied when true', () => {
+  it('accepts with data field', () => {
     const result = ChatOutputSchema.safeParse({
       status: 'completed',
       answer: 'Done',
-      workspaceCacheApplied: true,
-    });
-
-    assert.ok(result.success);
-    assert.strictEqual(result.data.workspaceCacheApplied, true);
-  });
-
-  it('accepts computations and workspaceCacheApplied', () => {
-    const result = ChatOutputSchema.safeParse({
-      status: 'completed',
-      answer: 'Done',
-      workspaceCacheApplied: false,
-      computations: [{ code: 'print(1)', output: '1' }],
+      data: { result: 'json-structured' },
     });
 
     assert.ok(result.success);
   });
 
-  it('rejects computations array with missing required code field', () => {
+  it('accepts with session id', () => {
     const result = ChatOutputSchema.safeParse({
       status: 'completed',
       answer: 'Done',
-      computations: [{ output: '1' }],
+      session: { id: 'session-123' },
     });
 
-    assert.strictEqual(result.success, false);
+    assert.ok(result.success);
   });
 
   it('rejects telemetry at the root level', () => {
@@ -219,6 +204,42 @@ describe('ChatOutputSchema', () => {
       diagnostics: { usage: { totalTokenCount: 100 } },
     });
     assert.strictEqual(result.success, false);
+  });
+
+  it('ChatOutputSchema rejects computations', () => {
+    const result = ChatOutputSchema.safeParse({
+      status: 'completed',
+      answer: 'hello',
+      computations: [{ code: 'print(1)', language: 'python' }],
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('ChatOutputSchema rejects workspaceCacheApplied', () => {
+    const result = ChatOutputSchema.safeParse({
+      status: 'completed',
+      answer: 'hello',
+      workspaceCacheApplied: true,
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('ChatOutputSchema rejects session with resources', () => {
+    const result = ChatOutputSchema.safeParse({
+      status: 'completed',
+      answer: 'hello',
+      session: { id: 'abc', resources: { detail: 'gemini://sessions/abc' } },
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('ChatOutputSchema accepts session with id only', () => {
+    const result = ChatOutputSchema.safeParse({
+      status: 'completed',
+      answer: 'hello',
+      session: { id: 'abc' },
+    });
+    assert.ok(result.success);
   });
 });
 

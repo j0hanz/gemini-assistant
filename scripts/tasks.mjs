@@ -221,24 +221,23 @@ const ProcessRunner = {
     return { cmd, args, windowsVerbatimArguments: false };
   },
 
-  spawnOptions({ signal, stdio = ['ignore', 'pipe', 'pipe'] } = {}) {
+  spawnOptions(command, { signal, stdio = ['ignore', 'pipe', 'pipe'], encoding } = {}) {
     return {
-      stdio,
+      ...(stdio ? { stdio } : {}),
+      ...(encoding ? { encoding } : {}),
       ...(signal ? { signal } : {}),
       ...(Config.IS_WINDOWS ? { windowsHide: true } : {}),
+      ...(command.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
     };
   },
 
   exec(cmd, args) {
     const command = this.command(cmd, args);
-    const result = spawnSync(command.cmd, command.args, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      ...(command.windowsVerbatimArguments
-        ? { windowsVerbatimArguments: command.windowsVerbatimArguments }
-        : {}),
-      ...(Config.IS_WINDOWS ? { windowsHide: true } : {}),
-    });
+    const result = spawnSync(
+      command.cmd,
+      command.args,
+      this.spawnOptions(command, { encoding: 'utf8' }),
+    );
 
     return {
       ok: result.status === 0 && !result.error,
@@ -272,12 +271,7 @@ const ProcessRunner = {
 
       let child;
       try {
-        child = spawn(command.cmd, command.args, {
-          ...this.spawnOptions({ signal }),
-          ...(command.windowsVerbatimArguments
-            ? { windowsVerbatimArguments: command.windowsVerbatimArguments }
-            : {}),
-        });
+        child = spawn(command.cmd, command.args, this.spawnOptions(command, { signal }));
       } catch (err) {
         settle({
           ok: false,
@@ -495,9 +489,13 @@ const KnipParser = {
     }
   },
 
+  parsePos(val) {
+    return Number.isInteger(val) && val > 0 ? val : 1;
+  },
+
   normalizeEntry(entry) {
-    const line = typeof entry?.line === 'number' && entry.line > 0 ? entry.line : 1;
-    const col = typeof entry?.col === 'number' && entry.col > 0 ? entry.col : 1;
+    const line = this.parsePos(entry?.line);
+    const col = this.parsePos(entry?.col);
     const name = entry?.name || '';
     const namespace = entry?.namespace ? `${entry.namespace}.` : '';
     return { line, col, name, namespace };
@@ -562,21 +560,15 @@ const TapParser = {
     for (const raw of lines) {
       const trimmed = raw.trim();
       const kv = this.YAML_KV_RE.exec(trimmed);
-      if (multiKey !== null) {
-        if (kv) {
-          flushMulti();
-          this.writeYamlKv(result, kv, (key) => {
-            multiKey = key;
-          });
-        } else {
-          multiLines.push(trimmed);
-        }
-        continue;
+
+      if (kv) {
+        flushMulti();
+        this.writeYamlKv(result, kv, (key) => {
+          multiKey = key;
+        });
+      } else if (multiKey !== null) {
+        multiLines.push(trimmed);
       }
-      if (!kv) continue;
-      this.writeYamlKv(result, kv, (key) => {
-        multiKey = key;
-      });
     }
     flushMulti();
 
@@ -604,6 +596,7 @@ class TestTapState {
     this.testDurations = new Map();
     this.failures = [];
     this.currentFailName = null;
+    this.currentFailIndex = -1;
     this.currentOkName = null;
     this.inYaml = false;
     this.yamlLines = [];
@@ -640,6 +633,7 @@ class TestTapState {
     this.currentOkName = null;
     this.inYaml = false;
     this.yamlLines.length = 0;
+    this.currentFailIndex = this.failures.length;
     this.failures.push({
       name: ev.name,
       file: '',
@@ -675,13 +669,14 @@ class TestTapState {
       frame: yaml.at || null,
     };
 
-    for (let i = this.failures.length - 1; i >= 0; i--) {
-      if (this.failures[i].name === this.currentFailName && !this.failures[i].frame) {
-        this.failures[i] = enriched;
-        return;
-      }
+    if (
+      this.currentFailIndex >= 0 &&
+      this.failures[this.currentFailIndex].name === this.currentFailName
+    ) {
+      this.failures[this.currentFailIndex] = enriched;
+    } else {
+      this.failures.push(enriched);
     }
-    this.failures.push(enriched);
   }
 
   updateCurrentDuration(yaml) {
@@ -708,11 +703,10 @@ class TestRunner {
     const child = spawn(
       process.execPath,
       ['--import', 'tsx/esm', '--env-file=.env', '--test', '--no-warnings', '--test-reporter=tap'],
-      {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        signal: AbortSignal.any([abortController.signal, this.signal]),
-        ...(Config.IS_WINDOWS ? { windowsHide: true } : {}),
-      },
+      ProcessRunner.spawnOptions(
+        {},
+        { signal: AbortSignal.any([abortController.signal, this.signal]) },
+      ),
     );
 
     child.stdout?.on('error', noop);
@@ -1531,19 +1525,18 @@ class TaskOrchestrator {
     return result;
   }
 
-  async runTaskWithReporting(task, aggregate, reporter, options = {}) {
-    if (task.skip) {
-      const result = Results.skip('skipped');
-      reporter.taskStart(task.label);
-      reporter.taskEnd(task.label, result, 0);
-      return { ...result, ms: 0 };
-    }
+  _checkSkip(task, aggregate) {
+    if (task.skip) return Results.skip('skipped');
+    if (this.shouldGate(task, aggregate)) return Results.skip('gated on prior failure');
+    return null;
+  }
 
-    if (this.shouldGate(task, aggregate)) {
-      const result = Results.skip('gated on prior failure');
+  async runTaskWithReporting(task, aggregate, reporter, options = {}) {
+    const skipResult = this._checkSkip(task, aggregate);
+    if (skipResult) {
       reporter.taskStart(task.label);
-      reporter.taskEnd(task.label, result, 0);
-      return { ...result, ms: 0 };
+      reporter.taskEnd(task.label, skipResult, 0);
+      return { ...skipResult, ms: 0 };
     }
 
     OutputRenderer.clearCache();
@@ -1558,12 +1551,12 @@ class TaskOrchestrator {
     const completed = [];
 
     for (const task of tasks) {
-      if (task.skip || this.shouldGate(task, aggregate)) {
-        const result = Results.skip(task.skip ? 'skipped' : 'gated on prior failure');
+      const skipResult = this._checkSkip(task, aggregate);
+      if (skipResult) {
         reporter.taskStart(task.label);
-        reporter.taskEnd(task.label, result, 0);
-        aggregate.record(task.label, result, 0);
-        completed.push({ task, result, ms: 0 });
+        reporter.taskEnd(task.label, skipResult, 0);
+        aggregate.record(task.label, skipResult, 0);
+        completed.push({ task, result: skipResult, ms: 0 });
       } else {
         activeTasks.push(task);
       }
@@ -1596,21 +1589,24 @@ class TaskOrchestrator {
     return { result, ms: Date.now() - start };
   }
 
+  async _applyFixAndRerun(task, fixResult) {
+    if (!fixResult.ok) {
+      return Results.fail({
+        rawOutput:
+          `auto-fix failed:\n${Text.joinOutput(fixResult.stdout, fixResult.stderr)}`.trim(),
+      });
+    }
+    const rerun = await task.runner();
+    return rerun.ok ? Results.pass({ annotation: 'auto-fixed' }) : rerun;
+  }
+
   async attemptAutoFix(task, result) {
     if (task.label === 'format') {
       const fixResult = ProcessRunner.exec('npm', ['run', 'format']);
-      if (!fixResult.ok) {
-        return Results.fail({
-          rawOutput:
-            `auto-fix failed:\n${Text.joinOutput(fixResult.stdout, fixResult.stderr)}`.trim(),
-        });
-      }
-      const rerun = await task.runner();
-      return rerun.ok ? Results.pass({ annotation: 'auto-fixed' }) : rerun;
+      return this._applyFixAndRerun(task, fixResult);
     }
 
-    if (!this.config.fix) return null;
-    if (!result.errors || result.errors.length === 0) return null;
+    if (!this.config.fix || !result.errors || result.errors.length === 0) return null;
     if (task.label !== 'lint' && task.label !== 'knip') return null;
     if (task.label === 'knip' && !KnipParser.isFixable(result.errors)) return null;
 
@@ -1619,15 +1615,7 @@ class TaskOrchestrator {
         ? ProcessRunner.exec(...TaskCommands.lintFix())
         : ProcessRunner.exec(...TaskCommands.knipFix());
 
-    if (!fixResult.ok) {
-      return Results.fail({
-        rawOutput:
-          `auto-fix failed:\n${Text.joinOutput(fixResult.stdout, fixResult.stderr)}`.trim(),
-      });
-    }
-
-    const rerun = await task.runner();
-    return rerun.ok ? Results.pass({ annotation: 'auto-fixed' }) : rerun;
+    return this._applyFixAndRerun(task, fixResult);
   }
 
   finish(aggregate, reporter, testDurations = null) {

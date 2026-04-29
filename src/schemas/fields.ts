@@ -597,8 +597,11 @@ export function createGenerationConfigFields() {
 }
 
 const ProfileNameSchema = withFieldMetadata(
-  z.enum(TOOL_PROFILE_NAMES),
-  'Gemini tool profile name. Selects the combination of built-in tools and thinking defaults.',
+  z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.enum(TOOL_PROFILE_NAMES).optional(),
+  ),
+  'Gemini tool profile name. Selects the combination of built-in tools and thinking defaults. Optional — omit (or leave empty) to use the per-tool default profile.',
 );
 
 const ProfileThinkingLevelSchema = withFieldMetadata(
@@ -643,7 +646,7 @@ const OverridesSchema = z.strictObject({
 });
 
 export const ToolsSpecSchema = z.strictObject({
-  profile: ProfileNameSchema,
+  profile: ProfileNameSchema.optional(),
   thinkingLevel: ProfileThinkingLevelSchema.optional(),
   overrides: OverridesSchema.optional(),
 });

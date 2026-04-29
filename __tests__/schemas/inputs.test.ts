@@ -308,6 +308,35 @@ describe('ChatInputSchema', () => {
     assert.ok(result.success);
   });
 
+  it('treats empty-string and omitted tools.profile as undefined (auto-default)', () => {
+    const empty = ChatInputSchema.safeParse({
+      goal: 'No profile chosen',
+      tools: { profile: '' },
+    });
+    assert.ok(empty.success, JSON.stringify(empty));
+    if (empty.success) {
+      assert.strictEqual(empty.data.tools?.profile, undefined);
+    }
+
+    const blank = ChatInputSchema.safeParse({
+      goal: 'Whitespace profile',
+      tools: { profile: '   ' },
+    });
+    assert.ok(blank.success);
+
+    const omitted = ChatInputSchema.safeParse({
+      goal: 'No profile key',
+      tools: {},
+    });
+    assert.ok(omitted.success);
+
+    const invalid = ChatInputSchema.safeParse({
+      goal: 'Bogus profile',
+      tools: { profile: 'nonsense' },
+    });
+    assert.strictEqual(invalid.success, false);
+  });
+
   it('rejects invalid function responses and validates tools.overrides.functions', () => {
     assert.strictEqual(
       ChatInputSchema.safeParse({

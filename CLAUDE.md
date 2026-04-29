@@ -4,21 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-Required checks before any commit:
+**Always run `tasks.mjs` before committing.** It orchestrates format → lint/type-check/knip (parallel) → test/build (parallel) with smart failure-fast and auto-fix:
 
 ```bash
-npm run lint
-npm run type-check
-npm run test
-npm run format
-npm run build
-```
-
-Or run lint, type-check, build, prettier, knip, and the test suite together:
-
-```bash
-npm run check          # check:static + tests
-npm run check:static   # lint, type-check, build, prettier, knip (no tests)
+node scripts/tasks.mjs          # full check suite (fail-fast)
+node scripts/tasks.mjs --fix    # auto-fix format/lint/knip, then verify
+node scripts/tasks.mjs --quick  # skip test + rebuild (format/lint/type-check/knip only)
+node scripts/tasks.mjs --all    # run all tasks even past failures
+node scripts/tasks.mjs --llm    # emit structured failure detail to stdout (also → .tasks-last-failure.json)
 ```
 
 Run a single test file:
@@ -36,6 +29,8 @@ Other useful commands:
 npm run format        # prettier write
 npm run build         # tsc compile to dist/
 npm run inspector     # build + launch MCP inspector for interactive testing
+npm run check         # check:static + tests (without tasks.mjs orchestration)
+npm run check:static  # lint, type-check, build, prettier, knip (no tests)
 ```
 
 ## Architecture

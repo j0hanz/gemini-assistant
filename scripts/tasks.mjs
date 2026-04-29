@@ -32,6 +32,7 @@ const FAIL = `${RED}✗${R}`;
 const RUN = `${CYAN}◆${R}`;
 const SKIP = `${YELLOW}–${R}`;
 const HANG = `${YELLOW}⏱${R}`;
+const FIX = `${CYAN}⟳${R}`;
 
 // --- HISTORY (cold-path sync FS is acceptable) ---
 
@@ -173,6 +174,22 @@ const KNIP_RULES = {
   },
   catalog: { rule: 'catalog-issue', label: 'catalog issue' },
 };
+
+const KNIP_FIXABLE_RULES = new Set([
+  'unused-dep',
+  'unused-dev-dep',
+  'unused-peer-dep',
+  'unused-export',
+  'unused-ns-export',
+  'unused-enum-member',
+  'unused-ns-member',
+  'unused-type',
+  'unused-ns-type',
+]);
+
+function isKnipFixable(errors) {
+  return errors.some((e) => KNIP_FIXABLE_RULES.has(e.rule));
+}
 
 function pushKnipError(errors, file, category, entry) {
   const meta = KNIP_RULES[category];

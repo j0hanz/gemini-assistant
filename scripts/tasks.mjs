@@ -57,12 +57,13 @@ function signalExitCode(signalName) {
 const HELP_TEXT = [
   'Usage: node scripts/tasks.mjs [flags]',
   '',
-  '  --fix     Run lint:fix / knip --fix instead of check',
-  '  --quick   Skip test + rebuild',
-  '  --all     Run-all mode: continue past failures across all tasks',
-  '  --json    Emit single JSON object on stdout, suppress human output',
-  '  --llm     Echo failure detail to stdout (always written to .tasks-last-failure.json)',
-  '  --help    Show this help',
+  '  --fix        Run lint:fix / knip --fix instead of check',
+  '  --quick      Skip test + rebuild',
+  '  --all        Run-all mode: continue past failures across all tasks',
+  '  --json       Emit single JSON object on stdout, suppress human output',
+  '  --llm        Echo failure detail to stdout (always written to .tasks-last-failure.json)',
+  '  --detail <n> Show source-window detail for test failure at index n',
+  '  --help       Show this help',
   '',
 ].join('\n');
 
@@ -183,6 +184,7 @@ function parseCliConfig(args) {
         all: { type: 'boolean' },
         json: { type: 'boolean' },
         llm: { type: 'boolean' },
+        detail: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
       },
       strict: true,
@@ -200,12 +202,24 @@ function parseCliConfig(args) {
     return null;
   }
 
+  if (values.detail !== undefined) {
+    const n = Number(values.detail);
+    if (!Number.isInteger(n) || n < 1) {
+      process.stderr.write(
+        `--detail requires a positive integer (got: ${values.detail})\n\n${HELP_TEXT}`,
+      );
+      process.exitCode = 2;
+      return null;
+    }
+  }
+
   return Object.freeze({
     fix: !!values.fix,
     quick: !!values.quick,
     all: !!values.all,
     json: !!values.json,
     llm: !!values.llm,
+    detail: values.detail !== undefined ? Number(values.detail) : null,
   });
 }
 
@@ -892,6 +906,14 @@ const TaskRunners = {
   },
 };
 
+function parseFrame(frame) {
+  const m3 = /^(.+):(\d+):(\d+)$/.exec(String(frame || ''));
+  if (m3) return { file: m3[1], line: Number(m3[2]), col: Number(m3[3]) };
+  const m2 = /^(.+):(\d+)$/.exec(String(frame || ''));
+  if (m2) return { file: m2[1], line: Number(m2[2]), col: 1 };
+  return null;
+}
+
 class SourceCache {
   constructor() {
     this.cache = new Map();
@@ -919,6 +941,59 @@ const sourceCache = new SourceCache();
 const OutputRenderer = {
   clearCache() {
     sourceCache.clear();
+  },
+
+  renderSourceWindow(filePath, line, col) {
+    const src = filePath ? sourceCache.lines(path.resolve(process.cwd(), filePath)) : [];
+    const BEFORE = 4;
+    const AFTER = 5;
+    const startLine = Math.max(1, line - BEFORE);
+    const endLine = Math.min(src.length || line, line + AFTER);
+    const gutterW = String(endLine).length;
+    const pad = ' '.repeat(gutterW);
+    const output = [];
+
+    output.push(`${Theme.DIM}${pad} |${Theme.R}`);
+    for (let n = startLine; n <= endLine; n++) {
+      const srcLine = src[n - 1] || '';
+      const gutter = String(n).padStart(gutterW);
+      if (n === line) {
+        output.push(`${Theme.BOLD}${gutter}${Theme.R} ${Theme.DIM}│${Theme.R} ${srcLine}`);
+        output.push(
+          `${Theme.DIM}${pad} │${Theme.R} ${' '.repeat(Math.max(0, col - 1))}${Theme.RED}^^^${Theme.R}`,
+        );
+      } else {
+        output.push(`${Theme.DIM}${gutter} │ ${srcLine}${Theme.R}`);
+      }
+    }
+    output.push(`${Theme.DIM}${pad} |${Theme.R}`);
+    return output.join('\n');
+  },
+
+  renderDetailView(failure, index) {
+    const { name, frame, errorMessage, expected, actual } = failure;
+    let errorLabel;
+    if (expected !== undefined && actual !== undefined) {
+      errorLabel = 'AssertionError';
+    } else if (errorMessage) {
+      errorLabel = errorMessage;
+    } else {
+      errorLabel = 'unknown error';
+    }
+
+    process.stdout.write(`\n  ${Theme.BOLD}Failure ${index}${Theme.R} — ${name}\n\n`);
+    process.stdout.write(`  ${Theme.RED}error${Theme.R}  ${Theme.DIM}${errorLabel}${Theme.R}\n`);
+
+    if (frame) {
+      process.stdout.write(`    ${Theme.DIM}-->${Theme.R} ${frame}\n\n`);
+      const parsed = parseFrame(frame);
+      if (parsed) {
+        process.stdout.write(this.renderSourceWindow(parsed.file, parsed.line, parsed.col));
+        process.stdout.write('\n');
+      }
+    } else {
+      process.stdout.write(`  ${Theme.DIM}(no source location available)${Theme.R}\n`);
+    }
   },
 
   renderDiagnostic(error, cwd = process.cwd()) {
@@ -1308,14 +1383,17 @@ class TtyReporter extends BaseReporter {
 
   renderTestFailures(failures) {
     process.stdout.write('\n');
-    const shown = failures.slice(0, Config.MAX_FAILURE_CARDS);
-    for (const failure of shown)
-      process.stdout.write(`${OutputRenderer.renderTestFailureCard(failure)}\n\n`);
-    if (failures.length > shown.length) {
+    const maxIdx = String(failures.length).length;
+    for (let i = 0; i < failures.length; i++) {
+      const f = failures[i];
+      const idx = String(i + 1).padStart(maxIdx);
+      const fileRef = f.frame ? f.frame.replace(/:(\d+):(\d+)$/, ':$1') : f.file || '';
+      const nameStr = Text.cap(f.name, 60);
       process.stdout.write(
-        `      ${Theme.DIM}… ${failures.length - shown.length} more failures, see ${Config.FAILURE_FILE}${Theme.R}\n\n`,
+        `    ${Theme.BOLD}${idx}${Theme.R}  ${nameStr.padEnd(62)}  ${Theme.DIM}${fileRef}${Theme.R}\n`,
       );
     }
+    process.stdout.write(`\n  ${Theme.DIM}→ node scripts/tasks.mjs --detail <n>${Theme.R}\n\n`);
   }
 
   renderRawOutput(rawOutput) {
@@ -1385,6 +1463,72 @@ class JsonReporter extends BaseReporter {
 
 function noop() {
   // intentionally empty
+}
+
+async function renderDetailCommand(config) {
+  const { detail: index, llm } = config;
+
+  const data = await FileStore.readJson(Config.FAILURE_FILE, null);
+  if (!data) {
+    process.stderr.write(`No failure data found. Run node scripts/tasks.mjs first.\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const testTask = Array.isArray(data.tasks)
+    ? data.tasks.find(
+        (t) => t.label === 'test' && !t.ok && Array.isArray(t.failures) && t.failures.length > 0,
+      )
+    : null;
+  const failures = testTask?.failures ?? [];
+
+  if (failures.length === 0) {
+    process.stderr.write(`No test failures in last run.\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (index < 1 || index > failures.length) {
+    process.stderr.write(
+      `Failure ${index} not found. Last run had ${Text.plural(failures.length, 'failure')}.\n`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const failure = failures[index - 1];
+
+  if (llm) {
+    const parsed = failure.frame ? parseFrame(failure.frame) : null;
+    const src = parsed ? sourceCache.lines(path.resolve(process.cwd(), parsed.file)) : [];
+    const BEFORE = 4;
+    const AFTER = 5;
+    const startLine = parsed ? Math.max(1, parsed.line - BEFORE) : 1;
+    const endLine = parsed ? Math.min(src.length || parsed.line, parsed.line + AFTER) : 1;
+    const windowLines = src.slice(startLine - 1, endLine);
+
+    process.stdout.write(
+      JSON.stringify(
+        {
+          index,
+          name: failure.name,
+          file: failure.file || '',
+          frame: failure.frame || null,
+          errorMessage: failure.errorMessage ?? null,
+          expected: failure.expected ?? null,
+          actual: failure.actual ?? null,
+          sourceWindow: parsed
+            ? { startLine, highlightLine: parsed.line, col: parsed.col, lines: windowLines }
+            : null,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+  } else {
+    OutputRenderer.renderDetailView(failure, index);
+    process.stdout.write('\n');
+  }
 }
 
 function writeFailureFile(aggregate, file = Config.FAILURE_FILE) {
@@ -1627,5 +1771,9 @@ class TaskOrchestrator {
 
 const config = parseCliConfig(process.argv.slice(2));
 if (config !== null) {
-  process.exitCode = await new TaskOrchestrator(config).run();
+  if (config.detail !== null) {
+    await renderDetailCommand(config);
+  } else {
+    process.exitCode = await new TaskOrchestrator(config).run();
+  }
 }

@@ -104,7 +104,6 @@ node scripts/tasks.mjs --quick
 ```js
 // __tests__/scripts/detail-command.test.mjs
 import assert from 'node:assert/strict';
-
 import { test } from 'node:test';
 
 // Inline copy of the detail validation logic from parseCliConfig

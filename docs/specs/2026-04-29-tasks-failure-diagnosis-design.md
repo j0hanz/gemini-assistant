@@ -101,6 +101,7 @@ Emits a single JSON object to stdout instead of TTY output:
 ```
 
 **LLM agent workflow:**
+
 1. Run `node scripts/tasks.mjs --llm` → get triage list with indices
 2. Pick index to investigate
 3. Run `node scripts/tasks.mjs --detail <n> --llm` → get structured detail
@@ -112,26 +113,26 @@ The existing `--llm` flag on a full run stays unchanged (emits failure summary b
 
 ## Implementation Touchpoints
 
-| Area | Location | Change |
-|:-----|:---------|:-------|
-| CLI arg parsing | `parseCliConfig()` ~L175 | Add `detail` option: `{ type: 'string' }`, validate it's a positive integer |
-| Triage renderer | `TtyReporter.renderTestFailures()` ~L1309 | Replace full cards with numbered list + hint line |
-| Detail entry point | Top-level `if (config !== null)` ~L1628 | If `config.detail` set, skip `TaskOrchestrator`, call new `renderDetailCommand()` |
-| Detail renderer | New `OutputRenderer.renderDetailView(failure, index)` | Source window with highlight + caret, TTY and JSON modes |
-| Source window | New `OutputRenderer.renderSourceWindow(file, line, col)` | Read file via `SourceCache`, slice lines, render with gutter |
-| Failure JSON format | `.tasks-last-failure.json` via `Aggregate.recordFail()` | No schema change needed — `frame` already stored; `failures` array already indexed |
+| Area                | Location                                                 | Change                                                                             |
+| :------------------ | :------------------------------------------------------- | :--------------------------------------------------------------------------------- |
+| CLI arg parsing     | `parseCliConfig()` ~L175                                 | Add `detail` option: `{ type: 'string' }`, validate it's a positive integer        |
+| Triage renderer     | `TtyReporter.renderTestFailures()` ~L1309                | Replace full cards with numbered list + hint line                                  |
+| Detail entry point  | Top-level `if (config !== null)` ~L1628                  | If `config.detail` set, skip `TaskOrchestrator`, call new `renderDetailCommand()`  |
+| Detail renderer     | New `OutputRenderer.renderDetailView(failure, index)`    | Source window with highlight + caret, TTY and JSON modes                           |
+| Source window       | New `OutputRenderer.renderSourceWindow(file, line, col)` | Read file via `SourceCache`, slice lines, render with gutter                       |
+| Failure JSON format | `.tasks-last-failure.json` via `Aggregate.recordFail()`  | No schema change needed — `frame` already stored; `failures` array already indexed |
 
 ---
 
 ## Edge Cases
 
-| Case | Handling |
-|:-----|:---------|
-| `--detail` with no prior run | Print: `No failure data found. Run tasks.mjs first.` exit 1 |
-| Index out of range | Print: `Failure <n> not found. Last run had <k> failures.` exit 1 |
-| Frame missing (no source location) | Render error info only, skip source window, note "no source location available" |
-| File deleted/moved since last run | Catch read error, render error info only, note stale failure data |
-| Non-test task failure with `--detail` | Only test failures are indexed; show: `--detail only applies to test failures` |
+| Case                                  | Handling                                                                        |
+| :------------------------------------ | :------------------------------------------------------------------------------ |
+| `--detail` with no prior run          | Print: `No failure data found. Run tasks.mjs first.` exit 1                     |
+| Index out of range                    | Print: `Failure <n> not found. Last run had <k> failures.` exit 1               |
+| Frame missing (no source location)    | Render error info only, skip source window, note "no source location available" |
+| File deleted/moved since last run     | Catch read error, render error info only, note stale failure data               |
+| Non-test task failure with `--detail` | Only test failures are indexed; show: `--detail only applies to test failures`  |
 
 ---
 

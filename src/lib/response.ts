@@ -115,32 +115,36 @@ function domainFromPublicUrl(url: string): string | undefined {
   }
 }
 
-export function collectUrlMetadataWithCounts(
-  urlMetadata: UrlMetadata[] | undefined,
-): CollectedItems<UrlMetadataEntry> {
-  if (!urlMetadata) return { items: [], droppedNonPublic: 0 };
-  const entries: UrlMetadataEntry[] = [];
+function collectUniquePublicEntries<S, T>(
+  source: Iterable<S> | undefined,
+  getUrl: (item: S) => string | undefined,
+  transform: (item: S, url: string) => T,
+): CollectedItems<T> {
+  if (!source) return { items: [], droppedNonPublic: 0 };
+  const items: T[] = [];
   const seen = new Set<string>();
   let droppedNonPublic = 0;
-  for (const meta of urlMetadata) {
-    const url = meta.retrievedUrl;
-    if (!url || seen.has(url)) {
-      continue;
-    }
-
+  for (const item of source) {
+    const url = getUrl(item);
+    if (!url || seen.has(url)) continue;
     if (!isPublicHttpUrl(url)) {
       droppedNonPublic += 1;
       continue;
     }
-
     seen.add(url);
-    entries.push({
-      url,
-      status: meta.urlRetrievalStatus ?? 'UNKNOWN',
-    });
+    items.push(transform(item, url));
   }
+  return { items, droppedNonPublic };
+}
 
-  return { items: entries, droppedNonPublic };
+export function collectUrlMetadataWithCounts(
+  urlMetadata: UrlMetadata[] | undefined,
+): CollectedItems<UrlMetadataEntry> {
+  return collectUniquePublicEntries(
+    urlMetadata,
+    (meta) => meta.retrievedUrl,
+    (meta, url) => ({ url, status: meta.urlRetrievalStatus ?? 'UNKNOWN' }),
+  );
 }
 
 export function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlMetadataEntry[] {
@@ -167,27 +171,15 @@ export function collectGroundedSourceDetailsWithCounts(
   groundingMetadata: GroundingMetadata | undefined,
   urlContextUrls = new Set<string>(),
 ): CollectedItems<SourceDetail> {
-  if (!groundingMetadata?.groundingChunks) return { items: [], droppedNonPublic: 0 };
-
-  const sources: SourceDetail[] = [];
-  const seen = new Set<string>();
-  let droppedNonPublic = 0;
-  for (const chunk of groundingMetadata.groundingChunks) {
-    const uri = chunk.web?.uri;
-    if (!uri || seen.has(uri)) continue;
-
-    if (!isPublicHttpUrl(uri)) {
-      droppedNonPublic += 1;
-      continue;
-    }
-
-    seen.add(uri);
-    const title = chunk.web?.title;
-    const origin = urlContextUrls.has(uri) ? ('both' as const) : ('googleSearch' as const);
-    sources.push(pickDefined({ domain: domainFromPublicUrl(uri), origin, title, url: uri }));
-  }
-
-  return { items: sources, droppedNonPublic };
+  return collectUniquePublicEntries(
+    groundingMetadata?.groundingChunks,
+    (chunk) => chunk.web?.uri,
+    (chunk, url) => {
+      const title = chunk.web?.title;
+      const origin = urlContextUrls.has(url) ? ('both' as const) : ('googleSearch' as const);
+      return pickDefined({ domain: domainFromPublicUrl(url), origin, title, url });
+    },
+  );
 }
 
 export function collectGroundedSourceDetails(

@@ -58,6 +58,10 @@ type AnalyzeFileInput = Extract<AnalyzeInput, { targetKind: 'file' }>;
 
 const UNLABELED_DIAGRAM_FENCED_PATTERN = /```\s*\n([\s\S]*?)```/;
 
+function basename(filePath: string): string {
+  return filePath.split(/[\\/]/).pop() ?? filePath;
+}
+
 export function buildDiagramFencePattern(diagramType: 'mermaid' | 'plantuml'): RegExp {
   return new RegExp(`\`\`\`${diagramType}\\s*\\n([\\s\\S]*?)\`\`\``);
 }
@@ -137,7 +141,7 @@ function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher, services?: ToolSe
       rootsFetcher,
       [filePath],
       progress,
-      (fp) => `Uploading ${fp.split(/[\\/]/).pop() ?? fp}`,
+      (fp) => `Uploading ${basename(fp)}`,
       async (contents) => {
         await mcpLog(ctx, 'info', `Analyzing file content`);
         await progress.step(1, 2, 'Analyzing content');
@@ -224,7 +228,7 @@ async function analyzeMultiFileWork(
     rootsFetcher,
     filePaths,
     progress,
-    (filePath) => `Uploading ${filePath.split(/[\\/]/).pop() ?? filePath}`,
+    (filePath) => `Uploading ${basename(filePath)}`,
     async (contents) => {
       await progress.step(filePaths.length, filePaths.length + 1, 'Analyzing content');
 
@@ -303,8 +307,7 @@ async function analyzeDiagramWork(
     rootsFetcher,
     filesToUpload,
     progress,
-    (filePath, index, total) =>
-      `Uploaded ${filePath.split(/[\\/]/).pop() ?? filePath} (${index + 1}/${total})`,
+    (filePath, index, total) => `Uploaded ${basename(filePath)} (${index + 1}/${total})`,
     async (uploadedParts, uploadedCount) => {
       let attachedParts: Part[] = [];
 

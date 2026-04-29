@@ -104,7 +104,12 @@ export const ChatOutputSchema = z.strictObject({
   session: z
     .strictObject({
       id: z.string().describe('Server-managed in-memory session identifier'),
-      rebuiltAt: z.number().int().nonnegative().optional().describe('Session rebuild timestamp'),
+      rebuiltAt: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe('Session rebuild timestamp (Unix ms)'),
       resources: SessionResourceLinksSchema,
     })
     .optional()

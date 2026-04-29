@@ -603,7 +603,7 @@ const ProfileNameSchema = withFieldMetadata(
 
 const ProfileThinkingLevelSchema = withFieldMetadata(
   z.enum(['minimal', 'low', 'medium', 'high'] as const),
-  'Thinking depth for this profile. Overrides the profile default.',
+  'Thinking depth override for this profile (lowercase: minimal, low, medium, high). Distinct from the top-level thinkingLevel which uses uppercase.',
 );
 
 const FileSearchStoreNameSchema = z

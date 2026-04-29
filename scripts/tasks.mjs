@@ -34,6 +34,7 @@ import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import { parseArgs, stripVTControlCharacters } from 'node:util';
 
 const runController = new AbortController();
@@ -622,7 +623,7 @@ const TapParser = {
   OK_RE: /^\s*ok \d+ - (.+?)(?:\s+#\s+time=(\S+))?$/,
   NOT_OK_RE: /^\s*not ok \d+ - (.+)$/,
   YAML_KV_RE: /^(\w+):\s*(.*)$/,
-  YAML_BLOCK_FRAME_RE: /at .+? \(([^)]+:\d+:\d+)\)/,
+  YAML_BLOCK_FRAME_RE: /(?:at\s+)?\S+\s+\(([^)]+:\d+:\d+)\)/,
 
   parseLine(line) {
     const indent = line.match(/^(\s*)/)?.[1]?.length || 0;
@@ -673,6 +674,9 @@ const TapParser = {
     if (!result.at && result.stack) {
       const match = this.YAML_BLOCK_FRAME_RE.exec(result.stack);
       if (match && !match[1].startsWith('node:')) result.at = match[1];
+    }
+    if (!result.at && result.location) {
+      result.at = result.location.replace(/\\\\/g, '\\');
     }
     return result;
   },
@@ -1088,9 +1092,20 @@ const TaskRunners = {
 };
 
 function parseFrame(frame) {
-  const m3 = /^(.+):(\d+):(\d+)$/.exec(String(frame || ''));
+  let f = String(frame || '');
+  if (f.startsWith('file:')) {
+    const suffix = /(:\d+:\d+)$/.exec(f);
+    if (suffix) {
+      try {
+        f = fileURLToPath(f.slice(0, f.length - suffix[0].length)) + suffix[0];
+      } catch {
+        // not a valid file URL; fall through to plain path parsing
+      }
+    }
+  }
+  const m3 = /^(.+):(\d+):(\d+)$/.exec(f);
   if (m3) return { file: m3[1], line: Number(m3[2]), col: Number(m3[3]) };
-  const m2 = /^(.+):(\d+)$/.exec(String(frame || ''));
+  const m2 = /^(.+):(\d+)$/.exec(f);
   if (m2) return { file: m2[1], line: Number(m2[2]), col: 1 };
   return null;
 }

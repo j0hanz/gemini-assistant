@@ -254,7 +254,7 @@ describe('MCP tool smoke coverage', () => {
         );
         assert.equal(
           thinkingLevel.description,
-          'Optional reasoning depth override. Omit to use the job default.',
+          'Optional reasoning depth override (uppercase: MINIMAL, LOW, MEDIUM, HIGH). Omit to use the job default.',
           `Expected ${toolName}.thinkingLevel description to stay consistent`,
         );
       }
@@ -282,7 +282,7 @@ describe('MCP tool smoke coverage', () => {
       assert.ok(responseSchemaJson);
       assert.equal(
         responseSchemaJson.description,
-        'JSON Schema (2020-12) for structured output. Single-turn or new-session only; resumed sessions reject it.',
+        'Gemini-compatible JSON Schema subset for structured output. Single-turn or new-session only; resumed sessions reject it.',
       );
 
       assert.ok(seed);

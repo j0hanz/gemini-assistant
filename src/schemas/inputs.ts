@@ -95,7 +95,7 @@ export const GeminiResponseSchema: z.ZodType<Record<string, unknown>> = z.lazy((
       title: geminiResponseTextField('Short human-readable label.').optional(),
 
       description: geminiResponseTextField(
-        'Human-readable explanation of schema node. Crucial for guiding the LLM.',
+        'Human-readable explanation of the schema node.',
       ).optional(),
     })
     .superRefine((schema, ctx) => {
@@ -174,7 +174,7 @@ function validateResponseSchemaJson(payload: ParsePayload<string>): void {
 function responseSchemaJsonField() {
   return withFieldMetadata(
     z.string().trim().min(1).check(validateResponseSchemaJson).optional(),
-    'JSON Schema (2020-12) for structured output. Single-turn or new-session only; resumed sessions reject it.',
+    'Gemini-compatible JSON Schema subset for structured output. Single-turn or new-session only; resumed sessions reject it.',
   );
 }
 
@@ -319,6 +319,8 @@ const ResearchVariantSchema = z.discriminatedUnion('mode', [
   ResearchDeepSchema,
 ]);
 
+// Base schema applies defaults; discriminated union enforces mode-specific field constraints.
+// The cast is required because Zod v4's pipe() types don't thread discriminated union inference.
 export const ResearchInputSchema = ResearchInputBaseSchema.pipe(
   ResearchVariantSchema as unknown as z.ZodType<
     z.infer<typeof ResearchVariantSchema>,

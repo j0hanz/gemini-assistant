@@ -271,11 +271,11 @@ describe('ChatInputSchema', () => {
     assert.strictEqual(ChatInputSchema.shape.goal.description, 'User goal or requested outcome');
     assert.strictEqual(
       ChatInputSchema.shape.thinkingLevel.description,
-      'Optional reasoning depth override. Omit to use the job default.',
+      'Optional reasoning depth override (uppercase: MINIMAL, LOW, MEDIUM, HIGH). Omit to use the job default.',
     );
     assert.strictEqual(
       ChatInputSchema.shape.responseSchemaJson.description,
-      'JSON Schema (2020-12) for structured output. Single-turn or new-session only; resumed sessions reject it.',
+      'Gemini-compatible JSON Schema subset for structured output. Single-turn or new-session only; resumed sessions reject it.',
     );
     assert.strictEqual(
       ChatInputSchema.shape.seed.description,

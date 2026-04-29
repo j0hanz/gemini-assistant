@@ -98,8 +98,8 @@ function walkGeminiJsonSchema(value: unknown, path: (string | number)[], errors:
 
   if (!isRecord(value)) return;
 
-  if (path.length === 0 && ('oneOf' in value || 'anyOf' in value)) {
-    addSchemaError(errors, path, 'oneOf/anyOf are not supported at the root schema.');
+  if ('oneOf' in value || 'anyOf' in value) {
+    addSchemaError(errors, path, 'oneOf/anyOf are not supported.');
   }
 
   if ('$ref' in value) {
@@ -154,7 +154,7 @@ export function validatePropertyKeyList(
   ctx: z.core.$RefinementCtx<Record<string, unknown>>,
   propertyNames: Set<string> | undefined,
   values: string[] | undefined,
-  path: 'required' | 'propertyOrdering',
+  path: 'required',
   missingMessage: string,
   duplicateMessage: string,
 ): void {
@@ -169,7 +169,7 @@ export function validatePropertyKeyList(
       if (!propertyNames.has(key)) {
         addCustomIssue(
           ctx,
-          `${path} ${path === 'required' ? 'property' : 'entry'} "${key}" is not defined in properties.`,
+          `${path} property "${key}" is not defined in properties.`,
           [path, index],
           key,
         );

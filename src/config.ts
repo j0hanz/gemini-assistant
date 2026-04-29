@@ -275,7 +275,7 @@ export function getRootsEnv(): string | undefined {
 }
 
 export function getRootsFallbackCwd(): boolean {
-  return parseBooleanEnv('ROOTS_FALLBACK_CWD', false);
+  return parseBooleanEnv('ROOTS_FALLBACK_CWD', true);
 }
 
 export function getSessionLimits(): {

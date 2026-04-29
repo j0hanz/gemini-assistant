@@ -215,7 +215,7 @@ API_KEY=your_gemini_api_key_here
 | `CACHE_TTL`          | `3600s` | Workspace cache TTL (e.g. `1800s`)                 |
 | `AUTO_SCAN`          | `true`  | Auto-scan workspace files on startup               |
 | `ROOTS`              | —       | Comma-separated workspace root paths               |
-| `ROOTS_FALLBACK_CWD` | `false` | Fall back to CWD when no roots are configured      |
+| `ROOTS_FALLBACK_CWD` | `true`  | Fall back to CWD when no roots are configured      |
 | `CONTEXT`            | —       | Path to a workspace context override file          |
 | `REVIEW_DOCS`        | —       | Comma-separated paths to docs injected into review |
 

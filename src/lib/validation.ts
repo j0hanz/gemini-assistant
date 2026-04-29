@@ -414,7 +414,7 @@ export async function resolveWorkspacePath(
 
     if (!hasConfiguredIntent) {
       throw new Error(
-        `Path '${filePath}' rejected: no workspace roots are configured. Set ROOTS to declare allowed directories, advertise client roots, or set ROOTS_FALLBACK_CWD=true to allow the server's working directory.`,
+        `Path '${filePath}' rejected: no workspace roots are configured. Set ROOTS to declare allowed directories or advertise client roots. (ROOTS_FALLBACK_CWD is disabled — set it to true to allow the server's working directory.)`,
       );
     }
 

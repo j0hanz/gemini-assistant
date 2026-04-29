@@ -254,11 +254,9 @@ describe('resolveAndValidatePath', () => {
     assert.ok(result.includes('nonexistent-test-file-12345.txt'));
   });
 
-  it('rejects paths when no workspace roots are configured and ROOTS_FALLBACK_CWD is unset', async () => {
+  it('rejects paths when no workspace roots are configured and ROOTS_FALLBACK_CWD is explicitly false', async () => {
     setAllowedFileRootsEnv(undefined);
-    restoreRootsFallbackCwdEnv();
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete process.env[ROOTS_FALLBACK_CWD_ENV_KEY];
+    process.env[ROOTS_FALLBACK_CWD_ENV_KEY] = 'false';
     await assert.rejects(() => resolveAndValidatePath('package.json'), {
       message: /no workspace roots are configured/,
     });

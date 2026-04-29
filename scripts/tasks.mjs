@@ -2,24 +2,68 @@
 // Usage: node scripts/tasks.mjs [--fix] [--fast]
 //   --fix   run lint:fix instead of lint
 //   --fast  skip the test suite (static checks only)
-import { execSync, spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import readline from 'node:readline';
 
-// --- HISTORY AND TIMEOUT ---
+// --- CONSTANTS ---
 
+const HISTORY_FILE = '.tasks-history.json';
 const MAX_DURATIONS = 5;
+const MIN_SILENCE_MS = 30_000;
+const STARTUP_MIN_MS = 30_000;
+const MAX_STDERR_BYTES = 256 * 1024;
+const RAW_OUTPUT_PREVIEW_LIMIT = 500;
+const RAW_OUTPUT_MAX_LINES = 40;
+const IS_WINDOWS = process.platform === 'win32';
 
-function loadHistory(file = '.tasks-history.json') {
+const R = '\x1b[0m';
+const BOLD = '\x1b[1m';
+const DIM = '\x1b[2m';
+const GREEN = '\x1b[32m';
+const RED = '\x1b[31m';
+const YELLOW = '\x1b[33m';
+const CYAN = '\x1b[36m';
+
+const PASS = `${GREEN}✓${R}`;
+const FAIL = `${RED}✗${R}`;
+const RUN = `${CYAN}◆${R}`;
+const SKIP = `${YELLOW}–${R}`;
+const HANG = `${YELLOW}⏱${R}`;
+
+// --- HISTORY (cold-path sync FS is acceptable) ---
+
+/** @returns {{ test_durations: Record<string, number[]> }} */
+function loadHistory(file = HISTORY_FILE) {
+  let raw;
   try {
-    return JSON.parse(readFileSync(file, 'utf8'));
+    raw = readFileSync(file, 'utf8');
   } catch {
-    return { test_durations: {} };
+    return { test_durations: Object.create(null) };
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    // Defensive copy into a null-prototype dict (avoid prototype pollution).
+    const test_durations = Object.create(null);
+    const src = parsed?.test_durations;
+    if (src && typeof src === 'object') {
+      for (const key of Object.keys(src)) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+        const value = src[key];
+        if (Array.isArray(value)) {
+          test_durations[key] = value.filter((n) => typeof n === 'number' && Number.isFinite(n));
+        }
+      }
+    }
+    return { test_durations };
+  } catch {
+    return { test_durations: Object.create(null) };
   }
 }
 
-function saveHistory(history, newDurations, file = '.tasks-history.json') {
+function saveHistory(history, newDurations, file = HISTORY_FILE) {
   for (const [name, ms] of newDurations) {
     const arr = history.test_durations[name] ?? [];
     arr.push(ms);
@@ -28,12 +72,35 @@ function saveHistory(history, newDurations, file = '.tasks-history.json') {
   writeFileSync(file, JSON.stringify(history, null, 2) + '\n', 'utf8');
 }
 
-const MIN_SILENCE_MS = 30_000;
-
 function getSilenceTimeout(history) {
   const all = Object.values(history.test_durations).flat();
   if (!all.length) return MIN_SILENCE_MS;
   return Math.max(MIN_SILENCE_MS, 10 * Math.max(...all));
+}
+
+// --- COMMAND EXECUTION (no shell on POSIX; Windows needs shell for npm.cmd) ---
+
+/**
+ * Run a command and capture stdout/stderr.
+ * @param {string} cmd
+ * @param {string[]} args
+ * @returns {{ ok: boolean, stdout: string, stderr: string, status: number | null }}
+ */
+function runCommand(cmd, args) {
+  const result = spawnSync(cmd, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    // npm/npx are .cmd shims on Windows — require shell for resolution.
+    // Node and other binaries do not. We never interpolate user input into
+    // these arguments, so shell-on-Windows is not a security concern here.
+    shell: IS_WINDOWS && (cmd === 'npm' || cmd === 'npx'),
+  });
+  return {
+    ok: result.status === 0 && !result.error,
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+    status: result.status,
+  };
 }
 
 // --- PARSERS ---
@@ -44,8 +111,8 @@ function parseEslintJson(jsonStr, cwd) {
   for (const file of results) {
     if (!file.messages?.length) continue;
     const rel = file.filePath?.startsWith(cwd)
-      ? file.filePath.slice(cwd.length + 1).replace(/\\/g, '/')
-      : (file.filePath ?? '').replace(/\\/g, '/');
+      ? file.filePath.slice(cwd.length + 1).replaceAll('\\', '/')
+      : (file.filePath ?? '').replaceAll('\\', '/');
     for (const msg of file.messages) {
       errors.push({
         file: rel,
@@ -66,10 +133,10 @@ const TSC_RE = /^(.+?)\((\d+),(\d+)\): (error|warning) (TS\d+): (.+)$/;
 function parseTscOutput(text) {
   const errors = [];
   for (const line of text.split('\n')) {
-    const m = line.match(TSC_RE);
+    const m = TSC_RE.exec(line);
     if (!m) continue;
     errors.push({
-      file: m[1].replace(/\\/g, '/'),
+      file: m[1].replaceAll('\\', '/'),
       line: Number(m[2]),
       col: Number(m[3]),
       endCol: Number(m[3]) + 3,
@@ -81,17 +148,23 @@ function parseTscOutput(text) {
   return errors;
 }
 
+const TAP_OK_RE = /^\s*ok \d+ - (.+?)(?:\s+#\s+time=(\S+))?$/;
+const TAP_NOT_OK_RE = /^\s*not ok \d+ - (.+)$/;
+const YAML_KV_RE = /^(\w+):\s*(.*)$/;
+const YAML_BLOCK_FRAME_RE = /at .+? \(([^)]+:\d+:\d+)\)/;
+
 function parseTapLine(line) {
-  const indent = (line.match(/^(\s*)/) ?? ['', ''])[1].length;
-  const ok = /^\s*ok \d+ - (.+?)(?:\s+#\s+time=(\S+))?$/.exec(line);
-  if (ok)
+  const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
+  const ok = TAP_OK_RE.exec(line);
+  if (ok) {
     return {
       type: 'ok',
       depth: indent,
       name: ok[1].trim(),
       duration: ok[2] ? parseFloat(ok[2]) : 0,
     };
-  const notOk = /^\s*not ok \d+ - (.+)$/.exec(line);
+  }
+  const notOk = TAP_NOT_OK_RE.exec(line);
   if (notOk) return { type: 'not_ok', depth: indent, name: notOk[1].trim() };
   if (/^\s+---\s*$/.test(line)) return { type: 'yaml_start' };
   if (/^\s+\.\.\.\s*$/.test(line)) return { type: 'yaml_end' };
@@ -99,22 +172,30 @@ function parseTapLine(line) {
 }
 
 function parseYamlBlock(lines) {
-  const result = {};
+  /** @type {Record<string, string>} */
+  const result = Object.create(null);
   let multiKey = null;
   const multiLines = [];
+
+  const flushMulti = () => {
+    if (multiKey !== null) {
+      result[multiKey] = multiLines.join('\n').trim();
+      multiKey = null;
+      multiLines.length = 0;
+    }
+  };
+
   for (const raw of lines) {
     const trimmed = raw.trim();
-    if (multiKey) {
+    if (multiKey !== null) {
       if (/^\w+:/.test(trimmed)) {
-        result[multiKey] = multiLines.join('\n').trim();
-        multiKey = null;
-        multiLines.length = 0;
+        flushMulti();
       } else {
         multiLines.push(trimmed);
         continue;
       }
     }
-    const kv = /^(\w+):\s*(.*)$/.exec(trimmed);
+    const kv = YAML_KV_RE.exec(trimmed);
     if (!kv) continue;
     const [, key, val] = kv;
     if (val === '|-' || val === '|') {
@@ -124,23 +205,16 @@ function parseYamlBlock(lines) {
       result[key] = val.replace(/^'|'$/g, '');
     }
   }
-  if (multiKey) result[multiKey] = multiLines.join('\n').trim();
+  flushMulti();
+
   if (!result.at && result.stack) {
-    const m = result.stack.match(/at .+? \(([^)]+:\d+:\d+)\)/);
+    const m = YAML_BLOCK_FRAME_RE.exec(result.stack);
     if (m && !m[1].startsWith('node:')) result.at = m[1];
   }
   return result;
 }
 
 // --- RENDERING ---
-
-const R = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const GREEN = '\x1b[32m';
-const RED = '\x1b[31m';
-const YELLOW = '\x1b[33m';
-const CYAN = '\x1b[36m';
 
 const sourceCache = new Map();
 
@@ -149,14 +223,15 @@ function clearSourceCache() {
 }
 
 function getLines(filePath) {
-  if (!sourceCache.has(filePath)) {
-    try {
-      sourceCache.set(filePath, readFileSync(filePath, 'utf8').split('\n'));
-    } catch {
-      sourceCache.set(filePath, []);
-    }
+  let cached = sourceCache.get(filePath);
+  if (cached !== undefined) return cached;
+  try {
+    cached = readFileSync(filePath, 'utf8').split('\n');
+  } catch {
+    cached = [];
   }
-  return sourceCache.get(filePath);
+  sourceCache.set(filePath, cached);
+  return cached;
 }
 
 function renderRustError(error, cwd = process.cwd()) {
@@ -171,7 +246,7 @@ function renderRustError(error, cwd = process.cwd()) {
   const pad = ' '.repeat(gutterW);
   out.push(`${DIM}${pad} |${R}`);
   const underlineLen = Math.max(3, (endCol ?? col + 3) - col);
-  const underline = '^^^^^^^^^^^'.slice(0, underlineLen);
+  const underline = '^'.repeat(underlineLen);
   if (line >= 1 && line <= src.length) {
     for (const n of [line - 1, line, line + 1]) {
       if (n < 1 || n > src.length) continue;
@@ -217,13 +292,7 @@ function emitLlmBlock(data) {
   );
 }
 
-// --- MAIN RUNNER ---
-
-const PASS = `${GREEN}✓${R}`;
-const FAIL = `${RED}✗${R}`;
-const RUN = `${CYAN}◆${R}`;
-const SKIP = `${YELLOW}–${R}`;
-const HANG = `${YELLOW}⏱${R}`;
+// --- TASK RUNNERS ---
 
 const args = new Set(process.argv.slice(2));
 const fix = args.has('--fix');
@@ -231,189 +300,187 @@ const fast = args.has('--fast');
 
 function runLint() {
   if (fix) {
-    try {
-      execSync('npm run lint:fix', { encoding: 'utf8', stdio: 'pipe' });
-      return { ok: true };
-    } catch (err) {
-      const e = /** @type {any} */ (err);
-      return { ok: false, rawOutput: [e.stdout, e.stderr].filter(Boolean).join('\n') };
-    }
+    const r = runCommand('npm', ['run', 'lint:fix']);
+    return r.ok ? { ok: true } : { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
   }
+  const r = runCommand('npx', ['eslint', '.', '--max-warnings=0', '--format=json']);
+  if (r.ok) return { ok: true };
   try {
-    execSync('npx eslint . --max-warnings=0 --format=json', { encoding: 'utf8', stdio: 'pipe' });
-    return { ok: true };
-  } catch (err) {
-    const e = /** @type {any} */ (err);
-    try {
-      const errors = parseEslintJson(e.stdout ?? '[]', process.cwd());
-      if (!errors.length) {
-        return { ok: false, rawOutput: [e.stdout, e.stderr].filter(Boolean).join('\n') };
-      }
-      const errCount = errors.filter((x) => x.severity === 'error').length;
-      const warnCount = errors.filter((x) => x.severity === 'warning').length;
-      return { ok: false, errors, counts: { errors: errCount, warnings: warnCount } };
-    } catch {
-      return { ok: false, rawOutput: [e.stdout, e.stderr].filter(Boolean).join('\n') };
+    const errors = parseEslintJson(r.stdout || '[]', process.cwd());
+    if (!errors.length) {
+      return { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
     }
+    const errCount = errors.filter((x) => x.severity === 'error').length;
+    const warnCount = errors.filter((x) => x.severity === 'warning').length;
+    return { ok: false, errors, counts: { errors: errCount, warnings: warnCount } };
+  } catch {
+    return { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
   }
 }
 
 function runTypeCheck() {
-  try {
-    execSync('npx tsc -p tsconfig.json --noEmit --pretty false', {
-      encoding: 'utf8',
-      stdio: 'pipe',
-    });
-    return { ok: true };
-  } catch (err) {
-    const e = /** @type {any} */ (err);
-    const text = [e.stdout, e.stderr].filter(Boolean).join('\n');
-    const errors = parseTscOutput(text);
-    if (!errors.length) return { ok: false, rawOutput: text };
-    const errCount = errors.filter((x) => x.severity === 'error').length;
-    const warnCount = errors.filter((x) => x.severity === 'warning').length;
-    return { ok: false, errors, counts: { errors: errCount, warnings: warnCount } };
-  }
+  const r = runCommand('npx', ['tsc', '-p', 'tsconfig.json', '--noEmit', '--pretty', 'false']);
+  if (r.ok) return { ok: true };
+  const text = `${r.stdout}\n${r.stderr}`.trim();
+  const errors = parseTscOutput(text);
+  if (!errors.length) return { ok: false, rawOutput: text };
+  const errCount = errors.filter((x) => x.severity === 'error').length;
+  const warnCount = errors.filter((x) => x.severity === 'warning').length;
+  return { ok: false, errors, counts: { errors: errCount, warnings: warnCount } };
 }
 
 function runTest() {
-  return new Promise((resolve) => {
-    const history = loadHistory();
-    const silenceMs = getSilenceTimeout(history);
-    // Startup budget: tsx/esm cold start + .env load + test discovery can take
-    // several seconds before the first TAP line. Use a generous budget until
-    // the first `ok` is observed; only then enforce the adaptive silence
-    // window between TAP lines.
-    const startupMs = Math.max(silenceMs, 30_000);
+  const history = loadHistory();
+  const silenceMs = getSilenceTimeout(history);
+  // Cold start (tsx/esm + .env load + discovery) needs a generous budget
+  // until the first TAP line; then enforce the adaptive silence window.
+  const startupMs = Math.max(silenceMs, STARTUP_MIN_MS);
 
-    const child = spawn(
-      'node',
-      ['--import', 'tsx/esm', '--env-file=.env', '--test', '--no-warnings', '--test-reporter=tap'],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
-    );
+  // Pass an AbortSignal to spawn so kill is automatic on timeout.
+  // (Replaces the legacy try/catch around child.kill('SIGTERM').)
+  const ac = new AbortController();
+  const child = spawn(
+    process.execPath,
+    ['--import', 'tsx/esm', '--env-file=.env', '--test', '--no-warnings', '--test-reporter=tap'],
+    { stdio: ['ignore', 'pipe', 'pipe'], signal: ac.signal },
+  );
 
-    /** @type {{ name: string; duration: number } | null} */
-    let lastCompleted = null;
-    /** @type {Map<string, number>} */
-    const testDurations = new Map();
-    /** @type {Array<{ name: string; file: string; expected?: string; actual?: string; errorMessage?: string; frame?: string | null }>} */
-    const failures = [];
-    let currentFailName = /** @type {string | null} */ (null);
-    let inYaml = false;
-    /** @type {string[]} */
-    const yamlLines = [];
-    let buf = '';
-    /** @type {ReturnType<typeof setTimeout> | null} */
-    let silenceTimer = null;
-    let resolved = false;
-    let seenFirstOk = false;
-    let stderrBuf = '';
+  /** @type {{ name: string; duration: number } | null} */
+  let lastCompleted = null;
+  /** @type {Map<string, number>} */
+  const testDurations = new Map();
+  /** @type {Array<{ name: string; file: string; expected?: string; actual?: string; errorMessage?: string; frame?: string | null }>} */
+  const failures = [];
+  let currentFailName = null;
+  let inYaml = false;
+  /** @type {string[]} */
+  const yamlLines = [];
+  let seenFirstOk = false;
+  let stderrBuf = '';
 
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk) => {
-      stderrBuf += chunk;
-    });
-
-    function done(value) {
-      if (resolved) return;
-      resolved = true;
-      if (silenceTimer) clearTimeout(silenceTimer);
-      resolve(value);
-    }
-
-    function resetTimer() {
-      if (silenceTimer) clearTimeout(silenceTimer);
-      const ms = seenFirstOk ? silenceMs : startupMs;
-      silenceTimer = setTimeout(() => {
-        try {
-          child.kill('SIGTERM');
-        } catch {
-          // ignore: process may already have exited
-        }
-        const maxHistorical = Math.max(0, ...Object.values(history.test_durations).flat());
-        done({
-          ok: false,
-          timeout: true,
-          silenceMs: ms,
-          phase: seenFirstOk ? 'between-tests' : 'startup',
-          lastCompletedTest: lastCompleted,
-          suiteMaxHistoricalMs: maxHistorical,
-        });
-      }, ms);
-    }
-
-    resetTimer();
-
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => {
-      resetTimer();
-      buf += chunk;
-      const lines = buf.split('\n');
-      buf = lines.pop() ?? '';
-      for (const line of lines) {
-        const ev = parseTapLine(line);
-        if (ev.type === 'ok') {
-          seenFirstOk = true;
-          lastCompleted = { name: ev.name, duration: ev.duration };
-          testDurations.set(ev.name, ev.duration);
-          inYaml = false;
-          yamlLines.length = 0;
-          currentFailName = null;
-        } else if (ev.type === 'not_ok') {
-          seenFirstOk = true;
-          currentFailName = ev.name;
-          inYaml = false;
-          yamlLines.length = 0;
-        } else if (ev.type === 'yaml_start') {
-          inYaml = true;
-          yamlLines.length = 0;
-        } else if (ev.type === 'yaml_end' && inYaml) {
-          inYaml = false;
-          const yaml = parseYamlBlock([...yamlLines]);
-          if (currentFailName) {
-            failures.push({
-              name: currentFailName,
-              file: yaml.at ? yaml.at.replace(/:\d+:\d+$/, '') : '',
-              expected: yaml.expected,
-              actual: yaml.actual,
-              errorMessage: yaml.error,
-              frame: yaml.at ?? null,
-            });
-          }
-          yamlLines.length = 0;
-          currentFailName = null;
-        } else if (inYaml) {
-          yamlLines.push(line);
-        }
-      }
-    });
-
-    child.on('error', (err) => {
-      done({ ok: false, rawOutput: String(err?.message ?? err) });
-    });
-
-    child.on('close', (code) => {
-      if (failures.length) {
-        done({ ok: false, failures, testDurations });
-        return;
-      }
-      if (code !== 0) {
-        done({ ok: false, rawOutput: stderrBuf || `test runner exited with code ${code}` });
-        return;
-      }
-      saveHistory(history, testDurations);
-      done({ ok: true, testDurations });
-    });
+  // Required: bind error listeners on the streams themselves to prevent
+  // an unhandled 'error' event from crashing the process.
+  child.stdout.on('error', (_err) => {
+    /* suppress stream errors */
   });
+  child.stderr.on('error', (_err) => {
+    /* suppress stream errors */
+  });
+
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => {
+    if (stderrBuf.length < MAX_STDERR_BYTES) {
+      stderrBuf += chunk;
+      if (stderrBuf.length > MAX_STDERR_BYTES) {
+        stderrBuf = stderrBuf.slice(0, MAX_STDERR_BYTES);
+      }
+    }
+  });
+
+  // readline gives correct line semantics with no manual buffer juggling.
+  const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+
+  const { promise, resolve } = Promise.withResolvers();
+  let resolved = false;
+  let silenceTimer = null;
+
+  const settle = (value) => {
+    if (resolved) return;
+    resolved = true;
+    if (silenceTimer) clearTimeout(silenceTimer);
+    lines.close();
+    resolve(value);
+  };
+
+  const armTimer = () => {
+    if (silenceTimer) clearTimeout(silenceTimer);
+    const ms = seenFirstOk ? silenceMs : startupMs;
+    silenceTimer = setTimeout(() => {
+      const maxHistorical = Math.max(0, ...Object.values(history.test_durations).flat());
+      ac.abort(); // triggers child kill via signal option
+      settle({
+        ok: false,
+        timeout: true,
+        silenceMs: ms,
+        phase: seenFirstOk ? 'between-tests' : 'startup',
+        lastCompletedTest: lastCompleted,
+        suiteMaxHistoricalMs: maxHistorical,
+      });
+    }, ms);
+  };
+
+  armTimer();
+
+  lines.on('line', (line) => {
+    armTimer();
+    const ev = parseTapLine(line);
+    if (ev.type === 'ok') {
+      seenFirstOk = true;
+      lastCompleted = { name: ev.name, duration: ev.duration };
+      testDurations.set(ev.name, ev.duration);
+      inYaml = false;
+      yamlLines.length = 0;
+      currentFailName = null;
+    } else if (ev.type === 'not_ok') {
+      seenFirstOk = true;
+      currentFailName = ev.name;
+      inYaml = false;
+      yamlLines.length = 0;
+    } else if (ev.type === 'yaml_start') {
+      inYaml = true;
+      yamlLines.length = 0;
+    } else if (ev.type === 'yaml_end' && inYaml) {
+      inYaml = false;
+      const yaml = parseYamlBlock([...yamlLines]);
+      if (currentFailName) {
+        failures.push({
+          name: currentFailName,
+          file: yaml.at ? yaml.at.replace(/:\d+:\d+$/, '') : '',
+          expected: yaml.expected,
+          actual: yaml.actual,
+          errorMessage: yaml.error,
+          frame: yaml.at ?? null,
+        });
+      }
+      yamlLines.length = 0;
+      currentFailName = null;
+    } else if (inYaml) {
+      yamlLines.push(line);
+    }
+  });
+
+  child.on('error', (err) => {
+    // Suppress the synthetic AbortError that spawn emits when ac.abort()
+    // fires — we already settled with the timeout payload.
+    if (err && err.name === 'AbortError') return;
+    settle({ ok: false, rawOutput: String(err?.message ?? err) });
+  });
+
+  child.on('close', (code) => {
+    if (failures.length) {
+      settle({ ok: false, failures, testDurations });
+      return;
+    }
+    if (code !== 0) {
+      settle({ ok: false, rawOutput: stderrBuf || `test runner exited with code ${code}` });
+      return;
+    }
+    saveHistory(history, testDurations);
+    settle({ ok: true, testDurations });
+  });
+
+  return promise;
 }
 
-/** @type {Array<{ label: string; cmd?: string; runner?: () => any | Promise<any>; skip?: boolean }>} */
+// --- TASK TABLE ---
+
+/** @type {Array<{ label: string; cmd?: [string, string[]]; runner?: () => any | Promise<any>; skip?: boolean }>} */
 const tasks = [
-  { label: 'format', cmd: 'npm run format' },
+  { label: 'format', cmd: ['npm', ['run', 'format']] },
   { label: 'lint', runner: runLint },
   { label: 'type-check', runner: runTypeCheck },
-  { label: 'build', cmd: 'npm run build' },
-  { label: 'knip', cmd: 'npm run knip' },
+  { label: 'build', cmd: ['npm', ['run', 'build']] },
+  { label: 'knip', cmd: ['npm', ['run', 'knip']] },
   { label: 'test', runner: runTest, skip: fast },
 ];
 
@@ -445,155 +512,165 @@ function printTask(icon, label, time, skipped, counts) {
 
 function printOutput(raw) {
   if (!raw) return;
-  const lines = raw.trim().split('\n');
-  const shown = lines.slice(0, 40);
+  const split = raw.trim().split('\n');
+  const shown = split.slice(0, RAW_OUTPUT_MAX_LINES);
   process.stdout.write('\n');
   for (const line of shown) process.stdout.write(`      ${DIM}${line}${R}\n`);
-  if (lines.length > 40)
-    process.stdout.write(`      ${DIM}… ${lines.length - 40} more lines${R}\n`);
+  if (split.length > RAW_OUTPUT_MAX_LINES) {
+    process.stdout.write(`      ${DIM}… ${split.length - RAW_OUTPUT_MAX_LINES} more lines${R}\n`);
+  }
   process.stdout.write('\n');
 }
 
-printHeader();
+// --- MAIN ---
 
-let passed = 0;
-let failed = 0;
-let skipped = 0;
-const wallStart = Date.now();
-let llmPayload = null;
+async function main() {
+  printHeader();
 
-for (const task of tasks) {
-  if (task.skip) {
-    printTask(SKIP, task.label, '', true, null);
-    skipped++;
-    continue;
-  }
+  let passed = 0;
+  let failed = 0;
+  let skipped = 0;
+  const wallStart = Date.now();
+  let llmPayload = null;
 
-  process.stdout.write(`  ${RUN}  ${BOLD}${task.label.padEnd(COL)}${R}`);
-  clearSourceCache();
-
-  const start = Date.now();
-  let result;
-
-  if (task.runner) {
-    result = await task.runner();
-  } else {
-    try {
-      execSync(task.cmd, { encoding: 'utf8', stdio: 'pipe' });
-      result = { ok: true };
-    } catch (err) {
-      const e = /** @type {any} */ (err);
-      result = { ok: false, rawOutput: [e.stdout, e.stderr].filter(Boolean).join('\n') };
+  for (const task of tasks) {
+    if (task.skip) {
+      printTask(SKIP, task.label, '', true, null);
+      skipped++;
+      continue;
     }
-  }
 
-  const ms = Date.now() - start;
+    process.stdout.write(`  ${RUN}  ${BOLD}${task.label.padEnd(COL)}${R}`);
+    clearSourceCache();
 
-  if (!result.ok) {
-    const counts = result.counts ?? null;
-    printTask(result.timeout ? HANG : FAIL, task.label, elapsed(ms), false, counts);
-    failed++;
+    const start = Date.now();
+    let result;
 
-    if (result.timeout) {
-      const startupPhase = result.phase === 'startup';
-      process.stdout.write('\n');
-      process.stdout.write(
-        `  ${HANG}  ${BOLD}TIMED OUT${R} — ${
-          startupPhase
-            ? `no TAP output during startup window (${elapsed(result.silenceMs)})`
-            : `no TAP output for ${elapsed(result.silenceMs)} between tests`
-        }\n\n`,
-      );
-      if (result.lastCompletedTest) {
-        process.stdout.write(`  ${DIM}Last completed test:${R}\n`);
-        process.stdout.write(`  ${GREEN}✔${R}  ${result.lastCompletedTest.name}\n\n`);
-        process.stdout.write(
-          `  ${DIM}→ The hang likely occurred in the next test after this one.\n` +
-            `    Check for: unclosed handles, unresolved promises, missing mock teardown.${R}\n\n`,
-        );
-      } else if (startupPhase) {
-        process.stdout.write(
-          `  ${DIM}→ Test process produced no TAP lines before the startup window expired.\n` +
-            `    Check for: top-level await deadlocks, missing .env / config, slow cold start.${R}\n\n`,
-        );
-      }
-      llmPayload = {
-        failed_task: task.label,
-        status: 'timeout',
-        phase: result.phase ?? 'between-tests',
-        silence_duration_ms: result.silenceMs,
-        last_completed_test: result.lastCompletedTest ?? null,
-        suite_max_historical_ms: result.suiteMaxHistoricalMs ?? 0,
-        hint: startupPhase
-          ? 'Test process produced no TAP output before the startup window expired. Likely causes: top-level await that never resolves, missing config/env, or a cold start slower than the startup budget.'
-          : 'Process produced no TAP output for the silence threshold. The next test after last_completed_test is the likely culprit. Check for unclosed handles, unresolved promises, or missing mock teardown.',
-      };
-    } else if (result.failures?.length) {
-      process.stdout.write('\n');
-      for (const f of result.failures) {
-        process.stdout.write(renderTestFailureCard(f) + '\n\n');
-      }
-      llmPayload = {
-        failed_task: task.label,
-        status: 'failed',
-        total_failures: result.failures.length,
-        failures: result.failures.map(({ name, file, expected, actual, errorMessage, frame }) => ({
-          name,
-          file,
-          ...(expected !== undefined ? { expected, received: actual } : {}),
-          ...(errorMessage ? { error: errorMessage } : {}),
-          ...(frame ? { at: frame } : {}),
-        })),
-      };
-    } else if (result.errors?.length) {
-      process.stdout.write('\n');
-      for (const err of result.errors) {
-        process.stdout.write(renderRustError(err) + '\n\n');
-      }
-      llmPayload = {
-        failed_task: task.label,
-        status: 'failed',
-        total_errors: counts?.errors ?? 0,
-        total_warnings: counts?.warnings ?? 0,
-        errors: result.errors.map(({ file, line, col, rule, severity, message }) => ({
-          file,
-          line,
-          col,
-          rule,
-          severity,
-          message,
-        })),
-      };
-    } else if (result.rawOutput) {
-      printOutput(result.rawOutput);
-      llmPayload = {
-        failed_task: task.label,
-        status: 'failed',
-        raw_output_preview: result.rawOutput.slice(0, 500),
-      };
+    if (task.runner) {
+      result = await task.runner();
+    } else if (task.cmd) {
+      const [cmd, cmdArgs] = task.cmd;
+      const r = runCommand(cmd, cmdArgs);
+      result = r.ok ? { ok: true } : { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
+    } else {
+      result = { ok: false, rawOutput: 'task has no runner or cmd' };
     }
-    break;
+
+    const ms = Date.now() - start;
+
+    if (!result.ok) {
+      const counts = result.counts ?? null;
+      printTask(result.timeout ? HANG : FAIL, task.label, elapsed(ms), false, counts);
+      failed++;
+
+      if (result.timeout) {
+        const startupPhase = result.phase === 'startup';
+        process.stdout.write('\n');
+        process.stdout.write(
+          `  ${HANG}  ${BOLD}TIMED OUT${R} — ${
+            startupPhase
+              ? `no TAP output during startup window (${elapsed(result.silenceMs)})`
+              : `no TAP output for ${elapsed(result.silenceMs)} between tests`
+          }\n\n`,
+        );
+        if (result.lastCompletedTest) {
+          process.stdout.write(`  ${DIM}Last completed test:${R}\n`);
+          process.stdout.write(`  ${GREEN}✔${R}  ${result.lastCompletedTest.name}\n\n`);
+          process.stdout.write(
+            `  ${DIM}→ The hang likely occurred in the next test after this one.\n` +
+              `    Check for: unclosed handles, unresolved promises, missing mock teardown.${R}\n\n`,
+          );
+        } else if (startupPhase) {
+          process.stdout.write(
+            `  ${DIM}→ Test process produced no TAP lines before the startup window expired.\n` +
+              `    Check for: top-level await deadlocks, missing .env / config, slow cold start.${R}\n\n`,
+          );
+        }
+        llmPayload = {
+          failed_task: task.label,
+          status: 'timeout',
+          phase: result.phase ?? 'between-tests',
+          silence_duration_ms: result.silenceMs,
+          last_completed_test: result.lastCompletedTest ?? null,
+          suite_max_historical_ms: result.suiteMaxHistoricalMs ?? 0,
+          hint: startupPhase
+            ? 'Test process produced no TAP output before the startup window expired. Likely causes: top-level await that never resolves, missing config/env, or a cold start slower than the startup budget.'
+            : 'Process produced no TAP output for the silence threshold. The next test after last_completed_test is the likely culprit. Check for unclosed handles, unresolved promises, or missing mock teardown.',
+        };
+      } else if (result.failures?.length) {
+        process.stdout.write('\n');
+        for (const f of result.failures) {
+          process.stdout.write(renderTestFailureCard(f) + '\n\n');
+        }
+        llmPayload = {
+          failed_task: task.label,
+          status: 'failed',
+          total_failures: result.failures.length,
+          failures: result.failures.map(
+            ({ name, file, expected, actual, errorMessage, frame }) => ({
+              name,
+              file,
+              ...(expected !== undefined ? { expected, received: actual } : {}),
+              ...(errorMessage ? { error: errorMessage } : {}),
+              ...(frame ? { at: frame } : {}),
+            }),
+          ),
+        };
+      } else if (result.errors?.length) {
+        process.stdout.write('\n');
+        for (const err of result.errors) {
+          process.stdout.write(renderRustError(err) + '\n\n');
+        }
+        llmPayload = {
+          failed_task: task.label,
+          status: 'failed',
+          total_errors: counts?.errors ?? 0,
+          total_warnings: counts?.warnings ?? 0,
+          errors: result.errors.map(({ file, line, col, rule, severity, message }) => ({
+            file,
+            line,
+            col,
+            rule,
+            severity,
+            message,
+          })),
+        };
+      } else if (result.rawOutput) {
+        printOutput(result.rawOutput);
+        llmPayload = {
+          failed_task: task.label,
+          status: 'failed',
+          raw_output_preview: result.rawOutput.slice(0, RAW_OUTPUT_PREVIEW_LIMIT),
+        };
+      }
+      break;
+    }
+
+    printTask(PASS, task.label, elapsed(ms), false, null);
+    passed++;
   }
 
-  printTask(PASS, task.label, elapsed(ms), false, null);
-  passed++;
-}
+  if (llmPayload) emitLlmBlock(llmPayload);
 
-if (llmPayload) emitLlmBlock(llmPayload);
+  const total = tasks.length - skipped;
+  const wall = elapsed(Date.now() - wallStart);
 
-const total = tasks.length - skipped;
-const wall = elapsed(Date.now() - wallStart);
+  process.stdout.write('\n');
 
-process.stdout.write('\n');
+  if (failed === 0) {
+    const label = fast
+      ? `${passed}/${total} passed  ${DIM}(test skipped)${R}`
+      : `${passed}/${total} passed`;
+    process.stdout.write(`  ${GREEN}${BOLD}✓${R}  ${label}  ${DIM}${wall}${R}\n\n`);
+    return 0;
+  }
 
-if (failed === 0) {
-  const label = fast
-    ? `${passed}/${total} passed  ${DIM}(test skipped)${R}`
-    : `${passed}/${total} passed`;
-  process.stdout.write(`  ${GREEN}${BOLD}✓${R}  ${label}  ${DIM}${wall}${R}\n\n`);
-} else {
   process.stdout.write(
     `  ${RED}${BOLD}✗${R}  ${passed}/${total} passed  ${RED}${failed} failed${R}  ${DIM}${wall}${R}\n\n`,
   );
-  process.exit(1);
+  return 1;
 }
+
+// CLI entry — only ever invoked via `node scripts/tasks.mjs`, never imported.
+// Use exitCode (not process.exit) so stdout has a chance to flush.
+process.exitCode = await main();

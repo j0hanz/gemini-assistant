@@ -271,7 +271,7 @@ describe('ChatInputSchema', () => {
     assert.strictEqual(ChatInputSchema.shape.goal.description, 'User goal or requested outcome');
     assert.strictEqual(
       ChatInputSchema.shape.thinkingLevel.description,
-      'Optional reasoning depth override (uppercase: MINIMAL, LOW, MEDIUM, HIGH). Omit to use the job default.',
+      'Thinking level selector. Overrides Gemini defaults for the selected profile.',
     );
     assert.strictEqual(
       ChatInputSchema.shape.responseSchemaJson.description,

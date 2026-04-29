@@ -161,7 +161,7 @@ export function sessionId(description: string) {
 }
 
 export function thinkingLevel(
-  description = 'Optional reasoning depth override. Omit to use the job default.',
+  description = 'Thinking level selector. Overrides Gemini defaults for the selected profile.',
 ) {
   return withFieldMetadata(z.enum(THINKING_LEVELS).optional(), description);
 }

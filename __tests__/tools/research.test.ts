@@ -3,6 +3,10 @@ import type { RequestTaskStore, ServerContext, Task } from '@modelcontextprotoco
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+import type { Interactions } from '@google/genai';
+
+import { MockGeminiEnvironment } from '../lib/mock-gemini-environment.js';
+
 import { getAI } from '../../src/client.js';
 import { createDefaultToolServices } from '../../src/lib/tool-context.js';
 import { ResearchOutputSchema } from '../../src/schemas/outputs.js';
@@ -213,28 +217,28 @@ describe('research tool contracts', () => {
     const { research } = getHandlers();
     const store = makeMockStore();
     const client = getAI();
+    const env = new MockGeminiEnvironment();
     const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
 
+    env.install();
+    env.queueInteraction({
+      id: 'deep-2',
+      status: 'in_progress',
+      created: '2026-01-01T00:00:00Z',
+      updated: '2026-01-01T00:00:00Z',
+    });
+    env.queuePollResponses('deep-2', {
+      id: 'deep-2',
+      status: 'completed',
+      created: '2026-01-01T00:00:00Z',
+      updated: '2026-01-01T00:00:00Z',
+      outputs: [{ type: 'text', text: 'Deep research report' }],
+    });
+
     // @ts-expect-error test override
-    client.models.generateContentStream = async () =>
-      fakeStream([
-        {
-          candidates: [
-            {
-              content: {
-                parts: [
-                  { toolCall: { id: 'search-1', toolType: 'GOOGLE_SEARCH_WEB' } },
-                  { text: 'Deep research report' },
-                ],
-              },
-              finishReason: 'STOP',
-              groundingMetadata: {
-                groundingChunks: [{ web: { title: 'Docs', uri: 'https://example.com/docs' } }],
-              },
-            },
-          ],
-        },
-      ]);
+    client.models.generateContentStream = async () => {
+      throw new Error('stream path should not be used for searchDepth=2');
+    };
 
     try {
       await research.createTask(
@@ -255,19 +259,12 @@ describe('research tool contracts', () => {
       assert.ok(structured && typeof structured === 'object');
       assert.strictEqual((structured as Record<string, unknown>).mode, 'deep');
       assert.strictEqual((structured as Record<string, unknown>).summary, 'Deep research report');
-      assert.strictEqual((structured as Record<string, unknown>).sources, undefined);
-      assert.deepStrictEqual((structured as Record<string, unknown>).sourceDetails, [
-        {
-          domain: 'example.com',
-          origin: 'googleSearch',
-          title: 'Docs',
-          url: 'https://example.com/docs',
-        },
-      ]);
-      assert.deepStrictEqual((structured as Record<string, unknown>).toolsUsed, ['googleSearch']);
-      assert.strictEqual((structured as Record<string, unknown>).status, 'partially_grounded');
+      assert.strictEqual((structured as Record<string, unknown>).sourceDetails, undefined);
+      assert.strictEqual((structured as Record<string, unknown>).toolsUsed, undefined);
+      assert.strictEqual((structured as Record<string, unknown>).status, 'ungrounded');
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
+      env.restore();
     }
   });
 
@@ -839,6 +836,7 @@ describe('research tool contracts', () => {
     const { research } = getHandlers();
     const store = makeMockStore();
     const client = getAI();
+    const env = new MockGeminiEnvironment();
     const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
     const depthThreeCalls: Record<string, unknown>[] = [];
     const depthFourCalls: Record<string, unknown>[] = [];
@@ -854,6 +852,21 @@ describe('research tool contracts', () => {
         );
       }).length;
     }
+
+    env.install();
+    env.queueInteraction({
+      id: 'single-pass-1',
+      status: 'in_progress',
+      created: '2026-01-01T00:00:00Z',
+      updated: '2026-01-01T00:00:00Z',
+    });
+    env.queuePollResponses('single-pass-1', {
+      id: 'single-pass-1',
+      status: 'completed',
+      created: '2026-01-01T00:00:00Z',
+      updated: '2026-01-01T00:00:00Z',
+      outputs: [{ type: 'text', text: 'Research answer' }],
+    });
 
     // @ts-expect-error test override
     client.models.generateContentStream = async (request: Record<string, unknown>) => {
@@ -997,6 +1010,53 @@ describe('research tool contracts', () => {
       assert.strictEqual(countRetrievalCalls(depthFourCalls), 4);
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
+      env.restore();
+    }
+  });
+
+  it('uses background interactions for single-pass deep research', async () => {
+    const { research } = getHandlers();
+    const store = makeMockStore();
+    const client = getAI();
+    const env = new MockGeminiEnvironment();
+    const originalGenerateContentStream = client.models.generateContentStream.bind(client.models);
+
+    env.install();
+
+    const backgroundInteraction: Interactions.Interaction = {
+      id: 'bg-test-1',
+      status: 'in_progress',
+      created: '2026-01-01T00:00:00Z',
+      updated: '2026-01-01T00:00:00Z',
+    };
+    env.queueInteraction(backgroundInteraction);
+    env.queuePollResponses('bg-test-1', {
+      ...backgroundInteraction,
+      status: 'completed',
+      outputs: [{ type: 'text', text: 'deep research result' }],
+    });
+
+    // @ts-expect-error test override
+    client.models.generateContentStream = async () => {
+      throw new Error('stream path should not be used for searchDepth=1');
+    };
+
+    try {
+      await research.createTask(
+        { goal: 'single pass', mode: 'deep', searchDepth: 1 },
+        makeMockContext(store),
+      );
+      await flushTaskWork();
+
+      assert.strictEqual(store.stored[0]?.status, 'completed');
+      assert.ok(
+        store.stored[0]?.result.content.some((entry) =>
+          entry.text?.includes('deep research result'),
+        ),
+      );
+    } finally {
+      client.models.generateContentStream = originalGenerateContentStream;
+      env.restore();
     }
   });
 

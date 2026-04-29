@@ -1,8 +1,14 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import type { GroundingMetadata, UrlContextMetadata } from '@google/genai';
+import type { GroundingMetadata, Interactions, UrlContextMetadata } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
+import {
+  builtInsToInteractionTools,
+  createBackgroundInteraction,
+  interactionToStreamResult,
+  pollUntilComplete,
+} from '../lib/interactions.js';
 import { parseJson } from '../lib/json.js';
 import { logger, mcpLog } from '../lib/logger.js';
 import {
@@ -12,6 +18,7 @@ import {
   type Capabilities,
 } from '../lib/model-prompts.js';
 import { resolveOrchestration } from '../lib/orchestration.js';
+import { PROGRESS_TOTAL, sendProgress } from '../lib/progress.js';
 import {
   appendSearchEntryPointContent,
   appendSources,
@@ -54,7 +61,7 @@ import {
 } from '../lib/tasks.js';
 import { createDefaultToolServices, type ToolServices } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
-import type { ToolsSpecInput } from '../lib/tool-profiles.js';
+import { toAskThinkingLevel, type ToolsSpecInput } from '../lib/tool-profiles.js';
 import { type AnalyzeInput, type ResearchInput, ResearchInputSchema } from '../schemas/inputs.js';
 import { ResearchOutputSchema } from '../schemas/outputs.js';
 
@@ -960,7 +967,6 @@ async function agenticSearchWork(
     mode: 'deep',
   });
   if (resolved.error) return resolved.error;
-  const { tools, toolConfig } = resolved.config;
   const resolvedUrls = resolved.config.resolvedProfile?.overrides.urls;
   await tasks.phase('planning');
   const prompt = buildAgenticResearchPrompt({
@@ -971,35 +977,80 @@ async function agenticSearchWork(
   });
 
   await tasks.phase('retrieving');
-  const result = await executor.runWithProgress(ctx, {
-    toolKey: 'research',
-    label: TOOL_LABELS.agenticSearch,
-    initialMsg: 'Starting deep research',
-    logMessage: 'Agentic search requested',
-    logData: { topic, searchDepth },
-    generator: () =>
-      getAI().models.generateContentStream({
-        model: getGeminiModel(),
-        contents: prompt.promptText,
-        config: buildGenerateContentConfig(
-          {
-            systemInstruction: prompt.systemInstruction,
-            costProfile: 'research.quick',
-            thinkingLevel,
-            thinkingBudget,
-            maxOutputTokens,
-            safetySettings,
-            tools,
-            toolConfig,
-          },
-          getWorkSignal(ctx),
-        ),
-      }),
-    responseBuilder: (streamResult, textContent) =>
-      buildAgenticSearchResult(streamResult, textContent, ctx, searchDepth, searchDepth),
+  await mcpLog(ctx, 'info', 'Agentic search requested');
+  log.info('Agentic search requested', { searchDepth });
+
+  const interactionTools = builtInsToInteractionTools(
+    resolved.config.resolvedProfile?.builtIns ?? [],
+  );
+  const interactionThinkingLevel = (
+    thinkingLevel ?? toAskThinkingLevel(resolved.config.resolvedProfile?.thinkingLevel ?? 'low')
+  ).toLowerCase() as Interactions.ThinkingLevel;
+
+  const backgroundInteraction = await createBackgroundInteraction({
+    model: getGeminiModel(),
+    input: prompt.promptText,
+    tools: interactionTools,
+    thinkingLevel: interactionThinkingLevel,
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+    ...(prompt.systemInstruction ? { systemInstruction: prompt.systemInstruction } : {}),
   });
+
+  let pollCount = 0;
+  const polledInteraction = await pollUntilComplete(
+    backgroundInteraction.id,
+    getWorkSignal(ctx),
+    async () => {
+      pollCount += 1;
+      await sendProgress(
+        ctx,
+        Math.min(10 + pollCount * 8, 85),
+        PROGRESS_TOTAL,
+        `${TOOL_LABELS.agenticSearch}: Research in progress...`,
+      );
+    },
+  );
+
+  if (polledInteraction.status !== 'completed') {
+    return new AppError(
+      'research',
+      `Background research ended with unexpected status: ${polledInteraction.status}`,
+      'internal',
+      true,
+    ).toToolResult();
+  }
+
   await tasks.phase('finalizing');
-  return result;
+  const streamResult = interactionToStreamResult(polledInteraction);
+  const textContent = streamResult.text;
+  const built = buildAgenticSearchResult(streamResult, textContent, ctx, searchDepth, searchDepth);
+  const baseResult: CallToolResult = {
+    content: [{ type: 'text', text: textContent }],
+  };
+  const overlay = built.resultMod(baseResult);
+  const sharedMetadata = buildSharedStructuredMetadata({
+    functionCalls: streamResult.functionCalls,
+    includeThoughts: true,
+    thoughtText: streamResult.thoughtText,
+    toolEvents: streamResult.toolEvents,
+    safetyRatings: streamResult.safetyRatings,
+    finishMessage: streamResult.finishMessage,
+    citationMetadata: streamResult.citationMetadata,
+    groundingMetadata: streamResult.groundingMetadata,
+    urlContextMetadata: streamResult.urlContextMetadata,
+  });
+
+  return {
+    ...baseResult,
+    ...overlay,
+    structuredContent:
+      typeof built.structuredContent === 'object'
+        ? {
+            ...built.structuredContent,
+            ...sharedMetadata,
+          }
+        : built.structuredContent,
+  };
 }
 
 async function runQuickResearch(

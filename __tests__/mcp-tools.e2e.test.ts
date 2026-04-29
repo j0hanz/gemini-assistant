@@ -254,7 +254,7 @@ describe('MCP tool smoke coverage', () => {
         );
         assert.equal(
           thinkingLevel.description,
-          'Optional reasoning depth override (uppercase: MINIMAL, LOW, MEDIUM, HIGH). Omit to use the job default.',
+          'Thinking level selector. Overrides Gemini defaults for the selected profile.',
           `Expected ${toolName}.thinkingLevel description to stay consistent`,
         );
       }

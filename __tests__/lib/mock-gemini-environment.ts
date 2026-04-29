@@ -1,5 +1,6 @@
 import { FinishReason } from '@google/genai';
 import type { GenerateContentResponse, Part } from '@google/genai';
+import type { Interactions } from '@google/genai';
 
 import { getAI } from '../../src/client.js';
 
@@ -68,6 +69,15 @@ export class MockGeminiEnvironment {
   private readonly originalGenerateContentStream = this.client.models.generateContentStream.bind(
     this.client.models,
   );
+  private readonly originalInteractionCancel = this.client.interactions.cancel.bind(
+    this.client.interactions,
+  );
+  private readonly originalInteractionCreate = this.client.interactions.create.bind(
+    this.client.interactions,
+  );
+  private readonly originalInteractionGet = this.client.interactions.get.bind(
+    this.client.interactions,
+  );
   private readonly originalGetCache = this.client.caches.get.bind(this.client.caches);
   private readonly originalListCaches = this.client.caches.list.bind(this.client.caches);
   private readonly originalUpdateCache = this.client.caches.update.bind(this.client.caches);
@@ -76,6 +86,9 @@ export class MockGeminiEnvironment {
     string,
     { displayName?: string; expireTime: string; model: string; name: string }
   >();
+  private readonly cancelledIds: string[] = [];
+  private readonly interactionQueue: Interactions.Interaction[] = [];
+  private readonly pollQueue = new Map<string, Interactions.Interaction[]>();
   private readonly streamQueue: AsyncGenerator<GenerateContentResponse>[] = [];
   private uploadCounter = 0;
   readonly deletedUploads: string[] = [];
@@ -91,6 +104,35 @@ export class MockGeminiEnvironment {
       }
 
       return next;
+    };
+
+    this.client.interactions.create = async () => {
+      const next = this.interactionQueue.shift();
+      if (!next) {
+        throw new Error('No mocked Interaction queued for interactions.create');
+      }
+
+      return next;
+    };
+
+    this.client.interactions.get = async (id: string) => {
+      const responses = this.pollQueue.get(id) ?? [];
+      const next = responses.shift();
+      if (!next) {
+        throw new Error(`No poll response queued for interaction id="${id}"`);
+      }
+
+      return next;
+    };
+
+    this.client.interactions.cancel = async (id: string) => {
+      this.cancelledIds.push(id);
+      return {
+        id,
+        created: '2099-01-01T00:00:00.000Z',
+        status: 'cancelled',
+        updated: '2099-01-01T00:00:00.000Z',
+      };
     };
 
     this.client.files.upload = async (opts: { file: Blob | string }) => {
@@ -164,6 +206,9 @@ export class MockGeminiEnvironment {
 
   restore(): void {
     this.client.models.generateContentStream = this.originalGenerateContentStream;
+    this.client.interactions.cancel = this.originalInteractionCancel;
+    this.client.interactions.create = this.originalInteractionCreate;
+    this.client.interactions.get = this.originalInteractionGet;
     this.client.files.upload = this.originalUpload;
     this.client.files.delete = this.originalDeleteFile;
     this.client.caches.create = this.originalCreateCache;
@@ -172,6 +217,9 @@ export class MockGeminiEnvironment {
     this.client.caches.delete = this.originalDeleteCache;
     this.client.caches.update = this.originalUpdateCache;
     this.streamQueue.length = 0;
+    this.interactionQueue.length = 0;
+    this.pollQueue.clear();
+    this.cancelledIds.length = 0;
     this.cacheStore.clear();
     this.deletedUploads.length = 0;
     this.uploadCounter = 0;
@@ -183,5 +231,17 @@ export class MockGeminiEnvironment {
 
   queueGenerator(stream: AsyncGenerator<GenerateContentResponse>): void {
     this.streamQueue.push(stream);
+  }
+
+  queueInteraction(interaction: Interactions.Interaction): void {
+    this.interactionQueue.push(interaction);
+  }
+
+  queuePollResponses(id: string, ...responses: Interactions.Interaction[]): void {
+    this.pollQueue.set(id, [...(this.pollQueue.get(id) ?? []), ...responses]);
+  }
+
+  get cancelledInteractionIds(): readonly string[] {
+    return this.cancelledIds;
   }
 }

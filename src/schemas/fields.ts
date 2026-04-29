@@ -122,13 +122,13 @@ function buildArrayField<T extends z.ZodType>(itemSchema: T, options: ArrayField
   return schema;
 }
 
-export function publicHttpUrlArray(
+function publicHttpUrlArray(
   options: PublicHttpUrlArrayOptions & { optional: true },
 ): z.ZodOptional<z.ZodArray<ReturnType<typeof publicHttpUrl>>>;
-export function publicHttpUrlArray(
+function publicHttpUrlArray(
   options: PublicHttpUrlArrayOptions & { optional?: false | undefined },
 ): z.ZodArray<ReturnType<typeof publicHttpUrl>>;
-export function publicHttpUrlArray(options: PublicHttpUrlArrayOptions) {
+function publicHttpUrlArray(options: PublicHttpUrlArrayOptions) {
   const { itemDescription, optional = false, ...rest } = options;
   const schema = buildArrayField(publicHttpUrl(itemDescription), rest);
   return withFieldMetadata(optional ? schema.optional() : schema, rest.description);

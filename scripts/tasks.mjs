@@ -1005,7 +1005,25 @@ const TaskCommands = {
   },
 
   knipFix() {
-    return ['npx', ['knip', '--fix', '--fix-type', 'exports,types,dependencies', '--format']];
+    // NOTE: knip ignores comma-separated values passed to a single `--fix-type` flag
+    // (it parses the whole string as one type and silently disables all fixes).
+    // Repeating the flag is the only reliable form, so keep this as multiple `--fix-type` args.
+    // `--format` is intentionally omitted: on Windows knip spawns `npx prettier`
+    // without a shell and crashes with ENOENT. We run `npm run format` ourselves
+    // after a successful knip --fix (see TaskOrchestrator.attemptAutoFix).
+    return [
+      'npx',
+      [
+        'knip',
+        '--fix',
+        '--fix-type',
+        'exports',
+        '--fix-type',
+        'types',
+        '--fix-type',
+        'dependencies',
+      ],
+    ];
   },
 
   build() {
@@ -1874,7 +1892,7 @@ class TaskOrchestrator {
     const staticTasks = rest.slice(0, 3);
     const deepTasks = rest.slice(3);
 
-    await this.executeTask(formatTask, aggregate, reporter, { allowAutoFix: this.config.fix });
+    await this.executeTask(formatTask, aggregate, reporter, { allowAutoFix: true });
     if (this.shouldStop(aggregate)) return null;
 
     await this.executeGroup(staticTasks, aggregate, reporter);
@@ -1948,7 +1966,7 @@ class TaskOrchestrator {
     const results = await Promise.all(
       activeTasks.map(async (task) => {
         OutputRenderer.clearCache();
-        const { result, ms } = await this.runMeasured(task);
+        const { result, ms } = await this.runMeasured(task, { allowAutoFix: true });
         reporter.groupTaskEnd(task.label, result, ms);
         return { task, result, ms };
       }),
@@ -1981,7 +1999,6 @@ class TaskOrchestrator {
   }
 
   async attemptAutoFix(task, result) {
-    if (!this.config.fix) return null;
     if (task.label === 'format') {
       const fixResult = await ProcessRunner.execAsync('npm', ['run', 'format']);
       return this._applyFixAndRerun(task, fixResult);
@@ -1995,6 +2012,13 @@ class TaskOrchestrator {
       task.label === 'lint'
         ? await ProcessRunner.execAsync(...TaskCommands.lintFix())
         : await ProcessRunner.execAsync(...TaskCommands.knipFix());
+
+    if (task.label === 'knip' && fixResult.ok) {
+      // knip --fix may leave files unformatted (we drop knip's own --format because
+      // it crashes on Windows). Format the workspace ourselves so the rerun passes.
+      const formatResult = await ProcessRunner.execAsync('npm', ['run', 'format']);
+      if (!formatResult.ok) return this._applyFixAndRerun(task, formatResult);
+    }
 
     return this._applyFixAndRerun(task, fixResult);
   }

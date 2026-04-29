@@ -54,10 +54,10 @@ describe('AnalyzeOutputSchema', () => {
   it('accepts summary output', () => {
     const result = AnalyzeOutputSchema.safeParse({
       kind: 'summary',
-      status: 'completed',
+      status: 'ungrounded',
       targetKind: 'file',
       summary: 'File analysis',
-      usage: { totalTokenCount: 200 },
+      diagnostics: { usage: { totalTokenCount: 200 } },
     });
     assert.ok(result.success);
   });
@@ -87,7 +87,7 @@ describe('AnalyzeOutputSchema', () => {
 describe('ResearchOutputSchema', () => {
   it('accepts quick research output', () => {
     const result = ResearchOutputSchema.safeParse({
-      status: 'completed',
+      status: 'grounded',
       mode: 'quick',
       summary: 'Quick answer',
       sources: ['https://example.com'],
@@ -97,7 +97,6 @@ describe('ResearchOutputSchema', () => {
 
   it('accepts grounding transparency fields and rejects unknown fields', () => {
     const result = ResearchOutputSchema.safeParse({
-      status: 'completed',
       mode: 'deep',
       summary: 'Deep answer',
       sources: ['https://example.com'],
@@ -141,7 +140,7 @@ describe('ResearchOutputSchema', () => {
     assert.ok(result.success);
 
     const unknown = ResearchOutputSchema.safeParse({
-      status: 'completed',
+      status: 'grounded',
       mode: 'deep',
       summary: 'Deep answer',
       sources: [],
@@ -175,25 +174,27 @@ describe('ChatOutputSchema', () => {
     assert.strictEqual(result.data.workspaceCacheApplied, true);
   });
 
-  it('accepts function-call signatures and thought tool events', () => {
+  it('accepts function-call signatures and thought tool events under diagnostics', () => {
     const result = ChatOutputSchema.safeParse({
       status: 'completed',
       answer: 'Done',
       workspaceCacheApplied: false,
-      functionCalls: [
-        {
-          name: 'lookup',
-          args: { q: 'x' },
-          thoughtSignature: 'sig-fn',
-        },
-      ],
-      toolEvents: [
-        {
-          kind: 'thought',
-          text: 'reasoning',
-          thoughtSignature: 'sig-thought',
-        },
-      ],
+      diagnostics: {
+        functionCalls: [
+          {
+            name: 'lookup',
+            args: { q: 'x' },
+            thoughtSignature: 'sig-fn',
+          },
+        ],
+        toolEvents: [
+          {
+            kind: 'thought',
+            text: 'reasoning',
+            thoughtSignature: 'sig-thought',
+          },
+        ],
+      },
       computations: [{ code: 'print(1)', output: '1' }],
     });
 
@@ -204,9 +205,18 @@ describe('ChatOutputSchema', () => {
     const result = ChatOutputSchema.safeParse({
       status: 'completed',
       answer: 'Done',
-      toolEvents: [{ kind: 'unknown' }],
+      diagnostics: { toolEvents: [{ kind: 'unknown' }] },
     });
 
+    assert.strictEqual(result.success, false);
+  });
+
+  it('rejects telemetry at the root level', () => {
+    const result = ChatOutputSchema.safeParse({
+      status: 'completed',
+      answer: 'Done',
+      toolEvents: [{ kind: 'thought', text: 'oops' }],
+    });
     assert.strictEqual(result.success, false);
   });
 });

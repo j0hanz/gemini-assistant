@@ -3,7 +3,12 @@ import {
   RELATED_TASK_META_KEY as SDK_RELATED_TASK_META_KEY,
 } from '@modelcontextprotocol/server';
 
-import type { GenerateContentResponse, GroundingMetadata, UrlMetadata } from '@google/genai';
+import {
+  type GenerateContentResponse,
+  type GroundingMetadata,
+  type UrlMetadata,
+  UrlRetrievalStatus,
+} from '@google/genai';
 import { z } from 'zod/v4';
 
 import type {
@@ -140,10 +145,18 @@ function collectUniquePublicEntries<S, T>(
 export function collectUrlMetadataWithCounts(
   urlMetadata: UrlMetadata[] | undefined,
 ): CollectedItems<UrlMetadataEntry> {
+  const knownStatuses = new Set<string>(Object.values(UrlRetrievalStatus));
   return collectUniquePublicEntries(
     urlMetadata,
     (meta) => meta.retrievedUrl,
-    (meta, url) => ({ url, status: meta.urlRetrievalStatus ?? 'UNKNOWN' }),
+    (meta, url) => {
+      const raw = meta.urlRetrievalStatus;
+      const status =
+        typeof raw === 'string' && knownStatuses.has(raw)
+          ? raw
+          : UrlRetrievalStatus.URL_RETRIEVAL_STATUS_UNSPECIFIED;
+      return { url, status };
+    },
   );
 }
 
@@ -363,18 +376,22 @@ export function promptBlockedError(toolName: string, blockReason?: string): Call
   return new SafetyError(toolName, 'prompt_blocked', blockReason).toToolResult();
 }
 
-interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
-  contextUsed?: ContextUsed;
-  warnings?: string[];
-  functionCalls?: TFunctionCall[];
+interface SharedStructuredDiagnostics<TFunctionCall, TToolEvent> {
   thoughts?: string;
-  toolEvents?: TToolEvent[];
   usage?: UsageMetadata;
-  safetyRatings?: unknown;
   finishMessage?: string | undefined;
+  safetyRatings?: unknown;
   citationMetadata?: unknown;
   groundingMetadata?: unknown;
   urlContextMetadata?: unknown;
+  functionCalls?: TFunctionCall[];
+  toolEvents?: TToolEvent[];
+}
+
+interface SharedStructuredMetadata<TFunctionCall, TToolEvent> {
+  contextUsed?: ContextUsed;
+  warnings?: string[];
+  diagnostics?: SharedStructuredDiagnostics<TFunctionCall, TToolEvent>;
 }
 
 function isEmptyStructuredValue(value: unknown): boolean {
@@ -420,22 +437,26 @@ export function buildSharedStructuredMetadata<TFunctionCall, TToolEvent>({
 }): SharedStructuredMetadata<TFunctionCall, TToolEvent> {
   const hasToolEvents = toolEvents && toolEvents.length > 0;
 
-  return pickDefined({
-    contextUsed,
-    warnings: warnings && warnings.length > 0 ? [...warnings] : undefined,
+  const diagnostics: SharedStructuredDiagnostics<TFunctionCall, TToolEvent> = pickDefined({
+    thoughts: includeThoughts && thoughtText ? thoughtText : undefined,
+    usage,
+    finishMessage: isTrivialFinishMessage(finishMessage) ? undefined : finishMessage,
+    safetyRatings: isEmptyStructuredValue(safetyRatings) ? undefined : safetyRatings,
+    citationMetadata: isEmptyStructuredValue(citationMetadata) ? undefined : citationMetadata,
+    groundingMetadata: isEmptyStructuredValue(groundingMetadata) ? undefined : groundingMetadata,
+    urlContextMetadata: isEmptyStructuredValue(urlContextMetadata) ? undefined : urlContextMetadata,
     functionCalls: hasToolEvents
       ? undefined
       : functionCalls && functionCalls.length > 0
         ? [...functionCalls]
         : undefined,
-    thoughts: includeThoughts && thoughtText ? thoughtText : undefined,
     toolEvents: hasToolEvents ? [...toolEvents] : undefined,
-    usage,
-    safetyRatings: isEmptyStructuredValue(safetyRatings) ? undefined : safetyRatings,
-    finishMessage: isTrivialFinishMessage(finishMessage) ? undefined : finishMessage,
-    citationMetadata: isEmptyStructuredValue(citationMetadata) ? undefined : citationMetadata,
-    groundingMetadata: isEmptyStructuredValue(groundingMetadata) ? undefined : groundingMetadata,
-    urlContextMetadata: isEmptyStructuredValue(urlContextMetadata) ? undefined : urlContextMetadata,
+  });
+
+  return pickDefined({
+    contextUsed,
+    warnings: warnings && warnings.length > 0 ? [...warnings] : undefined,
+    diagnostics: Object.keys(diagnostics).length > 0 ? diagnostics : undefined,
   });
 }
 
@@ -454,19 +475,7 @@ export function buildBaseStructuredOutput(
   });
 }
 
-const SHARED_STRUCTURED_RESULT_KEYS = [
-  'contextUsed',
-  'warnings',
-  'functionCalls',
-  'thoughts',
-  'toolEvents',
-  'usage',
-  'safetyRatings',
-  'finishMessage',
-  'citationMetadata',
-  'groundingMetadata',
-  'urlContextMetadata',
-] as const;
+const SHARED_STRUCTURED_RESULT_KEYS = ['contextUsed', 'warnings', 'diagnostics'] as const;
 
 type SharedStructuredResultKey = (typeof SHARED_STRUCTURED_RESULT_KEYS)[number];
 

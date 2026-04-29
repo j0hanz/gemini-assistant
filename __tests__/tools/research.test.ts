@@ -361,7 +361,9 @@ describe('research tool contracts', () => {
 
       const structured = store.stored[0]?.result.structuredContent as Record<string, unknown>;
       assert.ok(structured && typeof structured === 'object');
-      assert.deepStrictEqual(structured.usage, {
+      const diagnostics = structured.diagnostics as Record<string, unknown>;
+      assert.ok(diagnostics && typeof diagnostics === 'object');
+      assert.deepStrictEqual(diagnostics.usage, {
         cachedContentTokenCount: 0,
         promptTokenCount: 33,
         candidatesTokenCount: 22,
@@ -369,12 +371,12 @@ describe('research tool contracts', () => {
         totalTokenCount: 55,
         toolUsePromptTokenCount: 0,
       });
-      assert.deepStrictEqual(structured.safetyRatings, [
+      assert.deepStrictEqual(diagnostics.safetyRatings, [
         { probability: 'LOW' },
         { probability: 'LOW' },
         { probability: 'LOW' },
       ]);
-      assert.deepStrictEqual(structured.citationMetadata, {
+      assert.deepStrictEqual(diagnostics.citationMetadata, {
         citationSources: [
           { startIndex: 0, endIndex: 9, uri: 'https://example.com/r1' },
           { startIndex: 0, endIndex: 9, uri: 'https://example.com/r1' },
@@ -382,7 +384,7 @@ describe('research tool contracts', () => {
           { startIndex: 0, endIndex: 4, uri: 'https://example.com/synthesis' },
         ],
       });
-      assert.deepStrictEqual(structured.groundingMetadata, {
+      assert.deepStrictEqual(diagnostics.groundingMetadata, {
         groundingChunks: [{ web: { title: 'Docs', uri: 'https://example.com/docs' } }],
         groundingSupports: [
           {
@@ -391,7 +393,7 @@ describe('research tool contracts', () => {
           },
         ],
       });
-      assert.strictEqual(structured.finishMessage, undefined);
+      assert.strictEqual(diagnostics.finishMessage, undefined);
       assert.ok(
         Array.isArray(structured.warnings) &&
           structured.warnings.includes(

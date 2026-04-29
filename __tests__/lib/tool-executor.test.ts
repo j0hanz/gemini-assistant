@@ -280,7 +280,9 @@ describe('ToolExecutor', () => {
 
     assert.deepStrictEqual(result.structuredContent, {
       answer: 'answer',
-      toolEvents: [{ kind: 'function_call', name: 'lookupDocs', args: { topic: 'mcp' } }],
+      diagnostics: {
+        toolEvents: [{ kind: 'function_call', name: 'lookupDocs', args: { topic: 'mcp' } }],
+      },
     });
   });
 
@@ -300,10 +302,12 @@ describe('ToolExecutor', () => {
       (_streamResult, text) => ({
         structuredContent: {
           answer: text,
-          usage: {
-            candidatesTokenCount: 2,
-            promptTokenCount: 1,
-            totalTokenCount: 3,
+          diagnostics: {
+            usage: {
+              candidatesTokenCount: 2,
+              promptTokenCount: 1,
+              totalTokenCount: 3,
+            },
           },
         },
       }),
@@ -313,28 +317,32 @@ describe('ToolExecutor', () => {
       'search',
       z.strictObject({
         answer: z.string(),
-        functionCalls: z
-          .array(
-            z.strictObject({
-              name: z.string(),
-              args: z.record(z.string(), z.unknown()),
-            }),
-          )
-          .optional(),
-        toolEvents: z
-          .array(
-            z.strictObject({
-              kind: z.literal('function_call'),
-              name: z.string(),
-              args: z.record(z.string(), z.unknown()),
-            }),
-          )
-          .optional(),
-        usage: z
+        diagnostics: z
           .strictObject({
-            candidatesTokenCount: z.number().optional(),
-            promptTokenCount: z.number().optional(),
-            totalTokenCount: z.number().optional(),
+            functionCalls: z
+              .array(
+                z.strictObject({
+                  name: z.string(),
+                  args: z.record(z.string(), z.unknown()),
+                }),
+              )
+              .optional(),
+            toolEvents: z
+              .array(
+                z.strictObject({
+                  kind: z.literal('function_call'),
+                  name: z.string(),
+                  args: z.record(z.string(), z.unknown()),
+                }),
+              )
+              .optional(),
+            usage: z
+              .strictObject({
+                candidatesTokenCount: z.number().optional(),
+                promptTokenCount: z.number().optional(),
+                totalTokenCount: z.number().optional(),
+              })
+              .optional(),
           })
           .optional(),
       }),
@@ -344,11 +352,13 @@ describe('ToolExecutor', () => {
     assert.strictEqual(validated.isError, undefined);
     assert.deepStrictEqual(validated.structuredContent, {
       answer: 'answer',
-      toolEvents: [{ kind: 'function_call', name: 'lookupDocs', args: { topic: 'mcp' } }],
-      usage: {
-        candidatesTokenCount: 2,
-        promptTokenCount: 1,
-        totalTokenCount: 3,
+      diagnostics: {
+        toolEvents: [{ kind: 'function_call', name: 'lookupDocs', args: { topic: 'mcp' } }],
+        usage: {
+          candidatesTokenCount: 2,
+          promptTokenCount: 1,
+          totalTokenCount: 3,
+        },
       },
     });
   });

@@ -190,14 +190,16 @@ export interface SessionEventEntry {
 }
 
 interface SessionTurnStructuredContent {
-  citationMetadata?: unknown;
   data?: unknown;
-  functionCalls?: FunctionCallEntry[];
-  safetyRatings?: unknown;
   schemaWarnings?: string[];
-  thoughts?: string;
-  toolEvents?: ToolEvent[];
-  usage?: UsageMetadata;
+  diagnostics?: {
+    citationMetadata?: unknown;
+    functionCalls?: FunctionCallEntry[];
+    safetyRatings?: unknown;
+    thoughts?: string;
+    toolEvents?: ToolEvent[];
+    usage?: UsageMetadata;
+  };
 }
 
 interface SessionTurnResult {
@@ -688,15 +690,25 @@ export function buildSessionEventResponse(
       ? { promptBlockReason: streamResult.promptBlockReason }
       : {}),
     ...(structured?.data !== undefined ? { data: sanitizeSessionValue(structured.data) } : {}),
-    ...(structured?.functionCalls
-      ? { functionCalls: sanitizeFunctionCalls(structured.functionCalls) }
+    ...(structured?.diagnostics?.functionCalls
+      ? { functionCalls: sanitizeFunctionCalls(structured.diagnostics.functionCalls) }
       : {}),
     ...(structured?.schemaWarnings ? { schemaWarnings: structured.schemaWarnings } : {}),
-    ...(structured?.safetyRatings !== undefined ? { safetyRatings: '[REDACTED]' } : {}),
-    ...(structured?.citationMetadata !== undefined ? { citationMetadata: '[REDACTED]' } : {}),
-    ...(structured?.thoughts !== undefined ? { thoughts: structured.thoughts } : {}),
-    ...(structured?.toolEvents ? { toolEvents: sanitizeToolEvents(structured.toolEvents) } : {}),
-    ...(structured?.usage !== undefined ? { usage: structured.usage } : {}),
+    ...(structured?.diagnostics?.safetyRatings !== undefined
+      ? { safetyRatings: '[REDACTED]' }
+      : {}),
+    ...(structured?.diagnostics?.citationMetadata !== undefined
+      ? { citationMetadata: '[REDACTED]' }
+      : {}),
+    ...(structured?.diagnostics?.thoughts !== undefined
+      ? { thoughts: structured.diagnostics.thoughts }
+      : {}),
+    ...(structured?.diagnostics?.toolEvents
+      ? { toolEvents: sanitizeToolEvents(structured.diagnostics.toolEvents) }
+      : {}),
+    ...(structured?.diagnostics?.usage !== undefined
+      ? { usage: structured.diagnostics.usage }
+      : {}),
     ...(streamResult.groundingMetadata !== undefined
       ? {
           groundingMetadata: '[REDACTED]' as NonNullable<

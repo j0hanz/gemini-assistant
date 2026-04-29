@@ -1217,25 +1217,27 @@ describe('sessions', () => {
                   nested: { token: 'hidden-value' },
                   list: [{ password: 'another-secret' }],
                 },
-                functionCalls: [
-                  {
-                    name: 'lookup',
-                    args: {
-                      authorization: 'bearer secret',
+                diagnostics: {
+                  functionCalls: [
+                    {
+                      name: 'lookup',
+                      args: {
+                        authorization: 'bearer secret',
+                      },
                     },
-                  },
-                ],
-                toolEvents: [
-                  {
-                    kind: 'tool_call',
-                    args: {
-                      sessionId: 'sess-secret',
+                  ],
+                  toolEvents: [
+                    {
+                      kind: 'tool_call',
+                      args: {
+                        sessionId: 'sess-secret',
+                      },
+                      response: {
+                        cookie: 'hidden-cookie',
+                      },
                     },
-                    response: {
-                      cookie: 'hidden-cookie',
-                    },
-                  },
-                ],
+                  ],
+                },
               },
             },
             streamResult: {

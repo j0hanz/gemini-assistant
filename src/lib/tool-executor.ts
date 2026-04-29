@@ -104,6 +104,19 @@ function getStructuredWarnings(value: unknown): string[] {
     : [];
 }
 
+function mergeDiagnostics(
+  values: readonly (Record<string, unknown> | undefined)[],
+): Record<string, unknown> | undefined {
+  let merged: Record<string, unknown> | undefined;
+  for (const value of values) {
+    if (!value || typeof value !== 'object') continue;
+    const diagnostics = (value as { diagnostics?: unknown }).diagnostics;
+    if (!diagnostics || typeof diagnostics !== 'object') continue;
+    merged = { ...(merged ?? {}), ...(diagnostics as Record<string, unknown>) };
+  }
+  return merged && Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 function appendWarningsToContent(
   content: CallToolResult['content'],
   warnings: readonly string[],
@@ -187,6 +200,11 @@ export class ToolExecutor {
       ),
     };
 
+    const mergedDiagnostics = mergeDiagnostics([
+      overlayStructuredContent,
+      built.structuredContent,
+      sharedStructuredContent as Record<string, unknown>,
+    ]);
     const mergedResult = mergeStructured(
       {
         ...finalResult,
@@ -197,6 +215,7 @@ export class ToolExecutor {
             ...(overlayStructuredContent ?? {}),
             ...(built.structuredContent ?? {}),
             ...sharedStructuredContent,
+            ...(mergedDiagnostics ? { diagnostics: mergedDiagnostics } : {}),
           }
         : undefined,
       mergedWarnings.length > 0 ? { warnings: mergedWarnings } : undefined,

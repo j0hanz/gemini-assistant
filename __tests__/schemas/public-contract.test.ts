@@ -150,17 +150,19 @@ describe('public contract schemas', () => {
     const base = {
       requestId: 'task-1',
       status: 'completed' as const,
-      usage: {
-        totalTokenCount: 1,
-        toolUsePromptTokenCount: 1,
-        promptTokensDetails: [{ modality: 'TEXT', tokenCount: 1 }],
-        cacheTokensDetails: [{ modality: 'TEXT', tokenCount: 1 }],
-        candidatesTokensDetails: [{ modality: 'TEXT', tokenCount: 1 }],
-      },
       warnings: ['note'],
-      safetyRatings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT' }],
-      finishMessage: 'done',
-      citationMetadata: { citationSources: [] },
+      diagnostics: {
+        usage: {
+          totalTokenCount: 1,
+          toolUsePromptTokenCount: 1,
+          promptTokensDetails: [{ modality: 'TEXT', tokenCount: 1 }],
+          cacheTokensDetails: [{ modality: 'TEXT', tokenCount: 1 }],
+          candidatesTokensDetails: [{ modality: 'TEXT', tokenCount: 1 }],
+        },
+        safetyRatings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT' }],
+        finishMessage: 'done',
+        citationMetadata: { citationSources: [] },
+      },
     };
 
     assert.ok(
@@ -194,13 +196,6 @@ describe('public contract schemas', () => {
           groundingSupportsCount: 0,
           confidence: 'low',
         },
-        findings: [
-          {
-            claim: 'x',
-            supportingSourceUrls: ['https://example.com'],
-            verificationStatus: 'cited',
-          },
-        ],
         sourceDetails: [
           { domain: 'example.com', origin: 'urlContext', url: 'https://example.com' },
         ],
@@ -211,6 +206,7 @@ describe('public contract schemas', () => {
     assert.ok(
       AnalyzeOutputSchema.safeParse({
         ...base,
+        status: 'ungrounded',
         kind: 'summary',
         summary: 'x',
         targetKind: 'file',
@@ -249,8 +245,10 @@ describe('public contract schemas', () => {
     assert.ok(
       ResearchOutputSchema.safeParse({ status: 'ungrounded', mode: 'quick', summary: 's' }).success,
     );
-    assert.ok(
+    assert.strictEqual(
       ResearchOutputSchema.safeParse({ status: 'completed', mode: 'quick', summary: 's' }).success,
+      false,
+      'legacy completed status should be rejected on research outputs',
     );
     assert.strictEqual(
       ChatOutputSchema.safeParse({ status: 'unknown', answer: 'x', workspaceCacheApplied: false })
@@ -284,7 +282,7 @@ describe('public contract schemas', () => {
     );
     assert.ok(
       ResearchOutputSchema.safeParse({
-        status: 'completed',
+        status: 'grounded',
         mode: 'quick',
         summary: 'x',
         sources: [],

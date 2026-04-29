@@ -347,10 +347,14 @@ describe('ask transcript capture', () => {
         structuredContent: {
           answer: '{\n  "status": "ok"\n}',
           data: { status: 'ok' },
-          thoughts: 'Reasoning summary',
-          functionCalls: [{ name: 'lookupWeather', args: { city: 'Stockholm' } }],
-          toolEvents: [{ kind: 'tool_call' as const, id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' }],
-          usage: { totalTokenCount: 25 },
+          diagnostics: {
+            thoughts: 'Reasoning summary',
+            functionCalls: [{ name: 'lookupWeather', args: { city: 'Stockholm' } }],
+            toolEvents: [
+              { kind: 'tool_call' as const, id: 'tool-1', toolType: 'GOOGLE_SEARCH_WEB' },
+            ],
+            usage: { totalTokenCount: 25 },
+          },
         },
       },
       streamResult: {
@@ -409,19 +413,21 @@ describe('ask transcript capture', () => {
               Array.from({ length: 60 }, (_, index) => [`key-${index}`, `value-${index}`]),
             ),
           },
-          functionCalls: [
-            {
-              name: 'lookupWeather',
-              args: { details: 'y'.repeat(2500) },
-            },
-          ],
-          toolEvents: [
-            {
-              kind: 'tool_response' as const,
-              response: { output: 'z'.repeat(2500) },
-              output: 'q'.repeat(2500),
-            },
-          ],
+          diagnostics: {
+            functionCalls: [
+              {
+                name: 'lookupWeather',
+                args: { details: 'y'.repeat(2500) },
+              },
+            ],
+            toolEvents: [
+              {
+                kind: 'tool_response' as const,
+                response: { output: 'z'.repeat(2500) },
+                output: 'q'.repeat(2500),
+              },
+            ],
+          },
         },
       },
       streamResult: {
@@ -639,8 +645,10 @@ describe('ask transcript capture', () => {
       }),
       {
         answer: 'Assistant answer',
-        safetyRatings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', probability: 'LOW' }],
-        citationMetadata: { citations: [{ startIndex: 1, endIndex: 2 }] },
+        diagnostics: {
+          safetyRatings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', probability: 'LOW' }],
+          citationMetadata: { citations: [{ startIndex: 1, endIndex: 2 }] },
+        },
       },
     );
 

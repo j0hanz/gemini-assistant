@@ -473,14 +473,8 @@ function buildAnalyzeStructuredContent(
     ? structured.warnings.filter((warning): warning is string => typeof warning === 'string')
     : undefined;
   const base = {
-    functionCalls: structured.functionCalls,
-    safetyRatings: structured.safetyRatings,
-    finishMessage: structured.finishMessage,
-    citationMetadata: structured.citationMetadata,
-    thoughts: structured.thoughts,
-    toolEvents: structured.toolEvents,
-    usage: structured.usage,
     contextUsed: structured.contextUsed,
+    diagnostics: structured.diagnostics,
     computations: structured.computations,
   };
 
@@ -515,7 +509,7 @@ function buildAnalyzeStructuredContent(
       requestId: ctx.task?.id,
       warnings,
       domain: {
-        status: typeof structured.status === 'string' ? structured.status : 'completed',
+        status: typeof structured.status === 'string' ? structured.status : 'ungrounded',
         kind: 'summary' as const,
         targetKind: args.targetKind,
         summary: typeof structured.summary === 'string' ? structured.summary : '',

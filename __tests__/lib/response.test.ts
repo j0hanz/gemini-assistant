@@ -217,7 +217,7 @@ describe('buildSharedStructuredMetadata', () => {
     );
   });
 
-  it('retains populated envelope fields', () => {
+  it('retains populated envelope fields nested under diagnostics', () => {
     assert.deepStrictEqual(
       buildSharedStructuredMetadata({
         toolEvents: [{ kind: 'tool_call' }],
@@ -226,10 +226,12 @@ describe('buildSharedStructuredMetadata', () => {
         finishMessage: 'max tokens',
       }),
       {
-        toolEvents: [{ kind: 'tool_call' }],
-        safetyRatings: [{ category: 'x' }],
-        citationMetadata: { citations: [{ startIndex: 0 }] },
-        finishMessage: 'max tokens',
+        diagnostics: {
+          toolEvents: [{ kind: 'tool_call' }],
+          safetyRatings: [{ category: 'x' }],
+          citationMetadata: { citations: [{ startIndex: 0 }] },
+          finishMessage: 'max tokens',
+        },
       },
     );
   });
@@ -449,9 +451,10 @@ describe('buildSuccessfulStructuredContent', () => {
           omitted: undefined,
         },
         shared: {
-          functionCalls: [{ name: 'lookup' }],
-          usage: { totalTokenCount: 10 },
-          safetyRatings: undefined,
+          diagnostics: {
+            functionCalls: [{ name: 'lookup' }],
+            usage: { totalTokenCount: 10 },
+          },
         },
       }),
       {
@@ -459,8 +462,10 @@ describe('buildSuccessfulStructuredContent', () => {
         requestId: 'task-1',
         warnings: ['check sources'],
         summary: 'done',
-        functionCalls: [{ name: 'lookup' }],
-        usage: { totalTokenCount: 10 },
+        diagnostics: {
+          functionCalls: [{ name: 'lookup' }],
+          usage: { totalTokenCount: 10 },
+        },
       },
     );
   });

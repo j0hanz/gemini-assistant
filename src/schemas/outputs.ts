@@ -11,10 +11,10 @@ import {
   GroundingCitationSchema,
   GroundingSignalsSchema,
   groundingStatusField,
+  JsonValueSchema,
   nonNegativeInt,
-  publicBaseOutputFieldsWithoutStatus,
+  publicCoreOutputFields,
   publicHttpUrlArray,
-  RESEARCH_MODE_OPTIONS,
   REVIEW_SUBJECT_OPTIONS,
   SourceDetailSchema,
   UrlMetadataEntrySchema,
@@ -60,7 +60,7 @@ const ComputationSchema = z.strictObject({
 });
 
 const AnalyzeSummaryOutputSchema = z.strictObject({
-  ...publicBaseOutputFieldsWithoutStatus,
+  ...publicCoreOutputFields,
   status: groundingStatusField,
   kind: z.literal('summary').describe('Analyze output selector (`summary`)'),
   targetKind: z.enum(['file', 'url', 'multi']).describe('Analyze target discriminator'),
@@ -72,7 +72,7 @@ const AnalyzeSummaryOutputSchema = z.strictObject({
 });
 
 const AnalyzeDiagramOutputSchema = z.strictObject({
-  ...publicBaseOutputFieldsWithoutStatus,
+  ...publicCoreOutputFields,
   status: completedStatusField,
   kind: z.literal('diagram').describe('Analyze output selector (`diagram`)'),
   targetKind: z.enum(['file', 'url', 'multi']).describe('Analyze target discriminator'),
@@ -97,10 +97,10 @@ const SessionResourceLinksSchema = z.strictObject({
 });
 
 export const ChatOutputSchema = z.strictObject({
-  ...publicBaseOutputFieldsWithoutStatus,
+  ...publicCoreOutputFields,
   status: completedStatusField,
   answer: z.string().describe('Chat response text'),
-  data: z.unknown().describe('Structured response payload when JSON mode is used').optional(),
+  data: JsonValueSchema.describe('Structured response payload when JSON mode is used').optional(),
   session: z
     .strictObject({
       id: z.string().describe('Server-managed in-memory session identifier'),
@@ -122,10 +122,9 @@ export const ChatOutputSchema = z.strictObject({
     .describe('Whether automatic workspace cache was applied for this chat turn'),
 });
 
-export const ResearchOutputSchema = z.strictObject({
-  ...publicBaseOutputFieldsWithoutStatus,
+const ResearchSharedFields = {
+  ...publicCoreOutputFields,
   status: groundingStatusField,
-  mode: enumField(RESEARCH_MODE_OPTIONS, 'Research mode that handled the request'),
   summary: z.string().describe('Grounded research summary'),
   sources: publicHttpUrlArray({
     description: 'Grounded source URLs',
@@ -142,8 +141,19 @@ export const ResearchOutputSchema = z.strictObject({
     optional: true,
   }),
   urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
-  toolsUsed: z.array(z.string()).optional().describe('Tools invoked during deep research'),
   groundingSignals: GroundingSignalsSchema.optional(),
+  contextUsed: ContextUsedSchema.optional(),
+};
+
+const ResearchQuickOutputSchema = z.strictObject({
+  ...ResearchSharedFields,
+  mode: z.literal('quick').describe('Quick research mode'),
+});
+
+const ResearchDeepOutputSchema = z.strictObject({
+  ...ResearchSharedFields,
+  mode: z.literal('deep').describe('Deep research mode'),
+  toolsUsed: z.array(z.string()).optional().describe('Tools invoked during deep research'),
   findings: z
     .array(FindingSchema)
     .optional()
@@ -156,8 +166,12 @@ export const ResearchOutputSchema = z.strictObject({
     .array(ComputationSchema)
     .optional()
     .describe('Gemini Code Execution computations surfaced from tool events'),
-  contextUsed: ContextUsedSchema.optional(),
 });
+
+export const ResearchOutputSchema = z.discriminatedUnion('mode', [
+  ResearchQuickOutputSchema,
+  ResearchDeepOutputSchema,
+]);
 
 export const AnalyzeOutputSchema = z.discriminatedUnion('kind', [
   AnalyzeSummaryOutputSchema,
@@ -171,7 +185,7 @@ export const DocumentationDriftSchema = z.strictObject({
 });
 
 export const ReviewOutputSchema = z.strictObject({
-  ...publicBaseOutputFieldsWithoutStatus,
+  ...publicCoreOutputFields,
   status: completedStatusField,
   subjectKind: enumField(REVIEW_SUBJECT_OPTIONS, 'Review subject discriminator'),
   summary: z.string().describe('Review result summary'),

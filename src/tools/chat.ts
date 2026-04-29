@@ -111,19 +111,23 @@ interface AskStructuredContent extends Record<string, unknown> {
   contextUsed?: ContextUsed;
   data?: unknown;
   computations?: ReturnType<typeof deriveComputationsFromToolEvents>;
-  functionCalls?: FunctionCallEntry[];
-  citationMetadata?: unknown;
-  finishMessage?: string | undefined;
   schemaWarnings?: string[];
-  safetyRatings?: unknown;
   session?: {
     id: string;
     rebuiltAt?: number;
   };
-  thoughts?: string;
-  toolEvents?: ToolEvent[];
-  usage?: UsageMetadata;
   warnings?: string[];
+  diagnostics?: {
+    thoughts?: string;
+    usage?: UsageMetadata;
+    finishMessage?: string | undefined;
+    safetyRatings?: unknown;
+    citationMetadata?: unknown;
+    groundingMetadata?: unknown;
+    urlContextMetadata?: unknown;
+    functionCalls?: FunctionCallEntry[];
+    toolEvents?: ToolEvent[];
+  };
 }
 
 interface AskDependencies {
@@ -1268,13 +1272,7 @@ function assembleChatOutput(
       answer,
       data: structured.data,
       session,
-      functionCalls: structured.functionCalls,
-      thoughts: structured.thoughts,
-      toolEvents: structured.toolEvents,
-      usage: structured.usage,
-      safetyRatings: structured.safetyRatings,
-      finishMessage: structured.finishMessage,
-      citationMetadata: structured.citationMetadata,
+      diagnostics: structured.diagnostics,
       contextUsed: structured.contextUsed,
       computations: structured.computations,
       workspaceCacheApplied:

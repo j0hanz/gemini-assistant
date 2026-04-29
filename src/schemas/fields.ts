@@ -1,6 +1,14 @@
 import { isAbsolute, normalize } from 'node:path';
 
-import { HarmBlockMethod, HarmBlockThreshold, HarmCategory, MediaResolution } from '@google/genai';
+import {
+  HarmBlockMethod,
+  HarmBlockThreshold,
+  HarmCategory,
+  HarmProbability,
+  HarmSeverity,
+  MediaResolution,
+  UrlRetrievalStatus,
+} from '@google/genai';
 import { z } from 'zod/v4';
 
 // ── Profile-driven ToolsSpec schemas ─────────────────────────────────────────
@@ -328,54 +336,165 @@ const toolEventFields = {
 
 const ToolEventSchema = z.strictObject(toolEventFields);
 
-const streamMetadataOutputFields = {
-  thoughts: z.string().describe('Internal model reasoning.').optional(),
-  usage: UsageMetadataSchema.describe('Token usage').optional(),
-  safetyRatings: z.array(z.unknown()).describe('Candidate safety ratings').optional(),
-  finishMessage: z.string().describe('Candidate finish message when present').optional(),
-  citationMetadata: z.unknown().describe('Candidate citation metadata when present').optional(),
-  groundingMetadata: z.unknown().describe('Candidate grounding metadata when present').optional(),
-  urlContextMetadata: z
-    .unknown()
-    .describe('Candidate URL Context metadata when present')
-    .optional(),
-  functionCalls: z
-    .array(FunctionCallEntrySchema)
-    .optional()
-    .describe('Server-side function calls.'),
-  toolEvents: z
-    .array(ToolEventSchema)
-    .optional()
-    .describe('Normalized tool/function event stream.'),
-};
+// ── Gemini SDK metadata (typed shapes for diagnostics) ───────────────
+
+const GroundingChunkWebSchema = z
+  .strictObject({
+    domain: z.string().optional(),
+    title: z.string().optional(),
+    uri: z.string().optional(),
+  })
+  .partial();
+
+const GroundingChunkSchema = z
+  .strictObject({
+    web: GroundingChunkWebSchema.optional(),
+  })
+  .partial();
+
+const SegmentSchema = z
+  .strictObject({
+    startIndex: z.number().int().optional(),
+    endIndex: z.number().int().optional(),
+    partIndex: z.number().int().optional(),
+    text: z.string().optional(),
+  })
+  .partial();
+
+const GroundingSupportSchema = z
+  .strictObject({
+    confidenceScores: z.array(z.number()).optional(),
+    groundingChunkIndices: z.array(z.number().int()).optional(),
+    segment: SegmentSchema.optional(),
+    renderedParts: z.array(z.number().int()).optional(),
+  })
+  .partial();
+
+const RetrievalMetadataSchema = z
+  .strictObject({
+    googleSearchDynamicRetrievalScore: z.number().optional(),
+  })
+  .partial();
+
+const SearchEntryPointMetaSchema = z
+  .strictObject({
+    renderedContent: z.string().optional(),
+    sdkBlob: z.string().optional(),
+  })
+  .partial();
+
+const GroundingMetadataSchema = z
+  .strictObject({
+    imageSearchQueries: z.array(z.string()).optional(),
+    groundingChunks: z.array(GroundingChunkSchema).optional(),
+    groundingSupports: z.array(GroundingSupportSchema).optional(),
+    retrievalMetadata: RetrievalMetadataSchema.optional(),
+    searchEntryPoint: SearchEntryPointMetaSchema.optional(),
+    webSearchQueries: z.array(z.string()).optional(),
+    retrievalQueries: z.array(z.string()).optional(),
+  })
+  .partial();
+
+const UrlMetadataPartSchema = z
+  .strictObject({
+    retrievedUrl: z.string().optional(),
+    urlRetrievalStatus: z.enum(UrlRetrievalStatus).optional(),
+  })
+  .partial();
+
+const UrlContextMetadataSchema = z
+  .strictObject({
+    urlMetadata: z.array(UrlMetadataPartSchema).optional(),
+  })
+  .partial();
+
+const CitationSchema = z
+  .strictObject({
+    endIndex: z.number().int().optional(),
+    license: z.string().optional(),
+    startIndex: z.number().int().optional(),
+    title: z.string().optional(),
+    uri: z.string().optional(),
+  })
+  .partial();
+
+const CitationMetadataSchema = z
+  .strictObject({
+    citations: z.array(CitationSchema).optional(),
+    citationSources: z.array(CitationSchema).optional(),
+  })
+  .partial();
+
+const SafetyRatingSchema = z
+  .strictObject({
+    blocked: z.boolean().optional(),
+    category: z.enum(HarmCategory).optional(),
+    overwrittenThreshold: z.enum(HarmBlockThreshold).optional(),
+    probability: z.enum(HarmProbability).optional(),
+    probabilityScore: z.number().optional(),
+    severity: z.enum(HarmSeverity).optional(),
+    severityScore: z.number().optional(),
+  })
+  .partial();
+
+// ── Diagnostics block (single optional bag for telemetry) ────────────
+
+const DiagnosticsSchema = z
+  .strictObject({
+    thoughts: z.string().describe('Internal model reasoning.').optional(),
+    usage: UsageMetadataSchema.describe('Token usage').optional(),
+    finishMessage: z.string().describe('Candidate finish message when present').optional(),
+    safetyRatings: z.array(SafetyRatingSchema).describe('Candidate safety ratings').optional(),
+    citationMetadata: CitationMetadataSchema.describe(
+      'Candidate citation metadata when present',
+    ).optional(),
+    groundingMetadata: GroundingMetadataSchema.describe(
+      'Candidate grounding metadata when present',
+    ).optional(),
+    urlContextMetadata: UrlContextMetadataSchema.describe(
+      'Candidate URL Context metadata when present',
+    ).optional(),
+    functionCalls: z
+      .array(FunctionCallEntrySchema)
+      .describe('Server-side function calls.')
+      .optional(),
+    toolEvents: z
+      .array(ToolEventSchema)
+      .describe('Normalized tool/function event stream.')
+      .optional(),
+  })
+  .describe('Optional Gemini telemetry, reasoning, and tool-event diagnostics');
 
 export const completedStatusField = z
   .literal('completed')
   .describe('Stable status for successful tool executions');
 
 export const groundingStatusField = z
-  .enum(['completed', 'grounded', 'partially_grounded', 'ungrounded'])
-  .describe('Grounding status; `completed` is accepted for legacy successful outputs');
+  .enum(['grounded', 'partially_grounded', 'ungrounded'])
+  .describe('Grounding status derived from retrieval and citation coverage');
 
-export const publicBaseOutputFieldsWithoutStatus = {
+export const publicCoreOutputFields = {
   requestId: z.string().describe('Server-side request or task identifier').optional(),
   warnings: z.array(z.string()).describe('Non-fatal warnings for the result').optional(),
-  ...streamMetadataOutputFields,
+  diagnostics: DiagnosticsSchema.optional(),
 };
+
+// ── JSON value schema for `chat.data` ────────────────────────────────
+
+type JsonValue = string | number | boolean | null | { [k: string]: JsonValue } | JsonValue[];
+
+const JsonPrimitiveSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([JsonPrimitiveSchema, z.array(JsonValueSchema), z.record(z.string(), JsonValueSchema)]),
+);
 
 const urlMetadataEntryFields = {
   url: PublicHttpUrlSchema.describe('Retrieved URL'),
   status: z
-    .enum([
-      'URL_RETRIEVAL_STATUS_SUCCESS',
-      'URL_RETRIEVAL_STATUS_ERROR',
-      'URL_RETRIEVAL_STATUS_UNSAFE',
-      'URL_RETRIEVAL_STATUS_PAYWALL',
-      'URL_RETRIEVAL_STATUS_UNSPECIFIED',
-    ])
-    .or(z.string())
+    .enum(UrlRetrievalStatus)
     .describe(
-      'Gemini URL retrieval status. Known URL_RETRIEVAL_STATUS_* values are documented while unknown strings remain forward-compatible.',
+      'Gemini URL retrieval status (`UrlRetrievalStatus` enum). Unknown SDK values are coerced to `URL_RETRIEVAL_STATUS_UNSPECIFIED` before schema validation.',
     ),
 };
 

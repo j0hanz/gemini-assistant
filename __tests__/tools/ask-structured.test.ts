@@ -27,7 +27,7 @@ describe('ask structured output shaping', () => {
     assert.deepStrictEqual(result.structuredContent, {
       answer: '',
       data: { status: 'ok', count: 2 },
-      usage: { totalTokenCount: 42 },
+      diagnostics: { usage: { totalTokenCount: 42 } },
     });
     assert.strictEqual(result.content[0]?.type, 'text');
     assert.strictEqual(result.content[0]?.text, '');

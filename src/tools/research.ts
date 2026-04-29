@@ -333,9 +333,6 @@ function buildSearchResult(streamResult: StreamResult, textContent: string) {
         urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
         status: context.status,
         groundingSignals: context.groundingSignals,
-        findings: context.findings.length > 0 ? context.findings : undefined,
-        citations: context.citations.length > 0 ? context.citations : undefined,
-        computations: context.computations.length > 0 ? context.computations : undefined,
         warnings: warnings.length > 0 ? warnings : undefined,
       }),
     ),
@@ -1059,25 +1056,37 @@ function buildResearchStructuredContent(
   ctx: ServerContext,
   structured: Record<string, unknown>,
 ): Record<string, unknown> {
+  const sharedDomain = {
+    status: structured.status,
+    summary: extractResearchSummary(structured),
+    sources: Array.isArray(structured.sources) ? structured.sources : undefined,
+    sourceDetails: structured.sourceDetails,
+    urlContextSources: structured.urlContextSources,
+    urlMetadata: structured.urlMetadata,
+    groundingSignals: structured.groundingSignals,
+  };
+
+  const domain =
+    args.mode === 'deep'
+      ? {
+          ...sharedDomain,
+          mode: 'deep' as const,
+          toolsUsed: structured.toolsUsed,
+          findings: structured.findings,
+          citations: structured.citations,
+          computations: structured.computations,
+        }
+      : {
+          ...sharedDomain,
+          mode: 'quick' as const,
+        };
+
   return buildSuccessfulStructuredContent({
     requestId: ctx.task?.id,
     warnings: Array.isArray(structured.warnings)
       ? structured.warnings.filter((warning): warning is string => typeof warning === 'string')
       : undefined,
-    domain: {
-      status: structured.status,
-      mode: args.mode,
-      summary: extractResearchSummary(structured),
-      sources: Array.isArray(structured.sources) ? structured.sources : undefined,
-      sourceDetails: structured.sourceDetails,
-      urlContextSources: structured.urlContextSources,
-      urlMetadata: structured.urlMetadata,
-      toolsUsed: structured.toolsUsed,
-      groundingSignals: structured.groundingSignals,
-      findings: structured.findings,
-      citations: structured.citations,
-      computations: structured.computations,
-    },
+    domain,
     shared: structured,
   });
 }

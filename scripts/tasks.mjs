@@ -3,7 +3,7 @@
 //   --fix   run lint:fix instead of lint
 //   --fast  skip the test suite (static checks only)
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
@@ -17,6 +17,7 @@ const STARTUP_MIN_MS = 30_000;
 const MAX_STDERR_BYTES = 256 * 1024;
 const RAW_OUTPUT_PREVIEW_LIMIT = 500;
 const RAW_OUTPUT_MAX_LINES = 40;
+const REBUILD_DELAY_MS = 3_000;
 const IS_WINDOWS = process.platform === 'win32';
 
 const R = '\x1b[0m';
@@ -465,6 +466,29 @@ function runKnipFix() {
   runCommand('npx', ['knip', '--fix', '--fix-type', 'exports,types,dependencies', '--format']);
 }
 
+async function runBuild() {
+  const lbl = 'rebuild'.padEnd(COL);
+
+  process.stdout.write(`\r  ${RUN}  ${BOLD}${lbl}${R}  ${DIM}removing dist...${R}`);
+  try {
+    rmSync('dist', { recursive: true, force: true });
+  } catch (err) {
+    return { ok: false, rawOutput: `dist removal failed: ${String(err?.message ?? err)}` };
+  }
+
+  process.stdout.write(
+    `\r  ${RUN}  ${BOLD}${lbl}${R}  ${DIM}settling ${elapsed(REBUILD_DELAY_MS)}...${R}`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, REBUILD_DELAY_MS));
+
+  process.stdout.write(`\r  ${RUN}  ${BOLD}${lbl}${R}  ${DIM}rebuilding...${R}`);
+  const r = runCommand('npm', ['run', 'build']);
+  if (!r.ok) {
+    return { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
+  }
+  return { ok: true };
+}
+
 function runTest() {
   const history = loadHistory();
   const silenceMs = getSilenceTimeout(history);
@@ -618,6 +642,7 @@ const tasks = [
   { label: 'build', cmd: ['npm', ['run', 'build']] },
   { label: 'knip', runner: runKnip },
   { label: 'test', runner: runTest, skip: fast },
+  { label: 'rebuild', runner: runBuild, skip: fast },
 ];
 
 const COL = Math.max(...tasks.map((t) => t.label.length)) + 2;

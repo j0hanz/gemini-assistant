@@ -485,7 +485,11 @@ describe('ask transcript capture', () => {
         createContext('task-workspace'),
       );
 
-      assert.strictEqual(result.isError, undefined, `Expected success but got: ${result.error}`);
+      assert.strictEqual(
+        result.isError,
+        undefined,
+        `Expected success but got: ${String(result.error)}`,
+      );
       assert.ok(result.structuredContent, 'structuredContent should be present');
       const structured = result.structuredContent as Record<string, unknown>;
       assert.strictEqual(structured.answer, 'Assistant answer');

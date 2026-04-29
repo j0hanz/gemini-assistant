@@ -335,7 +335,6 @@ function getAskStructuredContent(result: CallToolResult): AskStructuredContent |
   return readStructuredObject(result) as AskStructuredContent | undefined;
 }
 
-
 function validateAskConflict(condition: boolean, message: string): CallToolResult | undefined {
   return condition ? new AppError('chat', message).toToolResult() : undefined;
 }
@@ -980,23 +979,11 @@ export function createDefaultAskDependencies(
   };
 }
 
-function addContextSource(
-  contextUsed: ContextUsed,
-  source: { kind: 'session-summary'; name: string; tokens: number },
-): ContextUsed {
-  return {
-    ...contextUsed,
-    sources: [...contextUsed.sources, source],
-    totalTokens: contextUsed.totalTokens + source.tokens,
-  };
-}
-
 async function askExistingSession(
   args: AskArgs & { sessionId: string },
   ctx: ServerContext,
   deps: AskDependencies,
   chat: Chat,
-  contextUsed?: ContextUsed,
   sessionSummary?: string,
 ): Promise<CallToolResult | undefined> {
   const functionResponses = normalizeFunctionResponses(args.functionResponses);
@@ -1007,14 +994,6 @@ async function askExistingSession(
   const resumedArgs = sessionSummary
     ? { ...args, message: `${sessionSummary}\n\n${args.message}` }
     : args;
-  const effectiveContextUsed =
-    sessionSummary && contextUsed
-      ? addContextSource(contextUsed, {
-          kind: 'session-summary',
-          name: args.sessionId,
-          tokens: Math.ceil(sessionSummary.length / 4),
-        })
-      : contextUsed;
 
   await mcpLog(ctx, 'debug', `Resuming session ${args.sessionId}`);
   const { progress } = createToolContext('chat', ctx);
@@ -1035,7 +1014,6 @@ async function askNewSession(
   args: AskArgs & { sessionId: string },
   ctx: ServerContext,
   deps: AskDependencies,
-  contextUsed?: ContextUsed,
 ): Promise<CallToolResult> {
   await mcpLog(ctx, 'debug', `Creating session ${args.sessionId}`);
   const { chat, contract } = deps.createChat(args);
@@ -1106,7 +1084,7 @@ export function createAskWork(deps: AskDependencies, workspace: ToolWorkspaceAcc
     const prepared = await prepareAskRequest(args, deps, ctx, ctx.mcpReq.signal, workspace);
     if (!isPreparedRequest(prepared)) return prepared;
 
-    const { effectiveArgs, contextUsed, warnings } = prepared;
+    const { effectiveArgs, warnings } = prepared;
 
     if (!effectiveArgs.sessionId) {
       const askResult = await deps.runWithoutSession(effectiveArgs, ctx);
@@ -1121,7 +1099,6 @@ export function createAskWork(deps: AskDependencies, workspace: ToolWorkspaceAcc
         ctx,
         deps,
         liveChat,
-        contextUsed,
       );
       if (resumed) return appendAskWarnings(resumed, warnings);
     } else if (deps.getSessionEntry(sessionId)) {
@@ -1134,7 +1111,6 @@ export function createAskWork(deps: AskDependencies, workspace: ToolWorkspaceAcc
           ctx,
           deps,
           rebuiltChat,
-          contextUsed,
           sessionSummary,
         );
         if (resumed) return appendAskWarnings(resumed, warnings);
@@ -1150,7 +1126,7 @@ export function createAskWork(deps: AskDependencies, workspace: ToolWorkspaceAcc
     }
 
     return appendAskWarnings(
-      await askNewSession(effectiveArgs as AskArgs & { sessionId: string }, ctx, deps, contextUsed),
+      await askNewSession(effectiveArgs as AskArgs & { sessionId: string }, ctx, deps),
       warnings,
     );
   };
@@ -1174,7 +1150,6 @@ function extractSessionId(
 
   return undefined;
 }
-
 
 function attachSessionMetadata(
   result: CallToolResult,

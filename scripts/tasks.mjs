@@ -98,11 +98,15 @@ const HELP_TEXT = [
   '  --json       Emit single JSON object on stdout, suppress human output',
   '  --llm        Echo failure detail to stdout (always written to .tasks-last-failure.json)',
   '  --detail <n> Show source-window detail for test failure at index n',
+  '  --watch      Run node --test in watch mode (bypasses orchestration; stdio inherited)',
   '  --test-timeout <ms>           Forward to node --test-timeout',
   '  --test-name-pattern <regex>   Forward to node --test-name-pattern',
   '  --test-shard <i/n>            Forward to node --test-shard',
   '  --update-snapshots            Forward to node --test-update-snapshots',
   '  --help       Show this help',
+  '',
+  'Note: when running under --permission, this script needs --allow-fs-read,',
+  '  --allow-fs-write, and --allow-child-process to spawn npm/npx/tsc/node test runs.',
   '',
 ].join('\n');
 
@@ -240,6 +244,7 @@ function parseCliConfig(args) {
         all: { type: 'boolean' },
         json: { type: 'boolean' },
         llm: { type: 'boolean' },
+        watch: { type: 'boolean' },
         detail: { type: 'string' },
         'test-timeout': { type: 'string' },
         'test-name-pattern': { type: 'string' },
@@ -298,12 +303,25 @@ function parseCliConfig(args) {
     all: !!values.all,
     json: !!values.json,
     llm: !!values.llm,
+    watch: !!values.watch,
     detail: values.detail !== undefined ? Number(values.detail) : null,
     testTimeout: values['test-timeout'] !== undefined ? Number(values['test-timeout']) : null,
     testNamePattern: values['test-name-pattern'] ?? null,
     testShard: values['test-shard'] ?? null,
     updateSnapshots: !!values['update-snapshots'],
   });
+}
+
+function describeSpawnError(err, cmd) {
+  const code = err?.code;
+  const base = err?.message || String(err);
+  if (code === 'ENOENT') {
+    return `${base}\nhint: '${cmd}' was not found on PATH. Run 'npm install' (or ensure Node ≥24 / corepack is set up).`;
+  }
+  if (code === 'ERR_ACCESS_DENIED' || code === 'EACCES' || code === 'EPERM') {
+    return `${base}\nhint: spawn was denied. If running under --permission, pass --allow-fs-read --allow-fs-write --allow-child-process.`;
+  }
+  return base;
 }
 
 const ProcessRunner = {
@@ -356,7 +374,7 @@ const ProcessRunner = {
         settle({
           ok: false,
           stdout: '',
-          stderr: err?.message || String(err),
+          stderr: describeSpawnError(err, cmd),
           status: null,
           signal: null,
           truncatedStdout: false,
@@ -393,7 +411,7 @@ const ProcessRunner = {
         settle({
           ok: false,
           stdout,
-          stderr: err?.message || String(err),
+          stderr: describeSpawnError(err, cmd),
           status: null,
           signal: null,
           truncatedStdout,
@@ -1994,6 +2012,22 @@ if (import.meta.main) {
   if (config !== null) {
     if (config.detail !== null) {
       await renderDetailCommand(config);
+    } else if (config.watch) {
+      const runner = new TestRunner({ testConfig: config });
+      const argv = [...runner.buildArgv(), '--watch'];
+      const command = ProcessRunner.command(process.execPath, argv);
+      const child = spawn(
+        command.cmd,
+        command.args,
+        ProcessRunner.spawnOptions(command, { stdio: 'inherit' }),
+      );
+      child.on('error', (err) => {
+        process.stderr.write(`${describeSpawnError(err, 'node')}\n`);
+        process.exitCode = 1;
+      });
+      child.on('close', (code, signalName) => {
+        process.exitCode = code ?? (signalName ? signalExitCode(signalName) : 1);
+      });
     } else {
       process.exitCode = await new TaskOrchestrator(config).run();
     }

@@ -3,16 +3,136 @@
 //   --fix   run lint:fix instead of lint
 //   --fast  skip the test suite (static checks only)
 import { execSync, spawn } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import process from 'node:process';
 
-import { getSilenceTimeout, loadHistory, saveHistory } from './tasks-history.mjs';
-import { parseEslintJson, parseTapLine, parseTscOutput, parseYamlBlock } from './tasks-parse.mjs';
-import {
-  clearSourceCache,
-  emitLlmBlock,
-  renderRustError,
-  renderTestFailureCard,
-} from './tasks-render.mjs';
+// --- HISTORY AND TIMEOUT ---
+
+const MAX_DURATIONS = 5;
+
+function loadHistory(file = '.tasks-history.json') {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return { test_durations: {} };
+  }
+}
+
+function saveHistory(history, newDurations, file = '.tasks-history.json') {
+  for (const [name, ms] of newDurations) {
+    const arr = history.test_durations[name] ?? [];
+    arr.push(ms);
+    history.test_durations[name] = arr.slice(-MAX_DURATIONS);
+  }
+  writeFileSync(file, JSON.stringify(history, null, 2) + '\n', 'utf8');
+}
+
+const MIN_SILENCE_MS = 30_000;
+
+function getSilenceTimeout(history) {
+  const all = Object.values(history.test_durations).flat();
+  if (!all.length) return MIN_SILENCE_MS;
+  return Math.max(MIN_SILENCE_MS, 10 * Math.max(...all));
+}
+
+// --- PARSERS ---
+
+function parseEslintJson(jsonStr, cwd) {
+  const results = JSON.parse(jsonStr);
+  const errors = [];
+  for (const file of results) {
+    if (!file.messages?.length) continue;
+    const rel = file.filePath?.startsWith(cwd)
+      ? file.filePath.slice(cwd.length + 1).replace(/\\/g, '/')
+      : (file.filePath ?? '').replace(/\\/g, '/');
+    for (const msg of file.messages) {
+      errors.push({
+        file: rel,
+        line: msg.line ?? 1,
+        col: msg.column ?? 1,
+        endCol: msg.endColumn ?? (msg.column ?? 1) + 3,
+        rule: msg.ruleId ?? 'unknown',
+        severity: msg.severity === 1 ? 'warning' : 'error',
+        message: msg.message,
+      });
+    }
+  }
+  return errors;
+}
+
+const TSC_RE = /^(.+?)\((\d+),(\d+)\): (error|warning) (TS\d+): (.+)$/;
+
+function parseTscOutput(text) {
+  const errors = [];
+  for (const line of text.split('\n')) {
+    const m = line.match(TSC_RE);
+    if (!m) continue;
+    errors.push({
+      file: m[1].replace(/\\/g, '/'),
+      line: Number(m[2]),
+      col: Number(m[3]),
+      endCol: Number(m[3]) + 3,
+      rule: m[5],
+      severity: m[4],
+      message: m[6],
+    });
+  }
+  return errors;
+}
+
+function parseTapLine(line) {
+  const indent = (line.match(/^(\s*)/) ?? ['', ''])[1].length;
+  const ok = /^\s*ok \d+ - (.+?)(?:\s+#\s+time=(\S+))?$/.exec(line);
+  if (ok)
+    return {
+      type: 'ok',
+      depth: indent,
+      name: ok[1].trim(),
+      duration: ok[2] ? parseFloat(ok[2]) : 0,
+    };
+  const notOk = /^\s*not ok \d+ - (.+)$/.exec(line);
+  if (notOk) return { type: 'not_ok', depth: indent, name: notOk[1].trim() };
+  if (/^\s+---\s*$/.test(line)) return { type: 'yaml_start' };
+  if (/^\s+\.\.\.\s*$/.test(line)) return { type: 'yaml_end' };
+  return { type: 'raw', line };
+}
+
+function parseYamlBlock(lines) {
+  const result = {};
+  let multiKey = null;
+  const multiLines = [];
+  for (const raw of lines) {
+    const trimmed = raw.trim();
+    if (multiKey) {
+      if (/^\w+:/.test(trimmed)) {
+        result[multiKey] = multiLines.join('\n').trim();
+        multiKey = null;
+        multiLines.length = 0;
+      } else {
+        multiLines.push(trimmed);
+        continue;
+      }
+    }
+    const kv = /^(\w+):\s*(.*)$/.exec(trimmed);
+    if (!kv) continue;
+    const [, key, val] = kv;
+    if (val === '|-' || val === '|') {
+      multiKey = key;
+      multiLines.length = 0;
+    } else {
+      result[key] = val.replace(/^'|'$/g, '');
+    }
+  }
+  if (multiKey) result[multiKey] = multiLines.join('\n').trim();
+  if (!result.at && result.stack) {
+    const m = result.stack.match(/at .+? \(([^)]+:\d+:\d+)\)/);
+    if (m && !m[1].startsWith('node:')) result.at = m[1];
+  }
+  return result;
+}
+
+// --- RENDERING ---
 
 const R = '\x1b[0m';
 const BOLD = '\x1b[1m';
@@ -21,6 +141,83 @@ const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
 const YELLOW = '\x1b[33m';
 const CYAN = '\x1b[36m';
+
+const sourceCache = new Map();
+
+function clearSourceCache() {
+  sourceCache.clear();
+}
+
+function getLines(filePath) {
+  if (!sourceCache.has(filePath)) {
+    try {
+      sourceCache.set(filePath, readFileSync(filePath, 'utf8').split('\n'));
+    } catch {
+      sourceCache.set(filePath, []);
+    }
+  }
+  return sourceCache.get(filePath);
+}
+
+function renderRustError(error, cwd = process.cwd()) {
+  const { file, line, col, endCol, rule, severity, message } = error;
+  const color = severity === 'warning' ? YELLOW : RED;
+  const out = [];
+  out.push(`${color}${severity}[${rule}]${R}  ${message}`);
+  out.push(`  ${DIM}-->${R} ${file}:${line}:${col}`);
+  const absPath = path.isAbsolute(file) ? file : path.join(cwd, file);
+  const src = getLines(absPath);
+  const gutterW = String(line + 1).length;
+  const pad = ' '.repeat(gutterW);
+  out.push(`${DIM}${pad} |${R}`);
+  const underlineLen = Math.max(3, (endCol ?? col + 3) - col);
+  const underline = '^^^^^^^^^^^'.slice(0, underlineLen);
+  if (line >= 1 && line <= src.length) {
+    for (const n of [line - 1, line, line + 1]) {
+      if (n < 1 || n > src.length) continue;
+      const srcLine = src[n - 1] ?? '';
+      const g = String(n).padStart(gutterW);
+      if (n === line) {
+        out.push(`${BOLD}${g}${R} ${DIM}│${R} ${srcLine}`);
+        out.push(`${DIM}${pad} │${R} ${' '.repeat(col - 1)}${color}${underline}${R}`);
+      } else {
+        out.push(`${DIM}${g} │ ${srcLine}${R}`);
+      }
+    }
+  } else {
+    out.push(`${DIM}${pad} │${R} ${' '.repeat(col - 1)}${color}${underline}${R}`);
+  }
+  return out.join('\n');
+}
+
+function renderTestFailureCard(failure) {
+  const { name, file, expected, actual, errorMessage, frame } = failure;
+  const out = [];
+  out.push(`${RED}FAIL${R}  ${DIM}${file}${R}`);
+  out.push(`  ${RED}✗${R}  ${name}`);
+  out.push('');
+  if (expected !== undefined && actual !== undefined) {
+    out.push(`     ${DIM}AssertionError:${R}`);
+    out.push(`     ${RED}- Expected   ${expected}${R}`);
+    out.push(`     ${GREEN}+ Received   ${actual}${R}`);
+  } else if (errorMessage) {
+    out.push(`     ${RED}${errorMessage}${R}`);
+  }
+  if (frame) {
+    out.push('');
+    out.push(`     ${DIM}at ${frame}${R}`);
+  }
+  return out.join('\n');
+}
+
+function emitLlmBlock(data) {
+  const HR = '─'.repeat(53);
+  process.stdout.write(
+    `\n${HR}\n## LLM CONTEXT\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`\n${HR}\n\n`,
+  );
+}
+
+// --- MAIN RUNNER ---
 
 const PASS = `${GREEN}✓${R}`;
 const FAIL = `${RED}✗${R}`;

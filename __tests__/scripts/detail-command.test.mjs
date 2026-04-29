@@ -294,3 +294,21 @@ test('buildLlmPayload populates sourceWindow with highlightLine when frame prese
   assert.equal(p.sourceWindow.highlightLine, 10);
   assert.equal(p.sourceWindow.col, 3);
 });
+
+// Inline copy of the detail JSON-routing predicate (TASK-002)
+function shouldEmitJsonDetail(llm, json) {
+  return Boolean(llm) || Boolean(json);
+}
+
+test('shouldEmitJsonDetail returns false when neither flag is set', () => {
+  assert.equal(shouldEmitJsonDetail(false, false), false);
+});
+test('shouldEmitJsonDetail returns true when --llm is set', () => {
+  assert.equal(shouldEmitJsonDetail(true, false), true);
+});
+test('shouldEmitJsonDetail returns true when --json is set', () => {
+  assert.equal(shouldEmitJsonDetail(false, true), true);
+});
+test('shouldEmitJsonDetail returns true when both flags are set', () => {
+  assert.equal(shouldEmitJsonDetail(true, true), true);
+});

@@ -97,6 +97,9 @@ const HELP_TEXT = [
   '  --json       Emit single JSON object on stdout, suppress human output',
   '  --llm        Echo failure detail to stdout (always written to .tasks-last-failure.json)',
   '  --detail <n> Show source-window detail for test failure at index n',
+  '  --test-timeout <ms>           Forward to node --test-timeout',
+  '  --test-name-pattern <regex>   Forward to node --test-name-pattern',
+  '  --test-shard <i/n>            Forward to node --test-shard',
   '  --help       Show this help',
   '',
 ].join('\n');
@@ -195,9 +198,17 @@ const Results = {
     return { ok: null, skipped: true, skipReason: reason };
   },
 
-  raw(stdout = '', stderr = '', prefix = '') {
+  raw(stdout = '', stderr = '', prefix = '', meta = {}) {
     const output = Text.joinOutput(stdout, stderr);
-    return this.fail({ rawOutput: prefix ? `${prefix}\n${output}`.trim() : output });
+    const rawOutput = prefix ? `${prefix}\n${output}`.trim() : output;
+    return this.fail({
+      rawOutput,
+      ...(meta.truncatedStdout ? { truncatedStdout: true } : {}),
+      ...(meta.truncatedStderr ? { truncatedStderr: true } : {}),
+      ...(meta.status !== undefined && meta.status !== null ? { status: meta.status } : {}),
+      ...(meta.signal ? { signal: meta.signal } : {}),
+      ...(meta.command ? { command: meta.command } : {}),
+    });
   },
 
   diagnostics(errors) {
@@ -228,6 +239,9 @@ function parseCliConfig(args) {
         json: { type: 'boolean' },
         llm: { type: 'boolean' },
         detail: { type: 'string' },
+        'test-timeout': { type: 'string' },
+        'test-name-pattern': { type: 'string' },
+        'test-shard': { type: 'string' },
         help: { type: 'boolean', short: 'h' },
       },
       strict: true,
@@ -256,6 +270,25 @@ function parseCliConfig(args) {
     }
   }
 
+  if (values['test-timeout'] !== undefined) {
+    const n = Number(values['test-timeout']);
+    if (!Number.isInteger(n) || n < 1) {
+      process.stderr.write(
+        `--test-timeout requires a positive integer ms (got: ${values['test-timeout']})\n\n${HELP_TEXT}`,
+      );
+      process.exitCode = 2;
+      return null;
+    }
+  }
+
+  if (values['test-shard'] !== undefined && !/^\d+\/\d+$/.test(values['test-shard'])) {
+    process.stderr.write(
+      `--test-shard requires <index>/<total> (got: ${values['test-shard']})\n\n${HELP_TEXT}`,
+    );
+    process.exitCode = 2;
+    return null;
+  }
+
   return Object.freeze({
     fix: !!values.fix,
     quick: !!values.quick,
@@ -263,6 +296,9 @@ function parseCliConfig(args) {
     json: !!values.json,
     llm: !!values.llm,
     detail: values.detail !== undefined ? Number(values.detail) : null,
+    testTimeout: values['test-timeout'] !== undefined ? Number(values['test-timeout']) : null,
+    testNamePattern: values['test-name-pattern'] ?? null,
+    testShard: values['test-shard'] ?? null,
   });
 }
 
@@ -728,9 +764,44 @@ class TestTapState {
 }
 
 class TestRunner {
-  constructor({ historyManager = HistoryManager, signal = runController.signal } = {}) {
+  constructor({
+    historyManager = HistoryManager,
+    signal = runController.signal,
+    testConfig = {},
+  } = {}) {
     this.historyManager = historyManager;
     this.signal = signal;
+    this.testConfig = testConfig;
+  }
+
+  buildArgv() {
+    const argv = [
+      '--enable-source-maps',
+      '--import',
+      'tsx/esm',
+      '--env-file-if-exists=.env',
+      '--test',
+      '--no-warnings',
+      '--test-reporter=tap',
+    ];
+    if (!Config.IS_WINDOWS) {
+      argv.push(
+        '--report-on-signal',
+        '--report-signal=SIGUSR2',
+        '--report-filename=.tasks-test-hang.json',
+        '--report-exclude-env',
+      );
+    }
+    if (this.testConfig.testTimeout) {
+      argv.push(`--test-timeout=${this.testConfig.testTimeout}`);
+    }
+    if (this.testConfig.testNamePattern) {
+      argv.push(`--test-name-pattern=${this.testConfig.testNamePattern}`);
+    }
+    if (this.testConfig.testShard) {
+      argv.push(`--test-shard=${this.testConfig.testShard}`);
+    }
+    return argv;
   }
 
   async run() {
@@ -742,7 +813,7 @@ class TestRunner {
 
     const child = spawn(
       process.execPath,
-      ['--import', 'tsx/esm', '--env-file=.env', '--test', '--no-warnings', '--test-reporter=tap'],
+      this.buildArgv(),
       ProcessRunner.spawnOptions(
         {},
         { signal: AbortSignal.any([abortController.signal, this.signal]) },
@@ -796,14 +867,22 @@ class TestRunner {
       const phase = state.seenFirstOk ? 'between-tests' : 'startup';
       const ms = state.seenFirstOk ? silenceMs : startupMs;
 
-      // Capture a diagnostic report (active handles, native stacks, event-loop state) before killing.
-      // Best-effort — must never throw out of the timeout path.
-      try {
-        if (typeof process.report?.writeReport === 'function') {
-          process.report.writeReport('.tasks-test-hang.json');
+      // Ask the test child to write its own diagnostic report (active handles, native stacks)
+      // via --report-on-signal=SIGUSR2 (POSIX only). Wait briefly for it to flush, then abort.
+      if (!Config.IS_WINDOWS && child.pid !== undefined) {
+        try {
+          child.kill('SIGUSR2');
+        } catch {
+          // ignore signal errors
         }
-      } catch {
-        // ignore report errors
+        try {
+          await Promise.race([
+            once(child, 'close'),
+            new Promise((resolve) => setTimeout(resolve, 500).unref()),
+          ]);
+        } catch {
+          // ignore drain errors
+        }
       }
 
       try {
@@ -910,7 +989,14 @@ const TaskCommands = {
 const TaskRunners = {
   async command(cmd, args) {
     const result = await ProcessRunner.execAsync(cmd, args);
-    return result.ok ? Results.pass() : Results.raw(result.stdout, result.stderr);
+    if (result.ok) return Results.pass();
+    return Results.raw(result.stdout, result.stderr, '', {
+      truncatedStdout: result.truncatedStdout,
+      truncatedStderr: result.truncatedStderr,
+      status: result.status,
+      signal: result.signal,
+      command: `${cmd} ${args.join(' ')}`.trim(),
+    });
   },
 
   async diagnosticCommand({ command, parse, output = (result) => result.stdout }) {
@@ -920,7 +1006,15 @@ const TaskRunners = {
 
     const text = output(result);
     const errors = parse(text);
-    if (errors.length === 0) return Results.raw(result.stdout, result.stderr);
+    if (errors.length === 0) {
+      return Results.raw(result.stdout, result.stderr, '', {
+        truncatedStdout: result.truncatedStdout,
+        truncatedStderr: result.truncatedStderr,
+        status: result.status,
+        signal: result.signal,
+        command: `${cmd} ${args.join(' ')}`.trim(),
+      });
+    }
     return Results.diagnostics(errors);
   },
 
@@ -965,8 +1059,8 @@ const TaskRunners = {
     return this.command(...TaskCommands.build());
   },
 
-  async runTest() {
-    return new TestRunner().run();
+  async runTest(testConfig = {}) {
+    return new TestRunner({ testConfig }).run();
   },
 };
 
@@ -1202,6 +1296,11 @@ class Aggregate {
           }
         : {}),
       ...(result.rawOutput ? { rawOutput: Text.cap(result.rawOutput, 4000) } : {}),
+      ...(result.truncatedStdout ? { truncatedStdout: true } : {}),
+      ...(result.truncatedStderr ? { truncatedStderr: true } : {}),
+      ...(result.status !== undefined && result.status !== null ? { status: result.status } : {}),
+      ...(result.signal ? { signal: result.signal } : {}),
+      ...(result.command ? { command: result.command } : {}),
     });
     this.failed++;
   }
@@ -1297,15 +1396,17 @@ class TtyReporter extends BaseReporter {
 
   taskStart(label) {
     this.tickerStart = Date.now();
-    this.writeTaskLine(Icons.RUN, label, '');
-    if (!this.useTicker) return;
-    this.tickerHandle = setInterval(() => {
-      this.writeTaskLine(
-        Icons.RUN,
-        label,
-        `${Theme.DIM}${Text.elapsed(Date.now() - this.tickerStart)}${Theme.R}`,
-      );
-    }, 1000).unref();
+    if (this.useTicker) {
+      this.writeTaskLine(Icons.RUN, label, '');
+      this.tickerHandle = setInterval(() => {
+        this.writeTaskLine(
+          Icons.RUN,
+          label,
+          `${Theme.DIM}${Text.elapsed(Date.now() - this.tickerStart)}${Theme.R}`,
+        );
+      }, 1000).unref();
+    }
+    // In non-TTY mode we wait until taskEnd to emit a single final line.
   }
 
   taskEnd(label, result, ms) {
@@ -1316,6 +1417,12 @@ class TtyReporter extends BaseReporter {
   }
 
   writeTaskLine(icon, label, right = '', newline = false) {
+    if (!this.useTicker) {
+      process.stdout.write(
+        `  ${icon}  ${Theme.BOLD}${label.padEnd(this.col)}${Theme.R}${right ? `  ${right}` : ''}\n`,
+      );
+      return;
+    }
     process.stdout.write(
       `\r  ${icon}  ${Theme.BOLD}${label.padEnd(this.col)}${Theme.R}${right ? `  ${right}` : ''}${Theme.CLEAR_EOL}${newline ? '\n' : ''}`,
     );
@@ -1412,10 +1519,17 @@ class TtyReporter extends BaseReporter {
       }
       if (task.errors?.length > 0) {
         process.stdout.write('\n');
-        OutputRenderer.renderDiagnosticsGrouped(task.errors);
+        const total = task.errors.length;
+        const shown = task.errors.slice(0, Config.MAX_FAILURE_CARDS);
+        OutputRenderer.renderDiagnosticsGrouped(shown);
+        if (total > shown.length) {
+          process.stdout.write(
+            `  ${Theme.DIM}… ${total - shown.length} more diagnostics; full list in ${Config.FAILURE_FILE}${Theme.R}\n\n`,
+          );
+        }
         continue;
       }
-      if (task.rawOutput) this.renderRawOutput(task.rawOutput);
+      if (task.rawOutput) this.renderRawOutput(task.rawOutput, task);
     }
   }
 
@@ -1447,9 +1561,11 @@ class TtyReporter extends BaseReporter {
 
   renderTestFailures(failures) {
     process.stdout.write('\n');
-    const maxIdx = String(failures.length).length;
-    for (let i = 0; i < failures.length; i++) {
-      const f = failures[i];
+    const total = failures.length;
+    const shown = failures.slice(0, Config.MAX_FAILURE_CARDS);
+    const maxIdx = String(total).length;
+    for (let i = 0; i < shown.length; i++) {
+      const f = shown[i];
       const idx = String(i + 1).padStart(maxIdx);
       const fileRef = f.frame ? f.frame.replace(/:(\d+):(\d+)$/, ':$1') : f.file || '';
       const nameStr = Text.cap(f.name, 60);
@@ -1457,10 +1573,15 @@ class TtyReporter extends BaseReporter {
         `    ${Theme.BOLD}${idx}${Theme.R}  ${nameStr.padEnd(62)}  ${Theme.DIM}${fileRef}${Theme.R}\n`,
       );
     }
+    if (total > shown.length) {
+      process.stdout.write(
+        `    ${Theme.DIM}… ${total - shown.length} more failures; full list in ${Config.FAILURE_FILE}${Theme.R}\n`,
+      );
+    }
     process.stdout.write(`\n  ${Theme.DIM}→ node scripts/tasks.mjs --detail <n>${Theme.R}\n\n`);
   }
 
-  renderRawOutput(rawOutput) {
+  renderRawOutput(rawOutput, task = {}) {
     process.stdout.write('\n');
     const lines = rawOutput.trim().split('\n');
     const shown = lines.slice(0, Config.RAW_OUTPUT_MAX_LINES);
@@ -1469,6 +1590,12 @@ class TtyReporter extends BaseReporter {
       process.stdout.write(
         `      ${Theme.DIM}… ${lines.length - shown.length} more lines${Theme.R}\n`,
       );
+    }
+    if (task.truncatedStdout || task.truncatedStderr) {
+      const which = [task.truncatedStdout ? 'stdout' : null, task.truncatedStderr ? 'stderr' : null]
+        .filter(Boolean)
+        .join(' + ');
+      process.stdout.write(`      ${Theme.DIM}[${which} truncated]${Theme.R}\n`);
     }
     process.stdout.write('\n');
   }
@@ -1506,21 +1633,20 @@ class TtyReporter extends BaseReporter {
   }
 }
 
+const JSON_SCHEMA_VERSION = 1;
+
 class JsonReporter extends BaseReporter {
   summary(aggregate) {
     process.stdout.write(
-      JSON.stringify(
-        {
-          ok: aggregate.failed === 0,
-          mode: aggregate.mode,
-          wallMs: aggregate.wallMs(),
-          tasks: aggregate.tasks,
-          slowestTests: aggregate.slowestTests,
-          failureSummary: aggregate.failureSummary(),
-        },
-        null,
-        2,
-      ) + '\n',
+      JSON.stringify({
+        schemaVersion: JSON_SCHEMA_VERSION,
+        ok: aggregate.failed === 0,
+        mode: aggregate.mode,
+        wallMs: aggregate.wallMs(),
+        tasks: aggregate.tasks,
+        slowestTests: aggregate.slowestTests,
+        failureSummary: aggregate.failureSummary(),
+      }) + '\n',
     );
   }
 }
@@ -1530,7 +1656,7 @@ function noop() {
 }
 
 async function renderDetailCommand(config) {
-  const { detail: index, llm } = config;
+  const { detail: index, llm, json } = config;
 
   const data = await FileStore.readJson(Config.FAILURE_FILE, null);
   if (!data) {
@@ -1562,7 +1688,7 @@ async function renderDetailCommand(config) {
 
   const failure = failures[index - 1];
 
-  if (llm) {
+  if (llm || json) {
     const parsed = failure.frame ? parseFrame(failure.frame) : null;
     const src = parsed ? sourceCache.lines(path.resolve(process.cwd(), parsed.file)) : [];
     const BEFORE = 4;
@@ -1571,24 +1697,21 @@ async function renderDetailCommand(config) {
     const endLine = parsed ? Math.min(src.length || parsed.line, parsed.line + AFTER) : 1;
     const windowLines = src.slice(startLine - 1, endLine);
 
-    process.stdout.write(
-      JSON.stringify(
-        {
-          index,
-          name: failure.name,
-          file: failure.file || '',
-          frame: failure.frame || null,
-          errorMessage: failure.errorMessage ?? null,
-          expected: failure.expected ?? null,
-          actual: failure.actual ?? null,
-          sourceWindow: parsed
-            ? { startLine, highlightLine: parsed.line, col: parsed.col, lines: windowLines }
-            : null,
-        },
-        null,
-        2,
-      ) + '\n',
-    );
+    const payload = {
+      schemaVersion: JSON_SCHEMA_VERSION,
+      index,
+      name: failure.name,
+      file: failure.file || '',
+      frame: failure.frame || null,
+      errorMessage: failure.errorMessage ?? null,
+      expected: failure.expected ?? null,
+      actual: failure.actual ?? null,
+      sourceWindow: parsed
+        ? { startLine, highlightLine: parsed.line, col: parsed.col, lines: windowLines }
+        : null,
+    };
+
+    process.stdout.write(JSON.stringify(payload) + '\n');
   } else {
     OutputRenderer.renderDetailView(failure, index);
     process.stdout.write('\n');
@@ -1617,25 +1740,38 @@ function clearFailureFile(file = Config.FAILURE_FILE) {
   FileStore.removeSync(file);
 }
 
-function installSigintHandler(reporter, config) {
-  if (process.listenerCount('SIGINT') > 0) return;
+function installSignalHandlers(reporter, config) {
+  const signals = Config.IS_WINDOWS ? ['SIGINT'] : ['SIGINT', 'SIGTERM'];
   let interrupted = false;
-  process.on('SIGINT', () => {
+
+  const handler = (signalName) => {
     runController.abort();
-    const exitCode = signalExitCode('SIGINT');
-    if (interrupted) process.exit(exitCode);
+    const exitCode = signalExitCode(signalName);
+
+    if (interrupted) {
+      process.exit(exitCode);
+      return;
+    }
     interrupted = true;
 
     if (reporter?.tickerHandle) clearInterval(reporter.tickerHandle);
     if (config?.json) {
       process.stderr.write('\n  interrupted\n\n');
-      process.stdout.write(JSON.stringify({ ok: false, interrupted: true }) + '\n');
+      process.stdout.write(
+        JSON.stringify({ schemaVersion: JSON_SCHEMA_VERSION, ok: false, interrupted: true }) + '\n',
+      );
     } else {
       process.stdout.write('\x1b[?25h');
       process.stdout.write(`\n  ${Theme.YELLOW}interrupted${Theme.R}\n\n`);
     }
-    process.exit(exitCode);
-  });
+    process.exitCode = exitCode;
+    // Allow tasks already in-flight to settle before truly exiting; second signal forces exit.
+  };
+
+  for (const signalName of signals) {
+    if (process.listenerCount(signalName) > 0) continue;
+    process.on(signalName, () => handler(signalName));
+  }
 }
 
 class TaskOrchestrator {
@@ -1651,7 +1787,16 @@ class TaskOrchestrator {
       { label: 'lint', runner: () => TaskRunners.runLint(config.fix) },
       { label: 'type-check', runner: () => TaskRunners.runTypeCheck() },
       { label: 'knip', runner: () => TaskRunners.runKnip() },
-      { label: 'test', runner: () => TaskRunners.runTest(), skip: config.quick },
+      {
+        label: 'test',
+        runner: () =>
+          TaskRunners.runTest({
+            testTimeout: config.testTimeout,
+            testNamePattern: config.testNamePattern,
+            testShard: config.testShard,
+          }),
+        skip: config.quick,
+      },
       { label: 'rebuild', runner: () => TaskRunners.runBuild(), skip: config.quick },
     ];
   }
@@ -1660,7 +1805,7 @@ class TaskOrchestrator {
     const reporter = this.config.json
       ? new JsonReporter(this.config, this.col)
       : new TtyReporter(this.config, this.col);
-    installSigintHandler(reporter, this.config);
+    installSignalHandlers(reporter, this.config);
     reporter.header();
 
     const aggregate = new Aggregate(this.config.all ? 'run-all' : 'fail-fast');
@@ -1674,7 +1819,9 @@ class TaskOrchestrator {
   async runSequential(aggregate, reporter) {
     let testDurations = null;
     for (const task of this.tasks) {
-      const result = await this.executeTask(task, aggregate, reporter, { allowAutoFix: true });
+      const result = await this.executeTask(task, aggregate, reporter, {
+        allowAutoFix: this.config.fix,
+      });
       if (result?.testDurations) testDurations = result.testDurations;
       if (!this.config.all && aggregate.failed > 0) break;
     }
@@ -1687,7 +1834,7 @@ class TaskOrchestrator {
     const staticTasks = rest.slice(0, 3);
     const deepTasks = rest.slice(3);
 
-    await this.executeTask(formatTask, aggregate, reporter, { allowAutoFix: true });
+    await this.executeTask(formatTask, aggregate, reporter, { allowAutoFix: this.config.fix });
     if (this.shouldStop(aggregate)) return null;
 
     await this.executeGroup(staticTasks, aggregate, reporter);
@@ -1794,12 +1941,13 @@ class TaskOrchestrator {
   }
 
   async attemptAutoFix(task, result) {
+    if (!this.config.fix) return null;
     if (task.label === 'format') {
       const fixResult = await ProcessRunner.execAsync('npm', ['run', 'format']);
       return this._applyFixAndRerun(task, fixResult);
     }
 
-    if (!this.config.fix || !result.errors || result.errors.length === 0) return null;
+    if (!result.errors || result.errors.length === 0) return null;
     if (task.label !== 'lint' && task.label !== 'knip') return null;
     if (task.label === 'knip' && !KnipParser.isFixable(result.errors)) return null;
 

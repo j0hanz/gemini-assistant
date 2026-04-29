@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Usage: node scripts/tasks.mjs [--fix] [--quick] [--all] [--json] [--llm] [--help]
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
@@ -228,23 +228,6 @@ const ProcessRunner = {
       ...(signal ? { signal } : {}),
       ...(Config.IS_WINDOWS ? { windowsHide: true } : {}),
       ...(command.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-    };
-  },
-
-  exec(cmd, args) {
-    const command = this.command(cmd, args);
-    const result = spawnSync(
-      command.cmd,
-      command.args,
-      this.spawnOptions(command, { encoding: 'utf8' }),
-    );
-
-    return {
-      ok: result.status === 0 && !result.error,
-      stdout: result.stdout || '',
-      stderr: result.stderr || (result.error ? result.error.message : ''),
-      status: result.status,
-      signal: result.signal,
     };
   },
 
@@ -715,6 +698,7 @@ class TestRunner {
     child.stderr?.on('data', (chunk) => state.appendStderr(chunk));
 
     const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+    lines.on('error', noop);
     const { promise, resolve } = Promise.withResolvers();
     let resolved = false;
     let activeTimerMs = startupMs;
@@ -896,7 +880,7 @@ const TaskRunners = {
 
   async runBuild() {
     try {
-      rmSync('dist', { recursive: true, force: true });
+      await rm('dist', { recursive: true, force: true });
     } catch (err) {
       return Results.fail({ rawOutput: `dist removal failed: ${err?.message || String(err)}` });
     }
@@ -1602,7 +1586,7 @@ class TaskOrchestrator {
 
   async attemptAutoFix(task, result) {
     if (task.label === 'format') {
-      const fixResult = ProcessRunner.exec('npm', ['run', 'format']);
+      const fixResult = await ProcessRunner.execAsync('npm', ['run', 'format']);
       return this._applyFixAndRerun(task, fixResult);
     }
 
@@ -1612,8 +1596,8 @@ class TaskOrchestrator {
 
     const fixResult =
       task.label === 'lint'
-        ? ProcessRunner.exec(...TaskCommands.lintFix())
-        : ProcessRunner.exec(...TaskCommands.knipFix());
+        ? await ProcessRunner.execAsync(...TaskCommands.lintFix())
+        : await ProcessRunner.execAsync(...TaskCommands.knipFix());
 
     return this._applyFixAndRerun(task, fixResult);
   }

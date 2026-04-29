@@ -51,35 +51,40 @@ describe('ContextUsedSchema', () => {
 });
 
 describe('AnalyzeOutputSchema', () => {
-  it('accepts summary output', () => {
+  it('AnalyzeOutputSchema rejects kind field', () => {
     const result = AnalyzeOutputSchema.safeParse({
-      kind: 'summary',
       status: 'ungrounded',
-      targetKind: 'file',
       summary: 'File analysis',
-    });
-    assert.ok(result.success);
-  });
-
-  it('accepts diagram output', () => {
-    const result = AnalyzeOutputSchema.safeParse({
-      kind: 'diagram',
-      status: 'completed',
-      targetKind: 'multi',
-      diagramType: 'mermaid',
-      diagram: 'flowchart TD\nA-->B',
-      explanation: 'Diagram generated from the provided files.',
-    });
-    assert.ok(result.success);
-  });
-
-  it('rejects missing output kind', () => {
-    const result = AnalyzeOutputSchema.safeParse({
-      status: 'completed',
-      targetKind: 'file',
-      summary: 'File analysis',
+      kind: 'summary',
     });
     assert.strictEqual(result.success, false);
+  });
+
+  it('AnalyzeOutputSchema rejects targetKind field', () => {
+    const result = AnalyzeOutputSchema.safeParse({
+      status: 'ungrounded',
+      summary: 'File analysis',
+      targetKind: 'file',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('AnalyzeOutputSchema accepts summary-mode payload', () => {
+    const result = AnalyzeOutputSchema.safeParse({
+      status: 'ungrounded',
+      summary: 'File analysis result',
+    });
+    assert.ok(result.success);
+  });
+
+  it('AnalyzeOutputSchema accepts diagram-mode payload', () => {
+    const result = AnalyzeOutputSchema.safeParse({
+      status: 'completed',
+      diagramType: 'mermaid',
+      diagram: 'flowchart TD\nA-->B',
+      syntaxValid: true,
+    });
+    assert.ok(result.success);
   });
 });
 

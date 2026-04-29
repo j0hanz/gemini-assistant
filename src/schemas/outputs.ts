@@ -1,6 +1,11 @@
 import { z } from 'zod/v4';
 
-import type { GroundingCitationSchema, SearchEntryPointSchema } from './fields.js';
+import type {
+  GroundingCitationSchema,
+  GroundingSignalsSchema,
+  SearchEntryPointSchema,
+  UrlMetadataEntrySchema,
+} from './fields.js';
 import {
   UsageMetadataSchema as BaseUsageMetadataSchema,
   completedStatusField,
@@ -8,14 +13,12 @@ import {
   diffStatsFields,
   enumField,
   FindingSchema,
-  GroundingSignalsSchema,
   groundingStatusField,
   JsonValueSchema,
   nonNegativeInt,
   publicCoreOutputFields,
   REVIEW_SUBJECT_OPTIONS,
   SourceDetailSchema,
-  UrlMetadataEntrySchema,
 } from './fields.js';
 
 export const UsageMetadataSchema = BaseUsageMetadataSchema;
@@ -49,31 +52,17 @@ export type Finding = z.infer<typeof FindingSchema>;
 export type GroundingSignals = z.infer<typeof GroundingSignalsSchema>;
 export type SearchEntryPoint = z.infer<typeof SearchEntryPointSchema>;
 
-const AnalyzeSummaryOutputSchema = z.strictObject({
+export const AnalyzeOutputSchema = z.strictObject({
   ...publicCoreOutputFields,
-  status: groundingStatusField,
-  kind: z.literal('summary').describe('Analyze output selector (`summary`)'),
-  targetKind: z.enum(['file', 'url', 'multi']).describe('Analyze target discriminator'),
-  summary: z.string().describe('Grounded analysis summary'),
-  groundingSignals: GroundingSignalsSchema.optional(),
-  urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
-  analyzedPaths: z.array(z.string()).optional().describe('Local files included in the analysis'),
-  contextUsed: ContextUsedSchema.optional(),
-});
-
-const AnalyzeDiagramOutputSchema = z.strictObject({
-  ...publicCoreOutputFields,
-  status: completedStatusField,
-  kind: z.literal('diagram').describe('Analyze output selector (`diagram`)'),
-  targetKind: z.enum(['file', 'url', 'multi']).describe('Analyze target discriminator'),
-  diagramType: enumField(DIAGRAM_TYPES, 'Diagram syntax used for the output'),
-  diagram: z.string().describe('Generated diagram source'),
+  status: z
+    .enum(['grounded', 'partially_grounded', 'ungrounded', 'completed'])
+    .describe('Grounding or completion status'),
+  summary: z.string().optional().describe('Analysis summary text (summary mode)'),
+  diagramType: enumField(DIAGRAM_TYPES, 'Diagram syntax used (diagram mode)').optional(),
+  diagram: z.string().optional().describe('Generated diagram source (diagram mode)'),
   explanation: z.string().optional().describe('Short explanation or caveats for the diagram'),
   syntaxErrors: z.array(z.string()).optional().describe('Diagram syntax validation errors'),
   syntaxValid: z.boolean().optional().describe('Whether diagram syntax validated successfully'),
-  urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
-  analyzedPaths: z.array(z.string()).optional().describe('Local files included in the analysis'),
-  contextUsed: ContextUsedSchema.optional(),
 });
 
 export const ChatOutputSchema = z.strictObject({
@@ -102,11 +91,6 @@ export const ResearchOutputSchema = z.strictObject({
     .optional()
     .describe('Claim-level findings attributed to retrieved sources; not independent proof'),
 });
-
-export const AnalyzeOutputSchema = z.discriminatedUnion('kind', [
-  AnalyzeSummaryOutputSchema,
-  AnalyzeDiagramOutputSchema,
-]);
 
 export const DocumentationDriftSchema = z.strictObject({
   file: z.string().describe('The path of the documentation file.'),

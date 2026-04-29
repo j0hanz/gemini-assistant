@@ -458,12 +458,6 @@ function getExplanationString(explanation: unknown): string | undefined {
   return typeof explanation === 'string' && explanation ? explanation : undefined;
 }
 
-function getAnalyzedPaths(args: AnalyzeInput): string[] | undefined {
-  if (args.targetKind === 'file') return [args.filePath];
-  if (args.targetKind === 'multi') return args.filePaths;
-  return undefined;
-}
-
 function buildAnalyzeStructuredContent(
   args: AnalyzeInput,
   ctx: ServerContext,
@@ -485,8 +479,7 @@ function buildAnalyzeStructuredContent(
       ...buildSuccessfulStructuredContent({
         warnings,
         domain: {
-          kind: 'diagram' as const,
-          targetKind: args.targetKind,
+          status: 'completed' as const,
           diagramType,
           diagram: getDiagramString(structured.diagram),
           explanation: getExplanationString(structured.explanation),
@@ -495,12 +488,10 @@ function buildAnalyzeStructuredContent(
             : undefined,
           syntaxValid:
             typeof structured.syntaxValid === 'boolean' ? structured.syntaxValid : undefined,
-          urlMetadata: structured.urlMetadata,
-          analyzedPaths: getAnalyzedPaths(args),
         },
         shared: base,
       }),
-    }) as unknown as z.infer<typeof AnalyzeOutputSchema>;
+    });
   }
 
   return pickDefined({
@@ -508,16 +499,11 @@ function buildAnalyzeStructuredContent(
       warnings,
       domain: {
         status: typeof structured.status === 'string' ? structured.status : 'ungrounded',
-        kind: 'summary' as const,
-        targetKind: args.targetKind,
         summary: typeof structured.summary === 'string' ? structured.summary : '',
-        groundingSignals: structured.groundingSignals,
-        urlMetadata: structured.urlMetadata,
-        analyzedPaths: args.targetKind === 'multi' ? args.filePaths : undefined,
       },
       shared: base,
     }),
-  }) as unknown as z.infer<typeof AnalyzeOutputSchema>;
+  });
 }
 
 export function registerAnalyzeTool(server: McpServer, services?: ToolServices): void {

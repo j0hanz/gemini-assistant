@@ -189,7 +189,7 @@ const EXPECTED_TOOL_CONTRACTS = {
   analyze: {
     annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     requiredInput: ['goal'],
-    requiredOutput: ['status', 'kind', 'targetKind'],
+    requiredOutput: ['status'],
     taskSupport: 'optional',
     title: 'Analyze',
   },
@@ -418,8 +418,6 @@ describe('MCP tool smoke coverage', () => {
         outputKind: 'summary',
       });
       expectSuccess(analyzeResult);
-      assert.strictEqual(analyzeResult.structuredContent.kind, 'summary');
-      assert.strictEqual(analyzeResult.structuredContent.targetKind, 'file');
       assert.match(String(analyzeResult.structuredContent.summary), /Gemini client factory/);
       const analyzeTool = toolMap.get('analyze');
       assert.ok(analyzeTool);
@@ -444,7 +442,6 @@ describe('MCP tool smoke coverage', () => {
         validateSyntax: true,
       });
       expectSuccess(diagramResult);
-      assert.strictEqual(diagramResult.structuredContent.kind, 'diagram');
       assert.strictEqual(diagramResult.structuredContent.diagramType, 'mermaid');
       assert.match(String(diagramResult.structuredContent.diagram), /flowchart TD/);
       const diagramTool = toolMap.get('analyze');

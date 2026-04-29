@@ -186,21 +186,18 @@ describe('public contract schemas', () => {
       AnalyzeOutputSchema.safeParse({
         ...base,
         status: 'ungrounded',
-        kind: 'summary',
         summary: 'x',
-        targetKind: 'file',
       }).success,
       'analyze output should parse',
     );
     assert.ok(
       AnalyzeOutputSchema.safeParse({
         ...base,
-        kind: 'diagram',
+        status: 'completed',
         diagram: 'flowchart TD\nA-->B',
         diagramType: 'mermaid',
         syntaxErrors: ['line 1: missing node'],
         syntaxValid: false,
-        targetKind: 'multi',
       }).success,
       'diagram analyze output should parse',
     );

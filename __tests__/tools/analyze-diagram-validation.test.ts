@@ -169,7 +169,6 @@ describe('analyze diagram validation', () => {
       const structured = store.stored[0]?.result.structuredContent;
       const parsed = AnalyzeOutputSchema.safeParse(structured);
       assert.ok(parsed.success);
-      assert.strictEqual(parsed.data.kind, 'diagram');
       assert.strictEqual(parsed.data.syntaxValid, true);
       assert.strictEqual(parsed.data.syntaxErrors, undefined);
     } finally {
@@ -224,7 +223,6 @@ describe('analyze diagram validation', () => {
       const structured = store.stored[0]?.result.structuredContent;
       const parsed = AnalyzeOutputSchema.safeParse(structured);
       assert.ok(parsed.success);
-      assert.strictEqual(parsed.data.kind, 'diagram');
       assert.strictEqual(parsed.data.syntaxValid, false);
       assert.deepStrictEqual(parsed.data.syntaxErrors, ['Parse error on line 1']);
     } finally {
@@ -268,7 +266,6 @@ describe('analyze diagram validation', () => {
       const structured = store.stored[0]?.result.structuredContent;
       const parsed = AnalyzeOutputSchema.safeParse(structured);
       assert.ok(parsed.success);
-      assert.strictEqual(parsed.data.kind, 'diagram');
       assert.strictEqual(parsed.data.syntaxValid, undefined);
       assert.strictEqual(parsed.data.syntaxErrors, undefined);
       assert.deepStrictEqual(parsed.data.warnings, [
@@ -314,7 +311,6 @@ describe('analyze diagram validation', () => {
       const structured = store.stored[0]?.result.structuredContent;
       const parsed = AnalyzeOutputSchema.safeParse(structured);
       assert.ok(parsed.success);
-      assert.strictEqual(parsed.data.kind, 'diagram');
       assert.strictEqual(parsed.data.syntaxValid, undefined);
       assert.strictEqual(parsed.data.syntaxErrors, undefined);
       assert.strictEqual(parsed.data.warnings, undefined);
@@ -358,7 +354,6 @@ describe('analyze diagram validation', () => {
       const structured = store.stored[0]?.result.structuredContent;
       const parsed = AnalyzeOutputSchema.safeParse(structured);
       assert.ok(parsed.success);
-      assert.strictEqual(parsed.data.kind, 'diagram');
       assert.strictEqual(parsed.data.syntaxValid, false);
       assert.deepStrictEqual(parsed.data.syntaxErrors, [
         'Gemini returned an unlabeled fenced block; expected ```mermaid',

@@ -13,7 +13,7 @@ const Config = {
   MAX_DURATIONS: 5,
   MIN_SILENCE_MS: 30_000,
   STARTUP_MIN_MS: 30_000,
-  MAX_STDERR_BYTES: 256 * 1024,
+  MAX_STDERR_CHARS: 256 * 1024,
   RAW_OUTPUT_MAX_LINES: 40,
   MAX_ERRORS_IN_FILE: 1000,
   MAX_FAILURE_CARDS: 50,
@@ -312,6 +312,7 @@ const TapParser = {
         type: 'ok',
         depth: indent,
         name: ok[1].trim(),
+        // Node's built-in TAP reporter emits `# time=<ms>` in milliseconds.
         duration: ok[2] ? parseFloat(ok[2]) : 0,
       };
 
@@ -539,13 +540,13 @@ const TaskRunners = {
     const r = CommandRunner.exec('npx', ['knip', '--reporter', 'json', '--no-progress']);
     if (r.ok) return { ok: true };
 
-    const jsonLine = (r.stdout || '')
-      .split('\n')
-      .map((l) => l.trim())
-      .find((l) => l.startsWith('{'));
-    if (!jsonLine) return { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
+    const stdout = (r.stdout || '').trim();
+    const start = stdout.indexOf('{');
+    const end = stdout.lastIndexOf('}');
+    const jsonText = start >= 0 && end > start ? stdout.slice(start, end + 1) : '';
+    if (!jsonText) return { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
 
-    const errors = KnipParser.parse(jsonLine);
+    const errors = KnipParser.parse(jsonText);
     if (errors.length === 0) return { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
 
     return { ok: false, errors, counts: { errors: errors.length, warnings: 0 } };
@@ -583,6 +584,7 @@ const TaskRunners = {
       testDurations: new Map(),
       failures: [],
       currentFailName: null,
+      currentOkName: null,
       inYaml: false,
       yamlLines: [],
       stderrBuf: '',
@@ -599,10 +601,10 @@ const TaskRunners = {
 
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk) => {
-      if (state.stderrBuf.length < Config.MAX_STDERR_BYTES) {
+      if (state.stderrBuf.length < Config.MAX_STDERR_CHARS) {
         state.stderrBuf += chunk;
-        if (state.stderrBuf.length > Config.MAX_STDERR_BYTES) {
-          state.stderrBuf = state.stderrBuf.slice(0, Config.MAX_STDERR_BYTES);
+        if (state.stderrBuf.length > Config.MAX_STDERR_CHARS) {
+          state.stderrBuf = state.stderrBuf.slice(0, Config.MAX_STDERR_CHARS);
         }
       }
     });
@@ -657,7 +659,11 @@ const TaskRunners = {
         settle({ ok: false, rawOutput: state.stderrBuf || `test runner exited with code ${code}` });
         return;
       }
-      HistoryManager.save(history, state.testDurations);
+      try {
+        HistoryManager.save(history, state.testDurations);
+      } catch {
+        /* best-effort: history write must never crash a green run */
+      }
       settle({ ok: true, testDurations: state.testDurations });
     });
 
@@ -668,13 +674,16 @@ const TaskRunners = {
     if (ev.type === 'ok') {
       state.seenFirstOk = true;
       state.lastCompleted = { name: ev.name, duration: ev.duration };
+      // Provisional: real duration comes from YAML `duration_ms` block when present.
       state.testDurations.set(ev.name, ev.duration);
+      state.currentOkName = ev.name;
       state.inYaml = false;
       state.yamlLines.length = 0;
       state.currentFailName = null;
     } else if (ev.type === 'not_ok') {
       state.seenFirstOk = true;
       state.currentFailName = ev.name;
+      state.currentOkName = null;
       state.inYaml = false;
       state.yamlLines.length = 0;
     } else if (ev.type === 'yaml_start') {
@@ -692,9 +701,16 @@ const TaskRunners = {
           errorMessage: yaml.error,
           frame: yaml.at || null,
         });
+      } else if (state.currentOkName && yaml.duration_ms !== undefined) {
+        const ms = parseFloat(yaml.duration_ms);
+        if (Number.isFinite(ms)) {
+          state.testDurations.set(state.currentOkName, ms);
+          state.lastCompleted = { name: state.currentOkName, duration: ms };
+        }
       }
       state.yamlLines.length = 0;
       state.currentFailName = null;
+      state.currentOkName = null;
     } else if (state.inYaml) {
       state.yamlLines.push(line);
     }
@@ -784,9 +800,9 @@ class Aggregate {
 
   setSlowestTests(testDurations) {
     if (!testDurations || testDurations.size === 0) return;
-    // TAP `# time=` directive emits seconds; convert to ms.
+    // Durations are already in milliseconds (TapParser preserves Node's TAP `# time=` value).
     const sorted = [...testDurations.entries()]
-      .map(([name, secs]) => ({ name, ms: typeof secs === 'number' ? secs * 1000 : 0 }))
+      .map(([name, ms]) => ({ name, ms: typeof ms === 'number' ? ms : 0 }))
       .sort((a, b) => b.ms - a.ms)
       .slice(0, 5);
     this.slowestTests = sorted;
@@ -1056,7 +1072,7 @@ class TaskOrchestrator {
     this.all = config.all;
 
     this.tasks = [
-      { label: 'format', cmd: ['npm', ['run', 'format']] },
+      { label: 'format', cmd: ['npm', ['run', this.fix ? 'format' : 'format:check']] },
       { label: 'lint', runner: () => TaskRunners.runLint(this.fix) },
       { label: 'type-check', runner: () => TaskRunners.runTypeCheck() },
       { label: 'knip', runner: () => TaskRunners.runKnip() },
@@ -1068,6 +1084,7 @@ class TaskOrchestrator {
   }
 
   attemptAutoFix(task, result, reporter) {
+    if (!this.fix) return null;
     const errors = result.errors;
     if (!errors || errors.length === 0) return null;
     if (task.label !== 'lint' && task.label !== 'knip') return null;
@@ -1079,16 +1096,21 @@ class TaskOrchestrator {
       );
     }
 
-    if (task.label === 'lint') {
-      CommandRunner.exec('npm', ['run', 'lint:fix']);
-    } else {
-      CommandRunner.exec('npx', [
-        'knip',
-        '--fix',
-        '--fix-type',
-        'exports,types,dependencies',
-        '--format',
-      ]);
+    const fixResult =
+      task.label === 'lint'
+        ? CommandRunner.exec('npm', ['run', 'lint:fix'])
+        : CommandRunner.exec('npx', [
+            'knip',
+            '--fix',
+            '--fix-type',
+            'exports,types,dependencies',
+            '--format',
+          ]);
+    if (!fixResult.ok) {
+      return {
+        ok: false,
+        rawOutput: `auto-fix failed:\n${fixResult.stdout}\n${fixResult.stderr}`.trim(),
+      };
     }
     return task.runner();
   }

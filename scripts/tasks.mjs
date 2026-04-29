@@ -31,12 +31,12 @@ const Theme = {
 };
 
 const Icons = {
-  PASS: `${Theme.GREEN}✓${Theme.R}`,
-  FAIL: `${Theme.RED}✗${Theme.R}`,
-  RUN: `${Theme.CYAN}◆${Theme.R}`,
-  SKIP: `${Theme.YELLOW}–${Theme.R}`,
-  HANG: `${Theme.YELLOW}⏱${Theme.R}`,
-  FIX: `${Theme.CYAN}⟳${Theme.R}`,
+  PASS: `${Theme.GREEN}✔${Theme.R}`,
+  FAIL: `${Theme.RED}✖${Theme.R}`,
+  RUN: `${Theme.CYAN}❯${Theme.R}`,
+  SKIP: `${Theme.YELLOW}⊘${Theme.R}`,
+  HANG: `${Theme.YELLOW}⧖${Theme.R}`,
+  FIX: `${Theme.CYAN}↻${Theme.R}`,
 };
 
 // --- HISTORY MANAGER ---

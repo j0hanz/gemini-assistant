@@ -50,10 +50,12 @@ Each tool lives in [src/tools/](src/tools/) and is registered by a `registerXxxT
 
 Shared tool infrastructure:
 
-- [src/lib/orchestration.ts](src/lib/orchestration.ts) — builds `GenerateContentConfig` from tool inputs (Google Search, URL Context, Code Execution profiles, file search).
+- [src/client.ts](src/client.ts) — lazy `getAI()` singleton, `buildGenerateContentConfig()`, and named cost profiles (e.g. `research.deep.synthesis`) that preset `thinkingLevel` and `maxOutputTokens`.
+- [src/lib/tool-profiles.ts](src/lib/tool-profiles.ts) — `resolveProfile()` / `validateProfile()` translate a `ToolsSpecInput` (profile name + overrides) into a `ResolvedProfile` with built-in capability sets. Profiles: `plain`, `grounded`, `web-research`, `deep-research`, `urls-only`, `code-math`, `code-math-grounded`, `visual-inspect`, `rag`, `agent`, `structured`. `fileSearch` is mutually exclusive with all others.
+- [src/lib/orchestration.ts](src/lib/orchestration.ts) — builds `GenerateContentConfig` from resolved profiles and tool inputs.
 - [src/lib/streaming.ts](src/lib/streaming.ts) — consumes Gemini streaming responses, extracts usage/tool events.
 - [src/lib/response.ts](src/lib/response.ts) — builds `CallToolResult` with `content[]` + `structuredContent`.
-- [src/lib/task-utils.ts](src/lib/task-utils.ts) — `registerWorkTool()` wraps tool handlers to support optional task-aware execution.
+- [src/lib/tasks.ts](src/lib/tasks.ts) — `registerWorkTool()` wraps tool handlers to support optional task-aware execution. Contains `ObservableTaskStore` (emits typed `'task'` events for cancellation bridging), `getTaskEmitter()` (phase/finding notifications), `elicitTaskInput()`, and `createSharedTaskInfra()` for HTTP/web-standard shared state across requests.
 - [src/lib/tool-executor.ts](src/lib/tool-executor.ts) — `executor()` / `createToolContext()` for running tool work with progress, logging, and abort signal.
 
 ### Sessions
@@ -80,9 +82,19 @@ Always use `z.strictObject()` at external/input boundaries. The MCP v2 SDK (`@mo
 
 Tests live under [**tests**/](/__tests__/) mirroring the `src/` structure. The test runner is Node's built-in test runner with `tsx/esm` — not Jest or Vitest. E2e tests (files named `*.e2e.test.ts`) use [**tests**/lib/mock-gemini-environment.ts](/__tests__/lib/mock-gemini-environment.ts) and an in-memory MCP transport.
 
+### Resources and prompts
+
+- [src/resources.ts](src/resources.ts) — registers all MCP resources: `discover://catalog`, `discover://workflows`, `discover://context`, `gemini://profiles`, `workspace://context`, `workspace://cache`, and session resources (gated by `MCP_EXPOSE_SESSION_RESOURCES=true`).
+- [src/prompts.ts](src/prompts.ts) — registers the three public prompts (`discover`, `research`, `review`) with completable enum arguments.
+- [src/catalog.ts](src/catalog.ts) — renders `DISCOVERY_ENTRIES` and `WORKFLOW_ENTRIES` from `public-contract.ts` into Markdown for the `discover://catalog` and `discover://workflows` resources.
+
+### Workspace context and caching
+
+[src/lib/workspace-context.ts](src/lib/workspace-context.ts) — `WorkspaceCacheManagerImpl` maintains a single Gemini context cache for the current workspace roots. It auto-scans known config files (`readme.md`, `package.json`, `agents.md`, etc.), keyword-scores them against the tool's focus text, and refreshes the cache when content changes (checked every 2 min). Enabled via `WORKSPACE_CACHE_ENABLED=true`; requires `≥4 000` estimated tokens to qualify.
+
 ### Transport modes
 
-`TRANSPORT` env var selects `stdio` (default), `http`, or `web-standard`. HTTP transport requires `MCP_HTTP_TOKEN` (≥32 chars) unless `MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP=true`. Stateless mode (`STATELESS=true`) disables the tasks capability.
+`TRANSPORT` env var selects `stdio` (default), `http`, or `web-standard`. HTTP transport requires `MCP_HTTP_TOKEN` (≥32 chars) unless `MCP_ALLOW_UNAUTHENTICATED_LOOPBACK_HTTP=true`. Stateless mode (`STATELESS=true`) disables the tasks capability. The `InMemoryEventStore` in [src/lib/event-store.ts](src/lib/event-store.ts) supports SSE reconnection for Streamable HTTP (max 1 000 events per stream, 200 streams, 30 min TTL).
 
 ## Key constraints
 

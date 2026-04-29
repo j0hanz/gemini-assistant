@@ -1,6 +1,6 @@
 import { z } from 'zod/v4';
 
-import type { SearchEntryPointSchema } from './fields.js';
+import type { GroundingCitationSchema, SearchEntryPointSchema } from './fields.js';
 import {
   UsageMetadataSchema as BaseUsageMetadataSchema,
   completedStatusField,
@@ -8,13 +8,11 @@ import {
   diffStatsFields,
   enumField,
   FindingSchema,
-  GroundingCitationSchema,
   GroundingSignalsSchema,
   groundingStatusField,
   JsonValueSchema,
   nonNegativeInt,
   publicCoreOutputFields,
-  publicHttpUrlArray,
   REVIEW_SUBJECT_OPTIONS,
   SourceDetailSchema,
   UrlMetadataEntrySchema,
@@ -50,14 +48,6 @@ export type GroundingCitation = z.infer<typeof GroundingCitationSchema>;
 export type Finding = z.infer<typeof FindingSchema>;
 export type GroundingSignals = z.infer<typeof GroundingSignalsSchema>;
 export type SearchEntryPoint = z.infer<typeof SearchEntryPointSchema>;
-
-const ComputationSchema = z.strictObject({
-  code: z.string().describe('Executable code emitted by Gemini Code Execution'),
-  language: z.string().optional().describe('Code language when provided'),
-  outcome: z.string().optional().describe('Code execution outcome when provided'),
-  output: z.string().optional().describe('Code execution output when provided'),
-  id: z.string().optional().describe('Code execution identifier when provided'),
-});
 
 const AnalyzeSummaryOutputSchema = z.strictObject({
   ...publicCoreOutputFields,
@@ -99,56 +89,19 @@ export const ChatOutputSchema = z.strictObject({
     .describe('Session metadata. Provide id to continue this session in a future call.'),
 });
 
-const ResearchSharedFields = {
+export const ResearchOutputSchema = z.strictObject({
   ...publicCoreOutputFields,
   status: groundingStatusField,
   summary: z.string().describe('Grounded research summary'),
-  sources: publicHttpUrlArray({
-    description: 'Grounded source URLs',
-    itemDescription: 'Grounded source URL',
-    optional: true,
-  }),
   sourceDetails: z
     .array(SourceDetailSchema)
     .optional()
     .describe('Structured source entries for client consumption'),
-  urlContextSources: publicHttpUrlArray({
-    description: 'URL Context source URLs',
-    itemDescription: 'URL Context source URL',
-    optional: true,
-  }),
-  urlMetadata: z.array(UrlMetadataEntrySchema).optional().describe('URL retrieval status'),
-  groundingSignals: GroundingSignalsSchema.optional(),
-  contextUsed: ContextUsedSchema.optional(),
-};
-
-const ResearchQuickOutputSchema = z.strictObject({
-  ...ResearchSharedFields,
-  mode: z.literal('quick').describe('Quick research mode'),
-});
-
-const ResearchDeepOutputSchema = z.strictObject({
-  ...ResearchSharedFields,
-  mode: z.literal('deep').describe('Deep research mode'),
-  toolsUsed: z.array(z.string()).optional().describe('Tools invoked during deep research'),
   findings: z
     .array(FindingSchema)
     .optional()
     .describe('Claim-level findings attributed to retrieved sources; not independent proof'),
-  citations: z
-    .array(GroundingCitationSchema)
-    .optional()
-    .describe('Claim-level source attributions derived from Gemini grounding supports'),
-  computations: z
-    .array(ComputationSchema)
-    .optional()
-    .describe('Gemini Code Execution computations surfaced from tool events'),
 });
-
-export const ResearchOutputSchema = z.discriminatedUnion('mode', [
-  ResearchQuickOutputSchema,
-  ResearchDeepOutputSchema,
-]);
 
 export const AnalyzeOutputSchema = z.discriminatedUnion('kind', [
   AnalyzeSummaryOutputSchema,

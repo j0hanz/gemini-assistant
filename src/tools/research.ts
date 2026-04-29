@@ -1080,34 +1080,16 @@ function extractResearchSummary(structured: Record<string, unknown>): string {
 }
 
 function buildResearchStructuredContent(
-  args: ResearchInput,
+  _args: ResearchInput,
   ctx: ServerContext,
   structured: Record<string, unknown>,
 ): Record<string, unknown> {
-  const sharedDomain = {
+  const domain = {
     status: structured.status,
     summary: extractResearchSummary(structured),
-    sources: Array.isArray(structured.sources) ? structured.sources : undefined,
     sourceDetails: structured.sourceDetails,
-    urlContextSources: structured.urlContextSources,
-    urlMetadata: structured.urlMetadata,
-    groundingSignals: structured.groundingSignals,
+    findings: structured.findings,
   };
-
-  const domain =
-    args.mode === 'deep'
-      ? {
-          ...sharedDomain,
-          mode: 'deep' as const,
-          toolsUsed: structured.toolsUsed,
-          findings: structured.findings,
-          citations: structured.citations,
-          computations: structured.computations,
-        }
-      : {
-          ...sharedDomain,
-          mode: 'quick' as const,
-        };
 
   return buildSuccessfulStructuredContent({
     warnings: Array.isArray(structured.warnings)

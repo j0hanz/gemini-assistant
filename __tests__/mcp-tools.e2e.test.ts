@@ -203,7 +203,7 @@ const EXPECTED_TOOL_CONTRACTS = {
   research: {
     annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     requiredInput: ['goal'],
-    requiredOutput: ['status', 'mode', 'summary'],
+    requiredOutput: ['status', 'summary'],
     taskSupport: 'optional',
     title: 'Research',
   },
@@ -391,9 +391,7 @@ describe('MCP tool smoke coverage', () => {
         mode: 'quick',
       });
       expectSuccess(researchResult);
-      assert.strictEqual(researchResult.structuredContent.mode, 'quick');
       assert.strictEqual(researchResult.structuredContent.summary, 'Search answer');
-      assert.deepStrictEqual(researchResult.structuredContent.sources, undefined);
       assert.deepStrictEqual(researchResult.structuredContent.sourceDetails, [
         {
           domain: 'example.com',

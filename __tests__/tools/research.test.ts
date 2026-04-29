@@ -195,9 +195,7 @@ describe('research tool contracts', () => {
       const parsed = ResearchOutputSchema.safeParse(structured);
       assert.ok(parsed.success);
       assert.ok(structured && typeof structured === 'object');
-      assert.strictEqual((structured as Record<string, unknown>).mode, 'quick');
       assert.strictEqual((structured as Record<string, unknown>).summary, 'Quick research answer');
-      assert.strictEqual((structured as Record<string, unknown>).sources, undefined);
       assert.deepStrictEqual((structured as Record<string, unknown>).sourceDetails, [
         {
           domain: 'example.com',
@@ -206,7 +204,6 @@ describe('research tool contracts', () => {
           url: 'https://example.com',
         },
       ]);
-      assert.strictEqual((structured as Record<string, unknown>).urlContextSources, undefined);
       assert.strictEqual((structured as Record<string, unknown>).status, 'partially_grounded');
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
@@ -257,10 +254,8 @@ describe('research tool contracts', () => {
       const parsed = ResearchOutputSchema.safeParse(structured);
       assert.ok(parsed.success);
       assert.ok(structured && typeof structured === 'object');
-      assert.strictEqual((structured as Record<string, unknown>).mode, 'deep');
       assert.strictEqual((structured as Record<string, unknown>).summary, 'Deep research report');
       assert.strictEqual((structured as Record<string, unknown>).sourceDetails, undefined);
-      assert.strictEqual((structured as Record<string, unknown>).toolsUsed, undefined);
       assert.strictEqual((structured as Record<string, unknown>).status, 'ungrounded');
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
@@ -441,7 +436,6 @@ describe('research tool contracts', () => {
       const result = store.stored[0]?.result;
       const structured = result?.structuredContent;
       assert.ok(structured && typeof structured === 'object');
-      assert.deepStrictEqual((structured as Record<string, unknown>).sources, []);
       assert.ok(
         result?.content.some((entry) =>
           entry.text?.includes('No grounded sources were retrieved; the answer may be ungrounded.'),
@@ -523,18 +517,10 @@ describe('research tool contracts', () => {
       await flushTaskWork();
 
       const structured = store.stored[0]?.result.structuredContent as Record<string, unknown>;
-      assert.strictEqual(structured.sources, undefined);
-      assert.strictEqual(structured.urlContextSources, undefined);
       assert.deepStrictEqual(structured.sourceDetails, [
         { domain: 'example.com', origin: 'urlContext', url: 'https://example.com/context' },
       ]);
       assert.strictEqual(structured.status, 'partially_grounded');
-      assert.deepStrictEqual(structured.groundingSignals, {
-        retrievalPerformed: true,
-        urlContextUsed: true,
-        groundingSupportsCount: 0,
-        confidence: 'low',
-      });
     } finally {
       client.models.generateContentStream = originalGenerateContentStream;
     }
@@ -641,11 +627,6 @@ describe('research tool contracts', () => {
       assert.ok(calls.length >= 4);
 
       const structured = store.stored[0]?.result.structuredContent as Record<string, unknown>;
-      assert.deepStrictEqual(structured.urlMetadata, [
-        { url: 'https://example.com/report', status: 'URL_RETRIEVAL_STATUS_SUCCESS' },
-      ]);
-      assert.strictEqual(structured.sources, undefined);
-      assert.strictEqual(structured.urlContextSources, undefined);
       assert.deepStrictEqual(structured.sourceDetails, [
         {
           domain: 'example.com',
@@ -654,34 +635,12 @@ describe('research tool contracts', () => {
           url: 'https://example.com/report',
         },
       ]);
-      assert.deepStrictEqual(structured.citations, [
-        {
-          text: 'Supported claim',
-          startIndex: 0,
-          endIndex: 15,
-          sourceUrls: ['https://example.com/report'],
-        },
-      ]);
       assert.deepStrictEqual(structured.findings, [
         {
           claim: 'Supported claim',
           supportingSourceUrls: ['https://example.com/report'],
           verificationStatus: 'cited',
         },
-      ]);
-      assert.strictEqual(
-        (structured.groundingSignals as { confidence?: string }).confidence,
-        'medium',
-      );
-      assert.deepStrictEqual((structured.computations as unknown[]).slice(0, 2), [
-        {
-          id: 'exec-1',
-          code: 'print(2)',
-          language: 'PYTHON',
-          outcome: 'OUTCOME_OK',
-          output: '2',
-        },
-        { code: 'print(3)' },
       ]);
       assert.ok(
         (structured.warnings as string[]).includes('dropped 1 non-public grounding supports'),

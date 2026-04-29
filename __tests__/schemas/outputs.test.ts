@@ -84,68 +84,54 @@ describe('AnalyzeOutputSchema', () => {
 });
 
 describe('ResearchOutputSchema', () => {
-  it('accepts quick research output', () => {
+  it('ResearchOutputSchema rejects mode field', () => {
     const result = ResearchOutputSchema.safeParse({
       status: 'grounded',
       mode: 'quick',
-      summary: 'Quick answer',
-      sources: ['https://example.com'],
+      summary: 'Answer',
     });
-    assert.ok(result.success);
+    assert.strictEqual(result.success, false);
   });
 
-  it('accepts grounding transparency fields and rejects unknown fields', () => {
+  it('ResearchOutputSchema rejects sources array', () => {
     const result = ResearchOutputSchema.safeParse({
-      mode: 'deep',
-      summary: 'Deep answer',
-      sources: ['https://example.com'],
-      citations: [
-        {
-          text: 'Supported claim',
-          startIndex: 0,
-          endIndex: 15,
-          sourceUrls: ['https://example.com'],
-        },
-      ],
-      urlContextSources: ['https://example.com/context'],
-      sourceDetails: [
-        { domain: 'example.com', origin: 'both', title: 'Example', url: 'https://example.com' },
-        { domain: 'example.com', origin: 'urlContext', url: 'https://example.com/context' },
-      ],
       status: 'grounded',
+      summary: 'Answer',
+      sources: ['https://example.com'],
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('ResearchOutputSchema rejects groundingSignals', () => {
+    const result = ResearchOutputSchema.safeParse({
+      status: 'grounded',
+      summary: 'Answer',
       groundingSignals: {
         retrievalPerformed: true,
-        urlContextUsed: true,
-        groundingSupportsCount: 1,
-        confidence: 'medium',
+        urlContextUsed: false,
+        groundingSupportsCount: 0,
+        confidence: 'low',
       },
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('ResearchOutputSchema accepts status + summary + sourceDetails + findings', () => {
+    const result = ResearchOutputSchema.safeParse({
+      status: 'grounded',
+      summary: 'Answer',
+      sourceDetails: [
+        { url: 'https://example.com', domain: 'example.com', origin: 'googleSearch' },
+      ],
       findings: [
         {
-          claim: 'Supported claim',
+          claim: 'Fact',
           supportingSourceUrls: ['https://example.com'],
           verificationStatus: 'cited',
         },
       ],
-      computations: [
-        {
-          id: 'exec-1',
-          code: 'print(2)',
-          language: 'PYTHON',
-          outcome: 'OUTCOME_OK',
-          output: '2',
-        },
-      ],
     });
     assert.ok(result.success);
-
-    const unknown = ResearchOutputSchema.safeParse({
-      status: 'grounded',
-      mode: 'deep',
-      summary: 'Deep answer',
-      sources: [],
-      extra: true,
-    });
-    assert.strictEqual(unknown.success, false);
   });
 });
 

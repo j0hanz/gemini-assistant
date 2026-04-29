@@ -153,8 +153,7 @@ describe('public contract schemas', () => {
     };
 
     assert.ok(
-      ChatOutputSchema.safeParse({ ...base, answer: 'hello' })
-        .success,
+      ChatOutputSchema.safeParse({ ...base, answer: 'hello' }).success,
       'chat output should parse',
     );
     assert.ok(
@@ -169,19 +168,17 @@ describe('public contract schemas', () => {
       ResearchOutputSchema.safeParse({
         ...base,
         status: 'partially_grounded',
-        mode: 'quick',
         summary: 'x',
-        sources: [],
-        groundingSignals: {
-          retrievalPerformed: true,
-          urlContextUsed: true,
-          groundingSupportsCount: 0,
-          confidence: 'low',
-        },
         sourceDetails: [
           { domain: 'example.com', origin: 'urlContext', url: 'https://example.com' },
         ],
-        urlContextSources: ['https://example.com'],
+        findings: [
+          {
+            claim: 'Example finding',
+            supportingSourceUrls: ['https://example.com'],
+            verificationStatus: 'cited',
+          },
+        ],
       }).success,
       'research output should parse',
     );
@@ -220,20 +217,15 @@ describe('public contract schemas', () => {
         answer: 'x',
       }).success,
     );
-    assert.ok(
-      ResearchOutputSchema.safeParse({ status: 'grounded', mode: 'quick', summary: 's' }).success,
-    );
-    assert.ok(
-      ResearchOutputSchema.safeParse({ status: 'ungrounded', mode: 'quick', summary: 's' }).success,
-    );
+    assert.ok(ResearchOutputSchema.safeParse({ status: 'grounded', summary: 's' }).success);
+    assert.ok(ResearchOutputSchema.safeParse({ status: 'ungrounded', summary: 's' }).success);
     assert.strictEqual(
-      ResearchOutputSchema.safeParse({ status: 'completed', mode: 'quick', summary: 's' }).success,
+      ResearchOutputSchema.safeParse({ status: 'completed', summary: 's' }).success,
       false,
       'legacy completed status should be rejected on research outputs',
     );
     assert.strictEqual(
-      ChatOutputSchema.safeParse({ status: 'unknown', answer: 'x' })
-        .success,
+      ChatOutputSchema.safeParse({ status: 'unknown', answer: 'x' }).success,
       false,
     );
     assert.ok(ChatOutputSchema.safeParse({ status: 'completed', answer: 'x' }).success);
@@ -264,9 +256,10 @@ describe('public contract schemas', () => {
     assert.ok(
       ResearchOutputSchema.safeParse({
         status: 'grounded',
-        mode: 'quick',
         summary: 'x',
-        sources: [],
+        sourceDetails: [
+          { url: 'https://example.com', domain: 'example.com', origin: 'googleSearch' },
+        ],
       }).success,
     );
   });

@@ -8,7 +8,7 @@ component: tasks-script
 execution: subagent-driven
 ---
 
-# Implementation Plan: Aggressive Error Output & Hang Detection for tasks.mjs
+# Implementation Plan: Error Output & Hang Detection for tasks.mjs
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Tasks are bite-sized (2-5 minutes each); follow them in order, run every verification, and commit at each commit step.
 

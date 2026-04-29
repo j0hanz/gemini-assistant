@@ -457,6 +457,14 @@ function runKnip() {
   };
 }
 
+function runLintFix() {
+  runCommand('npm', ['run', 'lint:fix']);
+}
+
+function runKnipFix() {
+  runCommand('npx', ['knip', '--fix', '--fix-type', 'exports,types,dependencies', '--format']);
+}
+
 function runTest() {
   const history = loadHistory();
   const silenceMs = getSilenceTimeout(history);
@@ -624,9 +632,10 @@ function printHeader() {
   process.stdout.write(`\n  ${BOLD}gemini-assistant${R}  ${DIM}checks${R}${suffix}\n\n`);
 }
 
-function printTask(icon, label, time, skipped, counts) {
+function printTask(icon, label, time, skipped, counts, annotation = null) {
   const col = label.padEnd(COL);
   let right = skipped ? `${DIM}skipped${R}` : `${DIM}${time}${R}`;
+  if (annotation) right += `  ${DIM}(${annotation})${R}`;
   if (counts) {
     const parts = [];
     if (counts.errors)
@@ -648,6 +657,18 @@ function printOutput(raw) {
     process.stdout.write(`      ${DIM}… ${split.length - RAW_OUTPUT_MAX_LINES} more lines${R}\n`);
   }
   process.stdout.write('\n');
+}
+
+function attemptAutoFix(task, result) {
+  if (!result.errors?.length) return null;
+  if (task.label !== 'lint' && task.label !== 'knip') return null;
+  if (task.label === 'knip' && !isKnipFixable(result.errors)) return null;
+  process.stdout.write(
+    `\r  ${FIX}  ${BOLD}${task.label.padEnd(COL)}${R}  ${DIM}auto-fixing...${R}`,
+  );
+  if (task.label === 'lint') runLintFix();
+  else runKnipFix();
+  return task.runner();
 }
 
 // --- MAIN ---
@@ -684,9 +705,19 @@ async function main() {
       result = { ok: false, rawOutput: 'task has no runner or cmd' };
     }
 
-    const ms = Date.now() - start;
+    let ms = Date.now() - start;
 
     if (!result.ok) {
+      const fixed = attemptAutoFix(task, result);
+      if (fixed !== null) {
+        ms = Date.now() - start;
+        if (fixed.ok) {
+          printTask(PASS, task.label, elapsed(ms), false, null, 'auto-fixed');
+          passed++;
+          continue;
+        }
+        result = fixed;
+      }
       const counts = result.counts ?? null;
       printTask(result.timeout ? HANG : FAIL, task.label, elapsed(ms), false, counts);
       failed++;

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Usage: node scripts/tasks.mjs [--fix] [--fast]
+// Usage: node scripts/tasks.mjs [--fix] [--quick] [--all] [--json] [--llm] [--help]
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
@@ -9,13 +9,14 @@ import readline from 'node:readline';
 // --- CONFIGURATION ---
 const Config = {
   HISTORY_FILE: '.tasks-history.json',
+  FAILURE_FILE: '.tasks-last-failure.json',
   MAX_DURATIONS: 5,
   MIN_SILENCE_MS: 30_000,
   STARTUP_MIN_MS: 30_000,
   MAX_STDERR_BYTES: 256 * 1024,
-  RAW_OUTPUT_PREVIEW_LIMIT: 500,
   RAW_OUTPUT_MAX_LINES: 40,
-  REBUILD_DELAY_MS: 3_000,
+  MAX_ERRORS_IN_FILE: 1000,
+  MAX_FAILURE_CARDS: 50,
   IS_WINDOWS: process.platform === 'win32',
 };
 
@@ -71,7 +72,9 @@ const HistoryManager = {
       arr.push(ms);
       history.test_durations[name] = arr.slice(-Config.MAX_DURATIONS);
     }
-    writeFileSync(file, JSON.stringify(history, null, 2) + '\n', 'utf8');
+    const tmp = `${file}.tmp`;
+    writeFileSync(tmp, JSON.stringify(history, null, 2) + '\n', 'utf8');
+    renameSync(tmp, file);
   },
 
   getSilenceTimeout(history) {
@@ -458,6 +461,25 @@ const OutputRenderer = {
     return out.join('\n');
   },
 
+  renderRustErrorsGrouped(errors, cwd = process.cwd()) {
+    const byFile = new Map();
+    for (const err of errors) {
+      const list = byFile.get(err.file) || [];
+      list.push(err);
+      byFile.set(err.file, list);
+    }
+    for (const [file, list] of byFile) {
+      process.stdout.write(`  ${Theme.BOLD}${file}${Theme.R}\n\n`);
+      for (const err of list) {
+        const block = this.renderRustError(err, cwd)
+          .split('\n')
+          .map((line) => `    ${line}`)
+          .join('\n');
+        process.stdout.write(block + '\n\n');
+      }
+    }
+  },
+
   emitLlmBlock(data) {
     const HR = '─'.repeat(53);
     process.stdout.write(
@@ -529,12 +551,7 @@ const TaskRunners = {
     return { ok: false, errors, counts: { errors: errors.length, warnings: 0 } };
   },
 
-  async runBuild(taskColWidth) {
-    const lbl = 'rebuild'.padEnd(taskColWidth);
-
-    process.stdout.write(
-      `\r  ${Icons.RUN}  ${Theme.BOLD}${lbl}${Theme.R}  ${Theme.DIM}removing dist...${Theme.R}${Theme.CLEAR_EOL}`,
-    );
+  async runBuild() {
     try {
       rmSync('dist', { recursive: true, force: true });
     } catch (err) {
@@ -543,15 +560,6 @@ const TaskRunners = {
         rawOutput: `dist removal failed: ${String(err && err.message ? err.message : err)}`,
       };
     }
-
-    process.stdout.write(
-      `\r  ${Icons.RUN}  ${Theme.BOLD}${lbl}${Theme.R}  ${Theme.DIM}settling ${OutputRenderer.formatElapsed(Config.REBUILD_DELAY_MS)}...${Theme.R}${Theme.CLEAR_EOL}`,
-    );
-    await new Promise((resolve) => setTimeout(resolve, Config.REBUILD_DELAY_MS));
-
-    process.stdout.write(
-      `\r  ${Icons.RUN}  ${Theme.BOLD}${lbl}${Theme.R}  ${Theme.DIM}rebuilding...${Theme.R}${Theme.CLEAR_EOL}`,
-    );
     const r = CommandRunner.exec('npm', ['run', 'build']);
     if (!r.ok) return { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
     return { ok: true };
@@ -693,42 +701,177 @@ const TaskRunners = {
   },
 };
 
-// --- ORCHESTRATION ---
-class TaskOrchestrator {
-  constructor(argsSet) {
-    this.fix = argsSet.has('--fix');
-    this.fast = argsSet.has('--fast');
+// --- RUN CONFIG ---
+function parseArgs(argv) {
+  const flags = new Set(argv);
+  if (flags.has('--help') || flags.has('-h')) {
+    process.stdout.write(
+      [
+        'Usage: node scripts/tasks.mjs [flags]',
+        '',
+        '  --fix     Run lint:fix / knip --fix instead of check',
+        '  --quick   Skip test + rebuild',
+        '  --all     Run-all mode: continue past failures in independent tasks',
+        '  --json    Emit single JSON object on stdout, suppress human output',
+        '  --llm     Echo failure detail to stdout (always written to .tasks-last-failure.json)',
+        '  --help    Show this help',
+        '',
+      ].join('\n'),
+    );
+    process.exit(0);
+  }
+  return {
+    fix: flags.has('--fix'),
+    quick: flags.has('--quick'),
+    all: flags.has('--all'),
+    json: flags.has('--json'),
+    llm: flags.has('--llm'),
+  };
+}
 
-    this.tasks = [
-      { label: 'format', cmd: ['npm', ['run', 'format']] },
-      { label: 'lint', runner: () => TaskRunners.runLint(this.fix) },
-      { label: 'type-check', runner: () => TaskRunners.runTypeCheck() },
-      { label: 'knip', runner: () => TaskRunners.runKnip() },
-      { label: 'test', runner: () => TaskRunners.runTest(), skip: this.fast },
-      { label: 'rebuild', runner: () => TaskRunners.runBuild(this.COL), skip: this.fast },
-    ];
-
-    this.COL = Math.max(...this.tasks.map((t) => t.label.length)) + 2;
+// --- AGGREGATE ---
+class Aggregate {
+  constructor(mode) {
+    this.mode = mode; // 'fail-fast' | 'run-all'
+    this.tasks = [];
+    this.passed = 0;
+    this.failed = 0;
+    this.skipped = 0;
+    this.slowestTests = [];
+    this.wallStart = Date.now();
   }
 
-  printHeader() {
-    const mode = this.fix
-      ? `${Theme.YELLOW}--fix${Theme.R}`
-      : this.fast
-        ? `${Theme.YELLOW}--fast${Theme.R}`
-        : '';
-    const suffix = mode ? `  ${mode}` : '';
+  recordPass(label, ms, annotation) {
+    this.tasks.push({
+      label,
+      ok: true,
+      ms,
+      skipped: false,
+      ...(annotation ? { annotation } : {}),
+    });
+    this.passed++;
+  }
+
+  recordFail(label, result, ms) {
+    this.tasks.push({
+      label,
+      ok: false,
+      ms,
+      skipped: false,
+      ...(result.counts ? { counts: result.counts } : {}),
+      ...(result.errors ? { errors: result.errors.slice(0, Config.MAX_ERRORS_IN_FILE) } : {}),
+      ...(result.failures ? { failures: result.failures.slice(0, Config.MAX_ERRORS_IN_FILE) } : {}),
+      ...(result.timeout
+        ? {
+            timeout: true,
+            phase: result.phase,
+            silenceMs: result.silenceMs,
+            ...(result.lastCompletedTest ? { lastCompletedTest: result.lastCompletedTest } : {}),
+            ...(result.suiteMaxHistoricalMs
+              ? { suiteMaxHistoricalMs: result.suiteMaxHistoricalMs }
+              : {}),
+          }
+        : {}),
+      ...(result.rawOutput ? { rawOutput: result.rawOutput.slice(0, 4000) } : {}),
+    });
+    this.failed++;
+  }
+
+  recordSkip(label, reason) {
+    this.tasks.push({ label, ok: null, ms: 0, skipped: true, skipReason: reason });
+    this.skipped++;
+  }
+
+  setSlowestTests(testDurations) {
+    if (!testDurations || testDurations.size === 0) return;
+    // TAP `# time=` directive emits seconds; convert to ms.
+    const sorted = [...testDurations.entries()]
+      .map(([name, secs]) => ({ name, ms: typeof secs === 'number' ? secs * 1000 : 0 }))
+      .sort((a, b) => b.ms - a.ms)
+      .slice(0, 5);
+    this.slowestTests = sorted;
+  }
+
+  wallMs() {
+    return Date.now() - this.wallStart;
+  }
+
+  failures() {
+    return this.tasks.filter((t) => t.ok === false);
+  }
+
+  failureSummary() {
+    const failed = this.failures();
+    if (failed.length === 0) return null;
+    return failed
+      .map((t) => {
+        if (t.timeout) return `${t.label}: timeout`;
+        if (t.counts && t.counts.errors) return `${t.label}: ${t.counts.errors} errors`;
+        if (t.failures) return `${t.label}: ${t.failures.length} failures`;
+        return `${t.label}: failed`;
+      })
+      .join(', ');
+  }
+}
+
+// --- REPORTERS ---
+class TtyReporter {
+  constructor(config, colWidth) {
+    this.config = config;
+    this.col = colWidth;
+    this.tickerHandle = null;
+    this.tickerStart = 0;
+    this.tickerLabel = null;
+    this.useTicker = !!process.stdout.isTTY;
+  }
+
+  header() {
+    const flags = [];
+    if (this.config.fix) flags.push(`${Theme.YELLOW}--fix${Theme.R}`);
+    if (this.config.quick) flags.push(`${Theme.YELLOW}--quick${Theme.R}`);
+    if (this.config.all) flags.push(`${Theme.YELLOW}--all${Theme.R}`);
+    const suffix = flags.length > 0 ? `  ${flags.join('  ')}` : '';
     process.stdout.write(
       `\n  ${Theme.BOLD}gemini-assistant${Theme.R}  ${Theme.DIM}checks${Theme.R}${suffix}\n\n`,
     );
   }
 
-  printTask(icon, label, time, skipped, counts, annotation = null) {
-    const col = label.padEnd(this.COL);
-    let right = skipped ? `${Theme.DIM}skipped${Theme.R}` : `${Theme.DIM}${time}${Theme.R}`;
-    if (annotation) right += `  ${Theme.DIM}(${annotation})${Theme.R}`;
+  taskStart(label) {
+    this.tickerLabel = label;
+    this.tickerStart = Date.now();
+    process.stdout.write(
+      `\r  ${Icons.RUN}  ${Theme.BOLD}${label.padEnd(this.col)}${Theme.R}${Theme.CLEAR_EOL}`,
+    );
+    if (!this.useTicker) return;
+    this.tickerHandle = setInterval(() => {
+      const elapsed = OutputRenderer.formatElapsed(Date.now() - this.tickerStart);
+      process.stdout.write(
+        `\r  ${Icons.RUN}  ${Theme.BOLD}${label.padEnd(this.col)}${Theme.R}  ${Theme.DIM}${elapsed}${Theme.R}${Theme.CLEAR_EOL}`,
+      );
+    }, 1000);
+  }
 
-    if (counts) {
+  taskEnd(label, result, ms) {
+    if (this.tickerHandle) {
+      clearInterval(this.tickerHandle);
+      this.tickerHandle = null;
+    }
+    this.tickerLabel = null;
+
+    const counts = result.counts || null;
+    let icon;
+    if (result.skipped) icon = Icons.SKIP;
+    else if (result.ok) icon = Icons.PASS;
+    else if (result.timeout) icon = Icons.HANG;
+    else icon = Icons.FAIL;
+
+    const time = result.skipped ? '' : OutputRenderer.formatElapsed(ms);
+    const left = `\r  ${icon}  ${Theme.BOLD}${label.padEnd(this.col)}${Theme.R}`;
+
+    let right;
+    if (result.skipped) {
+      right = `${Theme.DIM}${result.skipReason || 'skipped'}${Theme.R}`;
+    } else if (counts) {
       const parts = [];
       if (counts.errors)
         parts.push(`${Theme.RED}${counts.errors} error${counts.errors !== 1 ? 's' : ''}${Theme.R}`);
@@ -736,36 +879,205 @@ class TaskOrchestrator {
         parts.push(
           `${Theme.YELLOW}${counts.warnings} warning${counts.warnings !== 1 ? 's' : ''}${Theme.R}`,
         );
-      if (parts.length > 0) right = `${Theme.DIM}${time}${Theme.R}  ${parts.join(' · ')}`;
+      right = `${Theme.DIM}${time}${Theme.R}${parts.length ? `  ${parts.join(' · ')}` : ''}`;
+    } else {
+      right = `${Theme.DIM}${time}${Theme.R}`;
+      if (result.annotation) right += `  ${Theme.DIM}(${result.annotation})${Theme.R}`;
     }
-    process.stdout.write(
-      `\r  ${icon}  ${Theme.BOLD}${col}${Theme.R}  ${right}${Theme.CLEAR_EOL}\n`,
-    );
+    process.stdout.write(`${left}  ${right}${Theme.CLEAR_EOL}\n`);
   }
 
-  printOutput(raw) {
-    if (!raw) return;
-    const split = raw.trim().split('\n');
-    const shown = split.slice(0, Config.RAW_OUTPUT_MAX_LINES);
+  failureDetail(failedTasks) {
+    for (const t of failedTasks) {
+      if (t.timeout) {
+        const startupPhase = t.phase === 'startup';
+        process.stdout.write('\n');
+        process.stdout.write(
+          `  ${Icons.HANG}  ${Theme.BOLD}TIMED OUT${Theme.R} — ${
+            startupPhase
+              ? `no TAP output during startup window (${OutputRenderer.formatElapsed(t.silenceMs)})`
+              : `no TAP output for ${OutputRenderer.formatElapsed(t.silenceMs)} between tests`
+          }\n\n`,
+        );
+        if (t.lastCompletedTest) {
+          process.stdout.write(`  ${Theme.DIM}Last completed test:${Theme.R}\n`);
+          process.stdout.write(`  ${Theme.GREEN}✔${Theme.R}  ${t.lastCompletedTest.name}\n\n`);
+          process.stdout.write(
+            `  ${Theme.DIM}→ The hang likely occurred in the next test after this one.\n` +
+              `    Check for: unclosed handles, unresolved promises, missing mock teardown.${Theme.R}\n\n`,
+          );
+        } else if (startupPhase) {
+          process.stdout.write(
+            `  ${Theme.DIM}→ Test process produced no TAP lines before the startup window expired.\n` +
+              `    Check for: top-level await deadlocks, missing .env / config, slow cold start.${Theme.R}\n\n`,
+          );
+        }
+        continue;
+      }
+      if (t.failures && t.failures.length > 0) {
+        process.stdout.write('\n');
+        const cap = Config.MAX_FAILURE_CARDS;
+        const shown = t.failures.slice(0, cap);
+        for (const f of shown) {
+          process.stdout.write(OutputRenderer.renderTestFailureCard(f) + '\n\n');
+        }
+        if (t.failures.length > cap) {
+          process.stdout.write(
+            `      ${Theme.DIM}… ${t.failures.length - cap} more failures, see ${Config.FAILURE_FILE}${Theme.R}\n\n`,
+          );
+        }
+        continue;
+      }
+      if (t.errors && t.errors.length > 0) {
+        process.stdout.write('\n');
+        OutputRenderer.renderRustErrorsGrouped(t.errors);
+        continue;
+      }
+      if (t.rawOutput) {
+        process.stdout.write('\n');
+        const split = t.rawOutput.trim().split('\n');
+        const shown = split.slice(0, Config.RAW_OUTPUT_MAX_LINES);
+        for (const line of shown) process.stdout.write(`      ${Theme.DIM}${line}${Theme.R}\n`);
+        if (split.length > Config.RAW_OUTPUT_MAX_LINES) {
+          process.stdout.write(
+            `      ${Theme.DIM}… ${split.length - Config.RAW_OUTPUT_MAX_LINES} more lines${Theme.R}\n`,
+          );
+        }
+        process.stdout.write('\n');
+      }
+    }
+  }
+
+  summary(aggregate) {
     process.stdout.write('\n');
-    for (const line of shown) process.stdout.write(`      ${Theme.DIM}${line}${Theme.R}\n`);
-    if (split.length > Config.RAW_OUTPUT_MAX_LINES) {
+
+    if (aggregate.slowestTests.length > 0) {
+      process.stdout.write(`  ${Theme.DIM}Slowest tests:${Theme.R}\n`);
+      for (const t of aggregate.slowestTests) {
+        process.stdout.write(
+          `    ${OutputRenderer.formatElapsed(t.ms).padStart(5)}  ${Theme.DIM}${t.name}${Theme.R}\n`,
+        );
+      }
+      process.stdout.write('\n');
+    }
+
+    const total = aggregate.tasks.length - aggregate.skipped;
+    const wall = OutputRenderer.formatElapsed(aggregate.wallMs());
+    if (aggregate.failed === 0) {
+      const skippedNote =
+        aggregate.skipped > 0 ? `  ${Theme.DIM}(${aggregate.skipped} skipped)${Theme.R}` : '';
       process.stdout.write(
-        `      ${Theme.DIM}… ${split.length - Config.RAW_OUTPUT_MAX_LINES} more lines${Theme.R}\n`,
+        `  ${Theme.GREEN}${Theme.BOLD}✓${Theme.R}  ${aggregate.passed}/${total} passed${skippedNote}  ${Theme.DIM}${wall}${Theme.R}\n\n`,
       );
+      return;
     }
-    process.stdout.write('\n');
+
+    const summary = aggregate.failureSummary() || 'failed';
+    process.stdout.write(
+      `  ${Theme.RED}${Theme.BOLD}✗${Theme.R}  ${aggregate.failed} failed: ${summary}  ${Theme.DIM}·${Theme.R}  ${aggregate.passed}/${total} ran  ${Theme.DIM}${wall}${Theme.R}\n`,
+    );
+    process.stdout.write(`  ${Theme.DIM}✎  failure details → ${Config.FAILURE_FILE}${Theme.R}\n\n`);
+  }
+}
+
+class JsonReporter {
+  constructor(config) {
+    this.config = config;
+    this.tickerHandle = null;
+  }
+  header() {
+    /* json mode emits a single payload in summary() */
+  }
+  taskStart() {
+    /* no-op */
+  }
+  taskEnd() {
+    /* no-op */
+  }
+  failureDetail() {
+    /* no-op */
+  }
+  summary(aggregate) {
+    const payload = {
+      ok: aggregate.failed === 0,
+      mode: aggregate.mode,
+      wallMs: aggregate.wallMs(),
+      tasks: aggregate.tasks,
+      slowestTests: aggregate.slowestTests,
+      failureSummary: aggregate.failureSummary(),
+    };
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+  }
+}
+
+// --- FAILURE FILE ---
+function writeFailureFile(aggregate, file = Config.FAILURE_FILE) {
+  const payload = {
+    ok: false,
+    mode: aggregate.mode,
+    wallMs: aggregate.wallMs(),
+    tasks: aggregate.tasks,
+    slowestTests: aggregate.slowestTests,
+    failureSummary: aggregate.failureSummary(),
+    timestamp: new Date().toISOString(),
+  };
+  const tmp = `${file}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+    renameSync(tmp, file);
+  } catch {
+    // best-effort: don't crash the script for a failure-detail write error
+  }
+}
+
+// --- SIGINT ---
+function installSigintHandler(reporter) {
+  let interrupted = false;
+  process.on('SIGINT', () => {
+    if (interrupted) {
+      process.exit(130);
+    }
+    interrupted = true;
+    if (reporter && reporter.tickerHandle) {
+      clearInterval(reporter.tickerHandle);
+    }
+    process.stdout.write('\x1b[?25h'); // restore cursor
+    process.stdout.write(`\n  ${Theme.YELLOW}interrupted${Theme.R}\n\n`);
+    process.exit(130);
+  });
+}
+
+// --- ORCHESTRATION ---
+class TaskOrchestrator {
+  constructor(config) {
+    this.config = config;
+    this.fix = config.fix;
+    this.quick = config.quick;
+    this.all = config.all;
+
+    this.tasks = [
+      { label: 'format', cmd: ['npm', ['run', 'format']] },
+      { label: 'lint', runner: () => TaskRunners.runLint(this.fix) },
+      { label: 'type-check', runner: () => TaskRunners.runTypeCheck() },
+      { label: 'knip', runner: () => TaskRunners.runKnip() },
+      { label: 'test', runner: () => TaskRunners.runTest(), skip: this.quick },
+      { label: 'rebuild', runner: () => TaskRunners.runBuild(), skip: this.quick },
+    ];
+
+    this.COL = Math.max(...this.tasks.map((t) => t.label.length)) + 2;
   }
 
-  attemptAutoFix(task, result) {
+  attemptAutoFix(task, result, reporter) {
     const errors = result.errors;
     if (!errors || errors.length === 0) return null;
     if (task.label !== 'lint' && task.label !== 'knip') return null;
     if (task.label === 'knip' && !KnipParser.isFixable(errors)) return null;
 
-    process.stdout.write(
-      `\r  ${Icons.FIX}  ${Theme.BOLD}${task.label.padEnd(this.COL)}${Theme.R}  ${Theme.DIM}auto-fixing...${Theme.R}${Theme.CLEAR_EOL}`,
-    );
+    if (reporter instanceof TtyReporter) {
+      process.stdout.write(
+        `\r  ${Icons.FIX}  ${Theme.BOLD}${task.label.padEnd(this.COL)}${Theme.R}  ${Theme.DIM}auto-fixing...${Theme.R}${Theme.CLEAR_EOL}`,
+      );
+    }
 
     if (task.label === 'lint') {
       CommandRunner.exec('npm', ['run', 'lint:fix']);
@@ -781,205 +1093,106 @@ class TaskOrchestrator {
     return task.runner();
   }
 
-  handleFailure(task, result, ms) {
-    const counts = result.counts || null;
-    this.printTask(
-      result.timeout ? Icons.HANG : Icons.FAIL,
-      task.label,
-      OutputRenderer.formatElapsed(ms),
-      false,
-      counts,
-    );
-
-    if (result.timeout) {
-      return this._handleTimeoutFailure(task, result);
-    }
-    if (result.failures && result.failures.length > 0) {
-      return this._handleTestFailures(task, result);
-    }
-    if (result.errors && result.errors.length > 0) {
-      return this._handleLinterErrors(task, result, counts);
-    }
-    if (result.rawOutput) {
-      this.printOutput(result.rawOutput);
-      return {
-        failed_task: task.label,
-        status: 'failed',
-        raw_output_preview: result.rawOutput.slice(0, Config.RAW_OUTPUT_PREVIEW_LIMIT),
-      };
-    }
-    return null;
+  _gatedOnFailure(task, aggregate) {
+    if (!this.all) return false;
+    if (task.label !== 'test' && task.label !== 'rebuild') return false;
+    return aggregate.failed > 0;
   }
 
-  _handleTimeoutFailure(task, result) {
-    const startupPhase = result.phase === 'startup';
-    process.stdout.write('\n');
-    process.stdout.write(
-      `  ${Icons.HANG}  ${Theme.BOLD}TIMED OUT${Theme.R} — ${
-        startupPhase
-          ? `no TAP output during startup window (${OutputRenderer.formatElapsed(result.silenceMs)})`
-          : `no TAP output for ${OutputRenderer.formatElapsed(result.silenceMs)} between tests`
-      }\n\n`,
-    );
-
-    if (result.lastCompletedTest) {
-      process.stdout.write(`  ${Theme.DIM}Last completed test:${Theme.R}\n`);
-      process.stdout.write(`  ${Theme.GREEN}✔${Theme.R}  ${result.lastCompletedTest.name}\n\n`);
-      process.stdout.write(
-        `  ${Theme.DIM}→ The hang likely occurred in the next test after this one.\n` +
-          `    Check for: unclosed handles, unresolved promises, missing mock teardown.${Theme.R}\n\n`,
-      );
-    } else if (startupPhase) {
-      process.stdout.write(
-        `  ${Theme.DIM}→ Test process produced no TAP lines before the startup window expired.\n` +
-          `    Check for: top-level await deadlocks, missing .env / config, slow cold start.${Theme.R}\n\n`,
-      );
+  async _runTask(task) {
+    if (task.runner) return await task.runner();
+    if (task.cmd) {
+      const [cmd, cmdArgs] = task.cmd;
+      const r = CommandRunner.exec(cmd, cmdArgs);
+      return r.ok ? { ok: true } : { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
     }
-
-    return {
-      failed_task: task.label,
-      status: 'timeout',
-      phase: result.phase || 'between-tests',
-      silence_duration_ms: result.silenceMs,
-      last_completed_test: result.lastCompletedTest || null,
-      suite_max_historical_ms: result.suiteMaxHistoricalMs || 0,
-      hint: startupPhase
-        ? 'Test process produced no TAP output before the startup window expired.'
-        : 'Process produced no TAP output for the silence threshold.',
-    };
-  }
-
-  _handleTestFailures(task, result) {
-    process.stdout.write('\n');
-    for (const f of result.failures) {
-      process.stdout.write(OutputRenderer.renderTestFailureCard(f) + '\n\n');
-    }
-    return {
-      failed_task: task.label,
-      status: 'failed',
-      total_failures: result.failures.length,
-      failures: result.failures.map(({ name, file, expected, actual, errorMessage, frame }) => ({
-        name,
-        file,
-        ...(expected !== undefined ? { expected, received: actual } : {}),
-        ...(errorMessage ? { error: errorMessage } : {}),
-        ...(frame ? { at: frame } : {}),
-      })),
-    };
-  }
-
-  _handleLinterErrors(task, result, counts) {
-    process.stdout.write('\n');
-    for (const err of result.errors) {
-      process.stdout.write(OutputRenderer.renderRustError(err) + '\n\n');
-    }
-    return {
-      failed_task: task.label,
-      status: 'failed',
-      total_errors: counts && counts.errors ? counts.errors : 0,
-      total_warnings: counts && counts.warnings ? counts.warnings : 0,
-      errors: result.errors.map(({ file, line, col, rule, severity, message }) => ({
-        file,
-        line,
-        col,
-        rule,
-        severity,
-        message,
-      })),
-    };
+    return { ok: false, rawOutput: 'task has no runner' };
   }
 
   async run() {
-    this.printHeader();
-    let passed = 0,
-      failed = 0,
-      skipped = 0;
-    const wallStart = Date.now();
-    let llmPayload = null;
+    const reporter = this.config.json
+      ? new JsonReporter(this.config)
+      : new TtyReporter(this.config, this.COL);
+
+    installSigintHandler(reporter);
+
+    reporter.header();
+
+    const aggregate = new Aggregate(this.all ? 'run-all' : 'fail-fast');
+    let testDurations = null;
 
     for (const task of this.tasks) {
       if (task.skip) {
-        this.printTask(Icons.SKIP, task.label, '', true, null);
-        skipped++;
+        const skipResult = { skipped: true, skipReason: 'skipped' };
+        reporter.taskStart(task.label);
+        reporter.taskEnd(task.label, skipResult, 0);
+        aggregate.recordSkip(task.label, skipResult.skipReason);
         continue;
       }
 
-      process.stdout.write(
-        `\r  ${Icons.RUN}  ${Theme.BOLD}${task.label.padEnd(this.COL)}${Theme.R}${Theme.CLEAR_EOL}`,
-      );
-      OutputRenderer.clearCache();
-
-      const { result, ms } = await this._executeTask(task);
-
-      if (!result.ok) {
-        let finalResult = result;
-        let finalMs = ms;
-
-        const fixed = this.attemptAutoFix(task, result);
-        if (fixed !== null) {
-          finalMs = Date.now() - (wallStart + ms);
-          if (fixed.ok) {
-            this.printTask(
-              Icons.PASS,
-              task.label,
-              OutputRenderer.formatElapsed(finalMs),
-              false,
-              null,
-              'auto-fixed',
-            );
-            passed++;
-            continue;
-          }
-          finalResult = fixed;
-        }
-
-        llmPayload = this.handleFailure(task, finalResult, finalMs);
-        failed++;
-        break;
+      if (this._gatedOnFailure(task, aggregate)) {
+        const reason = 'gated on prior failure';
+        reporter.taskStart(task.label);
+        reporter.taskEnd(task.label, { skipped: true, skipReason: reason }, 0);
+        aggregate.recordSkip(task.label, reason);
+        continue;
       }
 
-      this.printTask(Icons.PASS, task.label, OutputRenderer.formatElapsed(ms), false, null);
-      passed++;
+      OutputRenderer.clearCache();
+      reporter.taskStart(task.label);
+      const start = Date.now();
+      let result = await this._runTask(task);
+      let ms = Date.now() - start;
+
+      if (!result.ok) {
+        const fixed = this.attemptAutoFix(task, result, reporter);
+        if (fixed !== null) {
+          ms = Date.now() - start;
+          if (fixed.ok) {
+            reporter.taskEnd(task.label, { ok: true, annotation: 'auto-fixed' }, ms);
+            aggregate.recordPass(task.label, ms, 'auto-fixed');
+            continue;
+          }
+          result = fixed;
+        }
+      }
+
+      if (result.ok) {
+        reporter.taskEnd(task.label, result, ms);
+        aggregate.recordPass(task.label, ms);
+        if (task.label === 'test' && result.testDurations) {
+          testDurations = result.testDurations;
+        }
+        continue;
+      }
+
+      reporter.taskEnd(task.label, result, ms);
+      aggregate.recordFail(task.label, result, ms);
+
+      if (!this.all) break;
     }
 
-    if (llmPayload) OutputRenderer.emitLlmBlock(llmPayload);
+    if (testDurations) aggregate.setSlowestTests(testDurations);
 
-    const total = this.tasks.length - skipped;
-    const wall = OutputRenderer.formatElapsed(Date.now() - wallStart);
+    reporter.failureDetail(aggregate.failures());
+    reporter.summary(aggregate);
 
-    process.stdout.write('\n');
-    if (failed === 0) {
-      const label = this.fast
-        ? `${passed}/${total} passed  ${Theme.DIM}(test skipped)${Theme.R}`
-        : `${passed}/${total} passed`;
-      process.stdout.write(
-        `  ${Theme.GREEN}${Theme.BOLD}✓${Theme.R}  ${label}  ${Theme.DIM}${wall}${Theme.R}\n\n`,
-      );
-      return 0;
+    if (aggregate.failed > 0) {
+      writeFailureFile(aggregate);
+      if (this.config.llm && !this.config.json) {
+        OutputRenderer.emitLlmBlock({
+          ok: false,
+          mode: aggregate.mode,
+          tasks: aggregate.tasks,
+          failureSummary: aggregate.failureSummary(),
+        });
+      }
     }
 
-    process.stdout.write(
-      `  ${Theme.RED}${Theme.BOLD}✗${Theme.R}  ${passed}/${total} passed  ${Theme.RED}${failed} failed${Theme.R}  ${Theme.DIM}${wall}${Theme.R}\n\n`,
-    );
-    return 1;
-  }
-
-  async _executeTask(task) {
-    const start = Date.now();
-    let result;
-
-    if (task.runner) {
-      result = await task.runner();
-    } else if (task.cmd) {
-      const [cmd, cmdArgs] = task.cmd;
-      const r = CommandRunner.exec(cmd, cmdArgs);
-      result = r.ok ? { ok: true } : { ok: false, rawOutput: `${r.stdout}\n${r.stderr}`.trim() };
-    }
-
-    return { result, ms: Date.now() - start };
+    return aggregate.failed === 0 ? 0 : 1;
   }
 }
 
 // --- CLI ENTRY ---
-const argsSet = new Set(process.argv.slice(2));
-process.exitCode = await new TaskOrchestrator(argsSet).run();
+const config = parseArgs(process.argv.slice(2));
+process.exitCode = await new TaskOrchestrator(config).run();

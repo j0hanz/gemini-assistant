@@ -12,7 +12,6 @@ import {
 import { z } from 'zod/v4';
 
 import type {
-  ContextUsed,
   Finding,
   GroundingCitation,
   GroundingSignals,
@@ -376,22 +375,18 @@ export function promptBlockedError(toolName: string, blockReason?: string): Call
   return new SafetyError(toolName, 'prompt_blocked', blockReason).toToolResult();
 }
 
-interface SharedStructuredMetadata<_TFunctionCall, _TToolEvent> {
-  contextUsed?: ContextUsed;
+interface SharedStructuredMetadata {
   warnings?: string[];
 }
 
 // ── Structured Content ────────────────────────────────────────────────
 
-export function buildSharedStructuredMetadata<_TFunctionCall, _TToolEvent>({
-  contextUsed,
+export function buildSharedStructuredMetadata({
   warnings,
 }: {
-  contextUsed?: ContextUsed;
   warnings?: readonly string[];
-}): SharedStructuredMetadata<_TFunctionCall, _TToolEvent> {
+}): SharedStructuredMetadata {
   return pickDefined({
-    contextUsed,
     warnings: warnings && warnings.length > 0 ? [...warnings] : undefined,
   });
 }
@@ -406,7 +401,7 @@ export function buildBaseStructuredOutput(warnings?: readonly string[]): {
   });
 }
 
-const SHARED_STRUCTURED_RESULT_KEYS = ['contextUsed', 'warnings'] as const;
+const SHARED_STRUCTURED_RESULT_KEYS = ['warnings'] as const;
 
 type SharedStructuredResultKey = (typeof SHARED_STRUCTURED_RESULT_KEYS)[number];
 
@@ -420,19 +415,14 @@ function pickSharedStructuredResultFields(
   );
 }
 
-export function buildStructuredResponse<
-  T extends Record<string, unknown>,
-  TFunctionCall = never,
-  TToolEvent = never,
->(
+export function buildStructuredResponse<T extends Record<string, unknown>>(
   domain: T,
   shared?: {
-    contextUsed?: ContextUsed;
     warnings?: readonly string[];
-    functionCalls?: readonly TFunctionCall[];
+    functionCalls?: readonly unknown[];
     includeThoughts?: boolean;
     thoughtText?: string;
-    toolEvents?: readonly TToolEvent[];
+    toolEvents?: readonly unknown[];
     usage?: UsageMetadata | undefined;
     safetyRatings?: unknown;
     finishMessage?: string | undefined;
@@ -440,10 +430,10 @@ export function buildStructuredResponse<
     groundingMetadata?: unknown;
     urlContextMetadata?: unknown;
   },
-): T & SharedStructuredMetadata<TFunctionCall, TToolEvent> & Record<string, unknown> {
+): T & SharedStructuredMetadata & Record<string, unknown> {
   return {
     ...domain,
-    ...(shared ? buildSharedStructuredMetadata<TFunctionCall, TToolEvent>(shared) : {}),
+    ...(shared ? buildSharedStructuredMetadata(shared) : {}),
   };
 }
 

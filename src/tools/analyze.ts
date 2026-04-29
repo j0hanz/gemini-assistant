@@ -466,11 +466,6 @@ function buildAnalyzeStructuredContent(
   const warnings = Array.isArray(structured.warnings)
     ? structured.warnings.filter((warning): warning is string => typeof warning === 'string')
     : undefined;
-  const base = {
-    contextUsed: structured.contextUsed,
-    diagnostics: structured.diagnostics,
-    computations: structured.computations,
-  };
 
   if (args.outputKind === 'diagram') {
     const diagramType = args.diagramType ?? 'mermaid';
@@ -489,7 +484,6 @@ function buildAnalyzeStructuredContent(
           syntaxValid:
             typeof structured.syntaxValid === 'boolean' ? structured.syntaxValid : undefined,
         },
-        shared: base,
       }),
     });
   }
@@ -501,7 +495,6 @@ function buildAnalyzeStructuredContent(
         status: typeof structured.status === 'string' ? structured.status : 'ungrounded',
         summary: typeof structured.summary === 'string' ? structured.summary : '',
       },
-      shared: base,
     }),
   });
 }

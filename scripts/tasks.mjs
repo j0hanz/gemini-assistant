@@ -5,6 +5,7 @@ import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
+import { convertProcessSignalToExitCode, parseArgs } from 'node:util';
 
 // --- CONFIGURATION ---
 const Config = {
@@ -88,17 +89,11 @@ const HistoryManager = {
 const CommandRunner = {
   exec(cmd, args) {
     const isNpm = Config.IS_WINDOWS && (cmd === 'npm' || cmd === 'npx');
-    const result = isNpm
-      ? spawnSync(`${cmd} ${args.join(' ')}`, {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          shell: true,
-        })
-      : spawnSync(cmd, args, {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          shell: false,
-        });
+    const result = spawnSync(cmd, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: isNpm,
+    });
 
     return {
       ok: result.status === 0 && !result.error,
@@ -131,9 +126,7 @@ const EslintParser = {
     if (!msgs || msgs.length === 0) return;
 
     const filePath = file.filePath || '';
-    const rel = filePath.startsWith(cwd)
-      ? filePath.slice(cwd.length + 1).replaceAll('\\', '/')
-      : filePath.replaceAll('\\', '/');
+    const rel = path.relative(cwd, filePath).replaceAll('\\', '/');
 
     for (const msg of msgs) {
       errors.push(this._formatError(msg, rel));
@@ -403,7 +396,7 @@ const OutputRenderer = {
     out.push(`${color}${severity}[${rule}]${Theme.R}  ${message}`);
     out.push(`  ${Theme.DIM}-->${Theme.R} ${file}:${line}:${col}`);
 
-    const absPath = path.isAbsolute(file) ? file : path.join(cwd, file);
+    const absPath = path.resolve(cwd, file);
     const src = this._getLines(absPath);
     const gutterW = String(line + 1).length;
     const pad = ' '.repeat(gutterW);
@@ -718,9 +711,21 @@ const TaskRunners = {
 };
 
 // --- RUN CONFIG ---
-function parseArgs(argv) {
-  const flags = new Set(argv);
-  if (flags.has('--help') || flags.has('-h')) {
+function parseConfig(args) {
+  const { values } = parseArgs({
+    args,
+    options: {
+      fix: { type: 'boolean' },
+      quick: { type: 'boolean' },
+      all: { type: 'boolean' },
+      json: { type: 'boolean' },
+      llm: { type: 'boolean' },
+      help: { type: 'boolean', short: 'h' },
+    },
+    strict: false,
+  });
+
+  if (values.help) {
     process.stdout.write(
       [
         'Usage: node scripts/tasks.mjs [flags]',
@@ -737,11 +742,11 @@ function parseArgs(argv) {
     process.exit(0);
   }
   return {
-    fix: flags.has('--fix'),
-    quick: flags.has('--quick'),
-    all: flags.has('--all'),
-    json: flags.has('--json'),
-    llm: flags.has('--llm'),
+    fix: !!values.fix,
+    quick: !!values.quick,
+    all: !!values.all,
+    json: !!values.json,
+    llm: !!values.llm,
   };
 }
 
@@ -1050,8 +1055,9 @@ function writeFailureFile(aggregate, file = Config.FAILURE_FILE) {
 function installSigintHandler(reporter) {
   let interrupted = false;
   process.on('SIGINT', () => {
+    const exitCode = convertProcessSignalToExitCode('SIGINT');
     if (interrupted) {
-      process.exit(130);
+      process.exit(exitCode);
     }
     interrupted = true;
     if (reporter && reporter.tickerHandle) {
@@ -1059,7 +1065,7 @@ function installSigintHandler(reporter) {
     }
     process.stdout.write('\x1b[?25h'); // restore cursor
     process.stdout.write(`\n  ${Theme.YELLOW}interrupted${Theme.R}\n\n`);
-    process.exit(130);
+    process.exit(exitCode);
   });
 }
 
@@ -1216,5 +1222,5 @@ class TaskOrchestrator {
 }
 
 // --- CLI ENTRY ---
-const config = parseArgs(process.argv.slice(2));
+const config = parseConfig(process.argv.slice(2));
 process.exitCode = await new TaskOrchestrator(config).run();

@@ -3,10 +3,13 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
 import { convertProcessSignalToExitCode, parseArgs } from 'node:util';
+
+const runController = new AbortController();
 
 // --- CONFIGURATION ---
 const Config = {
@@ -48,9 +51,9 @@ const Icons = {
 
 // --- HISTORY MANAGER ---
 const HistoryManager = {
-  load(file = Config.HISTORY_FILE) {
+  async load(file = Config.HISTORY_FILE) {
     try {
-      const raw = readFileSync(file, 'utf8');
+      const raw = await readFile(file, 'utf8');
       return this._sanitize(JSON.parse(raw));
     } catch {
       return { test_durations: Object.create(null) };
@@ -72,15 +75,15 @@ const HistoryManager = {
     return { test_durations };
   },
 
-  save(history, newDurations, file = Config.HISTORY_FILE) {
+  async save(history, newDurations, file = Config.HISTORY_FILE) {
     for (const [name, ms] of newDurations) {
       const arr = history.test_durations[name] || [];
       arr.push(ms);
       history.test_durations[name] = arr.slice(-Config.MAX_DURATIONS);
     }
     const tmp = `${file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(history, null, 2) + '\n', 'utf8');
-    renameSync(tmp, file);
+    await writeFile(tmp, JSON.stringify(history, null, 2) + '\n', 'utf8');
+    await rename(tmp, file);
   },
 
   getSilenceTimeout(history) {
@@ -92,24 +95,13 @@ const HistoryManager = {
 
 // --- COMMAND EXECUTION ---
 const CommandRunner = {
-  // On Windows, npm/npx are .cmd shims. Spawning a .cmd file without a shell
-  // fails with EINVAL since Node's CVE-2024-27980 mitigation, but passing an
-  // `args` array together with `shell: true` triggers DEP0190 (args are
-  // concatenated unescaped). The supported workaround is to pass a single
-  // pre-quoted command string with `shell: true` and no separate `args`.
-  _quote(arg) {
-    // Quote tokens that contain whitespace or shell metacharacters.
-    if (/^[A-Za-z0-9_./:=@+-]+$/.test(arg)) return arg;
-    return `"${arg.replace(/(["\\])/g, '\\$1')}"`;
-  },
-
   exec(cmd, args) {
     const isNpm = Config.IS_WINDOWS && (cmd === 'npm' || cmd === 'npx');
     const result = isNpm
-      ? spawnSync([cmd, ...args].map(this._quote).join(' '), {
+      ? spawnSync('cmd.exe', ['/d', '/c', cmd, ...args], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
-          shell: true,
+          windowsVerbatimArguments: true,
         })
       : spawnSync(cmd, args, {
           encoding: 'utf8',
@@ -128,12 +120,14 @@ const CommandRunner = {
     return new Promise((resolve) => {
       const isNpm = Config.IS_WINDOWS && (cmd === 'npm' || cmd === 'npx');
       const child = isNpm
-        ? spawn([cmd, ...args].map(this._quote).join(' '), {
+        ? spawn('cmd.exe', ['/d', '/c', cmd, ...args], {
             stdio: ['ignore', 'pipe', 'pipe'],
-            shell: true,
+            windowsVerbatimArguments: true,
+            signal: runController.signal,
           })
         : spawn(cmd, args, {
             stdio: ['ignore', 'pipe', 'pipe'],
+            signal: runController.signal,
           });
       let stdout = '';
       let stderr = '';
@@ -651,8 +645,8 @@ const TaskRunners = {
     return { ok: true };
   },
 
-  runTest() {
-    const history = HistoryManager.load();
+  async runTest() {
+    const history = await HistoryManager.load();
     const silenceMs = HistoryManager.getSilenceTimeout(history);
     const startupMs = Math.max(silenceMs, Config.STARTUP_MIN_MS);
     const ac = new AbortController();
@@ -660,7 +654,10 @@ const TaskRunners = {
     const child = spawn(
       process.execPath,
       ['--import', 'tsx/esm', '--env-file=.env', '--test', '--no-warnings', '--test-reporter=tap'],
-      { stdio: ['ignore', 'pipe', 'pipe'], signal: ac.signal },
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        signal: AbortSignal.any([ac.signal, runController.signal]),
+      },
     );
 
     const state = {
@@ -705,45 +702,53 @@ const TaskRunners = {
       resolve(value);
     };
 
-    const armTimer = () => {
-      if (state.silenceTimer) clearTimeout(state.silenceTimer);
+    const handleTimeout = async () => {
+      const maxHistorical = Math.max(0, ...Object.values(history.test_durations).flat());
+      const phase = state.seenFirstOk ? 'between-tests' : 'startup';
       const ms = state.seenFirstOk ? silenceMs : startupMs;
-      state.silenceTimer = setTimeout(async () => {
-        const maxHistorical = Math.max(0, ...Object.values(history.test_durations).flat());
-        const phase = state.seenFirstOk ? 'between-tests' : 'startup';
+      try {
+        ac.abort(new Error('test silence timeout'));
+      } catch {
+        /* ignore abort errors */
+      }
+      // Escalate to forced kill after grace period if child does not exit.
+      const killTimer = setTimeout(() => {
         try {
-          ac.abort(new Error('test silence timeout'));
+          if (Config.IS_WINDOWS) child.kill();
+          else child.kill('SIGKILL');
         } catch {
-          /* ignore abort errors */
+          /* ignore kill errors */
         }
-        // Escalate to forced kill after grace period if child does not exit.
-        const killTimer = setTimeout(() => {
-          try {
-            if (Config.IS_WINDOWS) child.kill();
-            else child.kill('SIGKILL');
-          } catch {
-            /* ignore kill errors */
-          }
-        }, Config.KILL_GRACE_MS);
-        try {
-          await once(child, 'close');
-        } catch {
-          /* ignore close errors */
-        }
-        clearTimeout(killTimer);
-        settle({
-          ok: false,
-          timeout: true,
-          silenceMs: ms,
-          phase,
-          lastCompletedTest: state.lastCompleted,
-          suiteMaxHistoricalMs: maxHistorical,
-          rawOutput: state.stderrBuf || undefined,
-        });
-      }, ms);
+      }, Config.KILL_GRACE_MS).unref();
+      try {
+        await once(child, 'close');
+      } catch {
+        /* ignore close errors */
+      }
+      clearTimeout(killTimer);
+      settle({
+        ok: false,
+        timeout: true,
+        silenceMs: ms,
+        phase,
+        lastCompletedTest: state.lastCompleted,
+        suiteMaxHistoricalMs: maxHistorical,
+        rawOutput: state.stderrBuf || undefined,
+      });
     };
 
-    armTimer();
+    let activeTimerMs = startupMs;
+    state.silenceTimer = setTimeout(handleTimeout, activeTimerMs).unref();
+
+    const armTimer = () => {
+      if (state.seenFirstOk && activeTimerMs !== silenceMs) {
+        clearTimeout(state.silenceTimer);
+        activeTimerMs = silenceMs;
+        state.silenceTimer = setTimeout(handleTimeout, activeTimerMs).unref();
+      } else {
+        state.silenceTimer.refresh();
+      }
+    };
 
     lines.on('line', (line) => {
       armTimer();
@@ -756,7 +761,7 @@ const TaskRunners = {
       settle({ ok: false, rawOutput: String(err && err.message ? err.message : err) });
     });
 
-    child.on('close', (code) => {
+    child.on('close', async (code) => {
       if (state.failures.length > 0) {
         settle({ ok: false, failures: state.failures, testDurations: state.testDurations });
         return;
@@ -766,7 +771,7 @@ const TaskRunners = {
         return;
       }
       try {
-        HistoryManager.save(history, state.testDurations);
+        await HistoryManager.save(history, state.testDurations);
       } catch {
         /* best-effort: history write must never crash a green run */
       }
@@ -876,12 +881,14 @@ function parseConfig(args) {
   } catch (err) {
     process.stderr.write(`${String(err && err.message ? err.message : err)}\n\n`);
     process.stderr.write(HELP_TEXT);
-    process.exit(2);
+    process.exitCode = 2;
+    return null;
   }
 
   if (values.help) {
     process.stdout.write(HELP_TEXT);
-    process.exit(0);
+    process.exitCode = 0;
+    return null;
   }
   return {
     fix: !!values.fix,
@@ -1011,7 +1018,7 @@ class TtyReporter {
       process.stdout.write(
         `\r  ${Icons.RUN}  ${Theme.BOLD}${label.padEnd(this.col)}${Theme.R}  ${Theme.DIM}${elapsed}${Theme.R}${Theme.CLEAR_EOL}`,
       );
-    }, 1000);
+    }, 1000).unref();
   }
 
   taskEnd(label, result, ms) {
@@ -1060,7 +1067,7 @@ class TtyReporter {
         `  ${Icons.RUN}  ${Theme.BOLD}${label.padEnd(this.col)}${Theme.R}${Theme.CLEAR_EOL}\n`,
       );
     }
-    this.tickerHandle = setInterval(() => this._redrawGroup(), 1000);
+    this.tickerHandle = setInterval(() => this._redrawGroup(), 1000).unref();
   }
 
   _buildGroupLine(label, done, elapsed) {
@@ -1276,6 +1283,7 @@ function writeFailureFile(aggregate, file = Config.FAILURE_FILE) {
 function installSigintHandler(reporter, config) {
   let interrupted = false;
   process.on('SIGINT', () => {
+    runController.abort();
     const exitCode = convertProcessSignalToExitCode('SIGINT');
     if (interrupted) {
       process.exit(exitCode);
@@ -1370,6 +1378,26 @@ class TaskOrchestrator {
     return { ok: false, rawOutput: 'task has no runner' };
   }
 
+  _finishRun(aggregate, reporter, testDurations = null) {
+    if (testDurations) aggregate.setSlowestTests(testDurations);
+    reporter.failureDetail(aggregate.failures());
+    reporter.summary(aggregate);
+    if (aggregate.failed > 0) {
+      writeFailureFile(aggregate);
+      if (this.config.llm && !this.config.json) {
+        OutputRenderer.emitLlmBlock({
+          ok: false,
+          mode: aggregate.mode,
+          tasks: aggregate.tasks,
+          failureSummary: aggregate.failureSummary(),
+        });
+      }
+    } else {
+      clearFailureFile();
+    }
+    return aggregate.failed === 0 ? 0 : 1;
+  }
+
   async run() {
     const reporter = this.config.json
       ? new JsonReporter(this.config)
@@ -1432,36 +1460,41 @@ class TaskOrchestrator {
       if (!this.all) break;
     }
 
-    if (testDurations) aggregate.setSlowestTests(testDurations);
-    reporter.failureDetail(aggregate.failures());
-    reporter.summary(aggregate);
-    if (aggregate.failed > 0) {
-      writeFailureFile(aggregate);
-      if (this.config.llm && !this.config.json) {
-        OutputRenderer.emitLlmBlock({
-          ok: false,
-          mode: aggregate.mode,
-          tasks: aggregate.tasks,
-          failureSummary: aggregate.failureSummary(),
-        });
-      }
-    } else {
-      clearFailureFile();
-    }
-    return aggregate.failed === 0 ? 0 : 1;
+    return this._finishRun(aggregate, reporter, testDurations);
   }
 
   async _runParallel(reporter) {
     const aggregate = new Aggregate(this.all ? 'run-all' : 'fail-fast');
     let testDurations = null;
 
-    // ── Group 1: format, lint, type-check, knip in parallel ─────────────
-    const staticTasks = this.tasks.slice(0, 4);
+    const formatTask = this.tasks[0];
+    const parallelStaticTasks = this.tasks.slice(1, 4);
     const deepTasks = this.tasks.slice(4);
 
-    reporter.groupStart(staticTasks.map((t) => t.label));
+    // ── Phase 0: format ──────────────────────────────────────────────────
+    if (formatTask.skip) {
+      reporter.taskStart(formatTask.label);
+      reporter.taskEnd(formatTask.label, { skipped: true, skipReason: 'skipped' }, 0);
+      aggregate.recordSkip(formatTask.label, 'skipped');
+    } else {
+      reporter.taskStart(formatTask.label);
+      const fStart = Date.now();
+      const fResult = await this._runTask(formatTask);
+      const fMs = Date.now() - fStart;
+      reporter.taskEnd(formatTask.label, fResult, fMs);
+
+      if (fResult.ok) aggregate.recordPass(formatTask.label, fMs);
+      else aggregate.recordFail(formatTask.label, fResult, fMs);
+
+      if (aggregate.failed > 0 && !this.all) {
+        return this._finishRun(aggregate, reporter);
+      }
+    }
+
+    // ── Phase 1: lint, type-check, knip in parallel ──────────────────────
+    reporter.groupStart(parallelStaticTasks.map((t) => t.label));
     const g1Results = await Promise.all(
-      staticTasks.map(async (task) => {
+      parallelStaticTasks.map(async (task) => {
         OutputRenderer.clearCache();
         const start = Date.now();
         const result = await this._runTask(task);
@@ -1477,23 +1510,12 @@ class TaskOrchestrator {
       else aggregate.recordFail(task.label, result, ms);
     }
 
-    // ── Gate: skip G2 when G1 failed and --all not set ───────────────────
+    // ── Gate: skip Phase 2 when Phase 1 failed and --all not set ─────────
     if (aggregate.failed > 0 && !this.all) {
-      reporter.failureDetail(aggregate.failures());
-      reporter.summary(aggregate);
-      writeFailureFile(aggregate);
-      if (this.config.llm && !this.config.json) {
-        OutputRenderer.emitLlmBlock({
-          ok: false,
-          mode: aggregate.mode,
-          tasks: aggregate.tasks,
-          failureSummary: aggregate.failureSummary(),
-        });
-      }
-      return 1;
+      return this._finishRun(aggregate, reporter);
     }
 
-    // ── Group 2: test + rebuild in parallel ──────────────────────────────
+    // ── Phase 2: test + rebuild in parallel ──────────────────────────────
     const activeTasks = deepTasks.filter((task) => {
       if (task.skip) {
         reporter.taskStart(task.label);
@@ -1528,26 +1550,12 @@ class TaskOrchestrator {
       }
     }
 
-    if (testDurations) aggregate.setSlowestTests(testDurations);
-    reporter.failureDetail(aggregate.failures());
-    reporter.summary(aggregate);
-    if (aggregate.failed > 0) {
-      writeFailureFile(aggregate);
-      if (this.config.llm && !this.config.json) {
-        OutputRenderer.emitLlmBlock({
-          ok: false,
-          mode: aggregate.mode,
-          tasks: aggregate.tasks,
-          failureSummary: aggregate.failureSummary(),
-        });
-      }
-    } else {
-      clearFailureFile();
-    }
-    return aggregate.failed === 0 ? 0 : 1;
+    return this._finishRun(aggregate, reporter, testDurations);
   }
 }
 
 // --- CLI ENTRY ---
 const config = parseConfig(process.argv.slice(2));
-process.exitCode = await new TaskOrchestrator(config).run();
+if (config !== null) {
+  process.exitCode = await new TaskOrchestrator(config).run();
+}

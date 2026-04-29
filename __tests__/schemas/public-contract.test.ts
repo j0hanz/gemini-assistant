@@ -202,7 +202,7 @@ describe('public contract schemas', () => {
       'diagram analyze output should parse',
     );
     assert.ok(
-      ReviewOutputSchema.safeParse({ ...base, subjectKind: 'failure', summary: 'x' }).success,
+      ReviewOutputSchema.safeParse({ ...base, summary: 'x' }).success,
       'review output should parse',
     );
   });

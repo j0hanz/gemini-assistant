@@ -235,18 +235,46 @@ describe('ChatOutputSchema', () => {
 });
 
 describe('ReviewOutputSchema', () => {
-  it('documents the corrected empty flag description', () => {
-    assert.strictEqual(
-      ReviewOutputSchema.shape.empty.description,
-      'Whether the local diff is empty (no changes)',
-    );
-  });
-
-  it('accepts failure diagnosis output', () => {
+  it('ReviewOutputSchema rejects subjectKind', () => {
     const result = ReviewOutputSchema.safeParse({
       status: 'completed',
-      subjectKind: 'failure',
-      summary: 'Likely root cause',
+      summary: 'LGTM',
+      subjectKind: 'diff',
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('ReviewOutputSchema rejects reviewedPaths', () => {
+    const result = ReviewOutputSchema.safeParse({
+      status: 'completed',
+      summary: 'LGTM',
+      reviewedPaths: ['src/index.ts'],
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('ReviewOutputSchema rejects truncated boolean', () => {
+    const result = ReviewOutputSchema.safeParse({
+      status: 'completed',
+      summary: 'LGTM',
+      truncated: true,
+    });
+    assert.strictEqual(result.success, false);
+  });
+
+  it('ReviewOutputSchema accepts minimal payload', () => {
+    const result = ReviewOutputSchema.safeParse({
+      status: 'completed',
+      summary: 'LGTM',
+    });
+    assert.ok(result.success);
+  });
+
+  it('ReviewOutputSchema accepts warnings array for truncation signal', () => {
+    const result = ReviewOutputSchema.safeParse({
+      status: 'completed',
+      summary: 'Review truncated',
+      warnings: ['Diff was truncated: 5 paths omitted due to size limit.'],
     });
     assert.ok(result.success);
   });

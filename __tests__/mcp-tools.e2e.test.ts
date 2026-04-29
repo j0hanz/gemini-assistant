@@ -210,7 +210,7 @@ const EXPECTED_TOOL_CONTRACTS = {
   review: {
     annotations: READONLY_NON_IDEMPOTENT_ANNOTATIONS,
     requiredInput: [],
-    requiredOutput: ['status', 'subjectKind', 'summary'],
+    requiredOutput: ['status', 'summary'],
     taskSupport: 'optional',
     title: 'Review',
   },
@@ -465,7 +465,6 @@ describe('MCP tool smoke coverage', () => {
         language: 'typescript',
       });
       expectSuccess(reviewResult);
-      assert.strictEqual(reviewResult.structuredContent.subjectKind, 'failure');
       assert.match(String(reviewResult.structuredContent.summary), /Validate the input/);
       const reviewTool = toolMap.get('review');
       assert.ok(reviewTool);

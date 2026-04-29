@@ -178,16 +178,7 @@ interface UntrackedPatchResult {
 
 type AnalyzePrStructuredContent = Record<string, unknown> & {
   summary: string;
-  schemaWarnings?: string[];
   stats: DiffStats;
-  reviewedPaths: string[];
-  includedUntracked: string[];
-  skippedBinaryPaths: string[];
-  skippedLargePaths: string[];
-  skippedSensitivePaths: string[];
-  omittedPaths?: string[];
-  empty: boolean;
-  truncated?: boolean;
   documentationDrift?: { file: string; driftDescription: string; suggestedUpdate: string }[];
 };
 
@@ -985,24 +976,11 @@ function buildBudgetedSnapshotDiff(snapshot: LocalDiffSnapshot): BudgetedSnapsho
 function buildStructuredContent(
   snapshot: LocalDiffSnapshot,
   summary: string,
-  reviewedPaths: string[],
-  omittedPaths: string[] = [],
-  truncated?: boolean,
   documentationDrift?: { file: string; driftDescription: string; suggestedUpdate: string }[],
-  schemaWarnings?: string[],
 ): AnalyzePrStructuredContent {
   return {
     summary,
-    ...(schemaWarnings && schemaWarnings.length > 0 ? { schemaWarnings } : {}),
     stats: snapshot.stats,
-    reviewedPaths,
-    includedUntracked: snapshot.includedUntracked,
-    skippedBinaryPaths: snapshot.skippedBinaryPaths,
-    skippedLargePaths: snapshot.skippedLargePaths,
-    skippedSensitivePaths: snapshot.skippedSensitivePaths,
-    ...(omittedPaths.length > 0 ? { omittedPaths } : {}),
-    empty: snapshot.empty,
-    ...(truncated ? { truncated } : {}),
     ...(documentationDrift && documentationDrift.length > 0 ? { documentationDrift } : {}),
   };
 }
@@ -1101,22 +1079,10 @@ function formatSnapshotSummary(stats: DiffStats, omittedPaths: string[] = []): s
   return `${String(stats.files)} files (+${String(stats.additions)}, -${String(stats.deletions)})${omittedPaths.length > 0 ? `, omitted ${String(omittedPaths.length)}` : ''}`;
 }
 
-function buildTextResult(
-  snapshot: LocalDiffSnapshot,
-  text: string,
-  reviewedPaths: string[],
-  omittedPaths: string[] = [],
-  truncated?: boolean,
-): CallToolResult {
+function buildTextResult(snapshot: LocalDiffSnapshot, text: string): CallToolResult {
   return {
     content: [{ type: 'text' as const, text }],
-    structuredContent: buildStructuredContent(
-      snapshot,
-      text,
-      reviewedPaths,
-      omittedPaths,
-      truncated,
-    ),
+    structuredContent: buildStructuredContent(snapshot, text),
   };
 }
 
@@ -1268,30 +1234,18 @@ export async function analyzePrWork(
   if (snapshot.empty) {
     const analysis = buildNoChangesAnalysis(snapshot);
     await progress.complete('no changes');
-    return buildTextResult(snapshot, analysis, snapshot.reviewedPaths);
+    return buildTextResult(snapshot, analysis);
   }
 
   if (dryRun) {
     await progress.complete('snapshot ready');
-    return buildTextResult(
-      snapshot,
-      budgetedDiff.diff,
-      budgetedDiff.reviewedPaths,
-      budgetedDiff.omittedPaths,
-      budgetedDiff.truncated,
-    );
+    return buildTextResult(snapshot, budgetedDiff.diff);
   }
 
   if (budgetedDiff.reviewedPaths.length === 0) {
     const analysis = buildBudgetExceededAnalysis(budgetedDiff.omittedPaths);
     await progress.complete('all changes omitted');
-    return buildTextResult(
-      snapshot,
-      analysis,
-      budgetedDiff.reviewedPaths,
-      budgetedDiff.omittedPaths,
-      budgetedDiff.truncated,
-    );
+    return buildTextResult(snapshot, analysis);
   }
 
   await progress.step(2, 3, 'Analyzing generated diff');
@@ -1342,7 +1296,7 @@ export async function analyzePrWork(
     responseBuilder: (_streamResult, textContent: string) => {
       const parsedOutput = parseAnalyzePrModelOutput(textContent);
       let finalSummary = parsedOutput.summary;
-      const { documentationDrift, schemaWarnings } = parsedOutput;
+      const { documentationDrift } = parsedOutput;
 
       if (documentationDrift && documentationDrift.length > 0) {
         finalSummary = `⚠️ **Documentation Drift Detected**\n\nThe following documentation files may need updates based on this diff:\n${documentationDrift.map((d) => `- **${d.file}**: ${d.driftDescription} (Suggestion: ${d.suggestedUpdate})`).join('\n')}\n\n---\n\n${finalSummary}`;
@@ -1352,15 +1306,7 @@ export async function analyzePrWork(
         resultMod: (_result: CallToolResult) => ({
           content: [{ type: 'text', text: finalSummary }],
         }),
-        structuredContent: buildStructuredContent(
-          snapshot,
-          finalSummary,
-          budgetedDiff.reviewedPaths,
-          budgetedDiff.omittedPaths,
-          budgetedDiff.truncated,
-          documentationDrift,
-          schemaWarnings,
-        ),
+        structuredContent: buildStructuredContent(snapshot, finalSummary, documentationDrift),
         reportMessage: `${String(snapshot.stats.files)} files reviewed (+${String(snapshot.stats.additions)}, -${String(snapshot.stats.deletions)})`,
       };
     },
@@ -1378,28 +1324,12 @@ export async function analyzePrWork(
 }
 
 function buildReviewStructuredContent(
-  taskId: string | undefined,
-  subjectKind: ReviewInput['subjectKind'],
   structured: Record<string, unknown>,
 ): z.infer<typeof ReviewOutputSchema> {
   return buildSuccessfulStructuredContent({
     domain: {
-      subjectKind,
       summary: typeof structured.summary === 'string' ? structured.summary : '',
-      schemaWarnings: Array.isArray(structured.schemaWarnings)
-        ? structured.schemaWarnings.filter(
-            (warning): warning is string => typeof warning === 'string',
-          )
-        : undefined,
       stats: structured.stats,
-      reviewedPaths: structured.reviewedPaths,
-      includedUntracked: structured.includedUntracked,
-      skippedBinaryPaths: structured.skippedBinaryPaths,
-      skippedLargePaths: structured.skippedLargePaths,
-      skippedSensitivePaths: structured.skippedSensitivePaths,
-      omittedPaths: structured.omittedPaths,
-      empty: typeof structured.empty === 'boolean' ? structured.empty : undefined,
-      truncated: typeof structured.truncated === 'boolean' ? structured.truncated : undefined,
       documentationDrift: structured.documentationDrift,
     },
     shared: structured,
@@ -1488,7 +1418,7 @@ export async function reviewWork(
   const structured = result.structuredContent ?? {};
   return createToolContext('review', ctx).validateOutput(
     ReviewOutputSchema,
-    buildReviewStructuredContent(ctx.task?.id, args.subjectKind, structured),
+    buildReviewStructuredContent(structured),
     result,
   );
 }

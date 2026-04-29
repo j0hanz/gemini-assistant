@@ -17,7 +17,6 @@ import {
   JsonValueSchema,
   nonNegativeInt,
   publicCoreOutputFields,
-  REVIEW_SUBJECT_OPTIONS,
   SourceDetailSchema,
 } from './fields.js';
 
@@ -101,27 +100,13 @@ export const DocumentationDriftSchema = z.strictObject({
 export const ReviewOutputSchema = z.strictObject({
   ...publicCoreOutputFields,
   status: completedStatusField,
-  subjectKind: enumField(REVIEW_SUBJECT_OPTIONS, 'Review subject discriminator'),
   summary: z.string().describe('Review result summary'),
-  schemaWarnings: z.array(z.string()).optional().describe('Schema-level review warnings.'),
   stats: z
     .strictObject(diffStatsFields)
     .optional()
     .describe('Diff statistics when subjectKind=diff'),
-  reviewedPaths: z.array(z.string()).optional().describe('Paths included in a local diff review'),
-  includedUntracked: z.array(z.string()).optional().describe('Included untracked text files'),
-  skippedBinaryPaths: z.array(z.string()).optional().describe('Skipped untracked binary files'),
-  skippedLargePaths: z.array(z.string()).optional().describe('Skipped large untracked files'),
-  skippedSensitivePaths: z
-    .array(z.string())
-    .optional()
-    .describe('Skipped untracked files that matched sensitive credential path rules'),
-  omittedPaths: z.array(z.string()).optional().describe('Local diff paths omitted due to budget'),
-  empty: z.boolean().optional().describe('Whether the local diff is empty (no changes)'),
-  truncated: z.boolean().optional().describe('Whether the diff review was truncated'),
   documentationDrift: z
     .array(DocumentationDriftSchema)
     .optional()
     .describe('Factual documentation drifts caused by the diff. Omitted if no drift is detected.'),
-  contextUsed: ContextUsedSchema.optional(),
 });

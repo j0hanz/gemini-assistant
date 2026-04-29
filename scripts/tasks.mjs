@@ -33,7 +33,8 @@ import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
-import { parseArgs } from 'node:util';
+import { setTimeout as delay } from 'node:timers/promises';
+import { parseArgs, stripVTControlCharacters } from 'node:util';
 
 const runController = new AbortController();
 
@@ -100,6 +101,7 @@ const HELP_TEXT = [
   '  --test-timeout <ms>           Forward to node --test-timeout',
   '  --test-name-pattern <regex>   Forward to node --test-name-pattern',
   '  --test-shard <i/n>            Forward to node --test-shard',
+  '  --update-snapshots            Forward to node --test-update-snapshots',
   '  --help       Show this help',
   '',
 ].join('\n');
@@ -242,6 +244,7 @@ function parseCliConfig(args) {
         'test-timeout': { type: 'string' },
         'test-name-pattern': { type: 'string' },
         'test-shard': { type: 'string' },
+        'update-snapshots': { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
       },
       strict: true,
@@ -299,6 +302,7 @@ function parseCliConfig(args) {
     testTimeout: values['test-timeout'] !== undefined ? Number(values['test-timeout']) : null,
     testNamePattern: values['test-name-pattern'] ?? null,
     testShard: values['test-shard'] ?? null,
+    updateSnapshots: !!values['update-snapshots'],
   });
 }
 
@@ -790,6 +794,7 @@ class TestRunner {
         '--report-signal=SIGUSR2',
         '--report-filename=.tasks-test-hang.json',
         '--report-exclude-env',
+        '--report-exclude-network',
       );
     }
     if (this.testConfig.testTimeout) {
@@ -800,6 +805,9 @@ class TestRunner {
     }
     if (this.testConfig.testShard) {
       argv.push(`--test-shard=${this.testConfig.testShard}`);
+    }
+    if (this.testConfig.updateSnapshots) {
+      argv.push('--test-update-snapshots');
     }
     return argv;
   }
@@ -876,10 +884,7 @@ class TestRunner {
           // ignore signal errors
         }
         try {
-          await Promise.race([
-            once(child, 'close'),
-            new Promise((resolve) => setTimeout(resolve, 500).unref()),
-          ]);
+          await Promise.race([once(child, 'close'), delay(500, undefined, { ref: false })]);
         } catch {
           // ignore drain errors
         }
@@ -1583,7 +1588,8 @@ class TtyReporter extends BaseReporter {
 
   renderRawOutput(rawOutput, task = {}) {
     process.stdout.write('\n');
-    const lines = rawOutput.trim().split('\n');
+    const cleanOutput = stripVTControlCharacters(rawOutput);
+    const lines = cleanOutput.trim().split('\n');
     const shown = lines.slice(0, Config.RAW_OUTPUT_MAX_LINES);
     for (const line of shown) process.stdout.write(`      ${Theme.DIM}${line}${Theme.R}\n`);
     if (lines.length > shown.length) {
@@ -1794,6 +1800,7 @@ class TaskOrchestrator {
             testTimeout: config.testTimeout,
             testNamePattern: config.testNamePattern,
             testShard: config.testShard,
+            updateSnapshots: config.updateSnapshots,
           }),
         skip: config.quick,
       },

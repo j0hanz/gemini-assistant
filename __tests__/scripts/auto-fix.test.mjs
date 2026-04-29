@@ -1,5 +1,5 @@
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { test } from 'node:test';
 
 // Inline copy — tasks.mjs is a CLI script, not a module; functions are not exported.
 const KNIP_FIXABLE_RULES = new Set([
@@ -19,17 +19,11 @@ function isKnipFixable(errors) {
 }
 
 test('isKnipFixable — returns true when at least one error is fixable', () => {
-  assert.equal(
-    isKnipFixable([{ rule: 'unused-export' }, { rule: 'unlisted-dep' }]),
-    true,
-  );
+  assert.equal(isKnipFixable([{ rule: 'unused-export' }, { rule: 'unlisted-dep' }]), true);
 });
 
 test('isKnipFixable — returns false when all errors are unfixable', () => {
-  assert.equal(
-    isKnipFixable([{ rule: 'unlisted-dep' }, { rule: 'unlisted-binary' }]),
-    false,
-  );
+  assert.equal(isKnipFixable([{ rule: 'unlisted-dep' }, { rule: 'unlisted-binary' }]), false);
 });
 
 test('isKnipFixable — returns false for empty array', () => {

@@ -64,7 +64,7 @@ describe('ask structured output shaping', () => {
 
     assert.deepStrictEqual(structured, {
       answer: '{not json}',
-      schemaWarnings: ['Failed to parse JSON from model response'],
+      warnings: ['Failed to parse JSON from model response'],
     });
   });
 
@@ -87,11 +87,11 @@ describe('ask structured output shaping', () => {
     );
 
     assert.deepStrictEqual(structured.data, { status: 'ok' });
-    assert.ok(structured.schemaWarnings);
-    assert.match(structured.schemaWarnings?.[0] ?? '', /does not match schema/i);
+    assert.ok(structured.warnings);
+    assert.match(structured.warnings?.[0] ?? '', /does not match schema/i);
   });
 
-  it('surfaces code execution computations from tool events', () => {
+  it('does not surface code execution computations from tool events', () => {
     const structured = buildAskStructuredContent('Answer', {
       functionCalls: [],
       thoughtText: '',
@@ -107,14 +107,6 @@ describe('ask structured output shaping', () => {
       usageMetadata: undefined,
     });
 
-    assert.deepStrictEqual(structured.computations, [
-      {
-        id: 'exec-1',
-        code: 'print(2)',
-        language: 'PYTHON',
-        outcome: 'OUTCOME_OK',
-        output: '2',
-      },
-    ]);
+    assert.strictEqual(structured.computations, undefined);
   });
 });

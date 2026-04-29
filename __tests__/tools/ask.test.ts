@@ -1074,7 +1074,10 @@ describe('ask contract', () => {
       const structured = result.structuredContent as Record<string, unknown>;
       assert.strictEqual(result.isError, undefined);
       assert.deepStrictEqual(structured.data, { count: 2 });
-      assert.strictEqual(structured.schemaWarnings, undefined);
+      assert.ok(
+        Array.isArray(structured.warnings) &&
+          structured.warnings.some((w) => String(w).includes('JSON repair turn used')),
+      );
       assert.strictEqual(stub.calls.length, 2);
       const retryContents = stub.calls[1]?.contents;
       if (typeof retryContents !== 'string') {
@@ -1154,7 +1157,7 @@ describe('ask contract', () => {
       const structured = result.structuredContent as Record<string, unknown>;
       assert.strictEqual(result.isError, undefined);
       assert.strictEqual(structured.data, undefined);
-      assert.ok(Array.isArray(structured.schemaWarnings));
+      assert.ok(Array.isArray(structured.warnings));
       assert.strictEqual(stub.calls.length, 2);
     } finally {
       process.env.CACHE = originalCache;
@@ -1191,7 +1194,10 @@ describe('ask contract', () => {
       const structured = result.structuredContent as Record<string, unknown>;
       assert.strictEqual(sendCalls, 2);
       assert.deepStrictEqual(structured.data, { count: 2 });
-      assert.strictEqual(structured.schemaWarnings, undefined);
+      assert.ok(
+        Array.isArray(structured.warnings) &&
+          structured.warnings.some((w) => String(w).includes('JSON repair turn used')),
+      );
     } finally {
       process.env.CACHE = originalCache;
     }
@@ -1399,7 +1405,7 @@ describe('ask contract', () => {
 
       const structured = result.structuredContent as Record<string, unknown>;
       assert.strictEqual(stub.calls.length, 1);
-      assert.ok(Array.isArray(structured.schemaWarnings));
+      assert.ok(Array.isArray(structured.warnings));
     } finally {
       process.env.CACHE = originalCache;
       stub.restore();

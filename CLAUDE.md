@@ -7,11 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Always run `tasks.mjs` before committing.** It orchestrates format → lint/type-check/knip (parallel) → test/build (parallel) with smart failure-fast and auto-fix:
 
 ```bash
-node scripts/tasks.mjs          # full check suite (fail-fast)
-node scripts/tasks.mjs --fix    # auto-fix format/lint/knip, then verify
-node scripts/tasks.mjs --quick  # skip test + rebuild (format/lint/type-check/knip only)
-node scripts/tasks.mjs --all    # run all tasks even past failures
-node scripts/tasks.mjs --llm    # emit structured failure detail to stdout (also → .tasks-last-failure.json)
+node scripts/tasks.mjs            # full check suite (fail-fast)
+node scripts/tasks.mjs --fix      # auto-fix format/lint/knip, then verify
+node scripts/tasks.mjs --quick    # skip test + rebuild (format/lint/type-check/knip only)
+node scripts/tasks.mjs --all      # run all tasks even past failures
+node scripts/tasks.mjs --llm      # emit structured failure detail to stdout (also → .tasks-last-failure.json)
+node scripts/tasks.mjs --json     # machine-readable single-line JSON to stdout (suppresses human output)
+node scripts/tasks.mjs --detail N # post-mortem source-window for the Nth test failure of the previous run
 ```
 
 Run a single test file:
@@ -28,8 +30,11 @@ Other useful commands:
 ```bash
 npm run format        # prettier write
 npm run build         # tsc compile to dist/
-npm run lint          # eslint check + autofix
+npm run lint          # eslint check (no fix) — fails on any warning
+npm run lint:fix      # eslint with --fix
 npm run type-check    # tsc type check only (no emit)
+npm run knip          # detect unused exports/files/dependencies
+npm run inspector     # build + launch MCP Inspector for interactive testing
 npm run check         # check:static + tests (without tasks.mjs orchestration)
 npm run check:static  # lint, type-check, build, prettier, knip (no tests)
 ```

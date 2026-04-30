@@ -11,6 +11,8 @@ import type {
 } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
+import { consumeInteractionStream } from '../lib/interaction-stream.js';
+import { buildInteractionParams } from '../lib/interactions.js';
 import { logger, mcpLog } from '../lib/logger.js';
 import {
   appendFunctionCallingInstruction,
@@ -916,6 +918,211 @@ function createDefaultAskDependencies(
       sessionAccess.setSession(sessionId, chat, rebuiltAt, cacheName, contract);
     },
   };
+}
+
+async function askWithInteractions(
+  args: AskArgs & { sessionId: string },
+  ctx: ServerContext,
+  resolvedProfile: ResolvedProfile,
+  lastInteractionId: string | undefined,
+): Promise<AskExecutionResult> {
+  const { prompt, urls } = await resolveAskTooling(args, ctx);
+  if (!prompt) {
+    return {
+      result: new AppError('chat', 'Failed to resolve tooling').toToolResult(),
+      streamResult: {
+        text: '',
+        textByWave: [''],
+        thoughtText: '',
+        parts: [],
+        toolsUsed: [],
+        toolsUsedOccurrences: [],
+        functionCalls: [],
+        toolEvents: [],
+        hadCandidate: false,
+      } satisfies StreamResult,
+      toolProfile: 'none',
+    };
+  }
+
+  const { progress } = createToolContext('chat', ctx);
+  await progress.send(0, undefined, 'Creating interaction');
+
+  try {
+    const params = buildInteractionParams({
+      profile: resolvedProfile,
+      model: getGeminiModel(),
+      prompt,
+      thinkingLevel: args.thinkingLevel,
+      maxOutputTokens: args.maxOutputTokens,
+      systemInstruction: args.systemInstruction,
+      previousInteractionId: lastInteractionId,
+    });
+
+    // interactions.create() returns Stream<InteractionSSEEvent> directly (not wrapped in .stream)
+
+    const createResult = await getAI().interactions.create(params);
+
+    const notifications: { type: string; data: unknown }[] = [];
+    const emitter = {
+      emit: (type: string, data: unknown) => {
+        notifications.push({ type, data });
+      },
+    };
+
+    // The create method returns Stream<InteractionSSEEvent> when streaming (default)
+
+    const interactionResult = await consumeInteractionStream(
+      createResult as AsyncIterable<unknown>,
+      emitter,
+    );
+
+    const result: CallToolResult =
+      interactionResult.status === 'completed'
+        ? {
+            isError: false,
+            content: [{ type: 'text', text: interactionResult.text ?? '' }],
+          }
+        : {
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text: interactionResult.error?.message ?? 'Interaction stream failed',
+              },
+            ],
+          };
+
+    return {
+      result,
+      streamResult: {
+        text: interactionResult.text ?? '',
+        textByWave: [interactionResult.text ?? ''],
+        thoughtText: '',
+        parts: interactionResult.text ? [{ text: interactionResult.text }] : [],
+        toolsUsed: [],
+        toolsUsedOccurrences: [],
+        functionCalls: [],
+        toolEvents: [],
+        hadCandidate: true,
+        finishReason: FinishReason.STOP,
+      },
+      toolProfile: 'interactions',
+      ...(urls && urls.length > 0 ? { urls } : {}),
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return {
+      result: new AppError('chat', `Interaction failed: ${errorMsg}`).toToolResult(),
+      streamResult: {
+        text: '',
+        textByWave: [''],
+        thoughtText: '',
+        parts: [],
+        toolsUsed: [],
+        toolsUsedOccurrences: [],
+        functionCalls: [],
+        toolEvents: [],
+        hadCandidate: false,
+      } satisfies StreamResult,
+      toolProfile: 'interactions',
+    };
+  }
+}
+
+function appendSessionTurn(
+  sessionId: string,
+  askResult: AskExecutionResult,
+  args: AskArgs,
+  deps: AskDependencies,
+  taskId: string | undefined,
+  resumedArgs?: AskArgs,
+): void {
+  const sentMessage = resumedArgs?.message ?? args.message;
+  const structured = getAskStructuredContent(askResult.result);
+  const usage = extractUsage(askResult.streamResult.usageMetadata);
+
+  const response: SessionEventEntry['response'] = {
+    text: extractTextContent(askResult.result.content),
+  };
+
+  if (structured?.data !== undefined) {
+    response.data = structured.data;
+  }
+  if (structured?.warnings !== undefined && structured.warnings.length > 0) {
+    response.schemaWarnings = structured.warnings;
+  }
+  if (askResult.streamResult.finishReason !== undefined) {
+    response.finishReason = String(askResult.streamResult.finishReason);
+  }
+  if (askResult.streamResult.functionCalls && askResult.streamResult.functionCalls.length > 0) {
+    response.functionCalls = askResult.streamResult.functionCalls;
+  }
+  if (askResult.streamResult.toolEvents && askResult.streamResult.toolEvents.length > 0) {
+    response.toolEvents = askResult.streamResult.toolEvents;
+  }
+  if (usage !== undefined) {
+    response.usage = usage;
+  }
+  if (askResult.streamResult.thoughtText) {
+    response.thoughts = askResult.streamResult.thoughtText;
+  }
+  if (askResult.streamResult.safetyRatings !== undefined) {
+    response.safetyRatings = askResult.streamResult.safetyRatings;
+  }
+  if (askResult.streamResult.finishMessage !== undefined) {
+    response.finishMessage = askResult.streamResult.finishMessage;
+  }
+  if (askResult.streamResult.citationMetadata !== undefined) {
+    response.citationMetadata = askResult.streamResult.citationMetadata;
+  }
+  if (askResult.streamResult.groundingMetadata !== undefined) {
+    response.groundingMetadata = askResult.streamResult.groundingMetadata;
+  }
+  if (askResult.streamResult.urlContextMetadata !== undefined) {
+    response.urlContextMetadata = askResult.streamResult.urlContextMetadata;
+  }
+  if (askResult.streamResult.anomalies !== undefined) {
+    response.anomalies = askResult.streamResult.anomalies;
+  }
+
+  const request: SessionEventEntry['request'] = {
+    message: args.message,
+  };
+
+  if (sentMessage !== undefined) {
+    request.sentMessage = sentMessage;
+  }
+  if (askResult.toolProfile) {
+    request.toolProfile = askResult.toolProfile;
+  }
+  if (askResult.urls !== undefined) {
+    request.urls = askResult.urls;
+  }
+
+  const event: SessionEventEntry = {
+    request,
+    response,
+    timestamp: deps.now(),
+  };
+
+  if (taskId !== undefined) {
+    event.taskId = taskId;
+  }
+
+  deps.appendSessionEvent(sessionId, event);
+  deps.appendSessionTranscript(sessionId, {
+    role: 'user',
+    text: args.message,
+    timestamp: deps.now(),
+    ...(taskId !== undefined ? { taskId } : {}),
+  });
+  deps.appendSessionTranscript(sessionId, {
+    role: 'assistant',
+    text: extractTextContent(askResult.result.content),
+    timestamp: deps.now(),
+    ...(taskId !== undefined ? { taskId } : {}),
+  });
 }
 
 async function askExistingSession(

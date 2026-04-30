@@ -251,10 +251,7 @@ const McpServerSpecSchema = z.strictObject({
     z.string().min(1).optional(),
     'Command to launch stdio transport (e.g. "npx", "python", absolute path)',
   ),
-  url: withFieldMetadata(
-    z.string().min(1).optional(),
-    'HTTP endpoint URL for http transport',
-  ),
+  url: withFieldMetadata(z.string().min(1).optional(), 'HTTP endpoint URL for http transport'),
   args: withFieldMetadata(
     z.array(z.string()).optional(),
     'Command-line arguments for stdio transport',

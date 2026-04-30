@@ -4,7 +4,6 @@ import { createSessionAccess, createSessionStore, type SessionAccess } from '../
 import { isPathWithinRoot, type RootsFetcher } from './validation.js';
 import {
   buildContextUsed,
-  buildSessionSummary,
   createWorkspaceAccess,
   createWorkspaceCacheManager,
   emptyContextUsed,

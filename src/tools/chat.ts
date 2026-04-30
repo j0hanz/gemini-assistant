@@ -1231,7 +1231,6 @@ async function chatWork(
       functionResponses: args.functionResponses,
       systemInstruction: args.systemInstruction,
       thinkingLevel: args.thinkingLevel,
-      thinkingBudget: args.thinkingBudget,
     },
     ctx,
   );

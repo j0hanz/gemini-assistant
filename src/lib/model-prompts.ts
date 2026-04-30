@@ -139,7 +139,7 @@ export function buildGroundedAnswerPrompt(
       promptText,
       systemInstruction: joinNonEmpty([
         retrievalUnavailable ? 'No retrieval tools are available this turn.' : undefined,
-        "Answer using sources retrieved this turn. If no source supports a claim, mark it '(unverified)'. If retrieval returned nothing, say that no sources were retrieved. Do not invent URLs.",
+        "Answer using sources retrieved this turn. Mark unsupported claims '(unverified)'. If retrieval returned nothing, say so. Do not invent URLs.",
       ]),
     },
     cacheName,

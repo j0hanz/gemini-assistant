@@ -27,13 +27,15 @@
 
 ## Commands
 
-- **Format**: `npm run format`
-- **Test**: `npm run test`
-- **Lint**: `npm run lint`
-- **Type Check**: `npm run type-check`
-- **Build**: `npm run build`
-- **Check (static-only)**: `npm run check:static`
-- **Check (static + tests)**: `npm run check`
+**Always run `tasks.mjs` before committing.** It orchestrates format → lint/type-check/knip (parallel) → test/build (parallel) with smart failure-fast and auto-fix:
+
+```bash
+node scripts/tasks.mjs          # full check suite (fail-fast)
+node scripts/tasks.mjs --fix    # auto-fix format/lint/knip, then verify
+node scripts/tasks.mjs --quick  # skip test + rebuild (format/lint/type-check/knip only)
+node scripts/tasks.mjs --all    # run all tasks even past failures
+node scripts/tasks.mjs --llm    # emit structured failure detail to stdout (also → .tasks-last-failure.json)
+```
 
 ## Safety Boundaries
 
@@ -72,10 +74,3 @@
 - Don't hardcode secrets or sensitive info in code, tests, docs, or config.
 - Don't commit secrets/credentials to the repo.
 - Don't edit generated files directly.
-
-## Change Checklist
-
-1. Run `npm run format`
-2. Run `npm run lint`
-3. Run `npm run type-check`
-4. Run `npm run test`

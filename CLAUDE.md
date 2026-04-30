@@ -28,7 +28,8 @@ Other useful commands:
 ```bash
 npm run format        # prettier write
 npm run build         # tsc compile to dist/
-npm run inspector     # build + launch MCP inspector for interactive testing
+npm run lint          # eslint check + autofix
+npm run type-check    # tsc type check only (no emit)
 npm run check         # check:static + tests (without tasks.mjs orchestration)
 npm run check:static  # lint, type-check, build, prettier, knip (no tests)
 ```

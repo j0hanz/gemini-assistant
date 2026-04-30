@@ -1,5 +1,10 @@
 import { z } from 'zod/v4';
 
+// Schemas for grounding metadata accumulation.
+// These are used by TASK-201 (streaming grounding accumulation) and TASK-202 (SessionStore turn accessors).
+// Some individual schemas may not be directly used yet but are part of the complete rollup definition
+// that will be needed for comprehensive grounding data persistence.
+
 export const WebCitationSchema = z.strictObject({
   uri: z.string(),
   title: z.string(),

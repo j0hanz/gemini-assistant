@@ -1,32 +1,33 @@
+import { ProtocolErrorCode } from '@modelcontextprotocol/server';
+
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-import { ProtocolErrorCode } from '@modelcontextprotocol/server';
 import {
   ASSISTANT_CATALOG_URI,
   ASSISTANT_CONTEXT_URI,
   ASSISTANT_INSTRUCTIONS_URI,
   ASSISTANT_PROFILES_URI,
   ASSISTANT_WORKFLOWS_URI,
-  FILE_RESOURCE_TEMPLATE,
-  SESSION_DETAIL_TEMPLATE,
-  SESSION_EVENTS_TEMPLATE,
-  SESSION_TRANSCRIPT_TEMPLATE,
-  SESSIONS_LIST_URI,
-  TURN_GROUNDING_TEMPLATE,
-  TURN_PARTS_TEMPLATE,
-  WORKSPACE_CACHE_CONTENTS_URI,
-  WORKSPACE_CACHE_URI,
-  WORKSPACE_FILES_URI,
   decodeTemplateParam,
+  FILE_RESOURCE_TEMPLATE,
   fileResourceUri,
   normalizeTemplateParam,
   requireTemplateParam,
+  SESSION_DETAIL_TEMPLATE,
+  SESSION_EVENTS_TEMPLATE,
+  SESSION_TRANSCRIPT_TEMPLATE,
   sessionEventsUri,
   sessionResourceUri,
+  SESSIONS_LIST_URI,
   sessionTranscriptUri,
+  TURN_GROUNDING_TEMPLATE,
+  TURN_PARTS_TEMPLATE,
   turnGroundingUri,
   turnPartsUri,
+  WORKSPACE_CACHE_CONTENTS_URI,
+  WORKSPACE_CACHE_URI,
+  WORKSPACE_FILES_URI,
 } from '../../src/resources/uris.js';
 
 test('URI constants — assistant:// URIs are defined', () => {
@@ -49,7 +50,10 @@ test('URI templates — session templates are defined', () => {
   assert.strictEqual(SESSION_TRANSCRIPT_TEMPLATE, 'gemini://session/{sessionId}/transcript');
   assert.strictEqual(SESSION_EVENTS_TEMPLATE, 'gemini://session/{sessionId}/events');
   assert.strictEqual(TURN_PARTS_TEMPLATE, 'gemini://session/{sessionId}/turn/{turnIndex}/parts');
-  assert.strictEqual(TURN_GROUNDING_TEMPLATE, 'gemini://session/{sessionId}/turn/{turnIndex}/grounding');
+  assert.strictEqual(
+    TURN_GROUNDING_TEMPLATE,
+    'gemini://session/{sessionId}/turn/{turnIndex}/grounding',
+  );
   assert.strictEqual(FILE_RESOURCE_TEMPLATE, 'gemini://workspace/files/{path}');
 });
 

@@ -69,6 +69,7 @@ export interface StreamResult {
   aborted?: boolean;
   finishReason?: FinishReason;
   groundingMetadata?: GroundingMetadata;
+  groundingMetadataEvents?: GroundingMetadata[] | undefined;
   safetyRatings?: unknown;
   finishMessage?: string;
   citationMetadata?: unknown;
@@ -143,7 +144,8 @@ export async function sendThoughtDelta(
 interface StreamMetadata {
   aborted: boolean;
   finishReason?: FinishReason;
-  groundingMetadata?: GroundingMetadata;
+  groundingMetadata?: GroundingMetadata | undefined;
+  groundingMetadataEvents?: GroundingMetadata[] | undefined;
   hadCandidate: boolean;
   safetyRatings?: unknown;
   finishMessage?: string;
@@ -214,6 +216,27 @@ function mergeUsageMetadata(
   return merged;
 }
 
+function mergeGroundingMetadata(
+  current: GroundingMetadata | undefined,
+  events: GroundingMetadata[] | undefined,
+  next: GroundingMetadata | undefined,
+): {
+  groundingMetadata: GroundingMetadata | undefined;
+  groundingMetadataEvents: GroundingMetadata[] | undefined;
+} {
+  if (!next) {
+    return { groundingMetadata: current, groundingMetadataEvents: events };
+  }
+
+  // Accumulate events
+  const updatedEvents = [...(events ?? []), next];
+
+  return {
+    groundingMetadata: next,
+    groundingMetadataEvents: updatedEvents,
+  };
+}
+
 function updateStreamMetadata(
   chunk: GenerateContentResponse,
   candidate: NonNullable<GenerateContentResponse['candidates']>[number],
@@ -225,7 +248,13 @@ function updateStreamMetadata(
   }
 
   if (candidate.groundingMetadata) {
-    metadata.groundingMetadata = candidate.groundingMetadata;
+    const result = mergeGroundingMetadata(
+      metadata.groundingMetadata,
+      metadata.groundingMetadataEvents,
+      candidate.groundingMetadata,
+    );
+    metadata.groundingMetadata = result.groundingMetadata;
+    metadata.groundingMetadataEvents = result.groundingMetadataEvents;
   }
 
   if (candidate.safetyRatings) {

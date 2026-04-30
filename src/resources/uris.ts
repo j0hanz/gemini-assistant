@@ -21,7 +21,8 @@ export const SESSION_DETAIL_TEMPLATE = 'gemini://session/{sessionId}' as const;
 export const SESSION_TRANSCRIPT_TEMPLATE = 'gemini://session/{sessionId}/transcript' as const;
 export const SESSION_EVENTS_TEMPLATE = 'gemini://session/{sessionId}/events' as const;
 export const TURN_PARTS_TEMPLATE = 'gemini://session/{sessionId}/turn/{turnIndex}/parts' as const;
-export const TURN_GROUNDING_TEMPLATE = 'gemini://session/{sessionId}/turn/{turnIndex}/grounding' as const;
+export const TURN_GROUNDING_TEMPLATE =
+  'gemini://session/{sessionId}/turn/{turnIndex}/grounding' as const;
 export const FILE_RESOURCE_TEMPLATE = 'gemini://workspace/files/{path}' as const;
 
 // ============================== Builder Functions ============================

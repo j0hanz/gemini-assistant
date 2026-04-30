@@ -94,3 +94,13 @@ test('ReviewInputSchema — extra properties rejected', () => {
   const result = ReviewInputSchema.safeParse({ subjectKind: 'diff', extra: 'field' });
   assert.strictEqual(result.success, false);
 });
+
+test('ChatInputSchema — thinkingBudget field is rejected (removed field)', () => {
+  const result = ChatInputSchema.safeParse({ goal: 'hello', thinkingBudget: 1000 });
+  assert.strictEqual(result.success, false);
+});
+
+test('ResearchInputSchema — thinkingBudget field is rejected (removed field)', () => {
+  const result = ResearchInputSchema.safeParse({ goal: 'hello', thinkingBudget: 1000 });
+  assert.strictEqual(result.success, false);
+});

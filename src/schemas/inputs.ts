@@ -20,7 +20,6 @@ import {
   REVIEW_SUBJECT_OPTIONS,
   sessionId,
   textField,
-  thinkingBudget,
   thinkingLevel,
   ToolsSpecSchema,
   withFieldMetadata,
@@ -121,7 +120,6 @@ export type GeminiResponseSchema = z.infer<typeof GeminiResponseSchema>;
 type SessionIdCompleter = (prefix?: string) => string[];
 
 const thinkingLevelField = thinkingLevel();
-const thinkingBudgetField = thinkingBudget();
 const generationConfigFields = createGenerationConfigFields();
 
 export function parseResponseSchemaJsonValue(raw: string): GeminiResponseSchema {
@@ -193,7 +191,6 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
       textField('System instructions for response style, constraints, or behavior.'),
     ),
     thinkingLevel: thinkingLevelField,
-    thinkingBudget: thinkingBudgetField,
     ...generationConfigFields,
     responseSchemaJson: responseSchemaJsonField(),
     seed: withFieldMetadata(z.int().optional(), 'Fixed random seed for reproducible outputs.'),
@@ -269,7 +266,6 @@ function validateAnalyzeOutputSelection(
 const researchSharedShape = {
   goal: goalText('Question or research goal to answer quickly'),
   thinkingLevel: thinkingLevelField,
-  thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
   tools: withFieldMetadata(
     ToolsSpecSchema.optional(),
@@ -351,7 +347,6 @@ const AnalyzeInputBaseSchema = z.strictObject({
     .optional()
     .describe('Validate generated diagram syntax when outputKind=diagram.'),
   thinkingLevel: thinkingLevelField,
-  thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
   mediaResolution: mediaResolution(
     'Resolution for image/video processing. Higher = more detail, more tokens.',
@@ -371,7 +366,6 @@ const analyzeSharedShape = {
   ),
   validateSyntax: z.boolean().optional().describe('Validate generated diagram syntax.'),
   thinkingLevel: thinkingLevelField,
-  thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
   mediaResolution: mediaResolution(
     'Resolution for image/video processing. Higher = more detail, more tokens.',
@@ -433,7 +427,6 @@ export type AnalyzeInput = z.infer<typeof AnalyzeInputSchema>;
 const reviewCommonShape = {
   focus: optionalField(textField('Review priorities (e.g. regressions, security, performance).')),
   thinkingLevel: thinkingLevelField,
-  thinkingBudget: thinkingBudgetField,
   ...generationConfigFields,
   tools: withFieldMetadata(
     ToolsSpecSchema.optional(),

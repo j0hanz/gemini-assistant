@@ -16,13 +16,20 @@ interface StreamEmitter {
  * Consume Interactions API SSE event stream.
  * Emits MCP notifications (progress, thoughts, function calls).
  * Returns result compatible with SessionEventEntry recording.
+ * Validates event properties before accessing them and handles errors gracefully.
  */
 export async function consumeInteractionStream(
   eventStream: AsyncIterable<unknown>,
   emitter: StreamEmitter,
 ): Promise<InteractionStreamResult> {
+  if (typeof emitter.emit !== 'function') {
+    return {
+      status: 'failed',
+      error: new Error('Invalid emitter: emitter must be an object with an emit method'),
+    };
+  }
+
   let fullText = '';
-  const outputs: Interactions.Interaction['outputs'] = [];
   let status: 'completed' | 'failed' | 'cancelled' = 'completed';
   let error: Error | undefined;
 
@@ -31,7 +38,7 @@ export async function consumeInteractionStream(
       const evt = event as Record<string, unknown>;
 
       // Parse content deltas
-      if (evt.type === 'content_part_delta') {
+      if (evt.type === 'content_part_delta' && evt.delta) {
         const delta = evt.delta as Record<string, unknown>;
         if (typeof delta.text === 'string') {
           fullText += delta.text;
@@ -41,8 +48,10 @@ export async function consumeInteractionStream(
 
       // Parse thought summaries
       if (evt.type === 'thought_summary') {
-        const summary = evt.summary as string;
-        emitter.emit('thought-delta', { summary });
+        const summary = evt.summary;
+        if (typeof summary === 'string') {
+          emitter.emit('thought-delta', { summary });
+        }
       }
 
       // Parse function calls
@@ -58,13 +67,13 @@ export async function consumeInteractionStream(
   } catch (err) {
     status = 'failed';
     error = err instanceof Error ? err : new Error(String(err));
+    // Emit phase transition on error to notify subscribers of failure
     emitter.emit('phase-transition', { phase: 'failed', error });
   }
 
   return {
     status,
     text: fullText || undefined,
-    outputs: outputs.length > 0 ? outputs : undefined,
     error,
   };
 }

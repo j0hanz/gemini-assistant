@@ -104,6 +104,14 @@ function buildThinkingConfig(thinkingLevel?: AskThinkingLevel, thinkingBudget?: 
     });
   }
 
+  // NEW: warn when thinkingLevel wins over an explicitly supplied thinkingBudget
+  if (thinkingLevel !== undefined && thinkingBudget !== undefined) {
+    clientLog.warn('thinkingLevel takes precedence over thinkingBudget; budget ignored', {
+      thinkingLevel,
+      thinkingBudget,
+    });
+  }
+
   return {
     ...(getExposeThoughts() ? { includeThoughts: true } : {}),
     // Gemini 3 precedence: thinkingLevel wins over thinkingBudget; see .github/google-genai-api.md §7.

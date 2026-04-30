@@ -4,15 +4,10 @@ import { createHash } from 'node:crypto';
 
 import type {
   BlockedReason,
-  Chat,
-  Content,
   FinishReason,
   FunctionResponse,
-  GenerateContentConfig,
   GroundingMetadata,
   Part,
-  ToolConfig,
-  ToolListUnion,
   UrlContextMetadata,
 } from '@google/genai';
 
@@ -35,129 +30,12 @@ export interface TranscriptEntry {
   taskId?: string;
 }
 
-export interface ContentEntry {
-  role: 'user' | 'model';
-  /** Replay-safe parts for session rebuild. Filtered via {@link buildReplayHistoryParts}. */
-  parts: Part[];
-  /**
-   * SDK-faithful Gemini `Part[]` for the `gemini://sessions/.../parts` resource.
-   * Oversized `inlineData` payloads are elided, but `thought` parts and
-   * `thoughtSignature` values are preserved verbatim.
-   */
-  rawParts?: Part[];
-  timestamp: number;
-  taskId?: string;
-  finishReason?: FinishReason;
-  finishMessage?: string;
-  promptBlockReason?: BlockedReason;
-}
-
-export interface SessionGenerationContract {
-  model: string;
-  systemInstruction?: GenerateContentConfig['systemInstruction'];
-  cachedContent?: GenerateContentConfig['cachedContent'];
-  tools?: ToolListUnion;
-  toolConfig?: ToolConfig;
-  functionCallingMode?: unknown;
-  functionCallingInstructionHash?: string;
-  thinkingConfig?: GenerateContentConfig['thinkingConfig'];
-  responseMimeType?: GenerateContentConfig['responseMimeType'];
-  responseJsonSchema?: unknown;
-}
-
 export function hashInstructionText(text: string | undefined): string | undefined {
   if (!text) {
     return undefined;
   }
 
   return createHash('sha256').update(text).digest('hex');
-}
-
-export function buildSessionGenerationContract(
-  model: string,
-  config: GenerateContentConfig,
-  functionCallingMode?: unknown,
-  functionCallingInstructionHash?: string,
-): SessionGenerationContract {
-  return {
-    model,
-    ...(config.systemInstruction !== undefined
-      ? { systemInstruction: config.systemInstruction }
-      : {}),
-    ...(config.cachedContent !== undefined ? { cachedContent: config.cachedContent } : {}),
-    ...(config.tools !== undefined ? { tools: config.tools } : {}),
-    ...(config.toolConfig !== undefined ? { toolConfig: config.toolConfig } : {}),
-    ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
-    ...(functionCallingInstructionHash !== undefined ? { functionCallingInstructionHash } : {}),
-    ...(config.thinkingConfig !== undefined ? { thinkingConfig: config.thinkingConfig } : {}),
-    ...(config.responseMimeType !== undefined ? { responseMimeType: config.responseMimeType } : {}),
-    ...(config.responseJsonSchema !== undefined
-      ? { responseJsonSchema: config.responseJsonSchema }
-      : {}),
-  };
-}
-
-export function buildConfigFromSessionContract(
-  contract: SessionGenerationContract,
-  cacheName?: string,
-): GenerateContentConfig {
-  const resolvedCachedContent = cacheName ?? contract.cachedContent;
-
-  return {
-    ...(resolvedCachedContent !== undefined ? { cachedContent: resolvedCachedContent } : {}),
-    ...(contract.systemInstruction !== undefined
-      ? { systemInstruction: contract.systemInstruction }
-      : {}),
-    ...(contract.tools !== undefined ? { tools: contract.tools } : {}),
-    ...(contract.toolConfig !== undefined ? { toolConfig: contract.toolConfig } : {}),
-    ...(contract.thinkingConfig !== undefined ? { thinkingConfig: contract.thinkingConfig } : {}),
-    ...(contract.responseMimeType !== undefined
-      ? { responseMimeType: contract.responseMimeType }
-      : {}),
-    ...(contract.responseJsonSchema !== undefined
-      ? { responseJsonSchema: contract.responseJsonSchema }
-      : {}),
-  };
-}
-
-function canonicalizeSessionContractValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => canonicalizeSessionContractValue(item));
-  }
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, nested]) => [key, canonicalizeSessionContractValue(nested)]),
-    );
-  }
-  return value;
-}
-
-function sameSessionContractValue(left: unknown, right: unknown): boolean {
-  return (
-    JSON.stringify(canonicalizeSessionContractValue(left)) ===
-    JSON.stringify(canonicalizeSessionContractValue(right))
-  );
-}
-
-export function isCompatibleSessionContract(
-  stored: SessionGenerationContract,
-  requested: SessionGenerationContract,
-): boolean {
-  return (
-    sameSessionContractValue(stored.model, requested.model) &&
-    sameSessionContractValue(stored.systemInstruction, requested.systemInstruction) &&
-    sameSessionContractValue(stored.tools, requested.tools) &&
-    sameSessionContractValue(stored.toolConfig, requested.toolConfig) &&
-    sameSessionContractValue(stored.functionCallingMode, requested.functionCallingMode) &&
-    sameSessionContractValue(
-      stored.functionCallingInstructionHash,
-      requested.functionCallingInstructionHash,
-    ) &&
-    sameSessionContractValue(stored.responseMimeType, requested.responseMimeType) &&
-    sameSessionContractValue(stored.responseJsonSchema, requested.responseJsonSchema)
-  );
 }
 
 export interface SessionEventEntry {
@@ -228,14 +106,10 @@ interface SessionTurnInput {
 }
 
 interface SessionEntry {
-  chat: Chat;
-  cacheName?: string;
-  contract?: SessionGenerationContract;
-  contents: ContentEntry[];
-  events: SessionEventEntry[];
+  interactionId: string;
   lastAccess: number;
-  rebuiltAt?: number;
   transcript: TranscriptEntry[];
+  events: SessionEventEntry[];
 }
 
 export interface SessionSummary {

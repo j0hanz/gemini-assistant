@@ -242,6 +242,31 @@ const FunctionResponseSchema = z.strictObject({
   ),
 });
 
+const McpServerSpecSchema = z.strictObject({
+  transport: withFieldMetadata(
+    z.enum(['stdio', 'http']),
+    'MCP server transport: stdio (local process) or http (remote endpoint)',
+  ),
+  command: withFieldMetadata(
+    z.string().min(1).optional(),
+    'Command to launch stdio transport (e.g. "npx", "python", absolute path)',
+  ),
+  url: withFieldMetadata(
+    z.string().min(1).optional(),
+    'HTTP endpoint URL for http transport',
+  ),
+  args: withFieldMetadata(
+    z.array(z.string()).optional(),
+    'Command-line arguments for stdio transport',
+  ),
+  env: withFieldMetadata(
+    z.record(z.string(), z.string()).optional(),
+    'Environment variables for stdio transport process',
+  ),
+});
+
+export type McpServerSpec = z.infer<typeof McpServerSpecSchema>;
+
 export const FunctionResponsesSchema = withFieldMetadata(
   z.array(FunctionResponseSchema).min(1).max(32),
   'Caller-executed Gemini function responses for an existing session.',
@@ -432,6 +457,10 @@ const OverridesSchema = z.strictObject({
   functions: withFieldMetadata(
     z.array(FunctionDeclarationSchema).min(1).max(20).optional(),
     'Function declarations exposed to Gemini (max 20). Required when profile is agent.',
+  ),
+  mcpServer: withFieldMetadata(
+    McpServerSpecSchema.optional(),
+    'MCP server configuration. When present on agent profile, tools are converted via mcpToTool().',
   ),
   responseSchemaJson: withFieldMetadata(
     z.record(z.string(), z.unknown()).optional(),

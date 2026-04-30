@@ -192,3 +192,21 @@ test('buildToolsArray — function declaration emits parametersJsonSchema not pa
   assert.ok(!('parameters' in decl), 'parameters key must not be present');
   assert.deepStrictEqual(decl.parametersJsonSchema, schema);
 });
+
+test('resolveProfile — accepts mcpServer in overrides', () => {
+  const override = {
+    profile: 'agent',
+    overrides: {
+      mcpServer: {
+        transport: 'stdio',
+        command: 'npx',
+        args: ['@modelcontextprotocol/server-filesystem', '--root', '.'],
+      },
+    },
+  };
+
+  const resolved = resolveProfile(override, { toolKey: 'chat' });
+
+  assert.strictEqual(resolved.profile, 'agent');
+  assert.deepStrictEqual(resolved.overrides.mcpServer, override.overrides.mcpServer);
+});

@@ -1,6 +1,8 @@
 import { FunctionCallingConfigMode } from '@google/genai';
 import type { ToolConfig, ToolListUnion } from '@google/genai';
 
+import type { McpServerSpec } from '../schemas/fields.js';
+
 import type { AskThinkingLevel } from '../public-contract.js';
 
 type BuiltInCapability = 'googleSearch' | 'urlContext' | 'codeExecution' | 'fileSearch';
@@ -185,10 +187,16 @@ interface FunctionDeclarationInput {
 
 type FunctionCallingModeValue = 'AUTO' | 'ANY' | 'NONE' | 'VALIDATED';
 
+/**
+ * Spec for an MCP server that can be connected to and have its tools exposed to Gemini.
+ * When present on agent profile, the server is queried for available tools via tools/list,
+ * and tool declarations are merged with explicit functions.
+ */
 interface ToolsSpecOverrides {
   urls?: string[] | undefined;
   fileSearchStores?: string[] | undefined;
   functions?: FunctionDeclarationInput[] | undefined;
+  mcpServer?: McpServerSpec | undefined;
   responseSchemaJson?: Record<string, unknown> | undefined;
   functionCallingMode?: FunctionCallingModeValue | undefined;
   allowedFunctionNames?: string[] | undefined;

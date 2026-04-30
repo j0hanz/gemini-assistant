@@ -8,15 +8,9 @@ import type {
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 import { AppError } from './lib/errors.js';
-import { logger } from './lib/logger.js';
 import type { GeminiResponseSchema } from './schemas/inputs.js';
 
-import {
-  getApiKey,
-  getExposeThoughts,
-  getMaxOutputTokens,
-  getSafetySettings,
-} from './config.js';
+import { getApiKey, getExposeThoughts, getMaxOutputTokens, getSafetySettings } from './config.js';
 import type { AskThinkingLevel } from './public-contract.js';
 
 // ── Config Utilities ──────────────────────────────────────────────────
@@ -72,7 +66,6 @@ interface ConfigBuilderOptions {
   functionCallingMode?: FunctionCallingConfigMode | undefined;
 }
 
-const clientLog = logger.child('client');
 interface SafetySettingInput {
   category: NonNullable<SafetySetting['category']>;
   method?: NonNullable<SafetySetting['method']> | undefined;

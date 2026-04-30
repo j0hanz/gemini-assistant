@@ -24,7 +24,7 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 import { z } from 'zod/v4';
 ```
 
-`McpServer` is the high-level surface — use it by default. The lower-level `Server` class is only needed when you must intercept raw JSON-RPC.
+`McpServer` is the high-level surface — use it by default. The lower-level `Server` class is `@deprecated` and only needed when you must intercept raw JSON-RPC that `McpServer` doesn't expose.
 
 ## Bootstrap shape
 
@@ -344,13 +344,23 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 
 const transport = new WebStandardStreamableHTTPServerTransport({
   sessionIdGenerator: () => crypto.randomUUID(),
+  // eventStore: myEventStore, // optional — enables SSE resumability
 });
 
 await server.connect(transport);
 
 // Hono example:
 app.all('/mcp', async (c) => transport.handleRequest(c.req.raw));
+
+// Cloudflare Workers example:
+export default {
+  async fetch(request: Request): Promise<Response> {
+    return transport.handleRequest(request);
+  },
+};
 ```
+
+**DNS rebinding protection on `WebStandardStreamableHTTPServerTransport`:** The `allowedHosts`, `allowedOrigins`, and `enableDnsRebindingProtection` options on this transport are `@deprecated`. Use external middleware (a custom fetch wrapper, Hono middleware, or a WAF) to validate the `Host` header instead. The standalone helpers `validateHostHeader`, `localhostAllowedHostnames`, and `hostHeaderValidationResponse` are exported from `@modelcontextprotocol/server` for building your own middleware.
 
 ### Stateful vs stateless
 
@@ -584,13 +594,31 @@ if (result.action !== 'accept' || !result.content?.confirm) {
 ### URL mode (sensitive — auth, payment, etc.)
 
 ```ts
-const result = await ctx.mcpReq.elicitInput({
-  mode: 'url',
-  message: 'Please complete payment in the browser',
-  url: 'https://checkout.example.com/session/xyz',
-  elicitationId: 'payment-session-xyz',
-});
+import { UrlElicitationRequiredError } from '@modelcontextprotocol/server';
+
+try {
+  const result = await ctx.mcpReq.elicitInput({
+    mode: 'url',
+    message: 'Please complete payment in the browser',
+    url: 'https://checkout.example.com/session/xyz',
+    elicitationId: 'payment-session-xyz',
+  });
+  if (result.action !== 'accept') {
+    return { content: [{ type: 'text', text: 'Payment not completed' }], isError: true };
+  }
+} catch (err) {
+  if (err instanceof UrlElicitationRequiredError) {
+    // Client only supports form mode — URL elicitation not available
+    return {
+      content: [{ type: 'text', text: 'URL-based elicitation not supported by this client' }],
+      isError: true,
+    };
+  }
+  throw err;
+}
 ```
+
+`UrlElicitationRequiredError` is thrown when the client doesn't advertise support for URL-mode elicitation. Always catch it when using `mode: 'url'` and return a graceful `isError: true` result instead of letting the exception propagate.
 
 Use URL mode when the input belongs in a real browser flow (OAuth consent, API key entry, payment).
 
@@ -688,17 +716,43 @@ If `structuredContent` comes from an upstream/external source, **always** parse 
 For long-running streams that survive client reconnects:
 
 ```ts
-import { InMemoryEventStore } from './inMemoryEventStore.js';
+import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 
-// example impl in SDK examples
+// InMemoryEventStore is not exported from the public SDK surface.
+// Provide your own EventStore implementation (or a community package) for production.
+// For development/testing, a minimal in-memory implementation:
+class DevEventStore implements EventStore {
+  private events = new Map<string, { streamId: string; message: JSONRPCMessage }>();
+  private counter = 0;
+  async storeEvent(streamId: string, message: JSONRPCMessage) {
+    const eventId = String(++this.counter);
+    this.events.set(eventId, { streamId, message });
+    return eventId;
+  }
+  async replayEventsAfter(
+    lastEventId: string,
+    { send }: { send: (id: string, msg: JSONRPCMessage) => Promise<void> },
+  ) {
+    const after = Number(lastEventId);
+    let lastStreamId = '';
+    for (const [id, { streamId, message }] of this.events) {
+      if (Number(id) > after) {
+        await send(id, message);
+        lastStreamId = streamId;
+      }
+    }
+    return lastStreamId;
+  }
+}
 
 const transport = new NodeStreamableHTTPServerTransport({
   sessionIdGenerator: () => randomUUID(),
-  eventStore: new InMemoryEventStore(),
+  eventStore: new DevEventStore(),
+  retryInterval: 1_000, // ms — SSE retry hint sent to clients
 });
 ```
 
-Clients reconnect with `Last-Event-ID`. The transport replays events from the store. Production needs durable event storage.
+Clients reconnect with `Last-Event-ID`. The transport calls `replayEventsAfter` to resend missed events. Production needs durable event storage. The `EventStore` interface is exported from `@modelcontextprotocol/server`.
 
 ## Schema source: when to use `fromJsonSchema(...)`
 
@@ -767,15 +821,20 @@ if (caps?.sampling) {
 
 - `console.log` in stdio code corrupts JSON-RPC. Always stderr or MCP logging (`ctx.mcpReq.log(...)`).
 - Forgetting `content` when returning `structuredContent` breaks legacy clients.
-- Loose `z.object(...)` lets typos through at the boundary.
+- Loose `z.object(...)` lets typos through at the boundary — use `z.strictObject(...)`.
 - Marking a destructive tool as `readOnlyHint: true`.
 - Throwing on tool runtime failures — use `isError: true`.
 - Sending progress notifications without checking for a `progressToken`.
 - Mixing v1 imports (`@modelcontextprotocol/sdk/...`) into a v2 codebase.
 - Using `StreamableHTTPServerTransport` (v1) when you should use `NodeStreamableHTTPServerTransport` (v2).
+- Using `new Server(...)` directly — `@deprecated`; use `McpServer`.
 - Putting `requestedSchema` (elicitation) in Zod — it's raw JSON Schema.
+- Not catching `UrlElicitationRequiredError` when calling `elicitInput({ mode: 'url', ... })`.
 - Treating queued task messages as the task result.
 - `await`-ing background work inside `createTask` — this blocks `tools/call`. Use `void background()` and return `{ task }` immediately.
 - Missing `getTask` or `getTaskResult` handlers in `registerToolTask` — all three are required.
 - Leaking `err.message` or `err.stack` into `statusMessage` — always use a safe generic message.
 - Using `InMemoryTaskStore` in production — it's for development only; use durable storage.
+- Using `allowedHosts`/`allowedOrigins`/`enableDnsRebindingProtection` on `WebStandardStreamableHTTPServerTransport` — deprecated; use external middleware.
+- Importing from `@modelcontextprotocol/core` — internal package; use re-exports from `/server` or `/client`.
+- Using `import { z } from 'zod'` (v3) instead of `import { z } from 'zod/v4'`.

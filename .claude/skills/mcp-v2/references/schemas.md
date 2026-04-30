@@ -240,6 +240,15 @@ server.registerTool(
 
 `as const` preserves literal types — the SDK uses them for handler argument inference.
 
+**`fromJsonSchema` optional second argument**: If you need to supply a custom JSON Schema validator (e.g., `AjvJsonSchemaValidator` or `CfWorkerJsonSchemaValidator`), pass it as the second argument. The SDK auto-selects the right validator for the runtime (Node.js → `AjvJsonSchemaValidator`, Cloudflare Workers → `CfWorkerJsonSchemaValidator`), so you only need this for custom validator configurations:
+
+```ts
+import { AjvJsonSchemaValidator, fromJsonSchema } from '@modelcontextprotocol/server';
+
+const validator = new AjvJsonSchemaValidator();
+const schema = fromJsonSchema(RawSchema, validator);
+```
+
 **Don't hand-translate JSON Schema to partial Zod.** Either convert fully (and lose the original as truth) or use `fromJsonSchema(...)`.
 
 ## Elicitation `requestedSchema` is JSON Schema (NOT Zod)

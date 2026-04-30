@@ -5,12 +5,19 @@ description: >-
   `/client`, `/node`, `/express`, or `/hono`; when registering MCP tools, prompts,
   or resources; when configuring stdio or Streamable HTTP transports (server-side SSE
   is removed in v2); or when migrating from the legacy `@modelcontextprotocol/sdk`
-  package.
+  package. Also triggers on: McpServer, StdioServerTransport, registerTool,
+  registerPrompt, registerResource, NodeStreamableHTTPServerTransport,
+  WebStandardStreamableHTTPServerTransport, completable, ResourceTemplate,
+  InMemoryTaskStore, experimental.tasks.registerToolTask.
 ---
 
 # MCP v2 Development Expert
 
 The MCP TypeScript SDK split into multiple packages in v2. Code that mixes v1 and v2 imports, or follows v1 patterns inside a v2 codebase, will silently misbehave or fail to compile. This skill encodes the v2 contract and the most common pitfalls so changes match what the SDK actually expects.
+
+**Runtime requirement: Node.js ≥ 20, ESM only.** CommonJS and Node 18 are dropped.
+
+**Current release: `2.0.0-alpha.2` (still in alpha — breaking changes possible between alpha versions; pin versions when upgrading).**
 
 ## When NOT to use
 
@@ -24,21 +31,22 @@ If v1 patterns appear in a codebase that should be v2, jump straight to [referen
 
 Before adding code, identify the SDK version. The two are not interchangeable.
 
-| Signal                                                                               | Version            |
-| ------------------------------------------------------------------------------------ | ------------------ |
-| Imports from `@modelcontextprotocol/server`, `/client`, `/node`, `/express`, `/hono` | **v2**             |
-| Imports from `@modelcontextprotocol/sdk/...` (subpath imports)                       | **v1**             |
-| `McpServer` from `@modelcontextprotocol/server`                                      | v2                 |
-| `.tool(...)`, `.prompt(...)`, `.resource(...)` variadic helpers                      | v1                 |
-| `registerTool(...)`, `registerPrompt(...)`, `registerResource(...)`                  | v2                 |
-| `setRequestHandler(SCHEMA_CONST, handler)` (schema constant first arg)               | v1                 |
-| `setRequestHandler("method/name", handler)` (string method)                          | v2                 |
-| `StreamableHTTPServerTransport` (no `Node` prefix)                                   | v1                 |
-| `NodeStreamableHTTPServerTransport` or `WebStandardStreamableHTTPServerTransport`    | v2                 |
-| `StreamableHTTPError`                                                                | v1 (removed in v2) |
-| `WebSocketClientTransport`                                                           | v1 (removed in v2) |
-| `extra.signal`, `extra._meta`, `extra.sendNotification(...)` in handler args         | v1                 |
-| Grouped context: `ctx.mcpReq`, `ctx.http`, `ctx.task`                                | v2                 |
+| Signal                                                                               | Version                              |
+| ------------------------------------------------------------------------------------ | ------------------------------------ |
+| Imports from `@modelcontextprotocol/server`, `/client`, `/node`, `/express`, `/hono` | **v2**                               |
+| Imports from `@modelcontextprotocol/sdk/...` (subpath imports)                       | **v1**                               |
+| `McpServer` from `@modelcontextprotocol/server`                                      | v2                                   |
+| `.tool(...)`, `.prompt(...)`, `.resource(...)` variadic helpers                      | v1                                   |
+| `registerTool(...)`, `registerPrompt(...)`, `registerResource(...)`                  | v2                                   |
+| `setRequestHandler(SCHEMA_CONST, handler)` (schema constant first arg)               | v1                                   |
+| `setRequestHandler("method/name", handler)` (string method)                          | v2                                   |
+| `StreamableHTTPServerTransport` (no `Node` prefix)                                   | v1                                   |
+| `NodeStreamableHTTPServerTransport` or `WebStandardStreamableHTTPServerTransport`    | v2                                   |
+| `StreamableHTTPError`                                                                | v1 (removed in v2)                   |
+| `WebSocketClientTransport`                                                           | v1 (removed in v2)                   |
+| `extra.signal`, `extra._meta`, `extra.sendNotification(...)` in handler args         | v1                                   |
+| Grouped context: `ctx.mcpReq`, `ctx.http`, `ctx.task`                                | v2                                   |
+| `new Server(...)` (low-level class)                                                  | v2, but deprecated — use `McpServer` |
 
 **If you see v1 patterns in a v2 codebase, fix them as part of the work.** Do not silently mix the two — they share names but not types.
 
@@ -67,9 +75,15 @@ The full reference files are intentionally split — load only the one(s) you ne
 @modelcontextprotocol/node      → NodeStreamableHTTPServerTransport (Node-specific HTTP)
 @modelcontextprotocol/express   → createMcpExpressApp() helper for Express integrations
 @modelcontextprotocol/hono      → Hono integration helpers
+@modelcontextprotocol/core      → INTERNAL — do not import directly; /client and /server re-export everything you need
 ```
 
-Rule: never import client code from `/server` or vice versa. Never import anything from `@modelcontextprotocol/sdk` in v2 code.
+Rules:
+
+- Never import client code from `/server` or vice versa.
+- Never import anything from `@modelcontextprotocol/sdk` in v2 code.
+- Never import from `@modelcontextprotocol/core` directly — it is an internal package.
+- `McpServer` is the high-level API; prefer it over the low-level `Server` class (which is `@deprecated`).
 
 ## Server: the registration patterns you'll use 95% of the time
 
@@ -347,13 +361,17 @@ For more — auth (bearer, client credentials, OAuth, private-key JWT, Cross-App
 1. **`console.log` in stdio servers corrupts the protocol stream.** stdout is JSON-RPC. Use MCP logging (`ctx.mcpReq.log('info', ...)` or `ctx.mcpReq.notify(...)`) or `console.error` (stderr). This applies to the `gemini-assistant` codebase too — use the project's `logger` instead of `console.log`.
 2. **Mixing v1 and v2 imports.** They share class and method names but not types. If `package.json` has only v2 packages, treat any `@modelcontextprotocol/sdk` import as a bug.
 3. **Using `z.object(...)` instead of `z.strictObject(...)` at boundaries.** `z.object` silently strips unknown fields, hiding caller mistakes.
-4. **Passing raw object shapes as schemas.** v2 requires Standard Schema (Zod v4, ArkType, Valibot, or `fromJsonSchema(...)`). Plain `{ type: 'object', ... }` will not work directly — wrap it.
+4. **Passing raw object shapes as schemas.** v2 requires Standard Schema (Zod v4, ArkType, Valibot, or `fromJsonSchema(...)`). Plain `{ type: 'object', ... }` will not work directly — wrap it with `fromJsonSchema(schema)`.
 5. **Throwing on tool runtime failures.** Use `isError: true` instead. Throw only for protocol-level errors.
 6. **Forgetting `content` when returning `structuredContent`.** Clients that don't understand structured content fall back to `content`. Always include both.
 7. **Capability mismatch.** Declare `capabilities` on the server _and_ the client before `connect()`. Sampling, elicitation, and roots only work if both sides advertise them.
 8. **In stateful HTTP, forgetting `terminateSession()`.** Leaks server-side session state. Call `transport.terminateSession()` before `client.close()` for Streamable HTTP.
 9. **In stateless HTTP, assuming `mcp-session-id` exists.** It won't. Don't key state on it.
-10. **In Node 20 ESM projects, omitting `.js` extensions in imports.** TypeScript compiles `import './foo'` to `import './foo'`, which Node ESM rejects. Write `import './foo.js'` even in `.ts` source.
+10. **In Node 20+ ESM projects, omitting `.js` extensions in imports.** TypeScript compiles `import './foo'` to `import './foo'`, which Node ESM rejects. Write `import './foo.js'` even in `.ts` source.
+11. **Using `new Server(...)` directly.** The low-level `Server` class is `@deprecated`. Use `McpServer` — only reach for `Server` when you must intercept raw JSON-RPC that `McpServer` doesn't expose.
+12. **Using `allowedHosts`/`allowedOrigins`/`enableDnsRebindingProtection` on `WebStandardStreamableHTTPServerTransport`.** These options are `@deprecated` on that transport. Use external middleware (e.g. `createMcpExpressApp()`) for DNS rebinding protection instead.
+13. **Catching `UrlElicitationRequiredError` — the client doesn't support URL elicitation.** When `elicitInput({ mode: 'url', ... })` is called but the client only supports form mode, the SDK throws `UrlElicitationRequiredError`. Always catch this and gracefully fall back or cancel.
+14. **Importing from `zod` (v3) instead of `zod/v4`.** The SDK bundles Zod v4; using Zod v3 types alongside it produces confusing type errors at boundaries.
 
 ## Project-specific note (gemini-assistant)
 
@@ -363,7 +381,9 @@ This repository has a frozen public surface defined in `src/public-contract.ts` 
 
 - Typing `z.object(` at a tool/prompt input boundary → use `z.strictObject(`.
 - Adding `import ... from '@modelcontextprotocol/sdk/...'` in a v2 package → wrong SDK; use the split packages.
+- Adding `import ... from '@modelcontextprotocol/core'` → internal package, not public API; use `/server` or `/client`.
 - Calling `server.tool(...)`, `server.prompt(...)`, or `server.resource(...)` → v1 API; use `registerTool/Prompt/Resource`.
+- Using `new Server(...)` directly → `@deprecated`; use `McpServer` unless you need raw JSON-RPC access.
 - Writing `console.log(...)` in a stdio server → corrupts JSON-RPC; use the project logger or `console.error`.
 - `throw` inside a tool handler for an ordinary upstream failure → return `{ content, isError: true }` instead.
 - Returning `structuredContent` without `content` → clients without structured-content support get nothing.
@@ -373,6 +393,9 @@ This repository has a frozen public surface defined in `src/public-contract.ts` 
 - `statusMessage: err.message` or `statusMessage: err.stack` in a task tool → leaks internals; use a safe generic message like `'Processing failed'`.
 - `store.updateTask({...})` or `store.setTaskResult(...)` → these names don't exist in v2; use `store.updateTaskStatus(id, status, msg?)` and `store.storeTaskResult(id, 'completed' | 'failed', result)`.
 - `ctx.task.updateStatus(...)` → no such method; `TaskContext` is `{ id, store, requestedTtl }`. Push status via `ctx.task.store.updateTaskStatus(ctx.task.id, ...)`.
+- Using `allowedHosts`/`allowedOrigins`/`enableDnsRebindingProtection` on `WebStandardStreamableHTTPServerTransport` → these options are `@deprecated`; use `createMcpExpressApp()` or external middleware instead.
+- Not catching `UrlElicitationRequiredError` when using `elicitInput({ mode: 'url', ... })` → thrown when the client only supports form mode; always have a fallback.
+- Using `import { z } from 'zod'` → must be `import { z } from 'zod/v4'` in v2 projects.
 
 If any of these are in your diff: stop and fix before continuing.
 

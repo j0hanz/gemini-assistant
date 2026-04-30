@@ -111,7 +111,7 @@ interface StreamProcessingState extends StreamMetadata {
 
 type ProgressMessageFormatter = (message: string) => string;
 
-interface ThoughtDeltaCtx {
+export interface ThoughtDeltaCtx {
   mcpReq: {
     signal: AbortSignal;
     _meta?: { progressToken?: unknown };

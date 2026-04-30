@@ -1,9 +1,11 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
+import { FunctionCallingConfigMode } from '@google/genai';
 import {
   ProfileValidationError,
   resolveProfile,
+  resolveProfileFunctionCallingMode,
   validateProfile,
 } from '../../src/lib/tool-profiles.js';
 
@@ -134,4 +136,31 @@ test('resolveProfile — auto-promotion with URLs', () => {
   );
   // plain auto-promotes to web-research when URLs are provided
   assert.strictEqual(resolved.autoPromoted, true);
+});
+
+test('FunctionCallingConfigMode.VALIDATED resolves to the string VALIDATED', () => {
+  // Pins that the SDK enum value used internally matches the string the API expects.
+  assert.strictEqual(FunctionCallingConfigMode.VALIDATED, 'VALIDATED');
+  // Bracket access must also resolve (used in resolveProfileFunctionCallingMode).
+  assert.strictEqual(FunctionCallingConfigMode['VALIDATED'], 'VALIDATED');
+});
+
+test('resolveProfileFunctionCallingMode — returns VALIDATED when profile has functions + built-ins', () => {
+  const resolved = resolveProfile(
+    {
+      profile: 'grounded',
+      overrides: {
+        functions: [{ name: 'myFn', description: 'a test function' }],
+      },
+    },
+    { toolKey: 'chat' },
+  );
+  const mode = resolveProfileFunctionCallingMode(resolved);
+  assert.strictEqual(mode, FunctionCallingConfigMode.VALIDATED);
+});
+
+test('resolveProfileFunctionCallingMode — returns undefined for plain profile with no functions', () => {
+  const resolved = resolveProfile({ profile: 'plain' }, { toolKey: 'chat' });
+  const mode = resolveProfileFunctionCallingMode(resolved);
+  assert.strictEqual(mode, undefined);
 });

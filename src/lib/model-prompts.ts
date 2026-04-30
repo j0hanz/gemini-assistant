@@ -330,8 +330,9 @@ export function buildDiagramGenerationPrompt(args: {
       systemInstruction: joinNonEmpty([
         `Generate a ${args.diagramType} diagram from the description and files.`,
         `Return exactly one fenced \`\`\`${args.diagramType} block with clear node and edge labels.`,
+        'No prose before or after the block.',
         args.validateSyntax
-          ? 'You may run Code Execution once to parse the diagram. Do not narrate the result.'
+          ? 'You may run Code Execution once to validate syntax. Do not narrate the result.'
           : undefined,
       ]),
     },

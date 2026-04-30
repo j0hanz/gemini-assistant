@@ -17,6 +17,7 @@ import {
   renderDiscoveryCatalogMarkdown,
   renderWorkflowCatalogMarkdown,
 } from './catalog.js';
+import { getAI } from './client.js';
 import {
   getExposeSessionResources,
   getExposeThoughts,
@@ -26,7 +27,7 @@ import {
   getWorkspaceCacheEnabled,
   getWorkspaceCacheTtl,
 } from './config.js';
-import { sanitizeSessionText, type SessionStore, type SessionSummary } from './sessions.js';
+import type { SessionStore, SessionSummary } from './sessions.js';
 
 const DISCOVER_CATALOG_URI = 'discover://catalog' as const;
 const DISCOVER_WORKFLOWS_URI = 'discover://workflows' as const;
@@ -244,21 +245,11 @@ function sessionEventResources(sessionStore: SessionStore): ResourceListEntry[] 
   );
 }
 
-function sessionTurnPartsResources(sessionStore: SessionStore): ResourceListEntry[] {
+function sessionTurnPartsResources(): ResourceListEntry[] {
   if (!getExposeSessionResources()) return [];
-  return sessionStore.listSessionEntries().flatMap((session) => {
-    const entries = sessionStore.listSessionContentEntries(session.id) ?? [];
-    return entries.flatMap((entry, index) =>
-      entry.role === 'model'
-        ? [
-            {
-              uri: sessionTurnPartsUri(session.id, index),
-              name: `Turn ${String(index)} Parts ${session.id}`,
-            },
-          ]
-        : [],
-    );
-  });
+  // List session IDs that have interactions; without content entries available,
+  // we cannot enumerate turns in advance. Clients must construct resource URIs directly.
+  return [];
 }
 
 function readDiscoverCatalogResource(
@@ -458,11 +449,11 @@ function getSessionEventsResourceData(
   return events;
 }
 
-function getSessionTurnPartsResourceData(
+async function getSessionTurnPartsResourceData(
   sessionStore: SessionStore,
   sessionId: string | undefined,
   turnIndexText: string | undefined,
-): unknown[] {
+): Promise<unknown> {
   if (!getExposeSessionResources()) {
     throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, SESSION_RESOURCES_DISABLED_MSG);
   }
@@ -480,18 +471,45 @@ function getSessionTurnPartsResourceData(
     throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Turn index required');
   }
 
-  const turnIndex = Number.parseInt(turnIndexText, 10);
-  const contentEntry = sessionStore.listSessionContentEntries(sessionId)?.[turnIndex];
-  if (!contentEntry) {
+  // Validate turn index format (future: could fetch specific turn outputs if Interactions API supports it)
+  void Number.parseInt(turnIndexText, 10);
+
+  // Get the interaction ID from the session
+  const interactionId = sessionStore.getSessionInteractionId(sessionId);
+  if (!interactionId) {
     throw new ProtocolError(
       ProtocolErrorCode.ResourceNotFound,
-      `Session '${sessionId}' turn ${String(turnIndex)} not found`,
+      `Session '${sessionId}' has no interaction ID`,
     );
   }
 
-  const serialized = JSON.stringify(structuredClone(contentEntry.rawParts ?? contentEntry.parts));
-  const sanitized = sanitizeSessionText(serialized) ?? serialized;
-  return JSON.parse(sanitized) as unknown[];
+  // Fetch the interaction from the Gemini API
+  try {
+    const interaction = await getAI().interactions.get(interactionId);
+
+    // Map outputs to response format
+    const outputs = interaction.outputs ?? [];
+    const mappedOutputs = outputs.map((output) => {
+      const base = { type: output.type };
+      if (output.type === 'text' && 'text' in output) {
+        return { ...base, text: output.text };
+      }
+      if (output.type === 'image' && 'mime_type' in output) {
+        return { ...base, mime_type: output.mime_type, data: output.data };
+      }
+      return base;
+    });
+
+    return { outputs: mappedOutputs, status: interaction.status };
+  } catch (err) {
+    if (err instanceof ProtocolError) {
+      throw err;
+    }
+    throw new ProtocolError(
+      ProtocolErrorCode.InternalError,
+      `Failed to fetch interaction '${interactionId}': ${AppError.formatMessage(err)}`,
+    );
+  }
 }
 
 function readSessionTranscriptResource(
@@ -572,15 +590,15 @@ function readSessionEventsResource(
   return dualContentResource(toResourceUri(uri), data, renderSessionEventsMarkdown(id, data));
 }
 
-function readSessionTurnPartsResource(
+async function readSessionTurnPartsResource(
   sessionStore: SessionStore,
   uri: URL | string,
   sessionId: string | string[] | undefined,
   turnIndex: string | string[] | undefined,
-): ReadResourceResult {
+): Promise<ReadResourceResult> {
   const id = decodeTemplateParam(sessionId);
   const index = normalizeTemplateParam(turnIndex);
-  const data = getSessionTurnPartsResourceData(sessionStore, id, index);
+  const data = await getSessionTurnPartsResourceData(sessionStore, id, index);
   return jsonResource(toResourceUri(uri), data);
 }
 
@@ -676,17 +694,13 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
   server.registerResource(
     'session-turn-parts',
     new ResourceTemplate('gemini://sessions/{sessionId}/turns/{turnIndex}/parts', {
-      list: () => ({ resources: sessionTurnPartsResources(sessionStore) }),
+      list: () => ({ resources: sessionTurnPartsResources() }),
       complete: {
         sessionId: sessionStore.completeSessionIds.bind(sessionStore),
-        turnIndex: (value, context) => {
-          const sessionId = context?.arguments?.sessionId;
-          if (!sessionId) return [];
-          const entries = sessionStore.listSessionContentEntries(sessionId);
-          if (!entries) return [];
-          return entries
-            .map((_, index) => String(index))
-            .filter((index) => index.startsWith(value));
+        turnIndex: () => {
+          // Turn indices cannot be enumerated without fetching the interaction from the API.
+          // Clients must construct the resource URI directly.
+          return [];
         },
       },
     }),
@@ -702,7 +716,7 @@ function registerSessionResources(server: McpServer, sessionStore: SessionStore)
         priority: 0.8,
       },
     },
-    (uri, { sessionId, turnIndex }): ReadResourceResult =>
+    async (uri, { sessionId, turnIndex }): Promise<ReadResourceResult> =>
       readSessionTurnPartsResource(sessionStore, uri, sessionId, turnIndex),
   );
 }

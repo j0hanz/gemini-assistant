@@ -302,6 +302,12 @@ export class SessionStore {
     return toSessionSummary(id, entry);
   }
 
+  getSessionInteractionId(id: string): string | undefined {
+    const entry = this.getActiveSessionEntry(id);
+    if (!entry) return undefined;
+    return entry.interactionId;
+  }
+
   isEvicted(id: string): boolean {
     return this.evictedSessions.has(id);
   }

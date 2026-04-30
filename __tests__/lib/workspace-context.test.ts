@@ -190,7 +190,9 @@ describe('workspace-context', () => {
   describe('DEFAULT_SYSTEM_INSTRUCTION', () => {
     it('is exported and non-empty', () => {
       assert.ok(DEFAULT_SYSTEM_INSTRUCTION.length > 0);
-      assert.ok(DEFAULT_SYSTEM_INSTRUCTION.includes('concise'));
+      assert.ok(DEFAULT_SYSTEM_INSTRUCTION.includes('Markdown table'));
+      assert.ok(DEFAULT_SYSTEM_INSTRUCTION.includes('##'));
+      assert.ok(DEFAULT_SYSTEM_INSTRUCTION.includes('Sources'));
     });
   });
 

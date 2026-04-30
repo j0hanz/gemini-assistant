@@ -268,10 +268,7 @@ export function buildDiffReviewPrompt(
     {
       cacheText: 'Review the diff for bugs and behavior risk. Ignore formatting-only changes.',
       promptText: args.promptText + docContent,
-      systemInstruction: buildOutputInstruction(
-        `Review the unified diff for bugs, regressions, and behavior risk. Ignore formatting-only changes. Cite file paths and hunk context. Do not invent line numbers. If the diff looks clean, say so briefly.${docInstruction}`,
-        ['Output:', 'Findings', 'Fixes'],
-      ),
+      systemInstruction: `Review the unified diff for bugs, regressions, and behavior risk. Ignore formatting-only changes.\nPresent findings as a Markdown table:\n| Severity | File | Finding | Fix |\nSeverity values: Critical · High · Medium · Low · Info\nCite file paths as \`path:line\`. Do not invent line numbers.\nIf the diff is clean, say so in one sentence — no table.${docInstruction}`,
     },
     args.cacheName,
   );

@@ -6,6 +6,7 @@ export const WebCitationSchema = z.strictObject({
   snippet: z.string().optional(),
   score: z.number().optional(),
 });
+export type WebCitation = z.infer<typeof WebCitationSchema>;
 
 export const UrlContextEntrySchema = z.strictObject({
   url: z.string(),
@@ -14,6 +15,7 @@ export const UrlContextEntrySchema = z.strictObject({
   snippet: z.string().optional(),
   status: z.string(),
 });
+export type UrlContextEntry = z.infer<typeof UrlContextEntrySchema>;
 
 export const FileSearchHitSchema = z.strictObject({
   fileUri: z.string(),
@@ -21,6 +23,7 @@ export const FileSearchHitSchema = z.strictObject({
   chunk: z.string(),
   score: z.number(),
 });
+export type FileSearchHit = z.infer<typeof FileSearchHitSchema>;
 
 export const CodeExecutionEntrySchema = z.strictObject({
   language: z.string(),
@@ -29,6 +32,7 @@ export const CodeExecutionEntrySchema = z.strictObject({
   stderr: z.string().optional(),
   exitCode: z.number().int().optional(),
 });
+export type CodeExecutionEntry = z.infer<typeof CodeExecutionEntrySchema>;
 
 export const GroundingRollupSchema = z.strictObject({
   webSearch: z

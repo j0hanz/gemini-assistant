@@ -1,9 +1,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-import {
-  buildUrlContextSourceDetails,
-} from '../../src/lib/response.js';
+import { buildUrlContextSourceDetails } from '../../src/lib/response.js';
 
 test('buildUrlContextSourceDetails — valid URL returns entry with domain', () => {
   const result = buildUrlContextSourceDetails(['https://example.com/path']);

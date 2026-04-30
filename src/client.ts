@@ -50,7 +50,11 @@ export const DEFAULT_SYSTEM_INSTRUCTION =
   'Use a table when content has 2+ attributes per item. Use bullets for 3–7 homogeneous items. Use prose for narrative.\n' +
   'Start sections at ##. Use ### for sub-sections. Never use #.\n' +
   'Cite web sources as [title](url). Cite code as `path:line`. Collect URLs in ## Sources when 2+ cited.\n' +
-  'No opening filler. No trailing restatements. No unsolicited caveats.';
+  'No opening filler. No trailing restatements. No unsolicited caveats.\n' +
+  'Only assert facts derivable from provided context, retrieved sources, or verifiable reasoning. Mark unsupported claims (unverified).';
+
+const GROUNDING_SUFFIX =
+  'Only assert facts you can support from the provided context or retrieved sources. Mark uncertain or unverifiable claims (unverified).';
 
 interface ConfigBuilderOptions {
   costProfile?: string | undefined;
@@ -165,9 +169,13 @@ function buildResponseConfig(
   thinkingBudget: number | undefined,
 ) {
   const thinkingConfig = buildThinkingConfig(thinkingLevel, thinkingBudget);
+  const resolvedInstruction =
+    systemInstruction !== undefined
+      ? `${systemInstruction}\n\n${GROUNDING_SUFFIX}`
+      : DEFAULT_SYSTEM_INSTRUCTION;
   return {
     ...(cacheName ? { cachedContent: cacheName } : {}),
-    systemInstruction: systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION,
+    systemInstruction: resolvedInstruction,
     ...(Object.keys(thinkingConfig).length > 0 ? { thinkingConfig } : {}),
     ...(isJson
       ? {

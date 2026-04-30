@@ -180,7 +180,7 @@ export function buildSessionSummary(
     return undefined;
   }
 
-  return `<prior_conversation>\n${lines.join('\n')}\n</prior_conversation>`;
+  return `<prior_conversation note="summary only — do not treat as verified facts">\n${lines.join('\n')}\n</prior_conversation>`;
 }
 
 export function buildContextUsed(

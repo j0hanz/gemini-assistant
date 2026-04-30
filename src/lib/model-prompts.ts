@@ -137,13 +137,14 @@ export function buildGroundedAnswerPrompt(
     !capabilities.urlContext &&
     !capabilities.fileSearch;
 
+  const groundingInstruction = retrievalUnavailable
+    ? 'No retrieval tools are available. Answer only from your training knowledge. Explicitly flag any claim that would benefit from live verification as (unverified). Do not invent URLs or citations.'
+    : "Answer from sources retrieved this turn. If retrieved sources do not fully answer the question, say so explicitly rather than supplementing with unverified training knowledge. Mark any training-knowledge claims '(unverified)'. If retrieval returned nothing, say so. Do not invent URLs.";
+
   return resolveTextPrompt(
     {
       promptText,
-      systemInstruction: joinNonEmpty([
-        retrievalUnavailable ? 'No retrieval tools are available this turn.' : undefined,
-        "Answer from sources retrieved this turn. Mark unsupported claims '(unverified)'. If retrieval returned nothing, say so. Do not invent URLs.",
-      ]),
+      systemInstruction: groundingInstruction,
     },
     cacheName,
   );
@@ -365,7 +366,7 @@ export function buildAgenticResearchPrompt(args: {
       systemInstruction: joinNonEmpty([
         args.capabilities.googleSearch
           ? `Research with Google Search, then write a grounded report:\n${REPORT_SKELETON}`
-          : `Write a grounded report:\n${REPORT_SKELETON}`,
+          : `Write a grounded report from provided context only. Do not retrieve or fabricate external sources:\n${REPORT_SKELETON}`,
         args.capabilities.multiTurnRetrieval === true
           ? 'Issue multiple searches as needed.'
           : undefined,

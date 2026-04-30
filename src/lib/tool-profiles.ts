@@ -4,7 +4,7 @@ import type { ToolConfig, ToolListUnion } from '@google/genai';
 import type { AskThinkingLevel } from '../public-contract.js';
 
 type BuiltInCapability = 'googleSearch' | 'urlContext' | 'codeExecution' | 'fileSearch';
-export type CapabilityKey = BuiltInCapability | 'functions';
+type CapabilityKey = BuiltInCapability | 'functions';
 
 /** Lowercase thinking levels used in the public ToolsSpec input. */
 type ProfileThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
@@ -23,7 +23,7 @@ export const TOOL_PROFILE_NAMES = [
   'structured',
 ] as const;
 
-export type ToolProfileName = (typeof TOOL_PROFILE_NAMES)[number];
+type ToolProfileName = (typeof TOOL_PROFILE_NAMES)[number];
 
 interface ProfileDefinition {
   name: ToolProfileName;
@@ -237,7 +237,7 @@ const THINKING_LEVEL_ORDER: Record<ProfileThinkingLevel, number> = {
   high: 3,
 };
 
-export function compareThinkingLevels(a: ProfileThinkingLevel, b: ProfileThinkingLevel): number {
+function compareThinkingLevels(a: ProfileThinkingLevel, b: ProfileThinkingLevel): number {
   return THINKING_LEVEL_ORDER[a] - THINKING_LEVEL_ORDER[b];
 }
 

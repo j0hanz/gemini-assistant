@@ -14,10 +14,6 @@ import {
 import { findWorkflowEntry } from './catalog.js';
 import type { PublicPromptName, PublicWorkflowName } from './public-contract.js';
 
-export { PUBLIC_PROMPT_NAMES } from './public-contract.js';
-
-export const PUBLIC_JOB_OPTIONS = [...PublicJobNameSchema.options];
-
 function enumComplete<T extends string>(options: readonly T[]) {
   return (value: string | undefined): T[] =>
     options.filter((option) => option.startsWith(value ?? ''));
@@ -37,7 +33,7 @@ function userPromptMessage(text: string) {
   };
 }
 
-export function renderWorkflowSection(name: PublicWorkflowName): string {
+function renderWorkflowSection(name: PublicWorkflowName): string {
   const workflow = findWorkflowEntry(name);
   if (!workflow) {
     return [
@@ -58,7 +54,7 @@ export function renderWorkflowSection(name: PublicWorkflowName): string {
   ].join('\n\n');
 }
 
-export const DiscoverPromptSchema = z
+const DiscoverPromptSchema = z
   .strictObject({
     job: completable(
       PublicJobNameSchema.describe('Public job to focus discovery guidance on.'),
@@ -68,7 +64,7 @@ export const DiscoverPromptSchema = z
   })
   .describe('Guide a client to the best public job, prompt, and resource.');
 
-export const ResearchPromptSchema = z
+const ResearchPromptSchema = z
   .strictObject({
     goal: goalText('Research goal or question'),
     mode: completable(
@@ -79,7 +75,7 @@ export const ResearchPromptSchema = z
   })
   .describe('Explain the quick-versus-deep research decision flow.');
 
-export const ReviewPromptSchema = z
+const ReviewPromptSchema = z
   .strictObject({
     subject: completable(
       enumField(REVIEW_SUBJECT_OPTIONS, 'Review variant (diff, comparison, failure).'),
@@ -89,7 +85,7 @@ export const ReviewPromptSchema = z
   })
   .describe('Guide diff review, file comparison, or failure triage.');
 
-export function buildDiscoverPrompt(args: z.infer<typeof DiscoverPromptSchema>) {
+function buildDiscoverPrompt(args: z.infer<typeof DiscoverPromptSchema>) {
   return userPromptMessage(
     [
       ...(args.job ? [`Job: ${args.job}`] : []),
@@ -100,7 +96,7 @@ export function buildDiscoverPrompt(args: z.infer<typeof DiscoverPromptSchema>) 
   );
 }
 
-export function buildResearchPrompt(args: z.infer<typeof ResearchPromptSchema>) {
+function buildResearchPrompt(args: z.infer<typeof ResearchPromptSchema>) {
   return userPromptMessage(
     [
       `Goal: ${args.goal}`,
@@ -112,7 +108,7 @@ export function buildResearchPrompt(args: z.infer<typeof ResearchPromptSchema>) 
   );
 }
 
-export function buildReviewPrompt(args: z.infer<typeof ReviewPromptSchema>) {
+function buildReviewPrompt(args: z.infer<typeof ReviewPromptSchema>) {
   return userPromptMessage(
     [
       ...(args.subject ? [`Subject: ${args.subject}`] : []),

@@ -1,6 +1,11 @@
-import { test } from 'node:test';
 import assert from 'node:assert';
-import { resolveProfile, validateProfile, ProfileValidationError } from '../../src/lib/tool-profiles.js';
+import { test } from 'node:test';
+
+import {
+  ProfileValidationError,
+  resolveProfile,
+  validateProfile,
+} from '../../src/lib/tool-profiles.js';
 
 test('resolveProfile — all named profiles resolve without throwing', () => {
   const profiles = [
@@ -36,35 +41,32 @@ test('validateProfile — grounded profile passes', () => {
 
 test('validateProfile — fileSearch + other built-ins throws', () => {
   const resolved = resolveProfile({ profile: 'rag' }, { toolKey: 'chat' });
-  assert.throws(
-    () => {
-      // Try to manually mix fileSearch with other builtIns (normally prevented at profile def level)
-      validateProfile({
-        ...resolved,
-        builtIns: [...resolved.builtIns, 'googleSearch'],
-      });
-    },
-    ProfileValidationError,
-  );
+  assert.throws(() => {
+    // Try to manually mix fileSearch with other builtIns (normally prevented at profile def level)
+    validateProfile({
+      ...resolved,
+      builtIns: [...resolved.builtIns, 'googleSearch'],
+    });
+  }, ProfileValidationError);
 });
 
 test('validateProfile — fileSearch + functions throws', () => {
   const resolved = resolveProfile(
-    { profile: 'rag', overrides: { functions: [{ name: 'test', description: 'test' }], fileSearchStores: ['store1'] } },
+    {
+      profile: 'rag',
+      overrides: {
+        functions: [{ name: 'test', description: 'test' }],
+        fileSearchStores: ['store1'],
+      },
+    },
     { toolKey: 'chat' },
   );
-  assert.throws(
-    () => validateProfile(resolved),
-    ProfileValidationError,
-  );
+  assert.throws(() => validateProfile(resolved), ProfileValidationError);
 });
 
 test('validateProfile — agent requires functions', () => {
   const resolved = resolveProfile({ profile: 'agent' }, { toolKey: 'chat' });
-  assert.throws(
-    () => validateProfile(resolved),
-    { message: /requires.*functions/i },
-  );
+  assert.throws(() => validateProfile(resolved), { message: /requires.*functions/i });
 });
 
 test('validateProfile — agent with functions passes', () => {
@@ -77,10 +79,7 @@ test('validateProfile — agent with functions passes', () => {
 
 test('validateProfile — structured requires responseSchemaJson', () => {
   const resolved = resolveProfile({ profile: 'structured' }, { toolKey: 'chat' });
-  assert.throws(
-    () => validateProfile(resolved),
-    { message: /requires.*responseSchema/i },
-  );
+  assert.throws(() => validateProfile(resolved), { message: /requires.*responseSchema/i });
 });
 
 test('validateProfile — structured with schema passes', () => {
@@ -96,10 +95,7 @@ test('validateProfile — visual-inspect requires thinkingLevel >= medium', () =
     { profile: 'visual-inspect', thinkingLevel: 'minimal' },
     { toolKey: 'analyze', hasImageInput: true },
   );
-  assert.throws(
-    () => validateProfile(resolved),
-    { message: /thinking.*medium/i },
-  );
+  assert.throws(() => validateProfile(resolved), { message: /thinking.*medium/i });
 });
 
 test('validateProfile — visual-inspect with medium thinking passes', () => {
@@ -112,10 +108,7 @@ test('validateProfile — visual-inspect with medium thinking passes', () => {
 
 test('validateProfile — rag requires fileSearchStores', () => {
   const resolved = resolveProfile({ profile: 'rag' }, { toolKey: 'chat' });
-  assert.throws(
-    () => validateProfile(resolved),
-    { message: /fileSearchStores/i },
-  );
+  assert.throws(() => validateProfile(resolved), { message: /fileSearchStores/i });
 });
 
 test('validateProfile — rag with stores passes', () => {

@@ -1,5 +1,6 @@
-import { test } from 'node:test';
 import assert from 'node:assert';
+import { test } from 'node:test';
+
 import { AppError, isAbortError, withRetry } from '../../src/lib/errors.js';
 
 test('AppError — construction', () => {

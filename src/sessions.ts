@@ -273,7 +273,7 @@ export interface SessionChangeEvent {
   turnPartsAdded?: { sessionId: string; turnIndex: number };
 }
 
-export interface SessionStoreOptions {
+interface SessionStoreOptions {
   maxEventEntries?: number;
   maxSessions?: number;
   maxTranscriptEntries?: number;
@@ -616,13 +616,6 @@ export function buildReplayHistoryParts(parts: Part[]): Part[] {
   });
 }
 
-export function buildTranscriptParts(parts: Part[]): Part[] {
-  return parts.filter((part) => {
-    if (part.thought === true) return false;
-    return Boolean(part.text) || Boolean(part.inlineData) || Boolean(part.fileData);
-  });
-}
-
 function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {
   return {
     id,
@@ -662,7 +655,7 @@ function appendTranscriptPair(
   });
 }
 
-export function buildSessionEventRequest(
+function buildSessionEventRequest(
   message: string,
   sentMessage: string,
   askResult: SessionTurnInput,
@@ -675,7 +668,7 @@ export function buildSessionEventRequest(
   };
 }
 
-export function buildSessionEventResponse(
+function buildSessionEventResponse(
   askResult: SessionTurnInput,
   structured: SessionTurnStructuredContent | undefined,
 ): SessionEventEntry['response'] {

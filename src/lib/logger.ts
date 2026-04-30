@@ -63,7 +63,7 @@ function isPrimitiveLogValue(value: unknown): value is null | number | boolean |
   );
 }
 
-export function summarizeLogValue(value: unknown, depth = 0): unknown {
+function summarizeLogValue(value: unknown, depth = 0): unknown {
   if (typeof value === 'string') {
     return { type: 'string', length: value.length };
   }
@@ -162,7 +162,7 @@ function defaultLogFileName(): string {
   return isNodeTestProcess() ? 'test-app.log' : 'app.log';
 }
 
-export class Logger {
+class Logger {
   private readonly attachedServers = new Set<McpServer>();
   private readonly verbosePayloads: boolean;
   private logStream: Pick<Writable, 'write'> | undefined;

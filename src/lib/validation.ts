@@ -69,14 +69,6 @@ export function resolveAllowedHosts(bindHost: string): string[] | undefined {
   return [normalizeAllowedHost(bindHost)];
 }
 
-export function isAutoDerivedAllowedHosts(bindHost: string): boolean {
-  return (
-    parseAllowedHosts() === undefined &&
-    !BROAD_BIND_ADDRESSES.has(bindHost) &&
-    !LOCALHOST_BIND_HOSTS.has(bindHost)
-  );
-}
-
 /**
  * Validates a request `Host` header against an allow-list.
  * Strips the port before comparing (case-insensitive).
@@ -391,13 +383,6 @@ function buildRootsFetcher(
     const { roots } = await listRoots();
     return roots.map((r) => parseRootUri(r.uri)).filter((p): p is string => p !== undefined);
   };
-}
-
-export async function resolveAndValidatePath(
-  filePath: string,
-  rootsFetcher?: RootsFetcher,
-): Promise<string> {
-  return (await resolveWorkspacePath(filePath, rootsFetcher)).resolvedPath;
 }
 
 export async function resolveWorkspacePath(

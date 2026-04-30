@@ -146,15 +146,6 @@ export function buildOrchestrationRequestFromInputs(input: CommonToolInputs): Or
   };
 }
 
-export function buildUrlContextFallbackPart(
-  urls: readonly string[] | undefined,
-  activeCapabilities: ReadonlySet<string>,
-): { text: string } | undefined {
-  if (!urls || urls.length === 0) return undefined;
-  if (activeCapabilities.has('urlContext')) return undefined;
-  return { text: `Context URLs:\n${urls.join('\n')}` };
-}
-
 interface ToolProfileDetails {
   fileSearchStoreCount?: number;
   functionCount?: number;

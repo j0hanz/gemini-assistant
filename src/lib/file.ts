@@ -14,7 +14,7 @@ import { isSensitiveUntrackedPath, resolveWorkspacePath } from './validation.js'
 
 // ── MIME / Size ───────────────────────────────────────────────────────
 
-export const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
 
 const MIME_MAP: Record<string, string> = {
   // Documents
@@ -69,7 +69,7 @@ const MIME_MAP: Record<string, string> = {
   '.toml': 'text/plain',
 };
 
-export function getMimeType(filePath: string): string {
+function getMimeType(filePath: string): string {
   const ext = extname(filePath).toLowerCase();
   return MIME_MAP[ext] ?? 'application/octet-stream';
 }
@@ -179,7 +179,7 @@ function assertCompleteUploadedHandle(
   }
 }
 
-export async function uploadFile(
+async function uploadFile(
   filePath: string,
   signal: AbortSignal,
   rootsFetcher?: RootsFetcher,
@@ -229,7 +229,7 @@ export async function uploadFile(
   };
 }
 
-export async function deleteUploadedFiles(
+async function deleteUploadedFiles(
   names: string[],
   onCleanupError?: (reason: unknown) => void,
 ): Promise<void> {
@@ -248,7 +248,7 @@ interface UploadedFilesCleanupTracker {
   addUploadedFile(file: Pick<UploadedFile, 'name'>): void;
 }
 
-export async function withUploadedFilesCleanup<T>(
+async function withUploadedFilesCleanup<T>(
   ctx: ServerContext,
   operation: (tracker: UploadedFilesCleanupTracker) => Promise<T>,
 ): Promise<T> {

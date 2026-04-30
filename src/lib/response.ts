@@ -3,25 +3,19 @@ import {
   RELATED_TASK_META_KEY as SDK_RELATED_TASK_META_KEY,
 } from '@modelcontextprotocol/server';
 
-import {
-  type GenerateContentResponse,
-  type GroundingMetadata,
-  type UrlMetadata,
-  UrlRetrievalStatus,
-} from '@google/genai';
+import { type GroundingMetadata, type UrlMetadata, UrlRetrievalStatus } from '@google/genai';
 import { z } from 'zod/v4';
 
 import type {
   Finding,
   GroundingCitation,
   GroundingSignals,
-  SearchEntryPoint,
   SourceDetail,
   UrlMetadataEntry,
   UsageMetadata,
 } from '../schemas/outputs.js';
 
-import { finishReasonToError, SafetyError } from './errors.js';
+import { SafetyError } from './errors.js';
 import { parseJson } from './json.js';
 import { logger } from './logger.js';
 import type { ToolEvent } from './streaming.js';
@@ -173,10 +167,6 @@ export function collectUrlMetadataWithCounts(
   );
 }
 
-export function collectUrlMetadata(urlMetadata: UrlMetadata[] | undefined): UrlMetadataEntry[] {
-  return collectUrlMetadataWithCounts(urlMetadata).items;
-}
-
 // ── Grounding Sources ─────────────────────────────────────────────────
 
 export function collectGroundedSourcesWithCounts(
@@ -187,10 +177,6 @@ export function collectGroundedSourcesWithCounts(
     items: collected.items.map((source) => source.url),
     droppedNonPublic: collected.droppedNonPublic,
   };
-}
-
-export function collectGroundedSources(groundingMetadata: GroundingMetadata | undefined): string[] {
-  return collectGroundedSourcesWithCounts(groundingMetadata).items;
 }
 
 export function collectGroundedSourceDetailsWithCounts(
@@ -206,13 +192,6 @@ export function collectGroundedSourceDetailsWithCounts(
       return pickDefined({ domain: domainFromPublicUrl(url), origin, title, url });
     },
   );
-}
-
-export function collectGroundedSourceDetails(
-  groundingMetadata: GroundingMetadata | undefined,
-  urlContextUrls = new Set<string>(),
-): SourceDetail[] {
-  return collectGroundedSourceDetailsWithCounts(groundingMetadata, urlContextUrls).items;
 }
 
 export function mergeSourceDetails(
@@ -378,13 +357,6 @@ export function deriveOverallStatus(
   return 'ungrounded';
 }
 
-export function collectSearchEntryPoint(
-  groundingMetadata: GroundingMetadata | undefined,
-): SearchEntryPoint | undefined {
-  const renderedContent = groundingMetadata?.searchEntryPoint?.renderedContent;
-  return renderedContent ? { renderedContent } : undefined;
-}
-
 export function promptBlockedError(toolName: string, blockReason?: string): CallToolResult {
   return new SafetyError(toolName, 'prompt_blocked', blockReason).toToolResult();
 }
@@ -468,22 +440,6 @@ export function buildSuccessfulStructuredContent<TDomain extends Record<string, 
   return stripEmpty(merged) as TDomain &
     ReturnType<typeof buildBaseStructuredOutput> &
     Record<string, unknown>;
-}
-
-export function validateStructuredContent<TSchema extends z.ZodType>(
-  toolName: string,
-  outputSchema: TSchema,
-  structuredContent: unknown,
-): z.infer<TSchema> {
-  const parsed = outputSchema.safeParse(structuredContent);
-  if (parsed.success) {
-    return parsed.data;
-  }
-
-  throw new Error(
-    `${toolName} produced structuredContent that does not match outputSchema.\n` +
-      z.prettifyError(parsed.error),
-  );
 }
 
 const responseLog = logger.child('response');
@@ -672,30 +628,6 @@ export function withRelatedTaskMeta<T extends Record<string, unknown>>(
           },
         }
       : {}),
-  };
-}
-
-/**
- * Extracts text from a Gemini response, returning an errorResult if the
- * response was blocked, empty, or truncated by safety/recitation filters.
- */
-export function extractTextOrError(
-  response: GenerateContentResponse,
-  toolName: string,
-): CallToolResult {
-  const candidate = response.candidates?.[0];
-
-  // No candidates at all — prompt-level block
-  if (!candidate) {
-    return promptBlockedError(toolName, response.promptFeedback?.blockReason);
-  }
-
-  const text = response.text ?? '';
-  const errResult = finishReasonToError(candidate.finishReason, text, toolName);
-  if (errResult) return errResult.toToolResult();
-
-  return {
-    content: [{ type: 'text', text }],
   };
 }
 

@@ -62,7 +62,7 @@ function basename(filePath: string): string {
   return filePath.split(/[\\/]/).pop() ?? filePath;
 }
 
-export function buildDiagramFencePattern(diagramType: 'mermaid' | 'plantuml'): RegExp {
+function buildDiagramFencePattern(diagramType: 'mermaid' | 'plantuml'): RegExp {
   return new RegExp(`\`\`\`${diagramType}\\s*\\n([\\s\\S]*?)\`\`\``);
 }
 

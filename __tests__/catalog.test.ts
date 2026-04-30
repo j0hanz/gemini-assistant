@@ -1,5 +1,6 @@
-import { test } from 'node:test';
 import assert from 'node:assert';
+import { test } from 'node:test';
+
 import { listDiscoveryEntries, listWorkflowEntries } from '../src/catalog.js';
 
 test('listDiscoveryEntries — returns discovery entries', () => {

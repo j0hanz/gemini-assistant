@@ -94,14 +94,12 @@ import {
   type TranscriptEntry,
 } from '../sessions.js';
 
-export { appendToolResponseTurn, buildRebuiltChatContents };
-
 type InternalAskArgs = Omit<ChatInput, 'goal' | 'responseSchemaJson'> & {
   message: string;
   responseSchema?: GeminiResponseSchema;
 };
 
-export type AskArgs = InternalAskArgs & {
+type AskArgs = InternalAskArgs & {
   cacheName?: string;
 };
 
@@ -236,7 +234,7 @@ function appendAskWarnings(result: CallToolResult, warnings: readonly string[]):
   );
 }
 
-export function buildAskStructuredContent(
+function buildAskStructuredContent(
   text: string,
   streamResult: Pick<
     StreamResult,
@@ -291,7 +289,7 @@ export function buildAskStructuredContent(
   );
 }
 
-export function formatStructuredResult(
+function formatStructuredResult(
   result: CallToolResult,
   streamResult: Pick<
     StreamResult,
@@ -670,7 +668,7 @@ function appendSessionResource(
   }
 }
 
-export async function askWithoutSession(
+async function askWithoutSession(
   args: AskArgs,
   ctx: ServerContext,
   chat?: Chat,
@@ -884,7 +882,7 @@ function buildRequestedSessionContract(args: AskArgs): SessionGenerationContract
   );
 }
 
-export function createDefaultAskDependencies(
+function createDefaultAskDependencies(
   sessionAccess: SessionAccess,
   workspace: ToolWorkspaceAccess,
 ): AskDependencies {
@@ -1082,7 +1080,7 @@ function isPreparedRequest(
   return 'effectiveArgs' in value;
 }
 
-export function createAskWork(deps: AskDependencies, workspace: ToolWorkspaceAccess) {
+function createAskWork(deps: AskDependencies, workspace: ToolWorkspaceAccess) {
   return async function askWork(args: AskArgs, ctx: ServerContext): Promise<CallToolResult> {
     const prepared = await prepareAskRequest(args, deps, ctx, ctx.mcpReq.signal, workspace);
     if (!isPreparedRequest(prepared)) return prepared;
@@ -1213,7 +1211,7 @@ function assembleChatOutput(
   );
 }
 
-export async function chatWork(
+async function chatWork(
   askWork: ReturnType<typeof createAskWork>,
   args: ChatInput,
   ctx: ServerContext,

@@ -252,7 +252,7 @@ interface ReviewWorkDeps {
   diagnoseFailureWork?: ReviewDiagnoseFailureWork;
 }
 
-export function __setReviewGitRunnerForTests(mockRunner: typeof execFileAsync): () => void {
+function __setReviewGitRunnerForTests(mockRunner: typeof execFileAsync): () => void {
   const previousRunner = reviewGitRunner;
   reviewGitRunner = mockRunner;
   return () => {
@@ -418,11 +418,11 @@ async function diagnoseFailureWork(
   );
 }
 
-export function matchesNoisyPath(filePath: string): boolean {
+function matchesNoisyPath(filePath: string): boolean {
   return PATH_RULES.isNoisy(filePath);
 }
 
-export function isSensitiveUntrackedPath(relativePath: string): boolean {
+function isSensitiveUntrackedPath(relativePath: string): boolean {
   return isSensitiveUntrackedPathFromValidation(relativePath);
 }
 
@@ -470,7 +470,7 @@ function splitPathSegments(filePath: string): string[] {
   return normalizePath(filePath).split('/').filter(Boolean);
 }
 
-export function computeDiffStats(diff: string): DiffStats {
+function computeDiffStats(diff: string): DiffStats {
   const files = new Set<string>();
   let additions = 0;
   let deletions = 0;
@@ -507,7 +507,7 @@ function buildGitArgs({
   ];
 }
 
-export function buildGitDiffArgs(staged: boolean): string[] {
+function buildGitDiffArgs(staged: boolean): string[] {
   return buildGitArgs({ staged });
 }
 
@@ -645,11 +645,7 @@ function isBinaryContent(buffer: Buffer): boolean {
   }
 }
 
-export function buildUntrackedFilePatch(
-  filePath: string,
-  content: string,
-  executable = false,
-): string {
+function buildUntrackedFilePatch(filePath: string, content: string, executable = false): string {
   const normalizedContent = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
   const hasTrailingNewline = normalizedContent.endsWith('\n');
   const body = hasTrailingNewline ? normalizedContent.slice(0, -1) : normalizedContent;
@@ -674,7 +670,7 @@ export function buildUntrackedFilePatch(
   return patchLines.join('\n');
 }
 
-export async function buildUntrackedPatch(
+async function buildUntrackedPatch(
   gitRoot: string,
   relativePath: string,
   signal?: AbortSignal,
@@ -723,7 +719,7 @@ function computeUnitStats(text: string): Pick<DiffUnit, 'additions' | 'deletions
   return { additions, deletions };
 }
 
-export function splitDiffUnits(diff: string): DiffUnit[] {
+function splitDiffUnits(diff: string): DiffUnit[] {
   if (!diff.trim()) return [];
 
   return diff
@@ -752,7 +748,7 @@ function scorePathLocation(normalizedPath: string): number {
   return PATH_RULES.scoreLocation(normalizedPath);
 }
 
-export function scoreDiffUnitRisk(unit: DiffUnit): number {
+function scoreDiffUnitRisk(unit: DiffUnit): number {
   const normalizedPath = normalizePath(unit.path);
   const segments = splitPathSegments(unit.path);
   const basename = segments.at(-1) ?? normalizedPath;
@@ -772,7 +768,7 @@ export function scoreDiffUnitRisk(unit: DiffUnit): number {
   return score * 1_000 + changeSize;
 }
 
-export function budgetDiffUnits(
+function budgetDiffUnits(
   units: DiffUnit[],
   maxChars = MAX_DIFF_CHARS,
 ): { diff: string; omittedPaths: string[]; reviewedPaths: string[]; truncated: boolean } {
@@ -839,7 +835,7 @@ function buildTruncatedDiffUnitText(text: string, remainingChars: number): strin
   return `${normalizedText}${TRUNCATED_DIFF_NOTICE}`;
 }
 
-export function formatGitError(err: unknown): string {
+function formatGitError(err: unknown): string {
   if (!(err instanceof Error)) {
     return `Failed to run git: ${String(err)}. Ensure git is installed.`;
   }
@@ -865,7 +861,7 @@ function appendPromptSection(parts: string[], title: string, entries: string[]):
   parts.push('', title, ...entries.map((entry) => `- ${entry}`));
 }
 
-export function buildAnalysisPrompt(
+function buildAnalysisPrompt(
   diff: string,
   stats: DiffStats,
   reviewedPaths: string[],
@@ -985,7 +981,7 @@ function buildStructuredContent(
   };
 }
 
-export function parseAnalyzePrModelOutput(textContent: string): {
+function parseAnalyzePrModelOutput(textContent: string): {
   summary: string;
   documentationDrift?: { file: string; driftDescription: string; suggestedUpdate: string }[];
   schemaWarnings: string[];
@@ -1105,7 +1101,7 @@ async function logSnapshotStats(
   );
 }
 
-export async function buildLocalDiffSnapshot(
+async function buildLocalDiffSnapshot(
   workingDirectory = process.cwd(),
   signal?: AbortSignal,
 ): Promise<LocalDiffSnapshot> {
@@ -1142,7 +1138,7 @@ export async function buildLocalDiffSnapshot(
   };
 }
 
-export async function resolveReviewWorkingDirectory(
+async function resolveReviewWorkingDirectory(
   rootsFetcher: ToolRootsFetcher,
   log: ScopedLogger,
 ): Promise<string> {
@@ -1183,7 +1179,7 @@ async function readDocFiles(
   return results;
 }
 
-export async function analyzePrWork(
+async function analyzePrWork(
   {
     thinkingLevel,
     language,
@@ -1367,7 +1363,7 @@ function requireReviewField(
   throw new Error(`${field} is required when subjectKind=${subjectKind}.`);
 }
 
-export async function reviewWork(
+async function reviewWork(
   deps: ReviewWorkDeps,
   args: ReviewInput,
   ctx: ServerContext,

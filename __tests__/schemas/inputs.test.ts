@@ -1,6 +1,12 @@
-import { test } from 'node:test';
 import assert from 'node:assert';
-import { ChatInputSchema, ResearchInputSchema, AnalyzeInputSchema, ReviewInputSchema } from '../../src/schemas/inputs.js';
+import { test } from 'node:test';
+
+import {
+  AnalyzeInputSchema,
+  ChatInputSchema,
+  ResearchInputSchema,
+  ReviewInputSchema,
+} from '../../src/schemas/inputs.js';
 
 test('ChatInputSchema — valid minimal input passes', () => {
   const result = ChatInputSchema.safeParse({ goal: 'hello' });
@@ -46,7 +52,11 @@ test('ResearchInputSchema — extra properties rejected', () => {
 });
 
 test('AnalyzeInputSchema — valid file target passes', () => {
-  const result = AnalyzeInputSchema.safeParse({ goal: 'analyze', targetKind: 'file', filePath: '/path/to/file.txt' });
+  const result = AnalyzeInputSchema.safeParse({
+    goal: 'analyze',
+    targetKind: 'file',
+    filePath: '/path/to/file.txt',
+  });
   assert.strictEqual(result.success, true);
 });
 
@@ -61,7 +71,12 @@ test('AnalyzeInputSchema — missing filePath for file target throws', () => {
 });
 
 test('AnalyzeInputSchema — extra properties rejected', () => {
-  const result = AnalyzeInputSchema.safeParse({ goal: 'analyze', targetKind: 'file', filePath: '/file', extra: 'field' });
+  const result = AnalyzeInputSchema.safeParse({
+    goal: 'analyze',
+    targetKind: 'file',
+    filePath: '/file',
+    extra: 'field',
+  });
   assert.strictEqual(result.success, false);
 });
 

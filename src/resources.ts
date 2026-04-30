@@ -28,15 +28,13 @@ import {
 } from './config.js';
 import { sanitizeSessionText, type SessionStore, type SessionSummary } from './sessions.js';
 
-export { PUBLIC_RESOURCE_URIS } from './public-contract.js';
-
-export const DISCOVER_CATALOG_URI = 'discover://catalog' as const;
-export const DISCOVER_WORKFLOWS_URI = 'discover://workflows' as const;
-export const DISCOVER_CONTEXT_URI = 'discover://context' as const;
+const DISCOVER_CATALOG_URI = 'discover://catalog' as const;
+const DISCOVER_WORKFLOWS_URI = 'discover://workflows' as const;
+const DISCOVER_CONTEXT_URI = 'discover://context' as const;
 const GEMINI_PROFILES_URI = 'gemini://profiles' as const;
 export const SESSIONS_LIST_URI = 'session://' as const;
-export const WORKSPACE_CONTEXT_URI = 'workspace://context' as const;
-export const WORKSPACE_CACHE_URI = 'workspace://cache' as const;
+const WORKSPACE_CONTEXT_URI = 'workspace://context' as const;
+const WORKSPACE_CACHE_URI = 'workspace://cache' as const;
 
 const MIME_JSON = 'application/json' as const;
 const MIME_MARKDOWN = 'text/markdown' as const;
@@ -178,7 +176,7 @@ interface WorkspaceContextResourceData {
   sources: string[];
 }
 
-export function renderWorkspaceContextMarkdown({
+function renderWorkspaceContextMarkdown({
   content,
   estimatedTokens,
   sources,
@@ -199,7 +197,7 @@ export function renderWorkspaceContextMarkdown({
   return sections.join('\n');
 }
 
-export function readWorkspaceContextResource(
+function readWorkspaceContextResource(
   uri: URL | string,
   data: WorkspaceContextResourceData,
 ): ReadResourceResult {
@@ -263,14 +261,14 @@ function sessionTurnPartsResources(sessionStore: SessionStore): ResourceListEntr
   });
 }
 
-export function readDiscoverCatalogResource(
+function readDiscoverCatalogResource(
   uri: URL | string = DISCOVER_CATALOG_RESOURCE.uri,
 ): ReadResourceResult {
   const entries = listDiscoveryEntries();
   return dualContentResource(toResourceUri(uri), entries, renderDiscoveryCatalogMarkdown(entries));
 }
 
-export function readDiscoverWorkflowsResource(
+function readDiscoverWorkflowsResource(
   uri: URL | string = DISCOVER_WORKFLOWS_RESOURCE.uri,
 ): ReadResourceResult {
   const entries = listWorkflowEntries();
@@ -317,7 +315,7 @@ function formatScannedFiles(scannedFiles: string[]): string {
   return `${scannedFileLabel}${scannedFileSuffix}`;
 }
 
-export function renderServerContextMarkdown(snapshot: ServerContextSnapshot): string {
+function renderServerContextMarkdown(snapshot: ServerContextSnapshot): string {
   const { workspace, sessions, config } = snapshot;
   const cacheStatus = formatCacheStatus(workspace.cacheStatus);
   const scannedFilesStr = formatScannedFiles(workspace.scannedFiles);
@@ -348,7 +346,7 @@ export function renderServerContextMarkdown(snapshot: ServerContextSnapshot): st
   ].join('\n');
 }
 
-export async function buildServerContextSnapshot(
+async function buildServerContextSnapshot(
   rootsFetcher: RootsFetcher,
   sessionStore: SessionStore,
   workspaceCacheManagerInstance: WorkspaceCacheManagerImpl,
@@ -389,7 +387,7 @@ export async function buildServerContextSnapshot(
   };
 }
 
-export async function readDiscoverContextResource(
+async function readDiscoverContextResource(
   uri: URL | string = DISCOVER_CONTEXT_RESOURCE.uri,
   rootsFetcher: RootsFetcher,
   sessionStore: SessionStore,
@@ -422,7 +420,7 @@ function renderSessionTranscriptMarkdown(
   return lines.join('\n').trimEnd() + '\n';
 }
 
-export function getSessionTranscriptResourceData(
+function getSessionTranscriptResourceData(
   sessionStore: SessionStore,
   sessionId: string | undefined,
 ): SessionTranscriptResourceData {
@@ -441,7 +439,7 @@ export function getSessionTranscriptResourceData(
   return transcript;
 }
 
-export function getSessionEventsResourceData(
+function getSessionEventsResourceData(
   sessionStore: SessionStore,
   sessionId: string | undefined,
 ): SessionEventsResourceData {
@@ -460,7 +458,7 @@ export function getSessionEventsResourceData(
   return events;
 }
 
-export function getSessionTurnPartsResourceData(
+function getSessionTurnPartsResourceData(
   sessionStore: SessionStore,
   sessionId: string | undefined,
   turnIndexText: string | undefined,
@@ -496,7 +494,7 @@ export function getSessionTurnPartsResourceData(
   return JSON.parse(sanitized) as unknown[];
 }
 
-export function readSessionTranscriptResource(
+function readSessionTranscriptResource(
   sessionStore: SessionStore,
   uri: URL | string,
   sessionId: string | string[] | undefined,
@@ -564,7 +562,7 @@ function appendSessionToolEventsMarkdown(
   }
 }
 
-export function readSessionEventsResource(
+function readSessionEventsResource(
   sessionStore: SessionStore,
   uri: URL | string,
   sessionId: string | string[] | undefined,
@@ -574,7 +572,7 @@ export function readSessionEventsResource(
   return dualContentResource(toResourceUri(uri), data, renderSessionEventsMarkdown(id, data));
 }
 
-export function readSessionTurnPartsResource(
+function readSessionTurnPartsResource(
   sessionStore: SessionStore,
   uri: URL | string,
   sessionId: string | string[] | undefined,

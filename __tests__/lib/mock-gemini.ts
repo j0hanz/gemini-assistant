@@ -1,4 +1,4 @@
-import type { GenerateContentResponse, GenerateContentResponseUsageMetadata } from '@google/genai';
+import type { GenerateContentResponse } from '@google/genai';
 
 export function mockStream(
   chunks: Partial<GenerateContentResponse>[],
@@ -19,7 +19,9 @@ export function mockStream(
 export function mockTextResponse(text: string): AsyncIterable<GenerateContentResponse> {
   return mockStream([
     {
-      candidates: [{ content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP' as never }],
+      candidates: [
+        { content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP' as never },
+      ],
     },
   ]);
 }
@@ -50,12 +52,14 @@ export function mockUsageResponse(
 ): AsyncIterable<GenerateContentResponse> {
   return mockStream([
     {
-      candidates: [{ content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP' as never }],
+      candidates: [
+        { content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP' as never },
+      ],
       usageMetadata: {
         promptTokenCount: inputTokens,
         candidatesTokenCount: outputTokens,
         totalTokenCount: inputTokens + outputTokens,
-      } as GenerateContentResponseUsageMetadata,
+      },
     },
   ]);
 }

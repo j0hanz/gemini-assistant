@@ -1,5 +1,4 @@
 import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
-import { INVALID_PARAMS, ProtocolError } from '@modelcontextprotocol/server';
 
 import { FinishReason } from '@google/genai';
 
@@ -142,17 +141,13 @@ export class SafetyError extends AppError {
   }
 }
 
-export function throwValidationError(message: string): never {
-  throw new ProtocolError(INVALID_PARAMS, message);
-}
-
-export class CancelledError extends AppError {
+class CancelledError extends AppError {
   constructor(toolName: string) {
     super(toolName, `${toolName}: cancelled by client`, 'cancelled', false);
   }
 }
 
-export class TruncationError extends AppError {
+class TruncationError extends AppError {
   constructor(toolName: string) {
     super(
       toolName,

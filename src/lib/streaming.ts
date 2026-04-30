@@ -13,10 +13,8 @@ import type {
 
 import { AppError, finishReasonToError, withRetry } from './errors.js';
 import { mcpLog } from './logger.js';
-import { advanceProgress, PROGRESS_CAP, PROGRESS_TOTAL, sendProgress } from './progress.js';
+import { advanceProgress, PROGRESS_TOTAL, sendProgress } from './progress.js';
 import { pickDefined, promptBlockedError } from './response.js';
-
-export { advanceProgress, PROGRESS_CAP, PROGRESS_TOTAL };
 
 export interface FunctionCallEntry {
   id?: string;
@@ -927,7 +925,7 @@ export function deriveComputationsFromToolEvents(
   return computations;
 }
 
-export async function consumeStreamWithProgress(
+async function consumeStreamWithProgress(
   stream: AsyncGenerator<GenerateContentResponse>,
   ctx: ServerContext,
   toolLabel?: string,
@@ -979,7 +977,7 @@ export async function consumeStreamWithProgress(
   return finalizeStreamResult(state);
 }
 
-export function validateStreamResult(result: StreamResult, toolName: string): CallToolResult {
+function validateStreamResult(result: StreamResult, toolName: string): CallToolResult {
   if (result.aborted) {
     return new AppError(
       toolName,

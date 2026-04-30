@@ -20,7 +20,7 @@ import {
   SourceDetailSchema,
 } from './fields.js';
 
-export const UsageMetadataSchema = BaseUsageMetadataSchema;
+const UsageMetadataSchema = BaseUsageMetadataSchema;
 
 export type UsageMetadata = z.infer<typeof UsageMetadataSchema>;
 
@@ -34,7 +34,7 @@ const ContextSourceReportSchema = z.strictObject({
 
 export type ContextSourceReport = z.infer<typeof ContextSourceReportSchema>;
 
-export const ContextUsedSchema = z
+const ContextUsedSchema = z
   .strictObject({
     sources: z.array(ContextSourceReportSchema).describe('Context sources included in the call'),
     totalTokens: nonNegativeInt('Total context tokens consumed'),
@@ -49,7 +49,7 @@ export type SourceDetail = z.infer<typeof SourceDetailSchema>;
 export type GroundingCitation = z.infer<typeof GroundingCitationSchema>;
 export type Finding = z.infer<typeof FindingSchema>;
 export type GroundingSignals = z.infer<typeof GroundingSignalsSchema>;
-export type SearchEntryPoint = z.infer<typeof SearchEntryPointSchema>;
+type SearchEntryPoint = z.infer<typeof SearchEntryPointSchema>;
 
 export const AnalyzeOutputSchema = z.strictObject({
   ...publicCoreOutputFields,

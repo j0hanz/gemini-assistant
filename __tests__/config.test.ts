@@ -1,5 +1,5 @@
-import { test, before, after } from 'node:test';
 import assert from 'node:assert';
+import { after, before, test } from 'node:test';
 
 // Save original env
 const originalEnv = { ...process.env };

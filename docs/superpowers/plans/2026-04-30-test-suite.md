@@ -26,63 +26,63 @@ All prior tests were removed. This plan produces a fresh suite that verifies eve
 
 ## 2. Requirements & Constraints
 
-| ID | Type | Statement |
-| :--: | :-- | :-- |
-| [`REQ-001`](#2-requirements--constraints) | Requirement | Every test file must pass `npm run test` with zero real API calls. |
-| [`REQ-002`](#2-requirements--constraints) | Requirement | `getAI()` must never be called with a live `API_KEY` in any test. |
-| [`REQ-003`](#2-requirements--constraints) | Requirement | Test names must read as behavior specs: `'withRetry — retries on retryable error'`. |
-| [`CON-001`](#2-requirements--constraints) | Constraint | Runner is Node.js built-in `node:test` — no Jest, Vitest, or Mocha. |
-| [`CON-002`](#2-requirements--constraints) | Constraint | All imports use `.js` extensions (ESM `NodeNext` resolution). |
-| [`CON-003`](#2-requirements--constraints) | Constraint | Tests that mutate `process.env` must restore originals in `after()`. |
-| [`PAT-001`](#2-requirements--constraints) | Pattern | Follow [createDefaultToolServices](src/lib/tool-context.ts#L49) for ToolServices stubs in integration tests. |
+|                    ID                     | Type        | Statement                                                                                                    |
+| :---------------------------------------: | :---------- | :----------------------------------------------------------------------------------------------------------- |
+| [`REQ-001`](#2-requirements--constraints) | Requirement | Every test file must pass `npm run test` with zero real API calls.                                           |
+| [`REQ-002`](#2-requirements--constraints) | Requirement | `getAI()` must never be called with a live `API_KEY` in any test.                                            |
+| [`REQ-003`](#2-requirements--constraints) | Requirement | Test names must read as behavior specs: `'withRetry — retries on retryable error'`.                          |
+| [`CON-001`](#2-requirements--constraints) | Constraint  | Runner is Node.js built-in `node:test` — no Jest, Vitest, or Mocha.                                          |
+| [`CON-002`](#2-requirements--constraints) | Constraint  | All imports use `.js` extensions (ESM `NodeNext` resolution).                                                |
+| [`CON-003`](#2-requirements--constraints) | Constraint  | Tests that mutate `process.env` must restore originals in `after()`.                                         |
+| [`PAT-001`](#2-requirements--constraints) | Pattern     | Follow [createDefaultToolServices](src/lib/tool-context.ts#L49) for ToolServices stubs in integration tests. |
 
 ## 3. Current Context
 
 ### File structure
 
-| File | Status | Responsibility |
-| :-- | :-- | :-- |
-| `__tests__/lib/mock-gemini.ts` | Create | Shared factory: fake AsyncIterable streams + `createMockAI()` stub |
-| `__tests__/lib/errors.test.ts` | Create | Tests for `AppError`, `isAbortError`, `withRetry`, `finishReasonToError` |
-| `__tests__/lib/tool-profiles.test.ts` | Create | Tests for `resolveProfile` and `validateProfile` across all profiles |
-| `__tests__/lib/streaming.test.ts` | Create | Tests for `validateStreamResult` and `extractUsage` with fake `StreamResult` data |
-| `__tests__/lib/response.test.ts` | Create | Tests for `tryParseJsonResponse`, `mergeStructured`, `promptBlockedError` |
-| `__tests__/lib/validation.test.ts` | Create | Tests for `isPathWithinRoot`, `validateHostHeader` |
-| `__tests__/schemas/inputs.test.ts` | Create | Tests for `ChatInput`, `ResearchInput`, `AnalyzeInput`, `ReviewInput` schemas |
-| `__tests__/sessions.test.ts` | Create | Tests for `sanitizeSessionText`, `buildReplayHistoryParts`, `selectReplayWindow`, `SessionStore` |
-| `__tests__/config.test.ts` | Create | Tests for boolean parsing, `getApiKey`, `getTransportMode` |
-| `__tests__/catalog.test.ts` | Create | Tests for `renderDiscoveryCatalogMarkdown`, `renderWorkflowCatalogMarkdown` |
+| File                                  | Status | Responsibility                                                                                   |
+| :------------------------------------ | :----- | :----------------------------------------------------------------------------------------------- |
+| `__tests__/lib/mock-gemini.ts`        | Create | Shared factory: fake AsyncIterable streams + `createMockAI()` stub                               |
+| `__tests__/lib/errors.test.ts`        | Create | Tests for `AppError`, `isAbortError`, `withRetry`, `finishReasonToError`                         |
+| `__tests__/lib/tool-profiles.test.ts` | Create | Tests for `resolveProfile` and `validateProfile` across all profiles                             |
+| `__tests__/lib/streaming.test.ts`     | Create | Tests for `validateStreamResult` and `extractUsage` with fake `StreamResult` data                |
+| `__tests__/lib/response.test.ts`      | Create | Tests for `tryParseJsonResponse`, `mergeStructured`, `promptBlockedError`                        |
+| `__tests__/lib/validation.test.ts`    | Create | Tests for `isPathWithinRoot`, `validateHostHeader`                                               |
+| `__tests__/schemas/inputs.test.ts`    | Create | Tests for `ChatInput`, `ResearchInput`, `AnalyzeInput`, `ReviewInput` schemas                    |
+| `__tests__/sessions.test.ts`          | Create | Tests for `sanitizeSessionText`, `buildReplayHistoryParts`, `selectReplayWindow`, `SessionStore` |
+| `__tests__/config.test.ts`            | Create | Tests for boolean parsing, `getApiKey`, `getTransportMode`                                       |
+| `__tests__/catalog.test.ts`           | Create | Tests for `renderDiscoveryCatalogMarkdown`, `renderWorkflowCatalogMarkdown`                      |
 
 ### Relevant symbols
 
-| Symbol | Why it matters |
-| :-- | :-- |
-| [AppError](src/lib/errors.ts#L35) | Core error class under test |
-| [isAbortError](src/lib/errors.ts#L27) | Abort detection utility |
-| [withRetry](src/lib/errors.ts#L290) | Retry policy — maxRetries=2, base=1000ms |
-| [finishReasonToError](src/lib/errors.ts#L204) | Finish-reason → AppError mapping |
-| [resolveProfile](src/lib/tool-profiles.ts#L269) | Profile name + overrides → ResolvedProfile |
-| [validateProfile](src/lib/tool-profiles.ts#L314) | Mutual exclusivity enforcement |
-| [sanitizeSessionText](src/sessions.ts#L376) | Secret redaction regex patterns |
-| [buildReplayHistoryParts](src/sessions.ts#L566) | Filters thought-only parts from replay history |
-| [selectReplayWindow](src/sessions.ts#L1150) | Fits conversation within maxBytes |
-| [SessionStore](src/sessions.ts#L783) | In-memory session store with TTL + LRU eviction |
-| [appendSessionTurn](src/sessions.ts#L733) | Appends user+model turns to a session |
-| [getApiKey](src/config.ts#L174) | Throws if `API_KEY` missing or blank |
-| [getTransportMode](src/config.ts#L222) | Parses `TRANSPORT` env var |
-| [isPathWithinRoot](src/lib/validation.ts#L173) | Path containment check |
-| [validateHostHeader](src/lib/validation.ts#L88) | Host header allow-list check |
-| [renderDiscoveryCatalogMarkdown](src/catalog.ts#L85) | Renders tool catalog to Markdown |
-| [renderWorkflowCatalogMarkdown](src/catalog.ts#L127) | Renders workflow catalog to Markdown |
-| [getAI](src/client.ts#L241) | Lazy Gemini client singleton — intercepted by `mock.module()` in Phase 2 |
-| [createDefaultToolServices](src/lib/tool-context.ts#L49) | Creates no-op ToolServices for test fixtures |
-| [registerChatTool](src/tools/chat.ts#L1256) | Chat tool registration entry point |
-| [registerResearchTool](src/tools/research.ts#L1132) | Research tool registration entry point |
-| [registerAnalyzeTool](src/tools/analyze.ts#L502) | Analyze tool registration entry point |
-| [registerReviewTool](src/tools/review.ts#L1448) | Review tool registration entry point |
-| [listDiscoveryEntries](src/catalog.ts#L22) | Returns all discovery entries |
-| [listWorkflowEntries](src/catalog.ts#L35) | Returns all workflow entries |
-| [buildGenerateContentConfig](src/client.ts#L173) | Builds Gemini config from cost profiles |
+| Symbol                                                   | Why it matters                                                           |
+| :------------------------------------------------------- | :----------------------------------------------------------------------- |
+| [AppError](src/lib/errors.ts#L35)                        | Core error class under test                                              |
+| [isAbortError](src/lib/errors.ts#L27)                    | Abort detection utility                                                  |
+| [withRetry](src/lib/errors.ts#L290)                      | Retry policy — maxRetries=2, base=1000ms                                 |
+| [finishReasonToError](src/lib/errors.ts#L204)            | Finish-reason → AppError mapping                                         |
+| [resolveProfile](src/lib/tool-profiles.ts#L269)          | Profile name + overrides → ResolvedProfile                               |
+| [validateProfile](src/lib/tool-profiles.ts#L314)         | Mutual exclusivity enforcement                                           |
+| [sanitizeSessionText](src/sessions.ts#L376)              | Secret redaction regex patterns                                          |
+| [buildReplayHistoryParts](src/sessions.ts#L566)          | Filters thought-only parts from replay history                           |
+| [selectReplayWindow](src/sessions.ts#L1150)              | Fits conversation within maxBytes                                        |
+| [SessionStore](src/sessions.ts#L783)                     | In-memory session store with TTL + LRU eviction                          |
+| [appendSessionTurn](src/sessions.ts#L733)                | Appends user+model turns to a session                                    |
+| [getApiKey](src/config.ts#L174)                          | Throws if `API_KEY` missing or blank                                     |
+| [getTransportMode](src/config.ts#L222)                   | Parses `TRANSPORT` env var                                               |
+| [isPathWithinRoot](src/lib/validation.ts#L173)           | Path containment check                                                   |
+| [validateHostHeader](src/lib/validation.ts#L88)          | Host header allow-list check                                             |
+| [renderDiscoveryCatalogMarkdown](src/catalog.ts#L85)     | Renders tool catalog to Markdown                                         |
+| [renderWorkflowCatalogMarkdown](src/catalog.ts#L127)     | Renders workflow catalog to Markdown                                     |
+| [getAI](src/client.ts#L241)                              | Lazy Gemini client singleton — intercepted by `mock.module()` in Phase 2 |
+| [createDefaultToolServices](src/lib/tool-context.ts#L49) | Creates no-op ToolServices for test fixtures                             |
+| [registerChatTool](src/tools/chat.ts#L1256)              | Chat tool registration entry point                                       |
+| [registerResearchTool](src/tools/research.ts#L1132)      | Research tool registration entry point                                   |
+| [registerAnalyzeTool](src/tools/analyze.ts#L502)         | Analyze tool registration entry point                                    |
+| [registerReviewTool](src/tools/review.ts#L1448)          | Review tool registration entry point                                     |
+| [listDiscoveryEntries](src/catalog.ts#L22)               | Returns all discovery entries                                            |
+| [listWorkflowEntries](src/catalog.ts#L35)                | Returns all workflow entries                                             |
+| [buildGenerateContentConfig](src/client.ts#L173)         | Builds Gemini config from cost profiles                                  |
 
 ### Existing commands
 
@@ -110,18 +110,18 @@ node scripts/tasks.mjs
 
 **Goal:** Shared mock Gemini factory exists and exports `mockStream`, `mockTextResponse`, `mockFunctionCallResponse`, `mockUsageResponse`, and `createMockAI`.
 
-| Task | Action | Depends on | Files | Validate |
-| :--: | :-- | :--: | :-- | :-- |
-| [`TASK-001`](#task-001-scaffold-mock-gemini-factory) | Scaffold shared mock factory | none | [__tests__/lib/mock-gemini.ts](__tests__/lib/mock-gemini.ts) | `node --import tsx/esm --no-warnings --input-type=module <<< "import './mock-gemini.ts'"` |
+|                         Task                         | Action                       | Depends on | Files                                                        | Validate                                                                                  |
+| :--------------------------------------------------: | :--------------------------- | :--------: | :----------------------------------------------------------- | :---------------------------------------------------------------------------------------- |
+| [`TASK-001`](#task-001-scaffold-mock-gemini-factory) | Scaffold shared mock factory |    none    | [**tests**/lib/mock-gemini.ts](__tests__/lib/mock-gemini.ts) | `node --import tsx/esm --no-warnings --input-type=module <<< "import './mock-gemini.ts'"` |
 
 #### TASK-001: Scaffold mock Gemini factory
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | none |
-| Files | Create: [__tests__/lib/mock-gemini.ts](__tests__/lib/mock-gemini.ts) |
-| Symbols | [getAI](src/client.ts#L241) |
-| Outcome | File exists, compiles without errors, exports all five factory functions. TDD skipped — pure scaffolding with no testable behavior of its own. |
+| Field      | Value                                                                                                                                          |
+| :--------- | :--------------------------------------------------------------------------------------------------------------------------------------------- |
+| Depends on | none                                                                                                                                           |
+| Files      | Create: [**tests**/lib/mock-gemini.ts](__tests__/lib/mock-gemini.ts)                                                                           |
+| Symbols    | [getAI](src/client.ts#L241)                                                                                                                    |
+| Outcome    | File exists, compiles without errors, exports all five factory functions. TDD skipped — pure scaffolding with no testable behavior of its own. |
 
 - [ ] **Step 1: Create the factory file**
 
@@ -148,7 +148,9 @@ export function mockStream(
 export function mockTextResponse(text: string): AsyncIterable<GenerateContentResponse> {
   return mockStream([
     {
-      candidates: [{ content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP' as never }],
+      candidates: [
+        { content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP' as never },
+      ],
     },
   ]);
 }
@@ -179,7 +181,9 @@ export function mockUsageResponse(
 ): AsyncIterable<GenerateContentResponse> {
   return mockStream([
     {
-      candidates: [{ content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP' as never }],
+      candidates: [
+        { content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP' as never },
+      ],
       usageMetadata: {
         promptTokenCount: inputTokens,
         candidatesTokenCount: outputTokens,
@@ -224,20 +228,20 @@ git commit -m "test: add shared mock Gemini factory"
 
 **Goal:** `__tests__/lib/errors.test.ts` passes, covering `AppError`, `isAbortError`, `withRetry`, and `finishReasonToError`.
 
-| Task | Action | Depends on | Files | Validate |
-| :--: | :-- | :--: | :-- | :-- |
-| [`TASK-002`](#task-002-test-apperror-and-isabort) | Test AppError construction and isAbortError | none | [__tests__/lib/errors.test.ts](__tests__/lib/errors.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/errors.test.ts` |
-| [`TASK-003`](#task-003-test-withretry) | Test withRetry behavior | [`TASK-002`](#task-002-test-apperror-and-isabort) | [__tests__/lib/errors.test.ts](__tests__/lib/errors.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/errors.test.ts` |
-| [`TASK-004`](#task-004-test-finishreasontooerror) | Test finishReasonToError mapping | [`TASK-003`](#task-003-test-withretry) | [__tests__/lib/errors.test.ts](__tests__/lib/errors.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/errors.test.ts` |
+|                       Task                        | Action                                      |                    Depends on                     | Files                                                        | Validate                                                                                  |
+| :-----------------------------------------------: | :------------------------------------------ | :-----------------------------------------------: | :----------------------------------------------------------- | :---------------------------------------------------------------------------------------- |
+| [`TASK-002`](#task-002-test-apperror-and-isabort) | Test AppError construction and isAbortError |                       none                        | [**tests**/lib/errors.test.ts](__tests__/lib/errors.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/errors.test.ts` |
+|      [`TASK-003`](#task-003-test-withretry)       | Test withRetry behavior                     | [`TASK-002`](#task-002-test-apperror-and-isabort) | [**tests**/lib/errors.test.ts](__tests__/lib/errors.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/errors.test.ts` |
+| [`TASK-004`](#task-004-test-finishreasontooerror) | Test finishReasonToError mapping            |      [`TASK-003`](#task-003-test-withretry)       | [**tests**/lib/errors.test.ts](__tests__/lib/errors.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/errors.test.ts` |
 
 #### TASK-002: Test AppError construction and isAbortError
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | none |
-| Files | Create: [__tests__/lib/errors.test.ts](__tests__/lib/errors.test.ts) |
-| Symbols | [AppError](src/lib/errors.ts#L35), [isAbortError](src/lib/errors.ts#L27) |
-| Outcome | Tests for AppError category/retryable/statusCode and isAbortError pass. |
+| Field      | Value                                                                    |
+| :--------- | :----------------------------------------------------------------------- |
+| Depends on | none                                                                     |
+| Files      | Create: [**tests**/lib/errors.test.ts](__tests__/lib/errors.test.ts)     |
+| Symbols    | [AppError](src/lib/errors.ts#L35), [isAbortError](src/lib/errors.ts#L27) |
+| Outcome    | Tests for AppError category/retryable/statusCode and isAbortError pass.  |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -336,12 +340,12 @@ git commit -m "test: add AppError and isAbortError tests"
 
 #### TASK-003: Test withRetry
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | [`TASK-002`](#task-002-test-apperror-and-isabort) |
-| Files | Modify: [__tests__/lib/errors.test.ts](__tests__/lib/errors.test.ts) |
-| Symbols | [withRetry](src/lib/errors.ts#L290), [AppError](src/lib/errors.ts#L35) |
-| Outcome | Tests verify: retries exactly 2×, non-retryable throws immediately, abort signal cancels, succeeds on 2nd attempt. |
+| Field      | Value                                                                                                              |
+| :--------- | :----------------------------------------------------------------------------------------------------------------- |
+| Depends on | [`TASK-002`](#task-002-test-apperror-and-isabort)                                                                  |
+| Files      | Modify: [**tests**/lib/errors.test.ts](__tests__/lib/errors.test.ts)                                               |
+| Symbols    | [withRetry](src/lib/errors.ts#L290), [AppError](src/lib/errors.ts#L35)                                             |
+| Outcome    | Tests verify: retries exactly 2×, non-retryable throws immediately, abort signal cancels, succeeds on 2nd attempt. |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -353,16 +357,20 @@ test('withRetry — stops retrying after maxRetries', async () => {
   const retryable = new AppError('t', 'boom', 'server', true, 503);
   await assert.rejects(
     () =>
-      withRetry(() => {
-        calls++;
-        return Promise.reject(retryable);
-      }, { maxRetries: 0 }), // intentionally 0 to make test fail first
+      withRetry(
+        () => {
+          calls++;
+          return Promise.reject(retryable);
+        },
+        { maxRetries: 0 },
+      ), // intentionally 0 to make test fail first
   );
   assert.equal(calls, 99); // wrong
 });
 ```
 
 Add the import at the top of the file:
+
 ```ts
 import { AppError, isAbortError, withRetry } from '../../src/lib/errors.js';
 ```
@@ -383,12 +391,11 @@ Replace the failing test appended in Step 1 with:
 test('withRetry — retries exactly 2 times on retryable error', async () => {
   let calls = 0;
   const retryable = new AppError('t', 'boom', 'server', true, 503);
-  await assert.rejects(
-    () =>
-      withRetry(() => {
-        calls++;
-        return Promise.reject(retryable);
-      }),
+  await assert.rejects(() =>
+    withRetry(() => {
+      calls++;
+      return Promise.reject(retryable);
+    }),
   );
   assert.equal(calls, 3); // 1 initial + 2 retries
 });
@@ -396,12 +403,11 @@ test('withRetry — retries exactly 2 times on retryable error', async () => {
 test('withRetry — does not retry on non-retryable error', async () => {
   let calls = 0;
   const nonRetryable = new AppError('t', 'boom', 'client', false);
-  await assert.rejects(
-    () =>
-      withRetry(() => {
-        calls++;
-        return Promise.reject(nonRetryable);
-      }),
+  await assert.rejects(() =>
+    withRetry(() => {
+      calls++;
+      return Promise.reject(nonRetryable);
+    }),
   );
   assert.equal(calls, 1);
 });
@@ -423,15 +429,14 @@ test('withRetry — aborts early when signal is already aborted', async () => {
   controller.abort();
   let calls = 0;
   const retryable = new AppError('t', 'boom', 'server', true, 503);
-  await assert.rejects(
-    () =>
-      withRetry(
-        () => {
-          calls++;
-          return Promise.reject(retryable);
-        },
-        { signal: controller.signal },
-      ),
+  await assert.rejects(() =>
+    withRetry(
+      () => {
+        calls++;
+        return Promise.reject(retryable);
+      },
+      { signal: controller.signal },
+    ),
   );
   assert.equal(calls, 1);
 });
@@ -454,12 +459,12 @@ git commit -m "test: add withRetry behavior tests"
 
 #### TASK-004: Test finishReasonToError
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | [`TASK-003`](#task-003-test-withretry) |
-| Files | Modify: [__tests__/lib/errors.test.ts](__tests__/lib/errors.test.ts) |
-| Symbols | [finishReasonToError](src/lib/errors.ts#L204), [AppError](src/lib/errors.ts#L35) |
-| Outcome | Tests verify SAFETY → SafetyError, STOP → undefined, MAX_TOKENS with empty text → TruncationError. |
+| Field      | Value                                                                                              |
+| :--------- | :------------------------------------------------------------------------------------------------- |
+| Depends on | [`TASK-003`](#task-003-test-withretry)                                                             |
+| Files      | Modify: [**tests**/lib/errors.test.ts](__tests__/lib/errors.test.ts)                               |
+| Symbols    | [finishReasonToError](src/lib/errors.ts#L204), [AppError](src/lib/errors.ts#L35)                   |
+| Outcome    | Tests verify SAFETY → SafetyError, STOP → undefined, MAX_TOKENS with empty text → TruncationError. |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -535,18 +540,18 @@ git commit -m "test: add finishReasonToError mapping tests"
 
 **Goal:** `__tests__/lib/tool-profiles.test.ts` passes, verifying all 11 named profiles resolve and `validateProfile` enforces mutual exclusivity.
 
-| Task | Action | Depends on | Files | Validate |
-| :--: | :-- | :--: | :-- | :-- |
-| [`TASK-005`](#task-005-test-resolveprofile-and-validateprofile) | Test resolveProfile + validateProfile | none | [__tests__/lib/tool-profiles.test.ts](__tests__/lib/tool-profiles.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/tool-profiles.test.ts` |
+|                              Task                               | Action                                | Depends on | Files                                                                      | Validate                                                                                         |
+| :-------------------------------------------------------------: | :------------------------------------ | :--------: | :------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------- |
+| [`TASK-005`](#task-005-test-resolveprofile-and-validateprofile) | Test resolveProfile + validateProfile |    none    | [**tests**/lib/tool-profiles.test.ts](__tests__/lib/tool-profiles.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/tool-profiles.test.ts` |
 
 #### TASK-005: Test resolveProfile and validateProfile
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | none |
-| Files | Create: [__tests__/lib/tool-profiles.test.ts](__tests__/lib/tool-profiles.test.ts) |
-| Symbols | [resolveProfile](src/lib/tool-profiles.ts#L269), [validateProfile](src/lib/tool-profiles.ts#L314) |
-| Outcome | All 11 named profiles resolve without throwing; `fileSearch` mutual exclusivity throws; unknown profile selection is guarded upstream by Zod schema. |
+| Field      | Value                                                                                                                                                |
+| :--------- | :--------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Depends on | none                                                                                                                                                 |
+| Files      | Create: [**tests**/lib/tool-profiles.test.ts](__tests__/lib/tool-profiles.test.ts)                                                                   |
+| Symbols    | [resolveProfile](src/lib/tool-profiles.ts#L269), [validateProfile](src/lib/tool-profiles.ts#L314)                                                    |
+| Outcome    | All 11 named profiles resolve without throwing; `fileSearch` mutual exclusivity throws; unknown profile selection is guarded upstream by Zod schema. |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -555,7 +560,11 @@ git commit -m "test: add finishReasonToError mapping tests"
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { TOOL_PROFILE_NAMES, resolveProfile, validateProfile } from '../../src/lib/tool-profiles.js';
+import {
+  resolveProfile,
+  TOOL_PROFILE_NAMES,
+  validateProfile,
+} from '../../src/lib/tool-profiles.js';
 
 test('resolveProfile — plain profile has no builtIns', () => {
   const resolved = resolveProfile({ profile: 'plain' }, { toolKey: 'chat' });
@@ -578,7 +587,11 @@ Expected: FAIL — `[] deepEqual ['WRONG']`.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { TOOL_PROFILE_NAMES, resolveProfile, validateProfile } from '../../src/lib/tool-profiles.js';
+import {
+  resolveProfile,
+  TOOL_PROFILE_NAMES,
+  validateProfile,
+} from '../../src/lib/tool-profiles.js';
 
 // Table-driven: all named profiles resolve without throwing
 for (const name of TOOL_PROFILE_NAMES) {
@@ -681,18 +694,18 @@ git commit -m "test: add resolveProfile and validateProfile tests"
 
 **Goal:** `__tests__/schemas/inputs.test.ts` passes — valid inputs parse, extra keys rejected, enum constraints enforced.
 
-| Task | Action | Depends on | Files | Validate |
-| :--: | :-- | :--: | :-- | :-- |
-| [`TASK-006`](#task-006-test-input-schemas) | Test ChatInput, ResearchInput, AnalyzeInput, ReviewInput | none | [__tests__/schemas/inputs.test.ts](__tests__/schemas/inputs.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/schemas/inputs.test.ts` |
+|                    Task                    | Action                                                   | Depends on | Files                                                                | Validate                                                                                      |
+| :----------------------------------------: | :------------------------------------------------------- | :--------: | :------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------- |
+| [`TASK-006`](#task-006-test-input-schemas) | Test ChatInput, ResearchInput, AnalyzeInput, ReviewInput |    none    | [**tests**/schemas/inputs.test.ts](__tests__/schemas/inputs.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/schemas/inputs.test.ts` |
 
 #### TASK-006: Test input schemas
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | none |
-| Files | Create: [__tests__/schemas/inputs.test.ts](__tests__/schemas/inputs.test.ts) |
-| Symbols | [buildGenerateContentConfig](src/client.ts#L173) |
-| Outcome | Valid minimal inputs parse; extra properties are rejected; enum fields reject invalid values; `thinkingLevel` constraint enforced. |
+| Field      | Value                                                                                                                              |
+| :--------- | :--------------------------------------------------------------------------------------------------------------------------------- |
+| Depends on | none                                                                                                                               |
+| Files      | Create: [**tests**/schemas/inputs.test.ts](__tests__/schemas/inputs.test.ts)                                                       |
+| Symbols    | [buildGenerateContentConfig](src/client.ts#L173)                                                                                   |
+| Outcome    | Valid minimal inputs parse; extra properties are rejected; enum fields reject invalid values; `thinkingLevel` constraint enforced. |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -700,6 +713,7 @@ git commit -m "test: add resolveProfile and validateProfile tests"
 // __tests__/schemas/inputs.test.ts
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+
 import { z } from 'zod/v4';
 
 import { ChatInputSchema } from '../../src/schemas/inputs.js';
@@ -808,21 +822,21 @@ git commit -m "test: add input schema validation tests"
 
 **Goal:** `__tests__/sessions.test.ts` passes — covering secret redaction, replay history filtering, window selection, and `SessionStore` operations including LRU eviction.
 
-| Task | Action | Depends on | Files | Validate |
-| :--: | :-- | :--: | :-- | :-- |
-| [`TASK-007`](#task-007-test-sanitizesessiontext) | Test sanitizeSessionText | none | [__tests__/sessions.test.ts](__tests__/sessions.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/sessions.test.ts` |
-| [`TASK-008`](#task-008-test-buildreplayhistoryparts) | Test buildReplayHistoryParts | [`TASK-007`](#task-007-test-sanitizesessiontext) | [__tests__/sessions.test.ts](__tests__/sessions.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/sessions.test.ts` |
-| [`TASK-009`](#task-009-test-selectreplaywindow) | Test selectReplayWindow | [`TASK-008`](#task-008-test-buildreplayhistoryparts) | [__tests__/sessions.test.ts](__tests__/sessions.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/sessions.test.ts` |
-| [`TASK-010`](#task-010-test-sessionstore-ops-and-eviction) | Test SessionStore ops and LRU eviction | [`TASK-009`](#task-009-test-selectreplaywindow) | [__tests__/sessions.test.ts](__tests__/sessions.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/sessions.test.ts` |
+|                            Task                            | Action                                 |                      Depends on                      | Files                                                    | Validate                                                                                |
+| :--------------------------------------------------------: | :------------------------------------- | :--------------------------------------------------: | :------------------------------------------------------- | :-------------------------------------------------------------------------------------- |
+|      [`TASK-007`](#task-007-test-sanitizesessiontext)      | Test sanitizeSessionText               |                         none                         | [**tests**/sessions.test.ts](__tests__/sessions.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/sessions.test.ts` |
+|    [`TASK-008`](#task-008-test-buildreplayhistoryparts)    | Test buildReplayHistoryParts           |   [`TASK-007`](#task-007-test-sanitizesessiontext)   | [**tests**/sessions.test.ts](__tests__/sessions.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/sessions.test.ts` |
+|      [`TASK-009`](#task-009-test-selectreplaywindow)       | Test selectReplayWindow                | [`TASK-008`](#task-008-test-buildreplayhistoryparts) | [**tests**/sessions.test.ts](__tests__/sessions.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/sessions.test.ts` |
+| [`TASK-010`](#task-010-test-sessionstore-ops-and-eviction) | Test SessionStore ops and LRU eviction |   [`TASK-009`](#task-009-test-selectreplaywindow)    | [**tests**/sessions.test.ts](__tests__/sessions.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/sessions.test.ts` |
 
 #### TASK-007: Test sanitizeSessionText
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | none |
-| Files | Create: [__tests__/sessions.test.ts](__tests__/sessions.test.ts) |
-| Symbols | [sanitizeSessionText](src/sessions.ts#L376) |
-| Outcome | Patterns for API keys, passwords, tokens are redacted; normal text passes through unchanged. |
+| Field      | Value                                                                                        |
+| :--------- | :------------------------------------------------------------------------------------------- |
+| Depends on | none                                                                                         |
+| Files      | Create: [**tests**/sessions.test.ts](__tests__/sessions.test.ts)                             |
+| Symbols    | [sanitizeSessionText](src/sessions.ts#L376)                                                  |
+| Outcome    | Patterns for API keys, passwords, tokens are redacted; normal text passes through unchanged. |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -895,12 +909,12 @@ git commit -m "test: add sanitizeSessionText redaction tests"
 
 #### TASK-008: Test buildReplayHistoryParts
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | [`TASK-007`](#task-007-test-sanitizesessiontext) |
-| Files | Modify: [__tests__/sessions.test.ts](__tests__/sessions.test.ts) |
-| Symbols | [buildReplayHistoryParts](src/sessions.ts#L566) |
-| Outcome | Nameless functionCall parts are dropped; functionResponse without matching functionCall is dropped; normal text parts pass through. |
+| Field      | Value                                                                                                                               |
+| :--------- | :---------------------------------------------------------------------------------------------------------------------------------- |
+| Depends on | [`TASK-007`](#task-007-test-sanitizesessiontext)                                                                                    |
+| Files      | Modify: [**tests**/sessions.test.ts](__tests__/sessions.test.ts)                                                                    |
+| Symbols    | [buildReplayHistoryParts](src/sessions.ts#L566)                                                                                     |
+| Outcome    | Nameless functionCall parts are dropped; functionResponse without matching functionCall is dropped; normal text parts pass through. |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -981,19 +995,23 @@ git commit -m "test: add buildReplayHistoryParts filter tests"
 
 #### TASK-009: Test selectReplayWindow
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | [`TASK-008`](#task-008-test-buildreplayhistoryparts) |
-| Files | Modify: [__tests__/sessions.test.ts](__tests__/sessions.test.ts) |
-| Symbols | [selectReplayWindow](src/sessions.ts#L1150) |
-| Outcome | Window fits within maxBytes by dropping oldest turns; always starts with a user-role entry; empty input returns empty result. |
+| Field      | Value                                                                                                                         |
+| :--------- | :---------------------------------------------------------------------------------------------------------------------------- |
+| Depends on | [`TASK-008`](#task-008-test-buildreplayhistoryparts)                                                                          |
+| Files      | Modify: [**tests**/sessions.test.ts](__tests__/sessions.test.ts)                                                              |
+| Symbols    | [selectReplayWindow](src/sessions.ts#L1150)                                                                                   |
+| Outcome    | Window fits within maxBytes by dropping oldest turns; always starts with a user-role entry; empty input returns empty result. |
 
 - [ ] **Step 1: Write the failing test**
 
 Append to `__tests__/sessions.test.ts` (add import for `selectReplayWindow`):
 
 ```ts
-import { sanitizeSessionText, buildReplayHistoryParts, selectReplayWindow } from '../src/sessions.js';
+import {
+  buildReplayHistoryParts,
+  sanitizeSessionText,
+  selectReplayWindow,
+} from '../src/sessions.js';
 
 test('selectReplayWindow — empty input returns empty', () => {
   const result = selectReplayWindow([], 1000);
@@ -1060,19 +1078,19 @@ git commit -m "test: add selectReplayWindow tests"
 
 #### TASK-010: Test SessionStore ops and LRU eviction
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | [`TASK-009`](#task-009-test-selectreplaywindow) |
-| Files | Modify: [__tests__/sessions.test.ts](__tests__/sessions.test.ts) |
-| Symbols | [SessionStore](src/sessions.ts#L783), [appendSessionTurn](src/sessions.ts#L733) |
-| Outcome | `setSession` creates session; duplicate throws; `getSession` returns undefined after TTL; `maxSessions` evicts oldest. |
+| Field      | Value                                                                                                                  |
+| :--------- | :--------------------------------------------------------------------------------------------------------------------- |
+| Depends on | [`TASK-009`](#task-009-test-selectreplaywindow)                                                                        |
+| Files      | Modify: [**tests**/sessions.test.ts](__tests__/sessions.test.ts)                                                       |
+| Symbols    | [SessionStore](src/sessions.ts#L783), [appendSessionTurn](src/sessions.ts#L733)                                        |
+| Outcome    | `setSession` creates session; duplicate throws; `getSession` returns undefined after TTL; `maxSessions` evicts oldest. |
 
 - [ ] **Step 1: Write the failing test**
 
 Append to `__tests__/sessions.test.ts`:
 
 ```ts
-import { SessionStore, createSessionStore } from '../src/sessions.js';
+import { createSessionStore, SessionStore } from '../src/sessions.js';
 
 test('SessionStore — setSession then getSession returns the chat', () => {
   const store = createSessionStore({ sweepIntervalMs: 0 });
@@ -1166,18 +1184,18 @@ git commit -m "test: add SessionStore operation and eviction tests"
 
 **Goal:** `__tests__/config.test.ts` passes — boolean parsing throws on non-`"true"`/`"false"` values, `getApiKey` throws on missing key, `getTransportMode` rejects invalid values.
 
-| Task | Action | Depends on | Files | Validate |
-| :--: | :-- | :--: | :-- | :-- |
-| [`TASK-011`](#task-011-test-config-parsing) | Test config boolean parsing and key validation | none | [__tests__/config.test.ts](__tests__/config.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/config.test.ts` |
+|                    Task                     | Action                                         | Depends on | Files                                                | Validate                                                                              |
+| :-----------------------------------------: | :--------------------------------------------- | :--------: | :--------------------------------------------------- | :------------------------------------------------------------------------------------ |
+| [`TASK-011`](#task-011-test-config-parsing) | Test config boolean parsing and key validation |    none    | [**tests**/config.test.ts](__tests__/config.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/config.test.ts` |
 
 #### TASK-011: Test config parsing
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | none |
-| Files | Create: [__tests__/config.test.ts](__tests__/config.test.ts) |
-| Symbols | [getApiKey](src/config.ts#L174), [getTransportMode](src/config.ts#L222), [getStatelessTransportFlag](src/config.ts#L226) |
-| Outcome | Boolean `"1"` / `"yes"` throws; missing `API_KEY` throws; invalid `TRANSPORT` throws; defaults apply when env vars are absent. |
+| Field      | Value                                                                                                                          |
+| :--------- | :----------------------------------------------------------------------------------------------------------------------------- |
+| Depends on | none                                                                                                                           |
+| Files      | Create: [**tests**/config.test.ts](__tests__/config.test.ts)                                                                   |
+| Symbols    | [getApiKey](src/config.ts#L174), [getTransportMode](src/config.ts#L222), [getStatelessTransportFlag](src/config.ts#L226)       |
+| Outcome    | Boolean `"1"` / `"yes"` throws; missing `API_KEY` throws; invalid `TRANSPORT` throws; defaults apply when env vars are absent. |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1315,18 +1333,18 @@ git commit -m "test: add config boolean and API key parsing tests"
 
 **Goal:** `__tests__/lib/validation.test.ts` passes — path containment and host header allow-list.
 
-| Task | Action | Depends on | Files | Validate |
-| :--: | :-- | :--: | :-- | :-- |
-| [`TASK-012`](#task-012-test-isPathWithinRoot-and-validateHostHeader) | Test isPathWithinRoot and validateHostHeader | none | [__tests__/lib/validation.test.ts](__tests__/lib/validation.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/validation.test.ts` |
+|                                 Task                                 | Action                                       | Depends on | Files                                                                | Validate                                                                                      |
+| :------------------------------------------------------------------: | :------------------------------------------- | :--------: | :------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------- |
+| [`TASK-012`](#task-012-test-isPathWithinRoot-and-validateHostHeader) | Test isPathWithinRoot and validateHostHeader |    none    | [**tests**/lib/validation.test.ts](__tests__/lib/validation.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/validation.test.ts` |
 
 #### TASK-012: Test isPathWithinRoot and validateHostHeader
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | none |
-| Files | Create: [__tests__/lib/validation.test.ts](__tests__/lib/validation.test.ts) |
-| Symbols | [isPathWithinRoot](src/lib/validation.ts#L173), [validateHostHeader](src/lib/validation.ts#L88) |
-| Outcome | Path containment accepts child paths, rejects `../` traversal, rejects sibling paths; host header respects allow-list. |
+| Field      | Value                                                                                                                  |
+| :--------- | :--------------------------------------------------------------------------------------------------------------------- |
+| Depends on | none                                                                                                                   |
+| Files      | Create: [**tests**/lib/validation.test.ts](__tests__/lib/validation.test.ts)                                           |
+| Symbols    | [isPathWithinRoot](src/lib/validation.ts#L173), [validateHostHeader](src/lib/validation.ts#L88)                        |
+| Outcome    | Path containment accepts child paths, rejects `../` traversal, rejects sibling paths; host header respects allow-list. |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1420,18 +1438,18 @@ git commit -m "test: add path containment and host header validation tests"
 
 **Goal:** `__tests__/catalog.test.ts` passes — Markdown rendering contains all tool and workflow names.
 
-| Task | Action | Depends on | Files | Validate |
-| :--: | :-- | :--: | :-- | :-- |
-| [`TASK-013`](#task-013-test-catalog-rendering) | Test renderDiscoveryCatalogMarkdown and renderWorkflowCatalogMarkdown | none | [__tests__/catalog.test.ts](__tests__/catalog.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/catalog.test.ts` |
+|                      Task                      | Action                                                                | Depends on | Files                                                  | Validate                                                                               |
+| :--------------------------------------------: | :-------------------------------------------------------------------- | :--------: | :----------------------------------------------------- | :------------------------------------------------------------------------------------- |
+| [`TASK-013`](#task-013-test-catalog-rendering) | Test renderDiscoveryCatalogMarkdown and renderWorkflowCatalogMarkdown |    none    | [**tests**/catalog.test.ts](__tests__/catalog.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/catalog.test.ts` |
 
 #### TASK-013: Test catalog rendering
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | none |
-| Files | Create: [__tests__/catalog.test.ts](__tests__/catalog.test.ts) |
-| Symbols | [listDiscoveryEntries](src/catalog.ts#L22), [listWorkflowEntries](src/catalog.ts#L35), [renderDiscoveryCatalogMarkdown](src/catalog.ts#L85), [renderWorkflowCatalogMarkdown](src/catalog.ts#L127) |
-| Outcome | Catalog Markdown contains all 4 tool names; workflow Markdown contains all workflow names; output is non-empty. |
+| Field      | Value                                                                                                                                                                                             |
+| :--------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Depends on | none                                                                                                                                                                                              |
+| Files      | Create: [**tests**/catalog.test.ts](__tests__/catalog.test.ts)                                                                                                                                    |
+| Symbols    | [listDiscoveryEntries](src/catalog.ts#L22), [listWorkflowEntries](src/catalog.ts#L35), [renderDiscoveryCatalogMarkdown](src/catalog.ts#L85), [renderWorkflowCatalogMarkdown](src/catalog.ts#L127) |
+| Outcome    | Catalog Markdown contains all 4 tool names; workflow Markdown contains all workflow names; output is non-empty.                                                                                   |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1532,19 +1550,19 @@ git commit -m "test: add catalog Markdown rendering tests"
 
 > **Why not tool-level integration tests?** `mock.module()` requires `--experimental-test-module-mocks` which is incompatible with `--import tsx/esm` on Node.js 24 (causes `ERR_REQUIRE_CYCLE_MODULE`). Streaming/response layer tests cover the same behavioral surface — they are the functions tools call to process Gemini responses. See [`RISK-001`](#7-risks--notes).
 
-| Task | Action | Depends on | Files | Validate |
-| :--: | :-- | :--: | :-- | :-- |
-| [`TASK-014`](#task-014-test-validatestreamresult-and-extractusage) | Test validateStreamResult and extractUsage | [`TASK-001`](#task-001-scaffold-mock-gemini-factory) | `__tests__/lib/streaming.test.ts` | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/streaming.test.ts` |
-| [`TASK-015`](#task-015-test-response-layer-functions) | Test tryParseJsonResponse and response builders | none | `__tests__/lib/response.test.ts` | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/response.test.ts` |
+|                                Task                                | Action                                          |                      Depends on                      | Files                             | Validate                                                                                     |
+| :----------------------------------------------------------------: | :---------------------------------------------- | :--------------------------------------------------: | :-------------------------------- | :------------------------------------------------------------------------------------------- |
+| [`TASK-014`](#task-014-test-validatestreamresult-and-extractusage) | Test validateStreamResult and extractUsage      | [`TASK-001`](#task-001-scaffold-mock-gemini-factory) | `__tests__/lib/streaming.test.ts` | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/streaming.test.ts` |
+|       [`TASK-015`](#task-015-test-response-layer-functions)        | Test tryParseJsonResponse and response builders |                         none                         | `__tests__/lib/response.test.ts`  | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/response.test.ts`  |
 
 #### TASK-014: Test validateStreamResult and extractUsage
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | [`TASK-001`](#task-001-scaffold-mock-gemini-factory) |
-| Files | Create: [__tests__/lib/streaming.test.ts](__tests__/lib/streaming.test.ts) |
-| Symbols | [validateStreamResult](src/lib/streaming.ts#L982), [extractUsage](src/lib/streaming.ts#L1017) |
-| Outcome | `validateStreamResult` returns correct `CallToolResult` for aborted, blocked, and successful streams; `extractUsage` handles full/partial/undefined metadata. |
+| Field      | Value                                                                                                                                                         |
+| :--------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Depends on | [`TASK-001`](#task-001-scaffold-mock-gemini-factory)                                                                                                          |
+| Files      | Create: [**tests**/lib/streaming.test.ts](__tests__/lib/streaming.test.ts)                                                                                    |
+| Symbols    | [validateStreamResult](src/lib/streaming.ts#L982), [extractUsage](src/lib/streaming.ts#L1017)                                                                 |
+| Outcome    | `validateStreamResult` returns correct `CallToolResult` for aborted, blocked, and successful streams; `extractUsage` handles full/partial/undefined metadata. |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1553,7 +1571,7 @@ git commit -m "test: add catalog Markdown rendering tests"
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { validateStreamResult, extractUsage } from '../../src/lib/streaming.js';
+import { extractUsage, validateStreamResult } from '../../src/lib/streaming.js';
 import type { StreamResult } from '../../src/lib/streaming.js';
 
 function makeStream(overrides: Partial<StreamResult> = {}): StreamResult {
@@ -1592,7 +1610,7 @@ Expected: FAIL — `true !== false`.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { validateStreamResult, extractUsage } from '../../src/lib/streaming.js';
+import { extractUsage, validateStreamResult } from '../../src/lib/streaming.js';
 import type { StreamResult } from '../../src/lib/streaming.js';
 
 function makeStream(overrides: Partial<StreamResult> = {}): StreamResult {
@@ -1667,12 +1685,12 @@ git commit -m "test: add validateStreamResult and extractUsage tests"
 
 #### TASK-015: Test response layer functions
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | none |
-| Files | Create: [__tests__/lib/response.test.ts](__tests__/lib/response.test.ts) |
-| Symbols | [tryParseJsonResponse](src/lib/response.ts#L114), [mergeStructured](src/lib/response.ts#L66), [promptBlockedError](src/lib/response.ts#L388) |
-| Outcome | `tryParseJsonResponse` handles JSON, fenced blocks, and invalid input; `promptBlockedError` returns isError result; `mergeStructured` merges correctly. |
+| Field      | Value                                                                                                                                                   |
+| :--------- | :------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Depends on | none                                                                                                                                                    |
+| Files      | Create: [**tests**/lib/response.test.ts](__tests__/lib/response.test.ts)                                                                                |
+| Symbols    | [tryParseJsonResponse](src/lib/response.ts#L114), [mergeStructured](src/lib/response.ts#L66), [promptBlockedError](src/lib/response.ts#L388)            |
+| Outcome    | `tryParseJsonResponse` handles JSON, fenced blocks, and invalid input; `promptBlockedError` returns isError result; `mergeStructured` merges correctly. |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1699,12 +1717,16 @@ Expected: FAIL — `{ key: 'value' }` does not deep-equal `{ key: 'WRONG' }`.
 
 - [ ] **Step 3: Write the real tests**
 
-```ts
+````ts
 // __tests__/lib/response.test.ts
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { mergeStructured, promptBlockedError, tryParseJsonResponse } from '../../src/lib/response.js';
+import {
+  mergeStructured,
+  promptBlockedError,
+  tryParseJsonResponse,
+} from '../../src/lib/response.js';
 
 test('tryParseJsonResponse — parses valid JSON string', () => {
   const result = tryParseJsonResponse('{"key": "value"}');
@@ -1743,7 +1765,7 @@ test('mergeStructured — later value overwrites earlier', () => {
   const result = mergeStructured({ a: 1 }, { a: 99 });
   assert.deepEqual(result, { a: 99 });
 });
-```
+````
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -1766,18 +1788,18 @@ git commit -m "test: add response layer function tests"
 
 **Goal:** `npm run test` passes with all test files and zero real API calls.
 
-| Task | Action | Depends on | Files | Validate |
-| :--: | :-- | :--: | :-- | :-- |
+|                       Task                        | Action                           |                      Depends on                       | Files          | Validate       |
+| :-----------------------------------------------: | :------------------------------- | :---------------------------------------------------: | :------------- | :------------- |
 | [`TASK-016`](#task-016-run-full-suite-and-verify) | Run full suite, fix any failures | [`TASK-015`](#task-015-test-response-layer-functions) | all test files | `npm run test` |
 
 #### TASK-016: Run full suite and verify
 
-| Field | Value |
-| :-- | :-- |
-| Depends on | [`TASK-015`](#task-015-test-response-layer-functions) |
-| Files | all test files |
-| Symbols | none |
-| Outcome | `npm run test` exits 0, all tests pass, no real Gemini API calls in output. TDD skipped — this is a verification-only task. |
+| Field      | Value                                                                                                                       |
+| :--------- | :-------------------------------------------------------------------------------------------------------------------------- |
+| Depends on | [`TASK-015`](#task-015-test-response-layer-functions)                                                                       |
+| Files      | all test files                                                                                                              |
+| Symbols    | none                                                                                                                        |
+| Outcome    | `npm run test` exits 0, all tests pass, no real Gemini API calls in output. TDD skipped — this is a verification-only task. |
 
 - [ ] **Step 1: Run the full suite**
 
@@ -1832,22 +1854,22 @@ node scripts/tasks.mjs
 
 ## 6. Acceptance Criteria
 
-| ID | Observable Outcome |
-| :--: | :-- |
-| [`AC-001`](#6-acceptance-criteria) | `npm run test` exits 0 with ≥ 55 tests discovered and all passing. |
-| [`AC-002`](#6-acceptance-criteria) | No test file calls a real Gemini endpoint; `getAI()` is never invoked during the test run. |
+|                 ID                 | Observable Outcome                                                                                      |
+| :--------------------------------: | :------------------------------------------------------------------------------------------------------ |
+| [`AC-001`](#6-acceptance-criteria) | `npm run test` exits 0 with ≥ 55 tests discovered and all passing.                                      |
+| [`AC-002`](#6-acceptance-criteria) | No test file calls a real Gemini endpoint; `getAI()` is never invoked during the test run.              |
 | [`AC-003`](#6-acceptance-criteria) | `__tests__/lib/errors.test.ts` covers `withRetry` with a call-count assertion proving 3 total attempts. |
-| [`AC-004`](#6-acceptance-criteria) | `__tests__/sessions.test.ts` asserts that `sanitizeSessionText` redacts `api_key` patterns. |
-| [`AC-005`](#6-acceptance-criteria) | `__tests__/config.test.ts` asserts that `STATELESS="yes"` throws. |
-| [`AC-006`](#6-acceptance-criteria) | `__tests__/lib/streaming.test.ts` asserts that an aborted `StreamResult` produces `isError: true`. |
-| [`AC-007`](#6-acceptance-criteria) | `node scripts/tasks.mjs` exits 0 (format + lint + type-check + knip + test + build all green). |
+| [`AC-004`](#6-acceptance-criteria) | `__tests__/sessions.test.ts` asserts that `sanitizeSessionText` redacts `api_key` patterns.             |
+| [`AC-005`](#6-acceptance-criteria) | `__tests__/config.test.ts` asserts that `STATELESS="yes"` throws.                                       |
+| [`AC-006`](#6-acceptance-criteria) | `__tests__/lib/streaming.test.ts` asserts that an aborted `StreamResult` produces `isError: true`.      |
+| [`AC-007`](#6-acceptance-criteria) | `node scripts/tasks.mjs` exits 0 (format + lint + type-check + knip + test + build all green).          |
 
 ## 7. Risks / Notes
 
-| ID | Type | Detail |
-| :--: | :--: | :-- |
+|              ID               | Type | Detail                                                                                                                                                                                                                                                                                        |
+| :---------------------------: | :--: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`RISK-001`](#7-risks--notes) | Risk | `mock.module()` requires `--experimental-test-module-mocks` which causes `ERR_REQUIRE_CYCLE_MODULE` when combined with `--import tsx/esm` on Node.js 24. Tool-level integration tests using module mocks are deferred; streaming/response layer tests provide equivalent behavioral coverage. |
-| [`RISK-002`](#7-risks--notes) | Risk | `withRetry` uses real `setTimeout` for delays. Tests for retry count set `maxRetries` via options to avoid waiting on default backoff timing. |
-| [`RISK-003`](#7-risks--notes) | Risk | `SessionStore` starts an eviction timer. Always call `store.close()` in tests to prevent leaking the interval into the next test. |
-| [`NOTE-001`](#7-risks--notes) | Note | Verify the exact required field names by checking [src/schemas/inputs.ts](src/schemas/inputs.ts) if a minimal-input test fails — the required field may differ from `message`/`query`/`focus`. |
-| [`NOTE-002`](#7-risks--notes) | Note | The `StreamResult` helper `makeStream()` defined in TASK-014 sets `hadCandidate: true` by default — override explicitly when testing the empty-stream error path. |
+| [`RISK-002`](#7-risks--notes) | Risk | `withRetry` uses real `setTimeout` for delays. Tests for retry count set `maxRetries` via options to avoid waiting on default backoff timing.                                                                                                                                                 |
+| [`RISK-003`](#7-risks--notes) | Risk | `SessionStore` starts an eviction timer. Always call `store.close()` in tests to prevent leaking the interval into the next test.                                                                                                                                                             |
+| [`NOTE-001`](#7-risks--notes) | Note | Verify the exact required field names by checking [src/schemas/inputs.ts](src/schemas/inputs.ts) if a minimal-input test fails — the required field may differ from `message`/`query`/`focus`.                                                                                                |
+| [`NOTE-002`](#7-risks--notes) | Note | The `StreamResult` helper `makeStream()` defined in TASK-014 sets `hadCandidate: true` by default — override explicitly when testing the empty-stream error path.                                                                                                                             |

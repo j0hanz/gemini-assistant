@@ -26,7 +26,7 @@ import {
 
 const TOKENS_PER_CHAR = 4;
 
-export function estimateTokens(text: string): number {
+function estimateTokens(text: string): number {
   return Math.ceil(text.length / TOKENS_PER_CHAR);
 }
 
@@ -90,7 +90,7 @@ const STATIC_PRIORITY_FILES = new Map<string, number>([
   ['copilot-instructions.md', 0.15],
 ]);
 
-export function extractKeywords(text: string): string[] {
+function extractKeywords(text: string): string[] {
   return text
     .toLowerCase()
     .split(/[\s_./\\:;,!?'"()[\]{}-]+/)
@@ -129,7 +129,7 @@ function staticPriority(fileName: string): number {
   return STATIC_PRIORITY_FILES.get(fileName.toLowerCase()) ?? 0.05;
 }
 
-export function scoreFile(fileName: string, content: string, keywords: readonly string[]): number {
+function scoreFile(fileName: string, content: string, keywords: readonly string[]): number {
   return (
     filenameScore(fileName, keywords) +
     contentKeywordScore(content, keywords) +
@@ -205,7 +205,7 @@ export function emptyContextUsed(): ContextUsed {
 
 // ── Constants ─────────────────────────────────────────────────────────
 
-export const MIN_CACHE_TOKENS = 4_000;
+const MIN_CACHE_TOKENS = 4_000;
 const MAX_SCAN_FILE_SIZE = 512 * 1024;
 const MAX_TOTAL_CONTEXT_SIZE = 256 * 1024;
 const MAX_SCAN_FILES_PER_ROOT = 25;

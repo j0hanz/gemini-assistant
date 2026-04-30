@@ -1,6 +1,12 @@
-import { test } from 'node:test';
 import assert from 'node:assert';
-import { isPathWithinRoot, parseAllowedHosts, validateHostHeader, isPublicHttpUrl } from '../../src/lib/validation.js';
+import { test } from 'node:test';
+
+import {
+  isPathWithinRoot,
+  isPublicHttpUrl,
+  parseAllowedHosts,
+  validateHostHeader,
+} from '../../src/lib/validation.js';
 
 test('isPathWithinRoot — path within root returns true', () => {
   const result = isPathWithinRoot('/root/path/file.txt', '/root');

@@ -102,7 +102,7 @@ const SESSION_TRANSCRIPT_URI_PATTERN = /^session:\/\/[^/]+\/transcript$/;
 const SESSION_EVENTS_URI_PATTERN = /^session:\/\/[^/]+\/events$/;
 const SESSION_TURN_PARTS_URI_PATTERN = /^gemini:\/\/sessions\/[^/]+\/turns\/\d+\/parts$/;
 
-export function isKnownResourceUri(uri: string): boolean {
+function isKnownResourceUri(uri: string): boolean {
   return (
     STATIC_RESOURCE_URIS.has(uri) ||
     SESSION_DETAIL_URI_PATTERN.test(uri) ||
@@ -112,7 +112,7 @@ export function isKnownResourceUri(uri: string): boolean {
   );
 }
 
-export function sendResourceChangedForServer(server: McpServer, listUri: string | undefined): void {
+function sendResourceChangedForServer(server: McpServer, listUri: string | undefined): void {
   if (!server.isConnected()) return;
   if (!listUri) return;
   if (!isKnownResourceUri(listUri)) {

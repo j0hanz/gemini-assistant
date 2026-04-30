@@ -101,7 +101,7 @@ async function cancelAndThrow(ai: ReturnType<typeof getAI>, interactionId: strin
   );
 }
 
-export function extractTextFromInteraction(interaction: Interactions.Interaction): string {
+function extractTextFromInteraction(interaction: Interactions.Interaction): string {
   return (interaction.outputs ?? [])
     .filter((output): output is Interactions.TextContent => output.type === 'text')
     .map((output) => output.text)

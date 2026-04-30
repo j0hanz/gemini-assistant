@@ -53,7 +53,7 @@ export const PUBLIC_TOOL_NAMES = [
   'review',
 ] as const satisfies readonly PublicJobName[];
 
-export const PUBLIC_PROMPT_NAMES = [
+const PUBLIC_PROMPT_NAMES = [
   'discover',
   'research',
   'review',
@@ -76,18 +76,10 @@ const PUBLIC_RESOURCE_TEMPLATES = [
   'gemini://sessions/{sessionId}/turns/{turnIndex}/parts',
 ] as const satisfies readonly PublicResourceUri[];
 
-export const PUBLIC_RESOURCE_URIS = [
+const PUBLIC_RESOURCE_URIS = [
   ...PUBLIC_STATIC_RESOURCE_URIS,
   ...PUBLIC_RESOURCE_TEMPLATES,
 ] as const satisfies readonly PublicResourceUri[];
-
-export const PUBLIC_WORKFLOW_NAMES = [
-  'start-here',
-  'chat',
-  'research',
-  'analyze',
-  'review',
-] as const satisfies readonly PublicWorkflowName[];
 
 type DiscoveryEntryMetadata = Omit<DiscoveryEntry, 'kind' | 'name'>;
 

@@ -1,6 +1,11 @@
-import { test } from 'node:test';
 import assert from 'node:assert';
-import { sanitizeSessionText, buildReplayHistoryParts, selectReplayWindow } from '../src/sessions.js';
+import { test } from 'node:test';
+
+import {
+  buildReplayHistoryParts,
+  sanitizeSessionText,
+  selectReplayWindow,
+} from '../src/sessions.js';
 
 test('sanitizeSessionText — redacts API key patterns', () => {
   const text = 'API_KEY=abc123xyz apikey=secret OTHER=keep';
@@ -26,10 +31,7 @@ test('sanitizeSessionText — preserves unrelated text', () => {
 });
 
 test('buildReplayHistoryParts — filters out pure thought parts', () => {
-  const parts = [
-    { text: 'my thought' },
-    { text: 'user response' },
-  ];
+  const parts = [{ text: 'my thought' }, { text: 'user response' }];
   const result = buildReplayHistoryParts(parts);
   assert(result.length > 0);
   assert(result.every((p) => p.text !== undefined || p.functionCall !== undefined));

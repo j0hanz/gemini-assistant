@@ -23,7 +23,7 @@ export function listDiscoveryEntries(): DiscoveryEntry[] {
   return buildDiscoveryEntries().sort(compareDiscoveryEntries);
 }
 
-export function buildDiscoveryEntries(): DiscoveryEntry[] {
+function buildDiscoveryEntries(): DiscoveryEntry[] {
   return DISCOVERY_ENTRIES.map((entry) => ({
     ...entry,
     inputs: [...entry.inputs],
@@ -40,10 +40,6 @@ export function listWorkflowEntries(): WorkflowEntry[] {
     recommendedPrompts: [...workflow.recommendedPrompts],
     relatedResources: [...workflow.relatedResources],
   }));
-}
-
-export function findDiscoveryEntry(kind: DiscoveryKind, name: string): DiscoveryEntry | undefined {
-  return buildDiscoveryEntries().find((entry) => entry.kind === kind && entry.name === name);
 }
 
 export function findWorkflowEntry(name: string): WorkflowEntry | undefined {

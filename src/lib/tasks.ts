@@ -202,7 +202,7 @@ type TaskEvent =
  * changes. Used by `bridgeTaskCancellationToSignal` to subscribe to
  * cancellation without polling.
  */
-export class ObservableTaskStore implements TaskStore {
+class ObservableTaskStore implements TaskStore {
   readonly emitter: EventEmitter<{ task: [TaskEvent] }>;
   readonly #inner: InMemoryTaskStore;
 
@@ -357,7 +357,7 @@ function parseTaskInput(schema: unknown, args: unknown): unknown {
   return args;
 }
 
-export function runToolAsTask(
+function runToolAsTask(
   store: RequestTaskStore,
   task: Task,
   work: Promise<CallToolResult>,
@@ -404,7 +404,7 @@ export function runToolAsTask(
     });
 }
 
-export function taskTtl(requestedTtl: number | undefined, defaultTtlMs?: number): number {
+function taskTtl(requestedTtl: number | undefined, defaultTtlMs?: number): number {
   return requestedTtl ?? defaultTtlMs ?? DEFAULT_TTL;
 }
 
@@ -486,7 +486,7 @@ async function ensureTerminalTaskProgress(
 
 const TERMINAL_STATUSES = new Set<TaskStatus>(['completed', 'failed', 'cancelled']);
 
-export function bridgeTaskCancellationToSignal(
+function bridgeTaskCancellationToSignal(
   baseSignal: AbortSignal,
   taskId: string,
   store: ObservableTaskStore,
@@ -631,7 +631,7 @@ export async function elicitTaskInput(
 
 // ── Tool registration ──
 
-export function createToolTaskHandlers<TArgs>(
+function createToolTaskHandlers<TArgs>(
   toolName: string,
   work: TaskWork<TArgs>,
   toolLabel = toolName,
@@ -716,7 +716,7 @@ export function createToolTaskHandlers<TArgs>(
   };
 }
 
-export function registerTaskTool<TArgs>(
+function registerTaskTool<TArgs>(
   server: McpServer,
   name: string,
   config: TaskToolConfig,

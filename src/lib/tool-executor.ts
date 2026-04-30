@@ -148,7 +148,7 @@ interface GeminiPipelineRequest<T extends Record<string, unknown>> {
   responseBuilder?: StreamResponseBuilder<T>;
 }
 
-export class ToolExecutor {
+class ToolExecutor {
   constructor(private readonly scopedLogger: ScopedLogger) {}
 
   private finalizeStreamExecution<T extends Record<string, unknown>>(

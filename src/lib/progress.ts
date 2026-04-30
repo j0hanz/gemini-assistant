@@ -12,7 +12,7 @@ const PROGRESS_ENTRY_TTL_MS = 5 * 60 * 1000;
 const PROGRESS_SWEEP_INTERVAL_MS = 60 * 1000;
 
 export const PROGRESS_TOTAL = 100;
-export const PROGRESS_CAP = 95;
+const PROGRESS_CAP = 95;
 
 const PROGRESS_STEP_FRACTION = 0.15;
 const PRE_STREAM_PROGRESS_CAP = 10;
@@ -50,11 +50,6 @@ class ProgressCoordinator {
 }
 
 const coordinator = new ProgressCoordinator();
-
-/** Reset the progress throttle state. Intended for testing. */
-export function resetProgressThrottle(): void {
-  coordinator.reset();
-}
 
 // ── Internals ─────────────────────────────────────────────────────────
 

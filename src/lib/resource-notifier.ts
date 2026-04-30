@@ -33,6 +33,9 @@ export class ResourceNotifier {
   notifyListChanged(): Promise<void> {
     if (this.disposed) return Promise.resolve();
     try {
+      // Fire-and-forget: sendResourceListChanged is synchronous and queues the
+      // notification without waiting. The async method signature allows the
+      // caller to optionally await if needed, but we don't block here.
       this.server.sendResourceListChanged();
       return Promise.resolve();
     } catch (err) {

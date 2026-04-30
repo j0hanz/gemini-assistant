@@ -19,11 +19,8 @@
 
 ## Testing Strategy
 
-- Tests are colocated under `__tests__/`.
-- `npm run test` uses Node's built-in test runner with `tsx/esm` and `.env`. Test files are
-  discovered by Node's directory walk (no shell glob expansion required), so the command runs the
-  same way under bash, PowerShell, and cmd.
-- The repository contains end-to-end coverage alongside unit suites.
+- **Unit**: test individual functions and modules in isolation with mocked dependencies.
+- **Integration**: test interactions between modules and with external services (e.g. Gemini API) using realistic scenarios.
 
 ## Commands
 

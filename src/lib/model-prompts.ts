@@ -242,10 +242,13 @@ export function buildDiffReviewPrompt(
           { text: args.focus ? `Focus: ${args.focus}` : 'Compare the two files.' },
         ],
         cacheText: 'Compare the files. Output: Summary, Differences, Impact. Cite short quotes.',
-        systemInstruction: buildOutputInstruction(
-          'Compare the files. Cite symbols or short quotes. Do not invent line numbers.',
-          ['Output:', '## Summary', '## Differences', '## Impact'],
-        ),
+        systemInstruction: joinNonEmpty([
+          'Compare the files.',
+          '## Summary — 2–4 sentence overview of what differs and why it matters.',
+          '## Differences — table with columns | Aspect | File A | File B | when 2+ attributes differ; prose otherwise.',
+          '## Impact — consequences of the differences.',
+          'Cite symbols or short quotes as `path:line`. Do not invent line numbers.',
+        ]),
       },
       args.cacheName,
     );

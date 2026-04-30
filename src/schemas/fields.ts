@@ -82,7 +82,7 @@ export function workspacePath(description: string) {
   return withFieldMetadata(schema, description);
 }
 
-export function nonNegativeInt(description: string) {
+function nonNegativeInt(description: string) {
   return withFieldMetadata(z.int().nonnegative(), description);
 }
 
@@ -358,15 +358,6 @@ export const GroundingSignalsSchema = z.strictObject({
     .enum(['high', 'medium', 'low', 'none'])
     .describe('Grounding confidence derived from retrieval and citation coverage'),
 });
-
-const searchEntryPointFields = {
-  renderedContent: z
-    .string()
-    .optional()
-    .describe('Google Search rendered entry point content for display compliance'),
-};
-
-export const SearchEntryPointSchema = z.strictObject(searchEntryPointFields);
 
 export const diffStatsFields = {
   files: nonNegativeInt('Files changed'),

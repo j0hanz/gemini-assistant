@@ -3,11 +3,10 @@ import { z } from 'zod/v4';
 import type {
   GroundingCitationSchema,
   GroundingSignalsSchema,
-  SearchEntryPointSchema,
   UrlMetadataEntrySchema,
+  UsageMetadataSchema,
 } from './fields.js';
 import {
-  UsageMetadataSchema as BaseUsageMetadataSchema,
   completedStatusField,
   DIAGRAM_TYPES,
   diffStatsFields,
@@ -15,41 +14,29 @@ import {
   FindingSchema,
   groundingStatusField,
   JsonValueSchema,
-  nonNegativeInt,
   publicCoreOutputFields,
   SourceDetailSchema,
 } from './fields.js';
 
-const UsageMetadataSchema = BaseUsageMetadataSchema;
-
 export type UsageMetadata = z.infer<typeof UsageMetadataSchema>;
 
-const ContextSourceReportSchema = z.strictObject({
-  kind: z
-    .enum(['workspace-file', 'session-summary', 'cache', 'workspace-cache'])
-    .describe('Context source type'),
-  name: z.string().describe('Source identifier (filename, session ID, or cache name)'),
-  tokens: nonNegativeInt('Estimated token cost for this source'),
-});
+export interface ContextSourceReport {
+  kind: 'workspace-file' | 'session-summary' | 'cache' | 'workspace-cache';
+  name: string;
+  tokens: number;
+}
 
-export type ContextSourceReport = z.infer<typeof ContextSourceReportSchema>;
-
-const ContextUsedSchema = z
-  .strictObject({
-    sources: z.array(ContextSourceReportSchema).describe('Context sources included in the call'),
-    totalTokens: nonNegativeInt('Total context tokens consumed'),
-    workspaceCacheApplied: z.boolean().describe('Whether automatic workspace cache was applied'),
-  })
-  .describe('Context transparency metadata');
-
-export type ContextUsed = z.infer<typeof ContextUsedSchema>;
+export interface ContextUsed {
+  sources: ContextSourceReport[];
+  totalTokens: number;
+  workspaceCacheApplied: boolean;
+}
 
 export type UrlMetadataEntry = z.infer<typeof UrlMetadataEntrySchema>;
 export type SourceDetail = z.infer<typeof SourceDetailSchema>;
 export type GroundingCitation = z.infer<typeof GroundingCitationSchema>;
 export type Finding = z.infer<typeof FindingSchema>;
 export type GroundingSignals = z.infer<typeof GroundingSignalsSchema>;
-type SearchEntryPoint = z.infer<typeof SearchEntryPointSchema>;
 
 export const AnalyzeOutputSchema = z.strictObject({
   ...publicCoreOutputFields,

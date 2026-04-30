@@ -589,6 +589,7 @@ async function runDeepResearchPlan(
     topic: string;
     searchDepth: number;
     thinkingLevel?: ResearchInput['thinkingLevel'] | undefined;
+    thinkingBudget?: number | undefined;
     tools?: ToolsSpecInput | undefined;
     maxOutputTokens?: number | undefined;
     safetySettings?: ResearchInput['safetySettings'] | undefined;
@@ -675,6 +676,7 @@ async function runDeepResearchPlan(
       {
         systemInstruction: prompt.systemInstruction,
         costProfile: 'research.deep.retrieval',
+        thinkingBudget: args.thinkingBudget,
         safetySettings: args.safetySettings,
         tools: resolvedRetrieval.config.tools,
         toolConfig: resolvedRetrieval.config.toolConfig,
@@ -729,6 +731,7 @@ async function runDeepResearchPlan(
       systemInstruction: synthesisPrompt.systemInstruction,
       costProfile: 'research.deep.synthesis',
       thinkingLevel: args.thinkingLevel,
+      thinkingBudget: args.thinkingBudget,
       maxOutputTokens: args.maxOutputTokens,
       safetySettings: args.safetySettings,
       cacheName,
@@ -797,6 +800,7 @@ async function searchWork(
     systemInstruction,
     tools: toolsSpec,
     thinkingLevel,
+    thinkingBudget,
     maxOutputTokens,
     safetySettings,
   }: QuickResearchInput,
@@ -836,6 +840,7 @@ async function searchWork(
             systemInstruction: systemInstruction ?? prompt.systemInstruction,
             costProfile: 'research.quick',
             thinkingLevel,
+            thinkingBudget,
             maxOutputTokens,
             safetySettings,
             tools,
@@ -851,7 +856,7 @@ async function searchWork(
 }
 
 export async function analyzeUrlWork(
-  { urls, goal, thinkingLevel, maxOutputTokens, safetySettings }: AnalyzeUrlInput,
+  { urls, goal, thinkingLevel, thinkingBudget, maxOutputTokens, safetySettings }: AnalyzeUrlInput,
   ctx: ServerContext,
   services?: ToolServices,
 ): Promise<CallToolResult> {
@@ -877,6 +882,7 @@ export async function analyzeUrlWork(
     config: {
       costProfile: 'analyze.summary',
       thinkingLevel,
+      thinkingBudget,
       maxOutputTokens,
       safetySettings,
     },
@@ -890,6 +896,7 @@ async function agenticSearchWork(
     goal,
     searchDepth = 2,
     thinkingLevel,
+    thinkingBudget,
     tools: toolsSpec,
     maxOutputTokens,
     safetySettings,
@@ -925,6 +932,7 @@ async function agenticSearchWork(
         topic: enrichedTopic,
         searchDepth,
         thinkingLevel,
+        thinkingBudget,
         tools: toolsSpec as ToolsSpecInput | undefined,
         maxOutputTokens,
         safetySettings,

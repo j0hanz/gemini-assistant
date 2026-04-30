@@ -47,6 +47,7 @@ interface AnalyzeDiagramInput {
   mediaResolution?: AnalyzeInput['mediaResolution'];
   safetySettings?: AnalyzeInput['safetySettings'];
   targetKind: AnalyzeInput['targetKind'];
+  thinkingBudget?: AnalyzeInput['thinkingBudget'];
   thinkingLevel?: AnalyzeInput['thinkingLevel'];
   urls?: string[] | undefined;
   validateSyntax?: boolean | undefined;
@@ -126,6 +127,7 @@ function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher, services?: ToolSe
       filePath,
       goal,
       thinkingLevel,
+      thinkingBudget,
       mediaResolution,
       maxOutputTokens,
       safetySettings,
@@ -162,6 +164,7 @@ function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher, services?: ToolSe
           config: {
             costProfile: 'analyze.summary',
             thinkingLevel,
+            thinkingBudget,
             mediaResolution,
             maxOutputTokens,
             safetySettings,
@@ -181,6 +184,7 @@ function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher, services?: ToolSe
 interface AnalyzeMultiExtra {
   maxOutputTokens?: AnalyzeInput['maxOutputTokens'];
   safetySettings?: AnalyzeInput['safetySettings'];
+  thinkingBudget?: AnalyzeInput['thinkingBudget'];
   tools?: AnalyzeInput['tools'] | undefined;
 }
 
@@ -192,7 +196,7 @@ async function analyzeMultiFileWork(
   ctx: ServerContext,
   extra: AnalyzeMultiExtra = {},
 ): Promise<CallToolResult> {
-  const { maxOutputTokens, safetySettings, tools: toolsSpec } = extra;
+  const { maxOutputTokens, safetySettings, thinkingBudget, tools: toolsSpec } = extra;
   const tasks = getTaskEmitter(ctx);
 
   const resolved = await resolveOrchestration(toolsSpec as ToolsSpecInput | undefined, ctx, {
@@ -249,6 +253,7 @@ async function analyzeMultiFileWork(
                 systemInstruction: prompt.systemInstruction,
                 costProfile: 'analyze.summary',
                 thinkingLevel,
+                thinkingBudget,
                 maxOutputTokens,
                 safetySettings,
                 tools: resolved.config.tools,
@@ -339,6 +344,7 @@ async function analyzeDiagramWork(
         config: {
           costProfile: 'analyze.diagram',
           thinkingLevel: args.thinkingLevel,
+          thinkingBudget: args.thinkingBudget,
           maxOutputTokens: args.maxOutputTokens,
           safetySettings: args.safetySettings,
         },
@@ -437,6 +443,7 @@ async function runAnalyzeTarget(
     ctx,
     {
       maxOutputTokens: args.maxOutputTokens,
+      thinkingBudget: args.thinkingBudget,
       safetySettings: args.safetySettings,
       tools: args.tools,
     },

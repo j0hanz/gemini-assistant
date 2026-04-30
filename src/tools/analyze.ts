@@ -474,6 +474,7 @@ function buildAnalyzeStructuredContent(
       ...buildSuccessfulStructuredContent({
         warnings,
         domain: {
+          outputKind: 'diagram' as const,
           status: 'completed' as const,
           diagramType,
           diagram: getDiagramString(structured.diagram),
@@ -492,6 +493,7 @@ function buildAnalyzeStructuredContent(
     ...buildSuccessfulStructuredContent({
       warnings,
       domain: {
+        outputKind: 'summary' as const,
         status: typeof structured.status === 'string' ? structured.status : 'ungrounded',
         summary: typeof structured.summary === 'string' ? structured.summary : '',
       },

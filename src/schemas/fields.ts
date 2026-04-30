@@ -292,9 +292,9 @@ export const groundingStatusField = z
   .enum(['grounded', 'partially_grounded', 'ungrounded'])
   .describe('Grounding status derived from retrieval and citation coverage');
 
-export const publicCoreOutputFields = {
-  warnings: z.array(z.string()).describe('Non-fatal warnings for the result').optional(),
-};
+export const BaseOutputSchema = z.strictObject({
+  warnings: z.array(z.string()).optional().describe('Non-fatal warnings for the result'),
+});
 
 // ── JSON value schema for `chat.data` ────────────────────────────────
 

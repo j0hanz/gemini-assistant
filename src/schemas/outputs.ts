@@ -7,6 +7,7 @@ import type {
   UsageMetadataSchema,
 } from './fields.js';
 import {
+  BaseOutputSchema,
   completedStatusField,
   DIAGRAM_TYPES,
   diffStatsFields,
@@ -14,7 +15,6 @@ import {
   FindingSchema,
   groundingStatusField,
   JsonValueSchema,
-  publicCoreOutputFields,
   SourceDetailSchema,
 } from './fields.js';
 
@@ -38,21 +38,33 @@ export type GroundingCitation = z.infer<typeof GroundingCitationSchema>;
 export type Finding = z.infer<typeof FindingSchema>;
 export type GroundingSignals = z.infer<typeof GroundingSignalsSchema>;
 
-export const AnalyzeOutputSchema = z.strictObject({
-  ...publicCoreOutputFields,
+const AnalyzeSummaryOutputSchema = z.strictObject({
+  ...BaseOutputSchema.shape,
+  outputKind: z.literal('summary'),
   status: z
     .enum(['grounded', 'partially_grounded', 'ungrounded', 'completed'])
     .describe('Grounding or completion status'),
-  summary: z.string().optional().describe('Analysis summary text (summary mode)'),
-  diagramType: enumField(DIAGRAM_TYPES, 'Diagram syntax used (diagram mode)').optional(),
-  diagram: z.string().optional().describe('Generated diagram source (diagram mode)'),
+  summary: z.string().describe('Analysis summary text'),
+});
+
+const AnalyzeDiagramOutputSchema = z.strictObject({
+  ...BaseOutputSchema.shape,
+  outputKind: z.literal('diagram'),
+  status: completedStatusField,
+  diagramType: enumField(DIAGRAM_TYPES, 'Diagram syntax used (diagram mode)'),
+  diagram: z.string().describe('Generated diagram source'),
   explanation: z.string().optional().describe('Short explanation or caveats for the diagram'),
   syntaxErrors: z.array(z.string()).optional().describe('Diagram syntax validation errors'),
   syntaxValid: z.boolean().optional().describe('Whether diagram syntax validated successfully'),
 });
 
+export const AnalyzeOutputSchema = z.discriminatedUnion('outputKind', [
+  AnalyzeSummaryOutputSchema,
+  AnalyzeDiagramOutputSchema,
+]);
+
 export const ChatOutputSchema = z.strictObject({
-  ...publicCoreOutputFields,
+  ...BaseOutputSchema.shape,
   status: completedStatusField,
   answer: z.string().describe('Chat response text'),
   data: JsonValueSchema.describe('Structured response payload when JSON mode is used').optional(),
@@ -65,7 +77,7 @@ export const ChatOutputSchema = z.strictObject({
 });
 
 export const ResearchOutputSchema = z.strictObject({
-  ...publicCoreOutputFields,
+  ...BaseOutputSchema.shape,
   status: groundingStatusField,
   summary: z.string().describe('Grounded research summary'),
   sourceDetails: z
@@ -85,7 +97,7 @@ export const DocumentationDriftSchema = z.strictObject({
 });
 
 export const ReviewOutputSchema = z.strictObject({
-  ...publicCoreOutputFields,
+  ...BaseOutputSchema.shape,
   status: completedStatusField,
   summary: z.string().describe('Review result summary'),
   stats: z

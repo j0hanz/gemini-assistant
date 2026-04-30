@@ -78,18 +78,8 @@ import {
   sessionTurnPartsUri,
 } from '../resources.js';
 import {
-  appendSessionTurn,
-  appendToolResponseTurn,
-  buildConfigFromSessionContract,
-  buildRebuiltChatContents,
-  buildSessionGenerationContract,
-  type ContentEntry,
-  getPendingFunctionCalls,
-  hashInstructionText,
-  isCompatibleSessionContract,
   type SessionAccess,
   type SessionEventEntry,
-  type SessionGenerationContract,
   type SessionSummary,
   type TranscriptEntry,
 } from '../sessions.js';
@@ -340,36 +330,6 @@ function validateAskConflict(condition: boolean, message: string): CallToolResul
   return condition ? new AppError('chat', message).toToolResult() : undefined;
 }
 
-function validateFunctionResponsesAgainstPending(
-  pending: FunctionCallEntry[],
-  responses: NonNullable<AskArgs['functionResponses']>,
-): string | undefined {
-  const seenIds = new Set<string>();
-  const pendingById = new Map(
-    pending.flatMap((call) =>
-      typeof call.id === 'string' && call.id.length > 0 ? [[call.id, call] as const] : [],
-    ),
-  );
-
-  for (const response of responses) {
-    if (seenIds.has(response.id)) {
-      return `chat: duplicate functionResponse id '${response.id}'.`;
-    }
-    seenIds.add(response.id);
-
-    const pendingCall = pendingById.get(response.id);
-    if (!pendingCall) {
-      return `chat: functionResponse id '${response.id}' does not match a pending functionCall.`;
-    }
-
-    if (pendingCall.name !== response.name) {
-      return `chat: functionResponse id '${response.id}' has name '${response.name}', expected '${pendingCall.name ?? ''}'.`;
-    }
-  }
-
-  return undefined;
-}
-
 function hasExpiredSession(
   sessionId: string | undefined,
   deps: Pick<AskDependencies, 'isEvicted'>,
@@ -452,18 +412,7 @@ function validateAskRequest(
     }
   }
 
-  if (hasFunctionResponses && sessionId && sessionEntry) {
-    const pending = getPendingFunctionCalls({
-      contents: deps.listSessionContentEntries(sessionId) ?? [],
-    });
-    const validationMessage = validateFunctionResponsesAgainstPending(
-      pending,
-      args.functionResponses ?? [],
-    );
-    if (validationMessage) {
-      return new AppError('chat', validationMessage).toToolResult();
-    }
-  }
+  // Pending call validation no longer needed; server-side state management via ai.interactions handles this
 
   if (
     hasExistingSession &&
@@ -976,10 +925,7 @@ async function askExistingSession(
   chat: Chat,
   sessionSummary?: string,
 ): Promise<CallToolResult | undefined> {
-  const functionResponses = normalizeFunctionResponses(args.functionResponses);
-  if (functionResponses) {
-    appendToolResponseTurn(args.sessionId, functionResponses, deps, ctx.task?.id);
-  }
+  // Tool response tracking removed; server-side state management via ai.interactions handles this
 
   const resumedArgs = sessionSummary
     ? { ...args, message: `${sessionSummary}\n\n${args.message}` }

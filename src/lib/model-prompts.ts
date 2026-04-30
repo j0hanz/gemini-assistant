@@ -47,7 +47,7 @@ const REPORT_SKELETON =
   '## Findings — body using ### sub-sections or tables.\n' +
   '## Sources — cited URLs as a compact reference list.';
 
-export function buildFunctionCallingInstructionText(
+function buildFunctionCallingInstructionText(
   opts: FunctionCallingInstructionOptions,
 ): string | undefined {
   const declaredNames = opts.declaredNames?.filter((name) => name.trim().length > 0) ?? [];

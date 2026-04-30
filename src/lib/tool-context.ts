@@ -35,4 +35,4 @@ export function createDefaultToolServices(): ToolServices {
 }
 
 export { isPathWithinRoot };
-export { buildContextUsed, buildSessionSummary, emptyContextUsed };
+export { buildContextUsed, emptyContextUsed };

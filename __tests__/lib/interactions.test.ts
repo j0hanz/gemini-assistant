@@ -1,8 +1,6 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-import type { Interactions } from '@google/genai';
-
 import { buildInteractionParams } from '../../src/lib/interactions.js';
 import type { ResolvedProfile } from '../../src/lib/tool-profiles.js';
 

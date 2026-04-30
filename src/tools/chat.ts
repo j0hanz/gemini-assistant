@@ -42,12 +42,9 @@ import {
 } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
 import {
-  buildProfileToolConfig,
-  buildToolsArray,
   ProfileValidationError,
   type ResolvedProfile,
   resolveProfile,
-  resolveProfileFunctionCallingMode,
   type ToolsSpecInput,
   validateProfile,
 } from '../lib/tool-profiles.js';
@@ -64,7 +61,6 @@ import {
   getExposeSessionResources,
   getExposeThoughts,
   getGeminiModel,
-  getSessionLimits,
   getStatelessTransportFlag,
   getWorkspaceCacheEnabled,
 } from '../config.js';
@@ -120,10 +116,7 @@ interface AskDependencies {
   isEvicted: (sessionId: string) => boolean;
   listSessionTranscriptEntries: (sessionId: string) => TranscriptEntry[] | undefined;
   now: () => number;
-  runWithoutSession: (
-    args: AskArgs,
-    ctx: ServerContext,
-  ) => Promise<AskExecutionResult>;
+  runWithoutSession: (args: AskArgs, ctx: ServerContext) => Promise<AskExecutionResult>;
 }
 
 interface AskExecutionResult {
@@ -748,20 +741,6 @@ function buildWorkspaceCacheSkipWarnings(args: AskArgs): string[] {
   return [`Automatic workspace cache skipped because this request uses ${reasons.join(', ')}.`];
 }
 
-function buildAskToolingConfig(args: AskArgs) {
-  const resolved = buildChatResolvedProfile(args);
-  const tools = buildToolsArray(resolved);
-  const toolConfig = buildProfileToolConfig(resolved);
-  const functionCallingMode = resolveProfileFunctionCallingMode(resolved);
-  return {
-    tools: tools.length > 0 ? tools : undefined,
-    toolConfig,
-    functionCallingMode,
-    serverSideToolInvocations: toolConfig?.includeServerSideToolInvocations === true,
-    resolvedProfile: resolved,
-  };
-}
-
 function createDefaultAskDependencies(sessionAccess: SessionAccess): AskDependencies {
   return {
     appendSessionEvent: (sessionId, item) => sessionAccess.appendEvent(sessionId, item),
@@ -980,7 +959,6 @@ function appendSessionTurn(
   });
 }
 
-
 interface PreparedAskRequest {
   effectiveArgs: AskArgs;
   contextUsed: ContextUsed;
@@ -1057,8 +1035,8 @@ function createAskWork(deps: AskDependencies, workspace: ToolWorkspaceAccess) {
     );
 
     if (!askResult.result.isError) {
-      appendSessionTurn(sessionId as string, askResult, effectiveArgs, deps, ctx.task?.id);
-      appendSessionResource(askResult.result, sessionId as string, undefined, ctx.task?.id);
+      appendSessionTurn(sessionId, askResult, effectiveArgs, deps, ctx.task?.id);
+      appendSessionResource(askResult.result, sessionId, undefined, ctx.task?.id);
     }
 
     return appendAskWarnings(askResult.result, warnings);
@@ -1082,23 +1060,6 @@ function extractSessionId(
   }
 
   return undefined;
-}
-
-function attachSessionMetadata(
-  result: CallToolResult,
-  sessionId: string,
-  rebuiltAt?: number,
-): CallToolResult {
-  if (result.isError) {
-    return result;
-  }
-
-  return mergeStructured(result, {
-    session: {
-      id: sessionId,
-      ...(rebuiltAt !== undefined ? { rebuiltAt } : {}),
-    },
-  });
 }
 
 function assembleChatOutput(
@@ -1183,10 +1144,7 @@ async function chatWork(
 }
 
 export function registerChatTool(server: McpServer, services: ToolServices): void {
-  const askWork = createAskWork(
-    createDefaultAskDependencies(services.session),
-    services.workspace,
-  );
+  const askWork = createAskWork(createDefaultAskDependencies(services.session), services.workspace);
 
   registerWorkTool<ChatInput>({
     server,

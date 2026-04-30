@@ -24,6 +24,7 @@ import type {
 import { EventEmitter } from 'node:events';
 
 import { getStatelessTransportFlag } from '../config.js';
+import type { CustomNotificationMethod } from '../public-contract.js';
 import { AppError } from './errors.js';
 import { logger, maybeSummarizePayload } from './logger.js';
 import { hasTerminalProgress, reportCompletion, reportFailure } from './progress.js';
@@ -32,6 +33,17 @@ import { executor } from './tool-executor.js';
 import { getWorkSignal } from './work-signal.js';
 
 // ── Shared infrastructure ──
+
+/**
+ * Valid custom notification method names for gemini-assistant.
+ * Exported from public-contract.ts for client implementations to use.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const CUSTOM_NOTIFICATION_METHODS = [
+  'notifications/gemini-assistant/phase',
+  'notifications/gemini-assistant/finding',
+  'notifications/gemini-assistant/thought',
+] as const satisfies readonly CustomNotificationMethod[];
 
 const storeToQueue = new WeakMap<ObservableTaskStore, TaskMessageQueue>();
 

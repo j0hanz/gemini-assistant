@@ -11,6 +11,7 @@ import type {
   UrlContextMetadata,
 } from '@google/genai';
 
+import type { ThoughtNotificationParams } from '../public-contract.js';
 import { AppError, finishReasonToError, withRetry } from './errors.js';
 import { mcpLog } from './logger.js';
 import { advanceProgress, PROGRESS_TOTAL, sendProgress } from './progress.js';
@@ -111,7 +112,7 @@ interface StreamProcessingState extends StreamMetadata {
 
 type ProgressMessageFormatter = (message: string) => string;
 
-export interface ThoughtDeltaCtx {
+interface ThoughtDeltaCtx {
   mcpReq: {
     signal: AbortSignal;
     _meta?: { progressToken?: unknown };
@@ -128,7 +129,7 @@ export async function sendThoughtDelta(
   if (ctx.mcpReq.signal.aborted) return;
 
   const progressToken = ctx.mcpReq._meta?.progressToken;
-  const params: Record<string, unknown> = { delta, totalLen, seq };
+  const params: ThoughtNotificationParams = { delta, totalLen, seq };
   if (progressToken !== undefined) {
     params._meta = { progressToken };
   }

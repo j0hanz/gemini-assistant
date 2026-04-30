@@ -414,7 +414,7 @@ export function buildToolsArray(resolved: ResolvedProfile): ToolListUnion {
         name: decl.name,
         description: decl.description,
         ...(decl.parametersJsonSchema !== undefined
-          ? { parameters: decl.parametersJsonSchema }
+          ? { parametersJsonSchema: decl.parametersJsonSchema }
           : {}),
       })),
     });

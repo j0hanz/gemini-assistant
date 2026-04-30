@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { FunctionCallingConfigMode } from '@google/genai';
 
 import {
+  buildToolsArray,
   ProfileValidationError,
   resolveProfile,
   resolveProfileFunctionCallingMode,
@@ -164,4 +165,30 @@ test('resolveProfileFunctionCallingMode — returns undefined for plain profile 
   const resolved = resolveProfile({ profile: 'plain' }, { toolKey: 'chat' });
   const mode = resolveProfileFunctionCallingMode(resolved);
   assert.strictEqual(mode, undefined);
+});
+
+test('buildToolsArray — function declaration emits parametersJsonSchema not parameters', () => {
+  const schema = { type: 'object', properties: { q: { type: 'string' } }, required: ['q'] };
+  const resolved = resolveProfile(
+    {
+      profile: 'agent',
+      overrides: {
+        functions: [{ name: 'search', description: 'web search', parametersJsonSchema: schema }],
+      },
+    },
+    { toolKey: 'chat' },
+  );
+
+  const tools = buildToolsArray(resolved);
+  const decl = tools
+    .flatMap((t) => ('functionDeclarations' in t ? (t.functionDeclarations ?? []) : []))
+    .find((d) => d.name === 'search');
+
+  assert.ok(decl, 'search declaration must exist');
+  assert.ok(
+    'parametersJsonSchema' in decl,
+    `expected parametersJsonSchema key, got: ${JSON.stringify(Object.keys(decl))}`,
+  );
+  assert.ok(!('parameters' in decl), 'parameters key must not be present');
+  assert.deepStrictEqual(decl.parametersJsonSchema, schema);
 });

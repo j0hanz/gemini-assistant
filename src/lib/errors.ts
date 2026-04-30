@@ -1,6 +1,6 @@
 import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 
-import { FinishReason } from '@google/genai';
+import { ApiError, FinishReason } from '@google/genai';
 
 type AppErrorCategory = 'client' | 'server' | 'safety' | 'cancelled' | 'internal';
 
@@ -241,6 +241,7 @@ type ClassifiedError = { kind: 'http'; status: number } | { kind: 'abort' } | { 
 
 function classifyError(err: unknown, signal?: AbortSignal): ClassifiedError {
   if (isAbortError(err, signal)) return { kind: 'abort' };
+  if (err instanceof ApiError) return { kind: 'http', status: err.status };
   if (hasHttpStatus(err)) return { kind: 'http', status: err.status };
   return { kind: 'other' };
 }

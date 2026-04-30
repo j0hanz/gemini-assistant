@@ -108,3 +108,22 @@ test('isAbortError — false for AppError', () => {
   const error = new AppError('chat', 'msg', 'client');
   assert.strictEqual(isAbortError(error), false);
 });
+
+test('AppError.isRetryable — ECONNRESET network error is retryable (fallback preserved)', () => {
+  const networkError = Object.assign(new Error('connect ECONNRESET'), { code: 'ECONNRESET' });
+  assert.strictEqual(AppError.isRetryable(networkError), true);
+});
+
+test('AppError.isRetryable — nested cause ECONNRESET is retryable (fallback preserved)', () => {
+  const wrapper = Object.assign(new Error('fetch failed'), {
+    cause: Object.assign(new Error('ECONNRESET'), { code: 'ECONNRESET' }),
+  });
+  assert.strictEqual(AppError.isRetryable(wrapper), true);
+});
+
+test('AppError.from — HTTP 429 error is classified as retryable server error', () => {
+  const httpErr = Object.assign(new Error('rate limited'), { status: 429 });
+  const appErr = AppError.from(httpErr, 'chat');
+  assert.strictEqual(appErr.retryable, true);
+  assert.strictEqual(appErr.category, 'server');
+});

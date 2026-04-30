@@ -53,7 +53,7 @@
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
-    "@google/genai": "^1.50.1",
+    "@google/genai": "^1.51",
     "@modelcontextprotocol/node": "2.0.0-alpha.2",
     "@modelcontextprotocol/server": "2.0.0-alpha.2",
     "express": "^5.2.1",
@@ -66,7 +66,7 @@
     "@types/node": "^24",
     "eslint": "^10.2.1",
     "eslint-config-prettier": "^10.1.8",
-    "knip": "^6.7.0",
+    "knip": "^6.9.0",
     "prettier": "^3.8.3",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",

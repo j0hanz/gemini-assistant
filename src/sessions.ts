@@ -1,7 +1,5 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 
-import { createHash } from 'node:crypto';
-
 import type {
   BlockedReason,
   FinishReason,
@@ -30,13 +28,6 @@ export interface TranscriptEntry {
   taskId?: string;
 }
 
-export function hashInstructionText(text: string | undefined): string | undefined {
-  if (!text) {
-    return undefined;
-  }
-
-  return createHash('sha256').update(text).digest('hex');
-}
 
 export interface SessionEventEntry {
   request: {
@@ -406,16 +397,6 @@ function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
   };
 }
 
-function cloneContentEntry(item: ContentEntry): ContentEntry {
-  return {
-    ...item,
-    parts: cloneValue(item.parts),
-    ...(item.rawParts !== undefined ? { rawParts: cloneValue(item.rawParts) } : {}),
-    ...(item.finishReason !== undefined ? { finishReason: item.finishReason } : {}),
-    ...(item.finishMessage !== undefined ? { finishMessage: item.finishMessage } : {}),
-    ...(item.promptBlockReason !== undefined ? { promptBlockReason: item.promptBlockReason } : {}),
-  };
-}
 
 /**
  * Produce SDK-faithful Gemini parts for persistence under {@link ContentEntry.rawParts}.

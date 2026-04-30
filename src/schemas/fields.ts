@@ -431,7 +431,7 @@ const ProfileNameSchema = withFieldMetadata(
 
 const ProfileThinkingLevelSchema = withFieldMetadata(
   z.enum(['minimal', 'low', 'medium', 'high'] as const),
-  'Thinking depth override for this profile. **Lowercase strings only** (`minimal`, `low`, `medium`, `high`) — maps to Interactions API `generation_config.thinking_level`. The top-level `thinkingLevel` field uses uppercase (`MINIMAL`–`HIGH`) for the Models API path.',
+  'Thinking depth override for this profile (lowercase: minimal, low, medium, high). The top-level thinkingLevel uses uppercase (MINIMAL-HIGH).',
 );
 
 const FileSearchStoreNameSchema = z

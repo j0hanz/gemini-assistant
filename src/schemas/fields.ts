@@ -266,7 +266,7 @@ export type McpServerSpec = z.infer<typeof McpServerSpecSchema>;
 
 export const FunctionResponsesSchema = withFieldMetadata(
   z.array(FunctionResponseSchema).min(1).max(32),
-  'Caller-executed Gemini function responses for an existing session.',
+  'Caller-executed Gemini function responses for a stateless (non-session) turn. Continues the model after functionCalls returned by the previous turn. Cannot be combined with sessionId — use server-side Interactions API for session-based function calling.',
 );
 
 const usageMetadataFields = {
@@ -417,6 +417,7 @@ export function createGenerationConfigFields() {
       .optional()
       .describe('Maximum Gemini output tokens.'),
     safetySettings: SafetySettingsSchema,
+    seed: withFieldMetadata(z.int().optional(), 'Fixed random seed for reproducible outputs.'),
   };
 }
 
@@ -430,7 +431,7 @@ const ProfileNameSchema = withFieldMetadata(
 
 const ProfileThinkingLevelSchema = withFieldMetadata(
   z.enum(['minimal', 'low', 'medium', 'high'] as const),
-  'Thinking depth override for this profile (lowercase: minimal, low, medium, high). Distinct from the top-level thinkingLevel which uses uppercase.',
+  'Thinking depth override for this profile. **Lowercase strings only** (`minimal`, `low`, `medium`, `high`) — maps to Interactions API `generation_config.thinking_level`. The top-level `thinkingLevel` field uses uppercase (`MINIMAL`–`HIGH`) for the Models API path.',
 );
 
 const FileSearchStoreNameSchema = z
@@ -457,7 +458,7 @@ const OverridesSchema = z.strictObject({
   ),
   mcpServer: withFieldMetadata(
     McpServerSpecSchema.optional(),
-    'MCP server configuration. When present on agent profile, tools are converted via mcpToTool().',
+    'MCP server configuration. When present on agent profile, provides MCP server details for tool integration. Runtime mcpToTool() conversion pending implementation.',
   ),
   responseSchemaJson: withFieldMetadata(
     z.record(z.string(), z.unknown()).optional(),
@@ -465,7 +466,7 @@ const OverridesSchema = z.strictObject({
   ),
   functionCallingMode: withFieldMetadata(
     z.enum(['AUTO', 'ANY', 'NONE', 'VALIDATED'] as const).optional(),
-    'Function-calling mode override. ANY and AUTO are rejected when built-in tools are active.',
+    'Function-calling mode override. `AUTO`: model decides (default). `ANY`: model must call a function. `NONE`: disable calling. `VALIDATED`: model must call with SDK-validated arguments. ANY and AUTO are rejected when built-in tools are active.',
   ),
   allowedFunctionNames: withFieldMetadata(
     z.array(z.string()).optional(),

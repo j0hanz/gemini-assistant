@@ -373,10 +373,9 @@ function validateAskRequest(
       hasExistingSession && responseSchema !== undefined,
       'chat: responseSchema cannot be used with an existing chat session. Use it with single-turn or a new session.',
     ],
-    [hasFunctionResponses && !sessionId, 'chat: functionResponses requires sessionId.'],
     [
-      hasFunctionResponses && !hasExistingSession,
-      'chat: functionResponses requires an existing sessionId.',
+      hasFunctionResponses && sessionId !== undefined,
+      'chat: functionResponses is not supported with sessionId. Sessions use server-side Interactions API state; function calls are handled server-side.',
     ],
     [
       hasFunctionResponses && responseSchema !== undefined,

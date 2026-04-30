@@ -193,14 +193,13 @@ export function createChatInputSchema(completeSessionIds: SessionIdCompleter = (
     thinkingLevel: thinkingLevelField,
     ...generationConfigFields,
     responseSchemaJson: responseSchemaJsonField(),
-    seed: withFieldMetadata(z.int().optional(), 'Fixed random seed for reproducible outputs.'),
     tools: withFieldMetadata(
       ToolsSpecSchema.optional(),
       'Tool profile and overrides for this chat turn. Selects Gemini built-in tools and thinking defaults.',
     ),
     functionResponses: withFieldMetadata(
       FunctionResponsesSchema.optional(),
-      'Caller-executed Gemini function responses for an existing session. Requires sessionId and continues the model after functionCalls returned by a previous turn.',
+      'Caller-executed Gemini function responses for a stateless (non-session) turn. Continues the model after functionCalls returned by the previous turn. Cannot be combined with sessionId — use server-side Interactions API for session-based function calling.',
     ),
   });
 }

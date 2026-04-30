@@ -212,11 +212,11 @@ function buildReducedRepairPrompt(
   const invalidOutputText = invalidOutput.slice(0, 4_000);
 
   return [
-    'Repair the invalid JSON response from the previous turn.',
-    'Return ONLY valid JSON that conforms exactly to the provided schema.',
-    `Original user request:\n${originalPrompt}`,
+    'Fix the invalid JSON from the previous turn.',
+    'Return only valid JSON that matches the provided schema.',
+    `User request:\n${originalPrompt}`,
     `Validation errors:\n${warningText}`,
-    `Previous invalid output:\n${invalidOutputText}`,
+    `Previous output:\n${invalidOutputText}`,
   ].join('\n\n');
 }
 

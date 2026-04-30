@@ -40,6 +40,13 @@ function escapeInstructionBlock(text: string): string {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
+const CITE_CODE = 'Cite as `path:line`.';
+const CITE_WEB = 'Cite as [title](url).';
+const REPORT_SKELETON =
+  '## Summary — 2–4 sentence overview.\n' +
+  '## Findings — body using ### sub-sections or tables.\n' +
+  '## Sources — cited URLs as a compact reference list.';
+
 export function buildFunctionCallingInstructionText(
   opts: FunctionCallingInstructionOptions,
 ): string | undefined {
@@ -49,27 +56,27 @@ export function buildFunctionCallingInstructionText(
 
   if (opts.mode === undefined || opts.mode === 'NONE') {
     return hasBuiltInTraces
-      ? 'Gemini may emit server-side built-in tool invocation traces for supported tools. Treat those traces as runtime events, not user-provided evidence.'
+      ? 'Server-side tool traces may appear. Treat them as runtime events, not evidence.'
       : undefined;
   }
 
   if (!hasDeclaredFunctions) {
     return hasBuiltInTraces
-      ? 'Gemini may emit server-side built-in tool invocation traces for supported tools. No declared client functions are available this turn.'
+      ? 'Server-side tool traces may appear. No declared client functions are available this turn.'
       : undefined;
   }
 
   const names = declaredNames.join(', ');
   const modeInstruction =
     opts.mode === 'ANY'
-      ? `You must call one or more of these declared functions when needed to complete the request: ${names}. Parallel calls are allowed.`
+      ? `Call one or more of these functions as needed: ${names}. Parallel calls allowed.`
       : opts.mode === 'VALIDATED'
-        ? `Available declared functions: ${names}. Function calls are schema-constrained by Gemini; the MCP client must still validate arguments before executing side effects.`
-        : `Available declared functions: ${names}. Call them only when the user's request requires it.`;
+        ? `Available declared functions: ${names}. Arguments are schema-constrained; the MCP client validates before executing side effects.`
+        : `Available declared functions: ${names}. Call them only when the request requires it.`;
 
   const executionInstruction = hasBuiltInTraces
-    ? 'Gemini may also emit server-side built-in tool invocation traces. Declared custom functions are still executed by the MCP client/application. Do not fabricate function or built-in tool results.'
-    : 'After issuing a declared function call, stop and wait for the client to return the function response. Do not invent results.';
+    ? 'Server-side tool traces may also appear. Custom functions are executed by the MCP client. Do not fabricate results.'
+    : 'After a function call, wait for the client response. Do not invent results.';
 
   return joinNonEmpty([modeInstruction, executionInstruction]);
 }
@@ -135,7 +142,7 @@ export function buildGroundedAnswerPrompt(
       promptText,
       systemInstruction: joinNonEmpty([
         retrievalUnavailable ? 'No retrieval tools are available this turn.' : undefined,
-        "Answer using sources retrieved this turn. Mark unsupported claims '(unverified)'. If retrieval returned nothing, say so. Do not invent URLs.",
+        "Answer from sources retrieved this turn. Mark unsupported claims '(unverified)'. If retrieval returned nothing, say so. Do not invent URLs.",
       ]),
     },
     cacheName,
@@ -176,7 +183,7 @@ export function buildFileAnalysisPrompt(
       {
         promptText: args.goal,
         systemInstruction:
-          'Answer the goal from the attached file.\n## Answer — response to the goal.\n## References — cited excerpts as `path:line`.\nDo not invent content not present in the file.',
+          'Answer the goal from the attached file.\n## Answer\n## References — excerpts as `path:line`.\nDo not invent.',
       },
       args.cacheName,
     );
@@ -190,7 +197,7 @@ export function buildFileAnalysisPrompt(
           `Task: ${args.goal}`,
         ]),
         systemInstruction:
-          'Answer the goal using content retrieved from the listed URLs.\n## Answer — response to the goal.\n## References — cite retrieved sources as [title](url). Note any URLs that did not retrieve.\nIf no URLs retrieved, say so in ## Answer. Do not guess content.',
+          'Answer the goal from content at the listed URLs.\n## Answer\n## References — sources as [title](url); note any that failed to retrieve.\nIf no URLs retrieved, say so. Do not invent.',
       },
       args.cacheName,
     );
@@ -200,7 +207,7 @@ export function buildFileAnalysisPrompt(
     {
       promptParts: [...(args.attachedParts ?? []), { text: `Goal: ${args.goal}` }],
       systemInstruction:
-        'Analyze the attached files.\n## Answer — response to the goal.\n## References — cited excerpts as `filename:line` or short quotes.\nDo not invent content not present in the files.',
+        'Analyze the attached files.\n## Answer\n## References — excerpts as `filename:line` or short quotes.\nDo not invent.',
     },
     args.cacheName,
   );
@@ -241,9 +248,9 @@ export function buildDiffReviewPrompt(
         systemInstruction: joinNonEmpty([
           'Compare the files.',
           '## Summary — 2–4 sentence overview of what differs and why it matters.',
-          '## Differences — table with columns | Aspect | File A | File B | when 2+ attributes differ; prose otherwise.',
+          '## Differences — table (| Aspect | File A | File B |) for 2+ attributes; prose otherwise.',
           '## Impact — consequences of the differences.',
-          'Cite symbols or short quotes as `path:line`. Do not invent line numbers.',
+          `${CITE_CODE} Do not invent line numbers.`,
         ]),
       },
       args.cacheName,
@@ -252,7 +259,7 @@ export function buildDiffReviewPrompt(
 
   const hasDocs = args.docContexts && args.docContexts.length > 0;
   const docInstruction = hasDocs
-    ? ' Cross-reference the diff against the documentation context. If the diff makes the docs factually incorrect or misleading, emit a trailing fenced JSON block exactly in the form ```json\\n{ "documentationDrift": [...] }\\n```. If docs are still accurate, omit the JSON block entirely. Do not emit an empty array or unfenced JSON.'
+    ? ' Cross-reference the diff with the documentation context. If the diff makes docs factually incorrect, emit a trailing ```json\n{ "documentationDrift": [...] }\n``` block. Omit it if docs are still accurate. No empty array; no unfenced JSON.'
     : '';
 
   const docContent = hasDocs
@@ -267,7 +274,7 @@ export function buildDiffReviewPrompt(
     {
       cacheText: 'Review the diff for bugs and behavior risk. Ignore formatting-only changes.',
       promptText: args.promptText + docContent,
-      systemInstruction: `Review the unified diff for bugs, regressions, and behavior risk. Ignore formatting-only changes.\nPresent findings as a Markdown table:\n| Severity | File | Finding | Fix |\nSeverity values: Critical · High · Medium · Low · Info\nCite file paths as \`path:line\`. Do not invent line numbers.\nIf the diff is clean, say so in one sentence — no table.${docInstruction}`,
+      systemInstruction: `Review the diff for bugs, regressions, and behavior risk. Ignore formatting-only changes.\nPresent findings as a table:\n| Severity | File | Finding | Fix |\nSeverity: Critical · High · Medium · Low · Info\n${CITE_CODE} Do not invent line numbers.\nIf clean, say so in one sentence — no table.${docInstruction}`,
     },
     args.cacheName,
   );
@@ -302,13 +309,13 @@ export function buildErrorDiagnosisPrompt(args: {
       cacheText: 'Diagnose the error. Output: Cause, Fix, Notes.',
       promptText: sections.join('\n\n'),
       systemInstruction: joinNonEmpty([
-        'Diagnose the error. Base the cause and fix on the given context.',
-        '## Cause — most likely root cause. Cite relevant code as `path:line`.',
-        '## Fix — concrete remediation steps. Use a numbered list if more than one step.',
-        '## Notes — secondary considerations, edge cases, or follow-ups. Omit if empty.',
+        'Diagnose the error from the given context.',
+        `## Cause — most likely root cause. ${CITE_CODE}`,
+        '## Fix — remediation steps. Number them if more than one.',
+        '## Notes — edge cases or follow-ups. Omit if empty.',
         args.googleSearchEnabled
-          ? 'Search the error message and key identifiers; cite retrieved sources as [title](url).'
-          : "Mark anything not derivable from the given context as '(unverified)'.",
+          ? `Search the error and key identifiers. ${CITE_WEB}`
+          : "Mark claims not derivable from context as '(unverified)'.",
       ]),
     },
     args.cacheName,
@@ -324,14 +331,14 @@ export function buildDiagramGenerationPrompt(args: {
 }): ResolvedPartPrompt {
   return resolvePartPrompt(
     {
-      cacheText: `Return exactly one fenced \`\`\`${args.diagramType} block.`,
+      cacheText: `Return one fenced \`\`\`${args.diagramType} block.`,
       promptParts: [...(args.attachedParts ?? []), { text: `Task: ${args.description}` }],
       systemInstruction: joinNonEmpty([
         `Generate a ${args.diagramType} diagram from the description and files.`,
-        `Return exactly one fenced \`\`\`${args.diagramType} block with clear node and edge labels.`,
-        'No prose before or after the block.',
+        `Return one fenced \`\`\`${args.diagramType} block with clear node and edge labels.`,
+        'No prose.',
         args.validateSyntax
-          ? 'You may run Code Execution once to validate syntax. Do not narrate the result.'
+          ? 'Run Code Execution once to validate syntax. Do not narrate the result.'
           : undefined,
       ]),
     },
@@ -353,22 +360,22 @@ export function buildAgenticResearchPrompt(args: {
       promptText: joinNonEmpty([
         args.urls && args.urls.length > 0 ? `Primary URLs:\n${args.urls.join('\n')}` : undefined,
         `<research_topic>${sanitizedTopic}</research_topic>`,
-        'Research the topic and produce a grounded Markdown report.',
+        'Research the topic and produce a grounded report.',
       ]),
       systemInstruction: joinNonEmpty([
         args.capabilities.googleSearch
-          ? 'Research with Google Search, then write a grounded Markdown report:\n## Summary — 2–4 sentence overview.\n## Findings — body using ### sub-sections or tables per content type.\n## Sources — cited URLs as a compact reference list.'
-          : 'Write a grounded Markdown report:\n## Summary — 2–4 sentence overview.\n## Findings — body using ### sub-sections or tables per content type.\n## Sources — cited URLs as a compact reference list.',
+          ? `Research with Google Search, then write a grounded report:\n${REPORT_SKELETON}`
+          : `Write a grounded report:\n${REPORT_SKELETON}`,
         args.capabilities.multiTurnRetrieval === true
-          ? 'You may issue multiple searches when needed.'
+          ? 'Issue multiple searches as needed.'
           : undefined,
         args.capabilities.codeExecution
           ? 'Use Code Execution only for arithmetic, ranking, or consistency checks.'
           : undefined,
         args.deliverable
-          ? `Preferred shape: ${args.deliverable}. If the evidence does not support it, use the best-supported structure and say why.`
+          ? `Preferred shape: ${args.deliverable}. If evidence does not support it, use the best-supported structure and say why.`
           : undefined,
-        'Cite source URLs as [title](url) inline for retrieved claims. Flag unverified claims. Include dates for time-sensitive facts.',
+        `${CITE_WEB} Flag unverified claims. Include dates for time-sensitive facts.`,
       ]),
     },
     args.cacheName,

@@ -47,10 +47,10 @@ const THINKING_LEVEL_MAP: Record<AskThinkingLevel, ThinkingLevel> = {
 };
 
 export const DEFAULT_SYSTEM_INSTRUCTION =
-  'Use a Markdown table when content has 2+ attributes per item (comparisons, option matrices, findings). Use bullet points for 3–7 homogeneous items. Use prose for narrative.\n' +
+  'Use a table when content has 2+ attributes per item. Use bullets for 3–7 homogeneous items. Use prose for narrative.\n' +
   'Start sections at ##. Use ### for sub-sections. Never use #.\n' +
-  'Cite web sources as [title](url) inline. Cite code as `path:line` inline. Collect URL references in a ## Sources section when more than one source is cited.\n' +
-  'No opening filler ("Sure,", "Great question,"). No trailing restatements. No unsolicited caveats not grounded in the task.';
+  'Cite web sources as [title](url). Cite code as `path:line`. Collect URLs in ## Sources when 2+ cited.\n' +
+  'No opening filler. No trailing restatements. No unsolicited caveats.';
 
 interface ConfigBuilderOptions {
   costProfile?: string | undefined;

@@ -611,7 +611,7 @@ async function runDeepResearchPlan(
   const planTurn = await runDeepResearchTurn(
     ctx,
     'Research plan',
-    `Return JSON only as {"queries":["..."]}. Produce ${String(Math.min(args.searchDepth, 5))} focused public web search queries for:\n${args.topic}`,
+    `Return JSON: {"queries":["..."]}. Produce ${String(Math.min(args.searchDepth, 5))} focused web search queries for:\n${args.topic}`,
     {
       systemInstruction: 'Plan retrieval queries. Do not answer the research question.',
       costProfile: 'research.deep.plan',

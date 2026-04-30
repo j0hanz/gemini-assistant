@@ -92,10 +92,10 @@ export const ReviewPromptSchema = z
 export function buildDiscoverPrompt(args: z.infer<typeof DiscoverPromptSchema>) {
   return userPromptMessage(
     [
-      ...(args.job ? [`Preferred job: ${args.job}`] : []),
-      ...(args.goal ? [`User goal: ${args.goal}`] : []),
+      ...(args.job ? [`Job: ${args.job}`] : []),
+      ...(args.goal ? [`Goal: ${args.goal}`] : []),
       renderWorkflowSection('start-here'),
-      'Recommend the best next job, prompt, and resource to inspect first.',
+      'Recommend the best next job, prompt, and resource.',
     ].join('\n\n'),
   );
 }
@@ -103,11 +103,11 @@ export function buildDiscoverPrompt(args: z.infer<typeof DiscoverPromptSchema>) 
 export function buildResearchPrompt(args: z.infer<typeof ResearchPromptSchema>) {
   return userPromptMessage(
     [
-      `Research goal: ${args.goal}`,
-      ...(args.mode ? [`Preferred mode: ${args.mode}`] : []),
-      ...(args.deliverable ? [`Requested deliverable: ${args.deliverable}`] : []),
+      `Goal: ${args.goal}`,
+      ...(args.mode ? [`Mode: ${args.mode}`] : []),
+      ...(args.deliverable ? [`Deliverable: ${args.deliverable}`] : []),
       renderWorkflowSection('research'),
-      'Explain whether quick or deep research is the better fit and why.',
+      'Explain whether quick or deep research fits better and why.',
     ].join('\n\n'),
   );
 }
@@ -115,10 +115,10 @@ export function buildResearchPrompt(args: z.infer<typeof ResearchPromptSchema>) 
 export function buildReviewPrompt(args: z.infer<typeof ReviewPromptSchema>) {
   return userPromptMessage(
     [
-      ...(args.subject ? [`Review subject: ${args.subject}`] : []),
+      ...(args.subject ? [`Subject: ${args.subject}`] : []),
       ...(args.focus ? [`Focus: ${args.focus}`] : []),
       renderWorkflowSection('review'),
-      'Recommend the correct review subject variant and the information to gather first.',
+      'Recommend the review variant and what information to gather first.',
     ].join('\n\n'),
   );
 }

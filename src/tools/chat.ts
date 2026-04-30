@@ -870,9 +870,7 @@ function appendSessionTurn(
   args: AskArgs,
   deps: AskDependencies,
   taskId: string | undefined,
-  resumedArgs?: AskArgs,
 ): void {
-  const sentMessage = resumedArgs?.message ?? args.message;
   const structured = getAskStructuredContent(askResult.result);
   const usage = extractUsage(askResult.streamResult.usageMetadata);
 
@@ -887,12 +885,12 @@ function appendSessionTurn(
     response.schemaWarnings = structured.warnings;
   }
   if (askResult.streamResult.finishReason !== undefined) {
-    response.finishReason = String(askResult.streamResult.finishReason);
+    response.finishReason = askResult.streamResult.finishReason;
   }
-  if (askResult.streamResult.functionCalls && askResult.streamResult.functionCalls.length > 0) {
+  if (askResult.streamResult.functionCalls?.length) {
     response.functionCalls = askResult.streamResult.functionCalls;
   }
-  if (askResult.streamResult.toolEvents && askResult.streamResult.toolEvents.length > 0) {
+  if (askResult.streamResult.toolEvents?.length) {
     response.toolEvents = askResult.streamResult.toolEvents;
   }
   if (usage !== undefined) {
@@ -923,10 +921,6 @@ function appendSessionTurn(
   const request: SessionEventEntry['request'] = {
     message: args.message,
   };
-
-  if (sentMessage !== undefined) {
-    request.sentMessage = sentMessage;
-  }
   if (askResult.toolProfile) {
     request.toolProfile = askResult.toolProfile;
   }

@@ -278,7 +278,9 @@ describe('model-prompts', () => {
     assert.ok(prompt.promptText.includes('https://example.com/report'));
     assert.ok(prompt.systemInstruction?.includes('Preferred shape:'));
     assert.ok(prompt.systemInstruction?.includes('a decision memo'));
-    assert.ok(!prompt.systemInstruction?.includes('## Findings'));
+    assert.ok(prompt.systemInstruction?.includes('## Summary'));
+    assert.ok(prompt.systemInstruction?.includes('## Findings'));
+    assert.ok(prompt.systemInstruction?.includes('## Sources'));
     assert.ok(!prompt.systemInstruction?.includes('multiple searches'));
     assert.ok(!prompt.systemInstruction?.includes('Code Execution'));
   });

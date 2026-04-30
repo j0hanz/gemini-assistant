@@ -358,8 +358,8 @@ export function buildAgenticResearchPrompt(args: {
       ]),
       systemInstruction: joinNonEmpty([
         args.capabilities.googleSearch
-          ? 'Research with Google Search, then write a grounded Markdown report.'
-          : 'Write a grounded Markdown report using retrieved evidence from this turn.',
+          ? 'Research with Google Search, then write a grounded Markdown report:\n## Summary — 2–4 sentence overview.\n## Findings — body using ### sub-sections or tables per content type.\n## Sources — cited URLs as a compact reference list.'
+          : 'Write a grounded Markdown report:\n## Summary — 2–4 sentence overview.\n## Findings — body using ### sub-sections or tables per content type.\n## Sources — cited URLs as a compact reference list.',
         args.capabilities.multiTurnRetrieval === true
           ? 'You may issue multiple searches when needed.'
           : undefined,
@@ -369,7 +369,7 @@ export function buildAgenticResearchPrompt(args: {
         args.deliverable
           ? `Preferred shape: ${args.deliverable}. If the evidence does not support it, use the best-supported structure and say why.`
           : undefined,
-        'Cite source URLs inline for retrieved claims. Treat planning notes as leads, not evidence. Flag unverified claims explicitly. Include dates for time-sensitive facts.',
+        'Cite source URLs as [title](url) inline for retrieved claims. Flag unverified claims. Include dates for time-sensitive facts.',
       ]),
     },
     args.cacheName,

@@ -63,6 +63,7 @@ export interface SessionAccess {
   appendTranscript(id: string, item: TranscriptEntry): boolean;
   completeSessionIds(prefix?: string): string[];
   getSessionEntry(id: string): SessionSummary | undefined;
+  getSessionInteractionId(id: string): string | undefined;
   isEvicted(id: string): boolean;
   listTranscriptEntries(id: string): TranscriptEntry[] | undefined;
 }
@@ -395,6 +396,7 @@ export function createSessionAccess(store: SessionStore): SessionAccess {
     appendTranscript: store.appendSessionTranscript.bind(store),
     completeSessionIds: store.completeSessionIds.bind(store),
     getSessionEntry: store.getSessionEntry.bind(store),
+    getSessionInteractionId: store.getSessionInteractionId.bind(store),
     isEvicted: store.isEvicted.bind(store),
     listTranscriptEntries: store.listSessionTranscriptEntries.bind(store),
   };

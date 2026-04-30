@@ -29,7 +29,6 @@ interface BuildInteractionParamsOptions {
   maxOutputTokens?: number | undefined;
   systemInstruction?: string | undefined;
   previousInteractionId?: string | undefined;
-  toolResults?: Interactions.ToolResult[] | undefined;
 }
 
 /**
@@ -47,7 +46,6 @@ export function buildInteractionParams(
     maxOutputTokens = 2048,
     systemInstruction,
     previousInteractionId,
-    toolResults,
   } = options;
 
   // Build system instruction with optional grounding suffix
@@ -84,10 +82,6 @@ export function buildInteractionParams(
 
   if (previousInteractionId) {
     paramsObj.previous_interaction_id = previousInteractionId;
-  }
-
-  if (toolResults && toolResults.length > 0) {
-    paramsObj.tool_results = toolResults;
   }
 
   return paramsObj as unknown as Interactions.InteractionCreateParams;

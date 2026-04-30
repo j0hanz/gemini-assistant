@@ -13,11 +13,8 @@ import type {
 import { AppError } from '../lib/errors.js';
 import { consumeInteractionStream } from '../lib/interaction-stream.js';
 import { buildInteractionParams } from '../lib/interactions.js';
-import { logger, mcpLog } from '../lib/logger.js';
-import {
-  appendFunctionCallingInstruction,
-  buildFunctionCallingInstructionText,
-} from '../lib/model-prompts.js';
+import { logger } from '../lib/logger.js';
+import { appendFunctionCallingInstruction } from '../lib/model-prompts.js';
 import { resolveOrchestration } from '../lib/orchestration.js';
 import {
   buildBaseStructuredOutput,
@@ -39,7 +36,6 @@ import {
 import { getTaskEmitter, MUTABLE_ANNOTATIONS, registerWorkTool } from '../lib/tasks.js';
 import {
   buildContextUsed,
-  buildSessionSummary,
   emptyContextUsed,
   type ToolServices,
   type ToolWorkspaceAccess,
@@ -117,29 +113,17 @@ interface AskStructuredContent extends Record<string, unknown> {
 }
 
 interface AskDependencies {
-  appendSessionContent: (sessionId: string, item: ContentEntry) => boolean;
   appendSessionEvent: (sessionId: string, item: SessionEventEntry) => boolean;
   appendSessionTranscript: (sessionId: string, item: TranscriptEntry) => boolean;
-  createChat: (args: AskArgs) => { chat: Chat; contract?: SessionGenerationContract };
-  getSession: (sessionId: string) => Chat | undefined;
   getSessionEntry: (sessionId: string) => SessionSummary | undefined;
+  getSessionInteractionId: (sessionId: string) => string | undefined;
   isEvicted: (sessionId: string) => boolean;
-  listSessionContentEntries: (sessionId: string) => ContentEntry[] | undefined;
-  now: () => number;
   listSessionTranscriptEntries: (sessionId: string) => TranscriptEntry[] | undefined;
-  rebuildChat: (sessionId: string, args: AskArgs) => Chat | undefined;
+  now: () => number;
   runWithoutSession: (
     args: AskArgs,
     ctx: ServerContext,
-    chat?: Chat,
   ) => Promise<AskExecutionResult>;
-  setSession: (
-    sessionId: string,
-    chat: Chat,
-    rebuiltAt?: number,
-    cacheName?: string,
-    contract?: SessionGenerationContract,
-  ) => void;
 }
 
 interface AskExecutionResult {
@@ -345,7 +329,7 @@ function buildChatResolvedProfile(args: AskArgs): ResolvedProfile {
 
 function validateAskRequest(
   args: AskArgs,
-  deps: Pick<AskDependencies, 'getSessionEntry' | 'isEvicted' | 'listSessionContentEntries'>,
+  deps: Pick<AskDependencies, 'getSessionEntry' | 'isEvicted'>,
   ctx: ServerContext,
 ): CallToolResult | undefined {
   const { responseSchema, sessionId } = args;
@@ -414,19 +398,7 @@ function validateAskRequest(
     }
   }
 
-  // Pending call validation no longer needed; server-side state management via ai.interactions handles this
-
-  if (
-    hasExistingSession &&
-    sessionEntry.contract &&
-    !isCompatibleSessionContract(sessionEntry.contract, buildRequestedSessionContract(args))
-  ) {
-    return new AppError(
-      'chat',
-      'chat: session contract mismatch: this sessionId was created with different model, tools, system instruction, or response schema settings. Start a new session.',
-    ).toToolResult();
-  }
-
+  // Contract validation no longer needed; server-side state management via ai.interactions handles compatibility
   return undefined;
 }
 
@@ -790,133 +762,16 @@ function buildAskToolingConfig(args: AskArgs) {
   };
 }
 
-function buildRequestedSessionContract(args: AskArgs): SessionGenerationContract {
-  const { toolConfig, tools, functionCallingMode, serverSideToolInvocations, resolvedProfile } =
-    buildAskToolingConfig(args);
-  const declaredNames = resolvedProfile.overrides.functions?.map((f) => f.name) ?? [];
-  const functionCallingInstructionHash = hashInstructionText(
-    buildFunctionCallingInstructionText({
-      ...(functionCallingMode !== undefined ? { mode: functionCallingMode } : {}),
-      declaredNames,
-      serverSideToolInvocations,
-    }),
-  );
-  const config = buildGenerateContentConfig({
-    ...buildAskGenerationOptions(
-      args,
-      toolConfig,
-      tools,
-      functionCallingMode,
-      serverSideToolInvocations,
-      resolvedProfile,
-    ),
-    costProfile: 'chat',
-    cacheName: args.cacheName,
-  });
-
-  return buildSessionGenerationContract(
-    getGeminiModel(),
-    config,
-    functionCallingMode,
-    functionCallingInstructionHash,
-  );
-}
-
-function createDefaultAskDependencies(
-  sessionAccess: SessionAccess,
-  workspace: ToolWorkspaceAccess,
-): AskDependencies {
+function createDefaultAskDependencies(sessionAccess: SessionAccess): AskDependencies {
   return {
-    appendSessionContent: (sessionId, item) => sessionAccess.appendContent(sessionId, item),
     appendSessionEvent: (sessionId, item) => sessionAccess.appendEvent(sessionId, item),
     appendSessionTranscript: (sessionId, item) => sessionAccess.appendTranscript(sessionId, item),
-    createChat: (args) => {
-      const { toolConfig, tools, functionCallingMode, serverSideToolInvocations, resolvedProfile } =
-        buildAskToolingConfig(args);
-      const config = buildGenerateContentConfig({
-        ...buildAskGenerationOptions(
-          args,
-          toolConfig,
-          tools,
-          functionCallingMode,
-          serverSideToolInvocations,
-          resolvedProfile,
-        ),
-        costProfile: 'chat',
-        cacheName: args.cacheName,
-      });
-      const chat = getAI().chats.create({
-        model: getGeminiModel(),
-        config,
-      });
-      return {
-        chat,
-        contract: buildRequestedSessionContract(args),
-      };
-    },
-    getSession: (sessionId) => sessionAccess.getSession(sessionId),
     getSessionEntry: (sessionId) => sessionAccess.getSessionEntry(sessionId),
+    getSessionInteractionId: (sessionId) => sessionAccess.getSessionInteractionId(sessionId),
     isEvicted: (sessionId) => sessionAccess.isEvicted(sessionId),
-    listSessionContentEntries: (sessionId) => sessionAccess.listContentEntries(sessionId),
     listSessionTranscriptEntries: (sessionId) => sessionAccess.listTranscriptEntries(sessionId),
-    rebuildChat: (sessionId, args) => {
-      const contents = sessionAccess.listContentEntries(sessionId) ?? [];
-      if (contents.length === 0) {
-        return undefined;
-      }
-
-      const sessionEntry = sessionAccess.getSessionEntry(sessionId);
-      const contract = sessionEntry?.contract;
-      const cacheName = sessionEntry?.cacheName;
-      const activeCacheName = workspace.getCacheStatus().cacheName;
-      const rebuildArgs =
-        cacheName && cacheName === activeCacheName ? { ...args, cacheName } : args;
-      if (cacheName && cacheName !== activeCacheName) {
-        logger.child('chat').info('Rebuilding session without stale workspace cache', {
-          sessionId,
-          cacheName,
-        });
-      }
-      // Replay reconstruction reads only the raw ContentEntry substrate. The
-      // normalized SessionEventEntry audit projection is intentionally ignored.
-      const config = contract
-        ? buildConfigFromSessionContract(
-            contract,
-            cacheName && cacheName === activeCacheName ? cacheName : undefined,
-          )
-        : (() => {
-            const {
-              toolConfig,
-              tools,
-              functionCallingMode,
-              serverSideToolInvocations,
-              resolvedProfile,
-            } = buildAskToolingConfig(args);
-            return buildGenerateContentConfig({
-              ...buildAskGenerationOptions(
-                rebuildArgs,
-                toolConfig,
-                tools,
-                functionCallingMode,
-                serverSideToolInvocations,
-                resolvedProfile,
-              ),
-              costProfile: 'chat',
-            });
-          })();
-      const chat = getAI().chats.create({
-        model: contract?.model ?? getGeminiModel(),
-        config,
-        history: buildRebuiltChatContents(contents, getSessionLimits().replayMaxBytes),
-      });
-      sessionAccess.replaceSession(sessionId, chat);
-      return chat;
-    },
     now: () => Date.now(),
     runWithoutSession: askWithoutSession,
-    setSession: (sessionId, chat, rebuiltAt, cacheName, contract) => {
-      sessionAccess.setSession(sessionId, chat, rebuiltAt, cacheName, contract);
-    },
   };
 }
 
@@ -1125,56 +980,6 @@ function appendSessionTurn(
   });
 }
 
-async function askExistingSession(
-  args: AskArgs & { sessionId: string },
-  ctx: ServerContext,
-  deps: AskDependencies,
-  chat: Chat,
-  sessionSummary?: string,
-): Promise<CallToolResult | undefined> {
-  // Tool response tracking removed; server-side state management via ai.interactions handles this
-
-  const resumedArgs = sessionSummary
-    ? { ...args, message: `${sessionSummary}\n\n${args.message}` }
-    : args;
-
-  await mcpLog(ctx, 'debug', `Resuming session ${args.sessionId}`);
-  const { progress } = createToolContext('chat', ctx);
-  await progress.send(0, undefined, 'Resuming session');
-  const askResult = await deps.runWithoutSession(resumedArgs, ctx, chat);
-  askResult.result = attachSessionMetadata(
-    askResult.result,
-    args.sessionId,
-    deps.getSessionEntry(args.sessionId)?.rebuiltAt,
-  );
-  appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id, resumedArgs);
-  const turnIndex = (deps.listSessionContentEntries(args.sessionId)?.length ?? 0) - 1;
-  appendSessionResource(askResult.result, args.sessionId, turnIndex, ctx.task?.id);
-  return askResult.result;
-}
-
-async function askNewSession(
-  args: AskArgs & { sessionId: string },
-  ctx: ServerContext,
-  deps: AskDependencies,
-): Promise<CallToolResult> {
-  await mcpLog(ctx, 'debug', `Creating session ${args.sessionId}`);
-  const { chat, contract } = deps.createChat(args);
-
-  const askResult = await deps.runWithoutSession(args, ctx, chat);
-
-  if (!askResult.result.isError) {
-    deps.setSession(args.sessionId, chat, undefined, args.cacheName, contract);
-    askResult.result = attachSessionMetadata(askResult.result, args.sessionId);
-    appendSessionTurn(args.sessionId, askResult, args, deps, ctx.task?.id);
-    const turnIndex = (deps.listSessionContentEntries(args.sessionId)?.length ?? 0) - 1;
-    appendSessionResource(askResult.result, args.sessionId, turnIndex, ctx.task?.id);
-  } else {
-    await mcpLog(ctx, 'debug', `Session ${args.sessionId} not stored due to stream error`);
-  }
-
-  return askResult.result;
-}
 
 interface PreparedAskRequest {
   effectiveArgs: AskArgs;
@@ -1192,14 +997,11 @@ async function prepareAskRequest(
   const validationError = validateAskRequest(args, deps, ctx);
   if (validationError) return validationError;
 
-  const persistedCacheName = args.sessionId
-    ? deps.getSessionEntry(args.sessionId)?.cacheName
-    : undefined;
-  const canUseWorkspaceCache =
-    !persistedCacheName && (!args.sessionId || deps.getSessionEntry(args.sessionId) === undefined);
+  // For sessions, workspace caching is not used; server-side state via ai.interactions handles persistence
+  const canUseWorkspaceCache = !args.sessionId;
   const workspaceCacheName = canUseWorkspaceCache
     ? await resolveWorkspaceCacheName(args, workspace, signal)
-    : persistedCacheName;
+    : undefined;
   const contextUsed = workspaceCacheName
     ? buildContextUsed(
         [{ kind: 'workspace-cache', name: workspaceCacheName, tokens: 0, relevanceScore: 1 }],
@@ -1208,10 +1010,7 @@ async function prepareAskRequest(
       )
     : emptyContextUsed();
   const effectiveArgs = workspaceCacheName ? { ...args, cacheName: workspaceCacheName } : args;
-  const warnings =
-    workspaceCacheName || persistedCacheName || !canUseWorkspaceCache
-      ? []
-      : buildWorkspaceCacheSkipWarnings(args);
+  const warnings = buildWorkspaceCacheSkipWarnings(args);
 
   return { effectiveArgs, contextUsed, warnings };
 }
@@ -1235,43 +1034,34 @@ function createAskWork(deps: AskDependencies, workspace: ToolWorkspaceAccess) {
     }
 
     const sessionId = effectiveArgs.sessionId;
-    const liveChat = deps.getSession(sessionId);
-    if (liveChat) {
-      const resumed = await askExistingSession(
-        effectiveArgs as AskArgs & { sessionId: string },
-        ctx,
-        deps,
-        liveChat,
-      );
-      if (resumed) return appendAskWarnings(resumed, warnings);
-    } else if (deps.getSessionEntry(sessionId)) {
-      const rebuiltChat = deps.rebuildChat(sessionId, effectiveArgs);
-      if (rebuiltChat) {
-        const transcript = deps.listSessionTranscriptEntries(sessionId) ?? [];
-        const sessionSummary = transcript.length > 0 ? buildSessionSummary(transcript) : undefined;
-        const resumed = await askExistingSession(
-          effectiveArgs as AskArgs & { sessionId: string },
-          ctx,
-          deps,
-          rebuiltChat,
-          sessionSummary,
-        );
-        if (resumed) return appendAskWarnings(resumed, warnings);
-      } else {
-        const transcript = deps.listSessionTranscriptEntries(sessionId) ?? [];
-        if (transcript.length > 0) {
-          return new AppError(
-            'chat',
-            `session ${sessionId} cannot be resumed: no turn parts persisted`,
-          ).toToolResult();
-        }
-      }
+    const session = deps.getSessionEntry(sessionId);
+    if (!session) {
+      return new AppError('chat', `Session ${sessionId} not found`).toToolResult();
     }
 
-    return appendAskWarnings(
-      await askNewSession(effectiveArgs as AskArgs & { sessionId: string }, ctx, deps),
-      warnings,
+    const toolingResolved = await resolveAskTooling(effectiveArgs, ctx);
+    if ('error' in toolingResolved) {
+      return toolingResolved.error;
+    }
+
+    if (!toolingResolved.resolvedProfile) {
+      return new AppError('chat', 'Failed to resolve profile').toToolResult();
+    }
+
+    const lastInteractionId = deps.getSessionInteractionId(sessionId);
+    const askResult = await askWithInteractions(
+      effectiveArgs as AskArgs & { sessionId: string },
+      ctx,
+      toolingResolved.resolvedProfile,
+      lastInteractionId,
     );
+
+    if (!askResult.result.isError) {
+      appendSessionTurn(sessionId as string, askResult, effectiveArgs, deps, ctx.task?.id);
+      appendSessionResource(askResult.result, sessionId as string, undefined, ctx.task?.id);
+    }
+
+    return appendAskWarnings(askResult.result, warnings);
   };
 }
 
@@ -1394,7 +1184,7 @@ async function chatWork(
 
 export function registerChatTool(server: McpServer, services: ToolServices): void {
   const askWork = createAskWork(
-    createDefaultAskDependencies(services.session, services.workspace),
+    createDefaultAskDependencies(services.session),
     services.workspace,
   );
 

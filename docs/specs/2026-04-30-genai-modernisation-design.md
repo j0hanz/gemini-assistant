@@ -33,10 +33,10 @@ Breaking changes are acceptable. No backward-compatibility shims or legacy fallb
 The public tool surface stays unchanged (four tools: `chat`, `research`, `analyze`, `review`).
 Internally, generation splits into two well-separated paths.
 
-| Path | API surface | Triggered by |
-|:---|:---|:---|
-| **Session** | `ai.interactions.create()` + `previous_interaction_id` + SSE stream | `chat` tool with a `sessionId` |
-| **Stateless** | `ai.models.generateContentStream()` | All other tools + session-less chat |
+| Path          | API surface                                                         | Triggered by                        |
+| :------------ | :------------------------------------------------------------------ | :---------------------------------- |
+| **Session**   | `ai.interactions.create()` + `previous_interaction_id` + SSE stream | `chat` tool with a `sessionId`      |
+| **Stateless** | `ai.models.generateContentStream()`                                 | All other tools + session-less chat |
 
 These paths never mix. Each has its own config builder and streaming module.
 
@@ -46,33 +46,33 @@ These paths never mix. Each has its own config builder and streaming module.
 
 ### What is deleted
 
-| Symbol | File | Reason |
-|:---|:---|:---|
-| `ContentEntry` type | `sessions.ts` | Server-side state replaces local part storage |
-| `buildReplayHistoryParts()` | `sessions.ts` | No local replay |
-| `buildRebuiltChatContents()` | `sessions.ts` | No chat rebuild |
-| `selectReplayWindow()` | `sessions.ts` | No window selection |
-| `capRawParts()` | `sessions.ts` | No rawParts |
-| `SessionGenerationContract` | `sessions.ts` | No rebuild compatibility check |
-| `isCompatibleSessionContract()` | `sessions.ts` | Deleted with contract |
-| `buildSessionGenerationContract()` | `sessions.ts` | Deleted with contract |
-| `buildConfigFromSessionContract()` | `sessions.ts` | Deleted with contract |
-| `hashInstructionText()` | `sessions.ts` | Deleted with contract |
-| `appendToolResponseTurn()` | `sessions.ts` | Server tracks function call state |
-| `getPendingFunctionCalls()` | `sessions.ts` | Server tracks function call state |
-| `Chat` object field on `SessionEntry` | `sessions.ts` | Replaced by `interactionId: string` |
-| `rebuildChat` dep in `chat.ts` | `tools/chat.ts` | No rebuild path |
-| `normalizeFunctionResponses()` | `tools/chat.ts` | Server handles sequencing |
-| `buildChatMessage()` | `tools/chat.ts` | Server handles sequencing |
+| Symbol                                | File            | Reason                                        |
+| :------------------------------------ | :-------------- | :-------------------------------------------- |
+| `ContentEntry` type                   | `sessions.ts`   | Server-side state replaces local part storage |
+| `buildReplayHistoryParts()`           | `sessions.ts`   | No local replay                               |
+| `buildRebuiltChatContents()`          | `sessions.ts`   | No chat rebuild                               |
+| `selectReplayWindow()`                | `sessions.ts`   | No window selection                           |
+| `capRawParts()`                       | `sessions.ts`   | No rawParts                                   |
+| `SessionGenerationContract`           | `sessions.ts`   | No rebuild compatibility check                |
+| `isCompatibleSessionContract()`       | `sessions.ts`   | Deleted with contract                         |
+| `buildSessionGenerationContract()`    | `sessions.ts`   | Deleted with contract                         |
+| `buildConfigFromSessionContract()`    | `sessions.ts`   | Deleted with contract                         |
+| `hashInstructionText()`               | `sessions.ts`   | Deleted with contract                         |
+| `appendToolResponseTurn()`            | `sessions.ts`   | Server tracks function call state             |
+| `getPendingFunctionCalls()`           | `sessions.ts`   | Server tracks function call state             |
+| `Chat` object field on `SessionEntry` | `sessions.ts`   | Replaced by `interactionId: string`           |
+| `rebuildChat` dep in `chat.ts`        | `tools/chat.ts` | No rebuild path                               |
+| `normalizeFunctionResponses()`        | `tools/chat.ts` | Server handles sequencing                     |
+| `buildChatMessage()`                  | `tools/chat.ts` | Server handles sequencing                     |
 
 ### What the session store becomes
 
 ```ts
 interface SessionEntry {
-  interactionId: string;   // last Interaction ID in this session chain
-  lastAccess:    number;
-  transcript:    TranscriptEntry[];
-  events:        SessionEventEntry[];
+  interactionId: string; // last Interaction ID in this session chain
+  lastAccess: number;
+  transcript: TranscriptEntry[];
+  events: SessionEventEntry[];
 }
 ```
 
@@ -136,7 +136,7 @@ removed (see Thinking Config section).
 
 ### `buildInteractionParams()` (new, `client.ts` or `lib/interaction-config.ts`)
 
-Builds `Interactions.CreateInteractionParameters` for session turns. Uses snake\_case fields:
+Builds `Interactions.CreateInteractionParameters` for session turns. Uses snake_case fields:
 `generation_config.thinking_level`, `max_output_tokens`, `system_instruction`, `tools`.
 
 Both builders are fed by `ResolvedProfile` from `tool-profiles.ts`. No new abstraction layer
@@ -171,17 +171,17 @@ between them — `ResolvedProfile` is already the neutral representation.
 
 ```ts
 interface ToolsSpecOverrides {
-  functions?:          FunctionDeclarationInput[];  // kept
-  mcpServer?:          McpServerSpec;               // new
+  functions?: FunctionDeclarationInput[]; // kept
+  mcpServer?: McpServerSpec; // new
   // ... existing fields
 }
 
 interface McpServerSpec {
   transport: 'stdio' | 'http';
-  command?:  string;   // for stdio
-  url?:      string;   // for http
-  args?:     string[];
-  env?:      Record<string, string>;
+  command?: string; // for stdio
+  url?: string; // for http
+  args?: string[];
+  env?: Record<string, string>;
 }
 ```
 
@@ -195,10 +195,14 @@ In `tool-profiles.ts`, the function declaration builder changes:
 
 ```ts
 // Before
-{ parameters: decl.parametersJsonSchema }
+{
+  parameters: decl.parametersJsonSchema;
+}
 
 // After
-{ parametersJsonSchema: decl.parametersJsonSchema }
+{
+  parametersJsonSchema: decl.parametersJsonSchema;
+}
 ```
 
 ---
@@ -223,21 +227,21 @@ The duck-type fallback is load-bearing (not legacy) because network-layer errors
 
 ## Files Affected
 
-| File | Change |
-|:---|:---|
-| `src/sessions.ts` | Major reduction — gut to ID index, delete all replay/rebuild/contract logic |
-| `src/tools/chat.ts` | Remove rebuild dep, function-response tracking, `normalizeFunctionResponses`, `buildChatMessage` |
-| `src/lib/interactions.ts` | Add foreground session turn support; `buildInteractionParams()` |
-| `src/lib/streaming.ts` | Add `ApiError` integration; otherwise unchanged |
-| `src/lib/interaction-stream.ts` | **New** — SSE consumer for session turns |
-| `src/client.ts` | Remove `thinkingBudget`; add `buildInteractionParams()` or delegate to new module |
-| `src/config.ts` | Remove `getThinkingBudgetCap()` and `GEMINI_THINKING_BUDGET_CAP` |
-| `src/lib/errors.ts` | Import `ApiError`; update `AppError.from` and `AppError.isRetryable` |
-| `src/lib/tool-profiles.ts` | Add `mcpServer` override; fix `parametersJsonSchema` |
-| `src/schemas/fields.ts` | Remove `thinkingBudget` from input schemas; add `mcpServer` spec schema |
-| `src/schemas/inputs.ts` | Propagate `thinkingBudget` removal |
-| `src/resources.ts` | Update `gemini://sessions/{id}/turns/{n}/parts` to proxy Interactions API |
-| `__tests__/**` | Update tests throughout for removed symbols and new session contract |
+| File                            | Change                                                                                           |
+| :------------------------------ | :----------------------------------------------------------------------------------------------- |
+| `src/sessions.ts`               | Major reduction — gut to ID index, delete all replay/rebuild/contract logic                      |
+| `src/tools/chat.ts`             | Remove rebuild dep, function-response tracking, `normalizeFunctionResponses`, `buildChatMessage` |
+| `src/lib/interactions.ts`       | Add foreground session turn support; `buildInteractionParams()`                                  |
+| `src/lib/streaming.ts`          | Add `ApiError` integration; otherwise unchanged                                                  |
+| `src/lib/interaction-stream.ts` | **New** — SSE consumer for session turns                                                         |
+| `src/client.ts`                 | Remove `thinkingBudget`; add `buildInteractionParams()` or delegate to new module                |
+| `src/config.ts`                 | Remove `getThinkingBudgetCap()` and `GEMINI_THINKING_BUDGET_CAP`                                 |
+| `src/lib/errors.ts`             | Import `ApiError`; update `AppError.from` and `AppError.isRetryable`                             |
+| `src/lib/tool-profiles.ts`      | Add `mcpServer` override; fix `parametersJsonSchema`                                             |
+| `src/schemas/fields.ts`         | Remove `thinkingBudget` from input schemas; add `mcpServer` spec schema                          |
+| `src/schemas/inputs.ts`         | Propagate `thinkingBudget` removal                                                               |
+| `src/resources.ts`              | Update `gemini://sessions/{id}/turns/{n}/parts` to proxy Interactions API                        |
+| `__tests__/**`                  | Update tests throughout for removed symbols and new session contract                             |
 
 ---
 

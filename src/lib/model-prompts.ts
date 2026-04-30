@@ -116,10 +116,6 @@ export function appendFunctionCallingInstruction(
   return joinNonEmpty([systemInstruction, instruction]);
 }
 
-function buildOutputInstruction(title: string, sections: readonly string[]): string {
-  return joinNonEmpty([title, ...sections]);
-}
-
 export function buildGroundedAnswerPrompt(
   query: string,
   urls?: readonly string[],
@@ -305,12 +301,15 @@ export function buildErrorDiagnosisPrompt(args: {
     {
       cacheText: 'Diagnose the error. Output: Cause, Fix, Notes.',
       promptText: sections.join('\n\n'),
-      systemInstruction: buildOutputInstruction(
+      systemInstruction: joinNonEmpty([
+        'Diagnose the error. Base the cause and fix on the given context.',
+        '## Cause — most likely root cause. Cite relevant code as `path:line`.',
+        '## Fix — concrete remediation steps. Use a numbered list if more than one step.',
+        '## Notes — secondary considerations, edge cases, or follow-ups. Omit if empty.',
         args.googleSearchEnabled
-          ? 'Diagnose the error. Base the cause and fix on the given context. Search the error message and key identifiers; cite retrieved sources.'
-          : "Diagnose the error. Base the cause and fix on the given context. No web search is available. Mark anything not derivable from the given context as '(unverified)'.",
-        ['Output:', '## Cause', '## Fix', '## Notes'],
-      ),
+          ? 'Search the error message and key identifiers; cite retrieved sources as [title](url).'
+          : "Mark anything not derivable from the given context as '(unverified)'.",
+      ]),
     },
     args.cacheName,
   );

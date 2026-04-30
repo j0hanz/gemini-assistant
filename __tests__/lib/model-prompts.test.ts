@@ -207,7 +207,7 @@ describe('model-prompts', () => {
     assert.ok(
       searchable.systemInstruction?.includes('Search the error message and key identifiers'),
     );
-    assert.ok(localOnly.systemInstruction?.includes('No web search is available'));
+    assert.ok(localOnly.systemInstruction?.includes('## Cause — most likely root cause'));
     assert.ok(localOnly.systemInstruction?.includes('(unverified)'));
   });
 

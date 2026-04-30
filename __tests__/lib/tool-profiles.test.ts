@@ -2,6 +2,7 @@ import assert from 'node:assert';
 import { test } from 'node:test';
 
 import { FunctionCallingConfigMode } from '@google/genai';
+
 import {
   ProfileValidationError,
   resolveProfile,

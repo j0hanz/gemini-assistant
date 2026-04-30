@@ -180,7 +180,7 @@ export function buildFileAnalysisPrompt(
       {
         promptText: args.goal,
         systemInstruction:
-          'Answer the goal from the attached file. Cite sections, lines, or symbols.',
+          'Answer the goal from the attached file.\n## Answer — response to the goal.\n## References — cited excerpts as `path:line`.\nDo not invent content not present in the file.',
       },
       args.cacheName,
     );
@@ -194,7 +194,7 @@ export function buildFileAnalysisPrompt(
           `Task: ${args.goal}`,
         ]),
         systemInstruction:
-          'Answer the goal using content retrieved from the listed URLs. Do not guess content for URLs that did not retrieve. If none retrieved, reply with exactly: "No URLs retrieved; cannot answer."',
+          'Answer the goal using content retrieved from the listed URLs.\n## Answer — response to the goal.\n## References — cite retrieved sources as [title](url). Note any URLs that did not retrieve.\nIf no URLs retrieved, say so in ## Answer. Do not guess content.',
       },
       args.cacheName,
     );
@@ -204,7 +204,7 @@ export function buildFileAnalysisPrompt(
     {
       promptParts: [...(args.attachedParts ?? []), { text: `Goal: ${args.goal}` }],
       systemInstruction:
-        'Analyze the attached files. Cite filenames and short excerpts. Do not invent content that is not in the files.',
+        'Analyze the attached files.\n## Answer — response to the goal.\n## References — cited excerpts as `filename:line` or short quotes.\nDo not invent content not present in the files.',
     },
     args.cacheName,
   );

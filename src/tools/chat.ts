@@ -536,16 +536,6 @@ async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
   } as const;
 }
 
-function buildPerTurnConfig(config: ReturnType<typeof buildGenerateContentConfig>) {
-  return pickDefined({
-    abortSignal: config.abortSignal,
-    thinkingConfig: config.thinkingConfig,
-    responseMimeType: config.responseMimeType,
-    responseJsonSchema: config.responseJsonSchema,
-    maxOutputTokens: config.maxOutputTokens,
-  });
-}
-
 function buildAskGenerationOptions(
   args: AskArgs,
   toolConfig: GenerateContentConfig['toolConfig'],
@@ -734,7 +724,6 @@ async function askWithoutSession(
             },
             ctx.mcpReq.signal,
           );
-    const perTurnConfig = buildPerTurnConfig(attemptConfig);
     askResult = await runAskStream(
       ctx,
       () =>
@@ -744,7 +733,7 @@ async function askWithoutSession(
                 currentPrompt,
                 attempt === 0 ? normalizeFunctionResponses(args.functionResponses) : undefined,
               ),
-              config: perTurnConfig,
+              config: attemptConfig,
             })
           : getAI().models.generateContentStream({
               model: getGeminiModel(),

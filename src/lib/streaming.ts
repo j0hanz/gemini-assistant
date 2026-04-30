@@ -102,6 +102,7 @@ interface StreamProcessingState extends StreamMetadata {
   phase: Phase;
   text: string;
   textByWave: string[];
+  thoughtSeq: number;
   thoughtText: string;
   toolEvents: ToolEvent[];
   toolsUsed: Set<string>;
@@ -109,6 +110,34 @@ interface StreamProcessingState extends StreamMetadata {
 }
 
 type ProgressMessageFormatter = (message: string) => string;
+
+interface ThoughtDeltaCtx {
+  mcpReq: {
+    signal: AbortSignal;
+    _meta?: { progressToken?: unknown };
+    notify(notification: unknown): Promise<void>;
+  };
+}
+
+export async function sendThoughtDelta(
+  ctx: ThoughtDeltaCtx,
+  delta: string,
+  totalLen: number,
+  seq: number,
+): Promise<void> {
+  if (ctx.mcpReq.signal.aborted) return;
+
+  const progressToken = ctx.mcpReq._meta?.progressToken;
+  const params: Record<string, unknown> = { delta, totalLen, seq };
+  if (progressToken !== undefined) {
+    params._meta = { progressToken };
+  }
+
+  await ctx.mcpReq.notify({
+    method: 'notifications/gemini-assistant/thought',
+    params,
+  });
+}
 
 interface StreamMetadata {
   aborted: boolean;
@@ -238,6 +267,7 @@ function createStreamProcessingState(): StreamProcessingState {
     phase: Phase.Waiting,
     text: '',
     textByWave: [''],
+    thoughtSeq: 0,
     thoughtText: '',
     toolEvents: [],
     toolsUsed: new Set<string>(),
@@ -493,6 +523,10 @@ async function handleThoughtPart(
   }
 
   state.thoughtText += partText;
+
+  if (partText.length > 0) {
+    await sendThoughtDelta(ctx, partText, state.thoughtText.length, state.thoughtSeq++);
+  }
 }
 
 async function handleExecutableCodePart(

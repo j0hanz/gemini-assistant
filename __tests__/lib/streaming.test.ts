@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { test, mock } from 'node:test';
+import { mock, test } from 'node:test';
 
 // sendThoughtDelta will be exported from streaming.ts after TASK-003
 // For now this import will fail, which is the expected failure mode.

@@ -90,15 +90,6 @@ const enum Phase {
   Generating = 2,
 }
 
-const THOUGHT_HEADER_PATTERN = /\*\*([^*]+)\*\*/;
-const THOUGHT_FALLBACK_CHUNK_THRESHOLD = 5;
-
-interface ThoughtHeaderState {
-  scanIndex: number;
-  currentProgress: number;
-  chunksSinceLastHeader: number;
-}
-
 interface StreamProcessingState extends StreamMetadata {
   completedToolWaves: number;
   currentProgress: number;
@@ -111,7 +102,6 @@ interface StreamProcessingState extends StreamMetadata {
   phase: Phase;
   text: string;
   textByWave: string[];
-  thoughtHeaderState: ThoughtHeaderState;
   thoughtText: string;
   toolEvents: ToolEvent[];
   toolsUsed: Set<string>;
@@ -119,47 +109,6 @@ interface StreamProcessingState extends StreamMetadata {
 }
 
 type ProgressMessageFormatter = (message: string) => string;
-
-async function emitThoughtHeaders(
-  thoughtText: string,
-  state: ThoughtHeaderState,
-  ctx: ServerContext,
-  msg: (m: string) => string,
-): Promise<void> {
-  const tail = thoughtText.slice(state.scanIndex);
-  const pattern = new RegExp(THOUGHT_HEADER_PATTERN.source, 'g');
-  let match: RegExpExecArray | null;
-  let lastLocalIndex = 0;
-  let foundHeader = false;
-  while ((match = pattern.exec(tail)) !== null) {
-    const header = match[1]?.trim();
-    if (header) {
-      foundHeader = true;
-      state.chunksSinceLastHeader = 0;
-      state.currentProgress = advanceProgress(state.currentProgress);
-      await sendProgress(ctx, Math.floor(state.currentProgress), PROGRESS_TOTAL, msg(header));
-    }
-    lastLocalIndex = pattern.lastIndex;
-  }
-
-  if (foundHeader) {
-    state.scanIndex += lastLocalIndex;
-  }
-
-  if (!foundHeader) {
-    state.chunksSinceLastHeader++;
-    if (state.chunksSinceLastHeader >= THOUGHT_FALLBACK_CHUNK_THRESHOLD) {
-      state.chunksSinceLastHeader = 0;
-      state.currentProgress = advanceProgress(state.currentProgress);
-      await sendProgress(
-        ctx,
-        Math.floor(state.currentProgress),
-        PROGRESS_TOTAL,
-        msg('Still thinking\u2026'),
-      );
-    }
-  }
-}
 
 interface StreamMetadata {
   aborted: boolean;
@@ -289,11 +238,6 @@ function createStreamProcessingState(): StreamProcessingState {
     phase: Phase.Waiting,
     text: '',
     textByWave: [''],
-    thoughtHeaderState: {
-      scanIndex: 0,
-      currentProgress: 0,
-      chunksSinceLastHeader: 0,
-    },
     thoughtText: '',
     toolEvents: [],
     toolsUsed: new Set<string>(),
@@ -549,9 +493,6 @@ async function handleThoughtPart(
   }
 
   state.thoughtText += partText;
-  state.thoughtHeaderState.currentProgress = state.currentProgress;
-  await emitThoughtHeaders(state.thoughtText, state.thoughtHeaderState, ctx, msg);
-  state.currentProgress = state.thoughtHeaderState.currentProgress;
 }
 
 async function handleExecutableCodePart(

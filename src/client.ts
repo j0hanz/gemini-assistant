@@ -16,7 +16,6 @@ import {
   getExposeThoughts,
   getMaxOutputTokens,
   getSafetySettings,
-  getThinkingBudgetCap,
 } from './config.js';
 import type { AskThinkingLevel } from './public-contract.js';
 
@@ -60,7 +59,6 @@ interface ConfigBuilderOptions {
   costProfile?: string | undefined;
   systemInstruction?: string | undefined;
   thinkingLevel?: AskThinkingLevel | undefined;
-  thinkingBudget?: number | undefined;
   cacheName?: string | undefined;
   responseSchema?: GeminiResponseSchema | undefined;
   jsonMode?: boolean | undefined;
@@ -97,32 +95,10 @@ function buildMergedToolConfig(
   };
 }
 
-function buildThinkingConfig(thinkingLevel?: AskThinkingLevel, thinkingBudget?: number) {
-  const budgetCap = getThinkingBudgetCap();
-  const resolvedThinkingBudget =
-    thinkingBudget !== undefined && thinkingBudget > budgetCap ? budgetCap : thinkingBudget;
-  if (thinkingBudget !== undefined && resolvedThinkingBudget !== thinkingBudget) {
-    clientLog.warn('Clamped Gemini thinkingBudget to configured cap', {
-      requestedThinkingBudget: thinkingBudget,
-      thinkingBudgetCap: budgetCap,
-    });
-  }
-
-  // NEW: warn when thinkingLevel wins over an explicitly supplied thinkingBudget
-  if (thinkingLevel !== undefined && thinkingBudget !== undefined) {
-    clientLog.warn('thinkingLevel takes precedence over thinkingBudget; budget ignored', {
-      thinkingLevel,
-      thinkingBudget,
-    });
-  }
-
+function buildThinkingConfig(thinkingLevel?: AskThinkingLevel) {
   return {
     ...(getExposeThoughts() ? { includeThoughts: true } : {}),
-    // Gemini 3 precedence: thinkingLevel wins over thinkingBudget; see .github/google-genai-api.md §7.
     ...(thinkingLevel ? { thinkingLevel: THINKING_LEVEL_MAP[thinkingLevel] } : {}),
-    ...(thinkingLevel === undefined && resolvedThinkingBudget !== undefined
-      ? { thinkingBudget: resolvedThinkingBudget }
-      : {}),
   };
 }
 
@@ -166,9 +142,8 @@ function buildResponseConfig(
   isJson: boolean,
   responseSchema: GeminiResponseSchema | undefined,
   thinkingLevel: AskThinkingLevel | undefined,
-  thinkingBudget: number | undefined,
 ) {
-  const thinkingConfig = buildThinkingConfig(thinkingLevel, thinkingBudget);
+  const thinkingConfig = buildThinkingConfig(thinkingLevel);
   const resolvedInstruction =
     systemInstruction !== undefined
       ? `${systemInstruction}\n\n${GROUNDING_SUFFIX}`
@@ -194,7 +169,6 @@ export function buildGenerateContentConfig(
     costProfile,
     systemInstruction,
     thinkingLevel,
-    thinkingBudget,
     cacheName,
     responseSchema,
     jsonMode,
@@ -208,8 +182,7 @@ export function buildGenerateContentConfig(
     functionCallingMode,
   } = options;
   const profile = resolveCostProfile(costProfile);
-  const resolvedThinkingLevel =
-    thinkingLevel ?? (thinkingBudget === undefined ? profile?.thinkingLevel : undefined);
+  const resolvedThinkingLevel = thinkingLevel ?? profile?.thinkingLevel;
   const resolvedMaxOutputTokens =
     maxOutputTokens ?? profile?.maxOutputTokens ?? getMaxOutputTokens();
   const mergedToolConfig = buildMergedToolConfig(toolConfig, functionCallingMode);
@@ -223,7 +196,6 @@ export function buildGenerateContentConfig(
       isJson,
       responseSchema,
       resolvedThinkingLevel,
-      thinkingBudget,
     ),
     maxOutputTokens: resolvedMaxOutputTokens,
     ...(resolvedSafetySettings ? { safetySettings: resolvedSafetySettings } : {}),

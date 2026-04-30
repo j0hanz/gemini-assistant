@@ -21,30 +21,3 @@ test('DEFAULT_SYSTEM_INSTRUCTION — contains anti-hallucination directive', () 
     `DEFAULT_SYSTEM_INSTRUCTION must contain anti-hallucination language, got: ${DEFAULT_SYSTEM_INSTRUCTION}`,
   );
 });
-
-test('buildGenerateContentConfig — warns when both thinkingLevel and thinkingBudget are supplied', async () => {
-  // Capture any warnings written to process.stderr (clientLog writes there via logger).
-  const warnings: string[] = [];
-  const originalStderrWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = (chunk: string | Uint8Array, ..._args: unknown[]): boolean => {
-    if (typeof chunk === 'string') warnings.push(chunk);
-    return true;
-  };
-
-  try {
-    // Dynamically import to avoid hoisting issues with the mock.
-    const { buildGenerateContentConfig } = await import('../src/client.js');
-    buildGenerateContentConfig({
-      thinkingLevel: 'LOW',
-      thinkingBudget: 4096,
-    });
-  } finally {
-    process.stderr.write = originalStderrWrite;
-  }
-
-  const warningOutput = warnings.join('');
-  assert.ok(
-    warningOutput.includes('thinkingBudget') || warningOutput.includes('thinking'),
-    `Expected a warning mentioning thinkingBudget, got: ${warningOutput}`,
-  );
-});

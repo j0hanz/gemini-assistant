@@ -357,13 +357,6 @@ export function getMaxOutputTokens(): number {
   });
 }
 
-export function getThinkingBudgetCap(): number {
-  return parseIntEnv('GEMINI_THINKING_BUDGET_CAP', 16_384, {
-    min: 0,
-    max: 1_048_576,
-  });
-}
-
 export function getSlimSessionEvents(): boolean {
   return !parseBooleanEnv('SESSION_EVENTS_VERBOSE', false);
 }

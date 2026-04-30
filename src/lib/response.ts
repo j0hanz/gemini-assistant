@@ -670,7 +670,7 @@ export function buildUrlContextSourceDetails(
   urls: readonly string[],
 ): { domain?: string; origin: 'urlContext'; url: string }[] {
   return urls.map((url) =>
-    pickDefined({ domain: new URL(url).hostname, origin: 'urlContext' as const, url }),
+    pickDefined({ domain: domainFromPublicUrl(url), origin: 'urlContext' as const, url }),
   );
 }
 

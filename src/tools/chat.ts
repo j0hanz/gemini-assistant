@@ -887,10 +887,10 @@ function appendSessionTurn(
   if (askResult.streamResult.finishReason !== undefined) {
     response.finishReason = askResult.streamResult.finishReason;
   }
-  if (askResult.streamResult.functionCalls && askResult.streamResult.functionCalls.length > 0) {
+  if (askResult.streamResult.functionCalls.length > 0) {
     response.functionCalls = askResult.streamResult.functionCalls;
   }
-  if (askResult.streamResult.toolEvents && askResult.streamResult.toolEvents.length > 0) {
+  if (askResult.streamResult.toolEvents.length > 0) {
     response.toolEvents = askResult.streamResult.toolEvents;
   }
   if (usage !== undefined) {

@@ -1,10 +1,8 @@
 
 import type {
   GroundingMetadata,
-  Part,
   UrlContextMetadata,
 } from '@google/genai';
-import { logger } from './lib/logger.js';
 import type { FunctionCallEntry, StreamAnomalies, ToolEvent } from './lib/streaming.js';
 import type { UsageMetadata } from './schemas/outputs.js';
 
@@ -186,61 +184,6 @@ function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
     },
     response,
   };
-}
-
-
-
-export function buildReplayHistoryParts(parts: Part[]): Part[] {
-  const inlineDataMaxBytes = getSessionLimits().replayInlineDataMaxBytes;
-  const hasFunctionCallParts = parts.some((part) => Boolean(part.functionCall));
-  const retainedFunctionCallIds = new Set<string>();
-  const retainedFunctionCallNames = new Set<string>();
-  const retainedParts: Part[] = [];
-
-  for (const part of parts) {
-    if (part.functionCall && !part.functionCall.name) {
-      continue;
-    }
-    if (part.inlineData?.data && part.inlineData.data.length > inlineDataMaxBytes) {
-      // Replay history must not retain large raw media blobs; callers should
-      // use fileData for durable replayable media references instead.
-      logger.child('sessions').debug('Dropping oversized inlineData part from replay history', {
-        inlineDataBytes: part.inlineData.data.length,
-        inlineDataMaxBytes,
-      });
-      continue;
-    }
-
-    if (part.functionCall?.id) {
-      retainedFunctionCallIds.add(part.functionCall.id);
-    }
-    if (part.functionCall?.name) {
-      retainedFunctionCallNames.add(part.functionCall.name);
-    }
-
-    retainedParts.push(part);
-  }
-
-  return retainedParts.filter((part) => {
-    const functionResponse = part.functionResponse;
-    if (!functionResponse) {
-      return true;
-    }
-
-    if (!hasFunctionCallParts) {
-      return false;
-    }
-
-    if (functionResponse.id) {
-      return retainedFunctionCallIds.has(functionResponse.id);
-    }
-
-    if (functionResponse.name) {
-      return retainedFunctionCallNames.has(functionResponse.name);
-    }
-
-    return false;
-  });
 }
 
 function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {

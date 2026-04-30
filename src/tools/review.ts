@@ -265,7 +265,6 @@ function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
       filePathB,
       question,
       thinkingLevel,
-      thinkingBudget,
       maxOutputTokens,
       safetySettings,
       tools,
@@ -317,7 +316,6 @@ function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
                   systemInstruction: prompt.systemInstruction,
                   costProfile: 'review.comparison',
                   thinkingLevel,
-                  thinkingBudget,
                   maxOutputTokens,
                   safetySettings,
                   tools: resolved.config.tools,
@@ -344,7 +342,6 @@ interface FailureReviewSubject {
   language?: ReviewFailureInput['language'];
   maxOutputTokens?: ReviewFailureInput['maxOutputTokens'];
   safetySettings?: ReviewFailureInput['safetySettings'];
-  thinkingBudget?: ReviewFailureInput['thinkingBudget'];
   tools?: ReviewFailureInput['tools'];
 }
 
@@ -354,8 +351,7 @@ async function diagnoseFailureWork(
   thinkingLevel: ReviewInput['thinkingLevel'],
   ctx: ServerContext,
 ): Promise<CallToolResult> {
-  const { error, codeContext, language, maxOutputTokens, safetySettings, thinkingBudget, tools } =
-    subject;
+  const { error, codeContext, language, maxOutputTokens, safetySettings, tools } = subject;
 
   const resolved = await resolveOrchestration(tools as ToolsSpecInput | undefined, ctx, {
     toolKey: 'review',
@@ -393,7 +389,6 @@ async function diagnoseFailureWork(
             systemInstruction: prompt.systemInstruction,
             costProfile: 'review.failure',
             thinkingLevel,
-            thinkingBudget,
             maxOutputTokens,
             safetySettings,
             tools: resolved.config.tools,
@@ -1172,15 +1167,7 @@ async function readDocFiles(
 }
 
 async function analyzePrWork(
-  {
-    thinkingLevel,
-    language,
-    dryRun,
-    focus,
-    maxOutputTokens,
-    thinkingBudget,
-    safetySettings,
-  }: ReviewDiffInput,
+  { thinkingLevel, language, dryRun, focus, maxOutputTokens, safetySettings }: ReviewDiffInput,
   ctx: ServerContext,
   workspaceCacheManagerOrRootsFetcher?: ToolWorkspaceCacheManager | ToolRootsFetcher,
   rootsFetcher: ToolRootsFetcher = () => Promise.resolve([]),
@@ -1276,7 +1263,6 @@ async function analyzePrWork(
     config: {
       costProfile: 'review.diff',
       thinkingLevel,
-      thinkingBudget,
       responseSchema: AnalyzePrModelResponseSchema,
       maxOutputTokens,
       safetySettings,
@@ -1374,7 +1360,6 @@ async function reviewWork(
         dryRun: args.dryRun,
         language: args.language,
         thinkingLevel: args.thinkingLevel,
-        thinkingBudget: args.thinkingBudget,
         focus: args.focus,
         maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
@@ -1395,7 +1380,6 @@ async function reviewWork(
         filePathB,
         question: args.question ?? args.focus,
         thinkingLevel: args.thinkingLevel,
-        thinkingBudget: args.thinkingBudget,
         maxOutputTokens: args.maxOutputTokens,
         safetySettings: args.safetySettings,
         tools: args.tools,
@@ -1411,7 +1395,6 @@ async function reviewWork(
         codeContext: args.codeContext,
         language: args.language,
         maxOutputTokens: args.maxOutputTokens,
-        thinkingBudget: args.thinkingBudget,
         safetySettings: args.safetySettings,
         tools: args.tools,
       },

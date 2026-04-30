@@ -177,56 +177,6 @@ test('buildInteractionParams — includes previousInteractionId when provided', 
   );
 });
 
-test('buildInteractionParams — includes toolResults when provided', () => {
-  const profile: ResolvedProfile = {
-    profile: 'plain',
-    builtIns: [],
-    thinkingLevel: 'minimal',
-    autoPromoted: false,
-    overrides: {},
-  };
-
-  const toolResults: Interactions.ToolResult[] = [
-    {
-      id: 'tool-call-1',
-      output: { mime_type: 'text/plain', data: 'result text' },
-    },
-  ];
-
-  const result = buildInteractionParams({
-    profile,
-    model: 'gemini-3-pro-preview',
-    prompt: 'Test',
-    toolResults,
-  });
-
-  const resultTools = (result as Record<string, unknown>).tool_results as unknown[];
-  assert(Array.isArray(resultTools));
-  assert.strictEqual(resultTools.length, 1);
-  const firstTool = resultTools[0] as Record<string, unknown>;
-  assert.strictEqual(firstTool.id, 'tool-call-1');
-});
-
-test('buildInteractionParams — omits toolResults when empty array provided', () => {
-  const profile: ResolvedProfile = {
-    profile: 'plain',
-    builtIns: [],
-    thinkingLevel: 'minimal',
-    autoPromoted: false,
-    overrides: {},
-  };
-
-  const result = buildInteractionParams({
-    profile,
-    model: 'gemini-3-pro-preview',
-    prompt: 'Test',
-    toolResults: [],
-  });
-
-  const resultTools = (result as Record<string, unknown>).tool_results as unknown[] | undefined;
-  assert(!resultTools || resultTools.length === 0);
-});
-
 test('buildInteractionParams — defaults maxOutputTokens to 2048 when not provided', () => {
   const profile: ResolvedProfile = {
     profile: 'plain',

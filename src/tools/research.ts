@@ -1087,7 +1087,7 @@ function extractResearchSummary(structured: Record<string, unknown>): string {
 
 function buildResearchStructuredContent(
   _args: ResearchInput,
-  ctx: ServerContext,
+  _ctx: ServerContext,
   structured: Record<string, unknown>,
 ): Record<string, unknown> {
   const domain = {

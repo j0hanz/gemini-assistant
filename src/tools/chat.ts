@@ -1161,7 +1161,7 @@ function attachSessionMetadata(
 function assembleChatOutput(
   result: CallToolResult,
   sessionIdHint: string | undefined,
-  taskId: string | undefined,
+  _taskId: string | undefined,
   ctx: ServerContext,
 ): CallToolResult {
   if (result.isError) {

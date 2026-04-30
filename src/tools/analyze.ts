@@ -460,7 +460,7 @@ function getExplanationString(explanation: unknown): string | undefined {
 
 function buildAnalyzeStructuredContent(
   args: AnalyzeInput,
-  ctx: ServerContext,
+  _ctx: ServerContext,
   structured: Record<string, unknown>,
 ): z.infer<typeof AnalyzeOutputSchema> {
   const warnings = Array.isArray(structured.warnings)

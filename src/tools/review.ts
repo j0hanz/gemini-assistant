@@ -42,7 +42,7 @@ import { getGeminiModel, getReviewDocs } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
 
 const execFileAsync = promisify(execFile);
-let reviewGitRunner = execFileAsync;
+const reviewGitRunner = execFileAsync;
 
 const GIT_TIMEOUT_MS = 30_000;
 const GIT_MAX_BUFFER = 10 * 1024 * 1024;
@@ -252,14 +252,6 @@ interface ReviewWorkDeps {
   diagnoseFailureWork?: ReviewDiagnoseFailureWork;
 }
 
-function __setReviewGitRunnerForTests(mockRunner: typeof execFileAsync): () => void {
-  const previousRunner = reviewGitRunner;
-  reviewGitRunner = mockRunner;
-  return () => {
-    reviewGitRunner = previousRunner;
-  };
-}
-
 interface GitDiffArgsOptions {
   againstHead?: boolean;
   nameOnly?: boolean;
@@ -293,7 +285,7 @@ function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
       rootsFetcher,
       [filePathA, filePathB],
       progress,
-      (filePath, index) => `Uploading file ${index === 0 ? 'A' : 'B'}`,
+      (_filePath, index) => `Uploading file ${index === 0 ? 'A' : 'B'}`,
       async (contents) => {
         const fileA = contents[0];
         const fileB = contents[1];

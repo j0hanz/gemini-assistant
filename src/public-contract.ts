@@ -47,16 +47,6 @@ export interface WorkflowEntry {
 }
 
 /**
- * Custom server-to-client notifications emitted outside the standard MCP progress channel.
- * All three methods carry `_meta` with a `progressToken` (when the originating request
- * provided one) so clients can correlate notifications to the calling tool invocation.
- */
-export type CustomNotificationMethod =
-  | 'notifications/gemini-assistant/phase'
-  | 'notifications/gemini-assistant/finding'
-  | 'notifications/gemini-assistant/thought';
-
-/**
  * Payload for `notifications/gemini-assistant/thought`.
  * Emitted once per Gemini thinking chunk during streaming.
  */

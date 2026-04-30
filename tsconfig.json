@@ -13,6 +13,8 @@
     "strict": true,
     "exactOptionalPropertyTypes": true,
     "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "isolatedModules": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

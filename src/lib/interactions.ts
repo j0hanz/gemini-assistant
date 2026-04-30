@@ -1,8 +1,15 @@
 import type { Interactions, Part } from '@google/genai';
 
-import { getAI } from '../client.js';
+import {
+  DEFAULT_SYSTEM_INSTRUCTION,
+  getAI,
+  GROUNDING_SUFFIX,
+  THINKING_LEVEL_MAP,
+} from '../client.js';
+import type { AskThinkingLevel } from '../public-contract.js';
 import { AppError } from './errors.js';
 import type { StreamResult } from './streaming.js';
+import type { ResolvedProfile } from './tool-profiles.js';
 
 const BUILT_IN_TO_INTERACTION_TOOL: Readonly<Record<string, Interactions.Tool>> = {
   googleSearch: { type: 'google_search' },
@@ -11,6 +18,80 @@ const BUILT_IN_TO_INTERACTION_TOOL: Readonly<Record<string, Interactions.Tool>> 
 };
 
 const POLL_INTERVAL_MS = 3_000;
+
+// ── buildInteractionParams ────────────────────────────────────────────────────
+
+interface BuildInteractionParamsOptions {
+  profile: ResolvedProfile;
+  model: string;
+  prompt: string;
+  thinkingLevel?: AskThinkingLevel | undefined;
+  maxOutputTokens?: number | undefined;
+  systemInstruction?: string | undefined;
+  previousInteractionId?: string | undefined;
+  toolResults?: Interactions.ToolResult[] | undefined;
+}
+
+/**
+ * Builds Interactions API parameters for session turns (both model and agent modes).
+ * Converts from camelCase API config to snake_case Interactions API format.
+ */
+export function buildInteractionParams(
+  options: BuildInteractionParamsOptions,
+): Interactions.InteractionCreateParams {
+  const {
+    profile,
+    model,
+    prompt,
+    thinkingLevel,
+    maxOutputTokens = 2048,
+    systemInstruction,
+    previousInteractionId,
+    toolResults,
+  } = options;
+
+  // Build system instruction with optional grounding suffix
+  const resolvedInstruction = systemInstruction
+    ? `${systemInstruction}\n\n${GROUNDING_SUFFIX}`
+    : DEFAULT_SYSTEM_INSTRUCTION;
+
+  // Build generation_config with snake_case fields
+  const generationConfig: Record<string, unknown> = {
+    max_output_tokens: maxOutputTokens,
+  };
+
+  if (thinkingLevel) {
+    // Convert camelCase thinkingLevel (e.g., 'HIGH') to snake_case string (e.g., 'high')
+    const level = THINKING_LEVEL_MAP[thinkingLevel];
+    // ThinkingLevel enum values are MINIMAL, LOW, MEDIUM, HIGH; convert to lowercase
+    generationConfig.thinking_level = level.toLowerCase();
+  }
+
+  // Build tools array from builtIns
+  const tools = builtInsToInteractionTools(profile.builtIns);
+
+  // Build the final params object, initially as unknown to avoid unsafe assignment errors
+  const paramsObj: Record<string, unknown> = {
+    model,
+    input: prompt,
+    system_instruction: resolvedInstruction,
+    generation_config: generationConfig,
+  };
+
+  if (tools.length > 0) {
+    paramsObj.tools = tools;
+  }
+
+  if (previousInteractionId) {
+    paramsObj.previous_interaction_id = previousInteractionId;
+  }
+
+  if (toolResults && toolResults.length > 0) {
+    paramsObj.tool_results = toolResults;
+  }
+
+  return paramsObj as unknown as Interactions.InteractionCreateParams;
+}
 
 interface BackgroundInteractionParams {
   model: string;

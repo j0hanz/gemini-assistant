@@ -32,7 +32,7 @@ const DEFAULT_TOOL_COST_PROFILES = {
 
 type ToolCostProfileName = keyof typeof DEFAULT_TOOL_COST_PROFILES;
 
-const THINKING_LEVEL_MAP: Record<AskThinkingLevel, ThinkingLevel> = {
+export const THINKING_LEVEL_MAP: Record<AskThinkingLevel, ThinkingLevel> = {
   MINIMAL: ThinkingLevel.MINIMAL,
   LOW: ThinkingLevel.LOW,
   MEDIUM: ThinkingLevel.MEDIUM,
@@ -46,7 +46,7 @@ export const DEFAULT_SYSTEM_INSTRUCTION =
   'No opening filler. No trailing restatements. No unsolicited caveats.\n' +
   'Only assert facts derivable from provided context, retrieved sources, or verifiable reasoning. Mark unsupported claims (unverified).';
 
-const GROUNDING_SUFFIX =
+export const GROUNDING_SUFFIX =
   'Only assert facts you can support from the provided context or retrieved sources. Mark uncertain or unverifiable claims (unverified).';
 
 interface ConfigBuilderOptions {

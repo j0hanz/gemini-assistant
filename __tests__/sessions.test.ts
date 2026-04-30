@@ -1,9 +1,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-import {
-  sanitizeSessionText,
-} from '../src/sessions.js';
+import { sanitizeSessionText } from '../src/sessions.js';
 
 test('sanitizeSessionText — redacts API key patterns', () => {
   const text = 'API_KEY=abc123xyz apikey=secret OTHER=keep';
@@ -27,4 +25,3 @@ test('sanitizeSessionText — preserves unrelated text', () => {
   const result = sanitizeSessionText(text);
   assert.strictEqual(result, text);
 });
-

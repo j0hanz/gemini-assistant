@@ -77,11 +77,11 @@ import {
   sessionTranscriptUri,
   sessionTurnPartsUri,
 } from '../resources.js';
-import {
-  type SessionAccess,
-  type SessionEventEntry,
-  type SessionSummary,
-  type TranscriptEntry,
+import type {
+  SessionAccess,
+  SessionEventEntry,
+  SessionSummary,
+  TranscriptEntry,
 } from '../sessions.js';
 
 type InternalAskArgs = Omit<ChatInput, 'goal' | 'responseSchemaJson'> & {

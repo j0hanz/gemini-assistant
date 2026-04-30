@@ -1,8 +1,5 @@
+import type { GroundingMetadata, UrlContextMetadata } from '@google/genai';
 
-import type {
-  GroundingMetadata,
-  UrlContextMetadata,
-} from '@google/genai';
 import type { FunctionCallEntry, StreamAnomalies, ToolEvent } from './lib/streaming.js';
 import type { UsageMetadata } from './schemas/outputs.js';
 
@@ -17,7 +14,6 @@ export interface TranscriptEntry {
   timestamp: number;
   taskId?: string;
 }
-
 
 export interface SessionEventEntry {
   request: {
@@ -47,7 +43,6 @@ export interface SessionEventEntry {
   timestamp: number;
   taskId?: string;
 }
-
 
 interface SessionEntry {
   interactionId: string;
@@ -94,9 +89,6 @@ const SESSION_FREE_TEXT_SECRET_PATTERNS: readonly RegExp[] = [
   /\b(?:api[_-]?key|authorization|password|secret|token)\s*[:=]\s*[^\s,;]+/gi,
 ];
 
-
-
-
 export function sanitizeSessionText(text: string | undefined): string | undefined {
   if (text === undefined) {
     return undefined;
@@ -110,9 +102,6 @@ export function sanitizeSessionText(text: string | undefined): string | undefine
     return current.replace(pattern, '[REDACTED]');
   }, text);
 }
-
-
-
 
 function cloneValue<T>(value: T): T {
   return structuredClone(value);
@@ -195,9 +184,6 @@ function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {
   };
 }
 
-
-
-
 export class SessionStore {
   private readonly evictedSessions = new Set<string>();
 
@@ -267,7 +253,6 @@ export class SessionStore {
     return entry.events.map((item) => cloneSessionEventEntry(item));
   }
 
-
   appendSessionTranscript(id: string, item: TranscriptEntry): boolean {
     return this.appendSessionHistoryEntry(
       id,
@@ -277,7 +262,6 @@ export class SessionStore {
       this.maxTranscriptEntries,
     );
   }
-
 
   appendSessionEvent(id: string, item: SessionEventEntry): boolean {
     return this.appendSessionHistoryEntry(
@@ -321,9 +305,6 @@ export class SessionStore {
   isEvicted(id: string): boolean {
     return this.evictedSessions.has(id);
   }
-
-
-
 
   private notifyChange(
     listChanged = true,
@@ -369,9 +350,6 @@ export class SessionStore {
     this.setSessionEntry(id, entry);
   }
 
-
-
-
   private trimEvictedSessions(): void {
     if (this.evictedSessions.size <= MAX_EVICTED_ENTRIES) return;
     const excess = this.evictedSessions.size - EVICTED_TRIM_TARGET;
@@ -388,7 +366,6 @@ export class SessionStore {
     entries.splice(0, entries.length - maxEntries);
   }
 
-
   private hasExpired(entry: SessionEntry): boolean {
     return this.now() - entry.lastAccess > this.ttlMs;
   }
@@ -404,7 +381,6 @@ export class SessionStore {
     }, 0).unref();
     return undefined;
   }
-
 }
 
 export function createSessionAccess(store: SessionStore): SessionAccess {
@@ -421,4 +397,3 @@ export function createSessionAccess(store: SessionStore): SessionAccess {
 export function createSessionStore(options?: SessionStoreOptions): SessionStore {
   return new SessionStore(options);
 }
-

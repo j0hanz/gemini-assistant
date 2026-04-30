@@ -475,7 +475,7 @@ export function getSafetySettings(): SafetySetting[] | undefined {
   return cachedSafetySettings;
 }
 
-export function getSessionRedactionPatterns(): RegExp[] {
+function getSessionRedactionPatterns(): RegExp[] {
   const raw = process.env.GEMINI_SESSION_REDACT_KEYS;
   if (cachedSessionRedactionPatternsSource === raw) {
     return cachedSessionRedactionPatterns ?? DEFAULT_SESSION_REDACTION_PATTERNS;

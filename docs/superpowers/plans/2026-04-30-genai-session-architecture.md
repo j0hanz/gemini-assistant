@@ -23,6 +23,7 @@ execution: subagent-driven
 ## 1. Goal
 
 Replace all client-side session state management and chat history rebuilding with server-side interaction chaining via `previous_interaction_id`. After this plan:
+
 - Sessions store only metadata (ID, transcript, events) — no replay parts, no rebuild contracts
 - Chat turns use `ai.interactions.create()` with optional `previous_interaction_id` for multi-turn conversations
 - Function call state is managed server-side; client provides results via `tool_results` field
@@ -32,56 +33,56 @@ Replace all client-side session state management and chat history rebuilding wit
 
 ## 2. Requirements & Constraints
 
-| ID                                        | Type        | Statement                                                                                                                                                                                                |
-| :---------------------------------------- | :---------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`REQ-001`](#2-requirements--constraints) | Requirement | Session store contains only `interactionId`, `lastAccess`, `transcript`, `events` — all replay/rebuild/contract logic deleted.                                                                             |
-| [`REQ-002`](#2-requirements--constraints) | Requirement | Chat turns use `ai.interactions.create()` with `previous_interaction_id` for multi-turn sessions; stateless chat uses `ai.models.generateContentStream()` unchanged.                                        |
-| [`REQ-003`](#2-requirements--constraints) | Requirement | `interaction-stream.ts` consumes Interactions SSE and produces MCP task/thought notifications compatible with `streaming.ts` interface.                                                                    |
-| [`REQ-004`](#2-requirements--constraints) | Requirement | Function results passed via `ai.interactions.create({ tool_results: [...] })` — no client pending-call tracking, `appendToolResponseTurn`, or `getPendingFunctionCalls`.                                   |
-| [`REQ-005`](#2-requirements--constraints) | Requirement | Agent profile can declare `mcpServer` spec; `mcpToTool()` converts MCP tool list to Gemini function declarations; merged with raw `functions` before building tool list.                                    |
-| [`REQ-006`](#2-requirements--constraints) | Requirement | `buildInteractionParams()` builds `Interactions.CreateInteractionParameters` with snake_case fields (`generation_config.thinking_level`, `max_output_tokens`, `system_instruction`, `tools`).              |
-| [`REQ-007`](#2-requirements--constraints) | Requirement | `gemini://sessions/{id}/turns/{n}/parts` calls `ai.interactions.get(interactionId)` and maps `Interaction.outputs` into resource payload (breaking change: typed outputs, not `Part[]`).                    |
-| [`CON-001`](#2-requirements--constraints) | Constraint  | No `console.log` — use `logger` from [src/lib/logger.ts](src/lib/logger.ts) (stdio transport constraint).                                                                                                |
-| [`CON-002`](#2-requirements--constraints) | Constraint  | Breaking changes are intentional — no backward-compat shims or deprecation warnings for removed functions.                                                                                                |
-| [`CON-003`](#2-requirements--constraints) | Constraint  | Run `node scripts/tasks.mjs` before every commit step.                                                                                                                                                   |
-| [`PAT-001`](#2-requirements--constraints) | Pattern     | All changes follow Plan 1 cleanup — no `thinkingBudget`, correct `parametersJsonSchema` usage, `ApiError` classification.                                                                               |
+| ID                                        | Type        | Statement                                                                                                                                                                                     |
+| :---------------------------------------- | :---------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`REQ-001`](#2-requirements--constraints) | Requirement | Session store contains only `interactionId`, `lastAccess`, `transcript`, `events` — all replay/rebuild/contract logic deleted.                                                                |
+| [`REQ-002`](#2-requirements--constraints) | Requirement | Chat turns use `ai.interactions.create()` with `previous_interaction_id` for multi-turn sessions; stateless chat uses `ai.models.generateContentStream()` unchanged.                          |
+| [`REQ-003`](#2-requirements--constraints) | Requirement | `interaction-stream.ts` consumes Interactions SSE and produces MCP task/thought notifications compatible with `streaming.ts` interface.                                                       |
+| [`REQ-004`](#2-requirements--constraints) | Requirement | Function results passed via `ai.interactions.create({ tool_results: [...] })` — no client pending-call tracking, `appendToolResponseTurn`, or `getPendingFunctionCalls`.                      |
+| [`REQ-005`](#2-requirements--constraints) | Requirement | Agent profile can declare `mcpServer` spec; `mcpToTool()` converts MCP tool list to Gemini function declarations; merged with raw `functions` before building tool list.                      |
+| [`REQ-006`](#2-requirements--constraints) | Requirement | `buildInteractionParams()` builds `Interactions.CreateInteractionParameters` with snake_case fields (`generation_config.thinking_level`, `max_output_tokens`, `system_instruction`, `tools`). |
+| [`REQ-007`](#2-requirements--constraints) | Requirement | `gemini://sessions/{id}/turns/{n}/parts` calls `ai.interactions.get(interactionId)` and maps `Interaction.outputs` into resource payload (breaking change: typed outputs, not `Part[]`).      |
+| [`CON-001`](#2-requirements--constraints) | Constraint  | No `console.log` — use `logger` from [src/lib/logger.ts](src/lib/logger.ts) (stdio transport constraint).                                                                                     |
+| [`CON-002`](#2-requirements--constraints) | Constraint  | Breaking changes are intentional — no backward-compat shims or deprecation warnings for removed functions.                                                                                    |
+| [`CON-003`](#2-requirements--constraints) | Constraint  | Run `node scripts/tasks.mjs` before every commit step.                                                                                                                                        |
+| [`PAT-001`](#2-requirements--constraints) | Pattern     | All changes follow Plan 1 cleanup — no `thinkingBudget`, correct `parametersJsonSchema` usage, `ApiError` classification.                                                                     |
 
 ## 3. Current Context
 
 ### File structure
 
-| File                                                                         | Status | Responsibility                                                                                                                                  |
-| :--------------------------------------------------------------------------- | :----- | :---------------------------------------------------------------------------------------------------------------------------------------------- |
-| [src/lib/interaction-stream.ts](src/lib/interaction-stream.ts)               | Create | New module: consume Interactions SSE; emit MCP progress/thought notifications                                                                    |
-| [src/sessions.ts](src/sessions.ts)                                           | Modify | Gut to ID index: delete all replay/rebuild/contract logic; simplify to `{ interactionId, lastAccess, transcript, events }`                      |
-| [src/client.ts](src/client.ts)                                               | Modify | Add `buildInteractionParams()` config builder for snake_case Interactions API                                                                   |
-| [src/lib/tool-profiles.ts](src/lib/tool-profiles.ts)                         | Modify | Add `mcpServer` field to `ToolsSpecOverrides`; integrate `mcpToTool()` when present                                                             |
-| [src/tools/chat.ts](src/tools/chat.ts)                                       | Modify | Use `ai.interactions.create()` for session turns; drop `buildRebuiltChatContents`, `normalizeFunctionResponses`, all rebuild/pending logic     |
-| [src/lib/interactions.ts](src/lib/interactions.ts)                           | Modify | Add foreground session-turn support (currently only background jobs); SSE streaming consumer                                                    |
-| [src/resources.ts](src/resources.ts)                                         | Modify | Update `gemini://sessions/{id}/turns/{n}/parts` to proxy Interactions API instead of serving local `rawParts`                                  |
-| [**tests**/lib/interaction-stream.test.ts](__tests__/lib/interaction-stream.test.ts) | Create | Test SSE consumption and MCP event emission                                                                                                    |
-| [**tests**/sessions.test.ts](__tests__/sessions.test.ts)                     | Modify | Update tests for simplified session store; delete tests for rebuild/contract logic                                                             |
-| [**tests**/tools/chat.test.ts](__tests__/tools/chat.test.ts)                 | Modify | Update chat session turn tests to use interactions API                                                                                         |
+| File                                                                                 | Status | Responsibility                                                                                                                             |
+| :----------------------------------------------------------------------------------- | :----- | :----------------------------------------------------------------------------------------------------------------------------------------- |
+| [src/lib/interaction-stream.ts](src/lib/interaction-stream.ts)                       | Create | New module: consume Interactions SSE; emit MCP progress/thought notifications                                                              |
+| [src/sessions.ts](src/sessions.ts)                                                   | Modify | Gut to ID index: delete all replay/rebuild/contract logic; simplify to `{ interactionId, lastAccess, transcript, events }`                 |
+| [src/client.ts](src/client.ts)                                                       | Modify | Add `buildInteractionParams()` config builder for snake_case Interactions API                                                              |
+| [src/lib/tool-profiles.ts](src/lib/tool-profiles.ts)                                 | Modify | Add `mcpServer` field to `ToolsSpecOverrides`; integrate `mcpToTool()` when present                                                        |
+| [src/tools/chat.ts](src/tools/chat.ts)                                               | Modify | Use `ai.interactions.create()` for session turns; drop `buildRebuiltChatContents`, `normalizeFunctionResponses`, all rebuild/pending logic |
+| [src/lib/interactions.ts](src/lib/interactions.ts)                                   | Modify | Add foreground session-turn support (currently only background jobs); SSE streaming consumer                                               |
+| [src/resources.ts](src/resources.ts)                                                 | Modify | Update `gemini://sessions/{id}/turns/{n}/parts` to proxy Interactions API instead of serving local `rawParts`                              |
+| [**tests**/lib/interaction-stream.test.ts](__tests__/lib/interaction-stream.test.ts) | Create | Test SSE consumption and MCP event emission                                                                                                |
+| [**tests**/sessions.test.ts](__tests__/sessions.test.ts)                             | Modify | Update tests for simplified session store; delete tests for rebuild/contract logic                                                         |
+| [**tests**/tools/chat.test.ts](__tests__/tools/chat.test.ts)                         | Modify | Update chat session turn tests to use interactions API                                                                                     |
 
 ### Relevant symbols
 
-| Symbol                                                        | Why it matters                                                     |
-| :------------------------------------------------------------ | :----------------------------------------------------------------- |
-| [SessionEntry](src/sessions.ts#L230)                          | Type to simplify: delete Chat field, add interactionId            |
-| [ContentEntry](src/sessions.ts#L38)                           | Type to delete entirely (no local part storage)                   |
-| [SessionGenerationContract](src/sessions.ts#L55)              | Type to delete (no rebuild compatibility check)                   |
-| [buildRebuiltChatContents](src/sessions.ts#L390)              | Function to delete (server-side state)                            |
-| [buildReplayHistoryParts](src/sessions.ts#L566)               | Function to delete (server-side state)                            |
-| [appendToolResponseTurn](src/sessions.ts#L399)                | Function to delete (server manages function state)                |
-| [getPendingFunctionCalls](src/sessions.ts#L417)               | Function to delete (server-side pending tracking)                 |
-| [selectReplayWindow](src/sessions.ts#L1143)                   | Function to delete (no windowing needed)                          |
-| [buildGenerateContentConfig](src/client.ts#L157)              | Keep for stateless paths; will add `buildInteractionParams()`     |
-| [createBackgroundInteraction](src/lib/interactions.ts#L31)    | Existing; will add foreground session-turn support                |
-| [interactionToStreamResult](src/lib/interactions.ts#L111)      | Existing; will be used for SSE consumption                        |
-| [resolveProfile](src/lib/tool-profiles.ts#L269)               | Use to build profiles; add mcpServer field support                |
-| [buildToolsArray](src/lib/tool-profiles.ts#L392)              | Will integrate `mcpToTool()` output when mcpServer present        |
-| [ToolsSpecOverrides](src/lib/tool-profiles.ts#L188)           | Add `mcpServer` field for MCP server declaratio                   |
-| [chat](src/tools/chat.ts#L956)                                | Main tool function; refactor to use interactions API              |
+| Symbol                                                     | Why it matters                                                |
+| :--------------------------------------------------------- | :------------------------------------------------------------ |
+| [SessionEntry](src/sessions.ts#L230)                       | Type to simplify: delete Chat field, add interactionId        |
+| [ContentEntry](src/sessions.ts#L38)                        | Type to delete entirely (no local part storage)               |
+| [SessionGenerationContract](src/sessions.ts#L55)           | Type to delete (no rebuild compatibility check)               |
+| [buildRebuiltChatContents](src/sessions.ts#L390)           | Function to delete (server-side state)                        |
+| [buildReplayHistoryParts](src/sessions.ts#L566)            | Function to delete (server-side state)                        |
+| [appendToolResponseTurn](src/sessions.ts#L399)             | Function to delete (server manages function state)            |
+| [getPendingFunctionCalls](src/sessions.ts#L417)            | Function to delete (server-side pending tracking)             |
+| [selectReplayWindow](src/sessions.ts#L1143)                | Function to delete (no windowing needed)                      |
+| [buildGenerateContentConfig](src/client.ts#L157)           | Keep for stateless paths; will add `buildInteractionParams()` |
+| [createBackgroundInteraction](src/lib/interactions.ts#L31) | Existing; will add foreground session-turn support            |
+| [interactionToStreamResult](src/lib/interactions.ts#L111)  | Existing; will be used for SSE consumption                    |
+| [resolveProfile](src/lib/tool-profiles.ts#L269)            | Use to build profiles; add mcpServer field support            |
+| [buildToolsArray](src/lib/tool-profiles.ts#L392)           | Will integrate `mcpToTool()` output when mcpServer present    |
+| [ToolsSpecOverrides](src/lib/tool-profiles.ts#L188)        | Add `mcpServer` field for MCP server declaratio               |
+| [chat](src/tools/chat.ts#L956)                             | Main tool function; refactor to use interactions API          |
 
 ### Existing commands
 
@@ -103,25 +104,26 @@ Sessions use `ai.chats` (client-side state) with local `Content[]` history, repl
 
 **Goal:** New module consumes Interactions API SSE stream and emits the same MCP notifications as `streaming.ts`, making the SSE source transparent to callers.
 
-| Task | Action | Depends on | Files | Validate |
-| :--- | :----- | :--------- | :---- | :-------- |
-| [`TASK-001`](#task-001-create-interaction-stream-module) | Create new `interaction-stream.ts` module consuming Interactions SSE | none | [src/lib/interaction-stream.ts](src/lib/interaction-stream.ts), [**tests**/lib/interaction-stream.test.ts](__tests__/lib/interaction-stream.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/interaction-stream.test.ts` |
+| Task                                                     | Action                                                               | Depends on | Files                                                                                                                                                | Validate                                                                                              |
+| :------------------------------------------------------- | :------------------------------------------------------------------- | :--------- | :--------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------- |
+| [`TASK-001`](#task-001-create-interaction-stream-module) | Create new `interaction-stream.ts` module consuming Interactions SSE | none       | [src/lib/interaction-stream.ts](src/lib/interaction-stream.ts), [**tests**/lib/interaction-stream.test.ts](__tests__/lib/interaction-stream.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/interaction-stream.test.ts` |
 
 #### TASK-001: Create `interaction-stream.ts` module
 
-| Field      | Value |
-| :--------- | :---- |
-| Depends on | none |
-| Files      | Create: [src/lib/interaction-stream.ts](src/lib/interaction-stream.ts); Create: [**tests**/lib/interaction-stream.test.ts](__tests__/lib/interaction-stream.test.ts) |
-| Symbols    | [createBackgroundInteraction](src/lib/interactions.ts#L31), [interactionToStreamResult](src/lib/interactions.ts#L111) |
+| Field      | Value                                                                                                                                                                                                                                                                     |
+| :--------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Depends on | none                                                                                                                                                                                                                                                                      |
+| Files      | Create: [src/lib/interaction-stream.ts](src/lib/interaction-stream.ts); Create: [**tests**/lib/interaction-stream.test.ts](__tests__/lib/interaction-stream.test.ts)                                                                                                      |
+| Symbols    | [createBackgroundInteraction](src/lib/interactions.ts#L31), [interactionToStreamResult](src/lib/interactions.ts#L111)                                                                                                                                                     |
 | Outcome    | New module exports `consumeInteractionStream()` function that takes an SSE event stream from `ai.interactions`, emits MCP progress/thought notifications, and returns a result compatible with `SessionEventEntry`. Tests verify event parsing and notification emission. |
 
 - [ ] **Step 1: Create failing test** — write [**tests**/lib/interaction-stream.test.ts](__tests__/lib/interaction-stream.test.ts)
 
 ```ts
 // __tests__/lib/interaction-stream.test.ts
-import { test } from 'node:test';
 import assert from 'node:assert';
+import { test } from 'node:test';
+
 import { consumeInteractionStream } from '../../src/lib/interaction-stream.js';
 
 test('consumeInteractionStream — parses SSE deltas and emits notifications', async () => {
@@ -165,6 +167,7 @@ Expected: FAIL — module does not exist.
 ```ts
 // src/lib/interaction-stream.ts
 import type { Readable } from 'node:stream';
+
 import type { Interaction } from '@google/genai';
 
 export interface StreamNotification {
@@ -262,19 +265,19 @@ git commit -m "feat(interaction-stream): new SSE consumer for Interactions API s
 
 **Goal:** Simplify `SessionEntry` to store only metadata; delete all replay/rebuild/contract logic and client-side pending-call tracking.
 
-| Task | Action | Depends on | Files | Validate |
-| :--- | :----- | :--------- | :---- | :-------- |
-| [`TASK-002`](#task-002-simplify-sessionentry-type) | Simplify `SessionEntry` type; delete unused types | none | [src/sessions.ts](src/sessions.ts), [**tests**/sessions.test.ts](__tests__/sessions.test.ts) | `npm run type-check` |
-| [`TASK-003`](#task-003-delete-replay-and-rebuild-functions) | Delete all replay/rebuild/contract functions | [`TASK-002`](#task-002-simplify-sessionentry-type) | [src/sessions.ts](src/sessions.ts) | `npm run knip` (no unused exports) |
-| [`TASK-004`](#task-004-delete-client-pending-call-tracking) | Delete `appendToolResponseTurn`, `getPendingFunctionCalls` | [`TASK-003`](#task-003-delete-replay-and-rebuild-functions) | [src/sessions.ts](src/sessions.ts), [src/tools/chat.ts](src/tools/chat.ts) | `node scripts/tasks.mjs --quick` |
+| Task                                                        | Action                                                     | Depends on                                                  | Files                                                                                        | Validate                           |
+| :---------------------------------------------------------- | :--------------------------------------------------------- | :---------------------------------------------------------- | :------------------------------------------------------------------------------------------- | :--------------------------------- |
+| [`TASK-002`](#task-002-simplify-sessionentry-type)          | Simplify `SessionEntry` type; delete unused types          | none                                                        | [src/sessions.ts](src/sessions.ts), [**tests**/sessions.test.ts](__tests__/sessions.test.ts) | `npm run type-check`               |
+| [`TASK-003`](#task-003-delete-replay-and-rebuild-functions) | Delete all replay/rebuild/contract functions               | [`TASK-002`](#task-002-simplify-sessionentry-type)          | [src/sessions.ts](src/sessions.ts)                                                           | `npm run knip` (no unused exports) |
+| [`TASK-004`](#task-004-delete-client-pending-call-tracking) | Delete `appendToolResponseTurn`, `getPendingFunctionCalls` | [`TASK-003`](#task-003-delete-replay-and-rebuild-functions) | [src/sessions.ts](src/sessions.ts), [src/tools/chat.ts](src/tools/chat.ts)                   | `node scripts/tasks.mjs --quick`   |
 
 #### TASK-002: Simplify `SessionEntry` type
 
-| Field      | Value |
-| :--------- | :---- |
-| Depends on | none |
-| Files      | Modify: [src/sessions.ts](src/sessions.ts) |
-| Symbols    | [SessionEntry](src/sessions.ts#L230), [ContentEntry](src/sessions.ts#L38), [SessionGenerationContract](src/sessions.ts#L55) |
+| Field      | Value                                                                                                                                                                                                                                          |
+| :--------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Depends on | none                                                                                                                                                                                                                                           |
+| Files      | Modify: [src/sessions.ts](src/sessions.ts)                                                                                                                                                                                                     |
+| Symbols    | [SessionEntry](src/sessions.ts#L230), [ContentEntry](src/sessions.ts#L38), [SessionGenerationContract](src/sessions.ts#L55)                                                                                                                    |
 | Outcome    | `SessionEntry` type has only `interactionId: string`, `lastAccess: number`, `transcript: TranscriptEntry[]`, `events: SessionEventEntry[]`. Types `ContentEntry`, `Chat` (field on SessionEntry), and `SessionGenerationContract` are deleted. |
 
 - [ ] **Step 1: Apply change** — Update [src/sessions.ts](src/sessions.ts)
@@ -330,16 +333,17 @@ git commit -m "refactor(sessions): simplify SessionEntry to interactionId + meta
 
 #### TASK-003: Delete replay and rebuild functions
 
-| Field      | Value |
-| :--------- | :---- |
-| Depends on | [`TASK-002`](#task-002-simplify-sessionentry-type) |
-| Files      | Modify: [src/sessions.ts](src/sessions.ts) |
-| Symbols    | [buildReplayHistoryParts](src/sessions.ts#L566), [buildRebuiltChatContents](src/sessions.ts#L390), [selectReplayWindow](src/sessions.ts#L1143) |
+| Field      | Value                                                                                                                                                                                                                                          |
+| :--------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Depends on | [`TASK-002`](#task-002-simplify-sessionentry-type)                                                                                                                                                                                             |
+| Files      | Modify: [src/sessions.ts](src/sessions.ts)                                                                                                                                                                                                     |
+| Symbols    | [buildReplayHistoryParts](src/sessions.ts#L566), [buildRebuiltChatContents](src/sessions.ts#L390), [selectReplayWindow](src/sessions.ts#L1143)                                                                                                 |
 | Outcome    | Functions `buildReplayHistoryParts`, `buildRebuiltChatContents`, `selectReplayWindow`, and `isCompatibleSessionContract`, `buildSessionGenerationContract`, `buildConfigFromSessionContract`, `hashInstructionText` are deleted from the file. |
 
 - [ ] **Step 1: Apply change** — Delete functions from [src/sessions.ts](src/sessions.ts)
 
 Delete entirely:
+
 - [buildReplayHistoryParts](src/sessions.ts#L566)
 - [buildRebuiltChatContents](src/sessions.ts#L390)
 - [selectReplayWindow](src/sessions.ts#L1143)
@@ -369,11 +373,11 @@ git commit -m "refactor(sessions): delete all replay/rebuild/window logic"
 
 #### TASK-004: Delete client pending-call tracking
 
-| Field      | Value |
-| :--------- | :---- |
-| Depends on | [`TASK-003`](#task-003-delete-replay-and-rebuild-functions) |
-| Files      | Modify: [src/sessions.ts](src/sessions.ts); Modify: [src/tools/chat.ts](src/tools/chat.ts) |
-| Symbols    | [appendToolResponseTurn](src/sessions.ts#L399), [getPendingFunctionCalls](src/sessions.ts#L417) |
+| Field      | Value                                                                                                                                                                   |
+| :--------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Depends on | [`TASK-003`](#task-003-delete-replay-and-rebuild-functions)                                                                                                             |
+| Files      | Modify: [src/sessions.ts](src/sessions.ts); Modify: [src/tools/chat.ts](src/tools/chat.ts)                                                                              |
+| Symbols    | [appendToolResponseTurn](src/sessions.ts#L399), [getPendingFunctionCalls](src/sessions.ts#L417)                                                                         |
 | Outcome    | Functions `appendToolResponseTurn` and `getPendingFunctionCalls` deleted from sessions.ts. All references in chat.ts removed. No pending-call state stored client-side. |
 
 - [ ] **Step 1: Apply change** — Delete [appendToolResponseTurn](src/sessions.ts#L399) and [getPendingFunctionCalls](src/sessions.ts#L417) from [src/sessions.ts](src/sessions.ts)
@@ -405,17 +409,17 @@ git commit -m "refactor(sessions): delete appendToolResponseTurn and getPendingF
 
 **Goal:** Create snake_case config builder for `ai.interactions.create()` calls, mirroring `buildGenerateContentConfig()` for the models API.
 
-| Task | Action | Depends on | Files | Validate |
-| :--- | :----- | :--------- | :---- | :-------- |
-| [`TASK-005`](#task-005-create-buildinteractionparams-builder) | Add `buildInteractionParams()` to client.ts | none | [src/client.ts](src/client.ts), [**tests**/client.test.ts](__tests__/client.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/client.test.ts` |
+| Task                                                          | Action                                      | Depends on | Files                                                                                | Validate                                                                              |
+| :------------------------------------------------------------ | :------------------------------------------ | :--------- | :----------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------ |
+| [`TASK-005`](#task-005-create-buildinteractionparams-builder) | Add `buildInteractionParams()` to client.ts | none       | [src/client.ts](src/client.ts), [**tests**/client.test.ts](__tests__/client.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/client.test.ts` |
 
 #### TASK-005: Create `buildInteractionParams()` builder
 
-| Field      | Value |
-| :--------- | :---- |
-| Depends on | none |
-| Files      | Modify: [src/client.ts](src/client.ts); Modify: [**tests**/client.test.ts](__tests__/client.test.ts) |
-| Symbols    | [buildGenerateContentConfig](src/client.ts#L157), [ResolvedProfile](src/lib/tool-profiles.ts#L223) |
+| Field      | Value                                                                                                                                                                                                                                                      |
+| :--------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Depends on | none                                                                                                                                                                                                                                                       |
+| Files      | Modify: [src/client.ts](src/client.ts); Modify: [**tests**/client.test.ts](__tests__/client.test.ts)                                                                                                                                                       |
+| Symbols    | [buildGenerateContentConfig](src/client.ts#L157), [ResolvedProfile](src/lib/tool-profiles.ts#L223)                                                                                                                                                         |
 | Outcome    | New `buildInteractionParams()` function exports from client.ts, accepts `ResolvedProfile` and tool overrides, returns `Interactions.CreateInteractionParameters` with correct snake_case fields. Tests verify correct field casing and tool list building. |
 
 - [ ] **Step 1: Write failing test** — Add to [**tests**/client.test.ts](__tests__/client.test.ts)
@@ -432,7 +436,7 @@ test('buildInteractionParams — emits snake_case generation_config', () => {
       systemInstruction: 'Be helpful',
       thinkingLevel: 'LOW',
       maxOutputTokens: 2048,
-    }
+    },
   );
 
   assert.ok('generation_config' in params);
@@ -470,7 +474,7 @@ export function buildInteractionParams(
 ): Interactions.CreateInteractionParameters {
   const resolved = resolveProfile(profile, context);
   const tools = buildToolsArray(resolved);
-  
+
   const generationConfig = {
     ...(options.thinkingLevel ? { thinking_level: options.thinkingLevel.toLowerCase() } : {}),
     ...(options.maxOutputTokens ? { max_output_tokens: options.maxOutputTokens } : {}),
@@ -506,17 +510,17 @@ git commit -m "feat(client): add buildInteractionParams() for Interactions API c
 
 **Goal:** Add `mcpServer` field to `ToolsSpecOverrides` and integrate `mcpToTool()` output into tool list building.
 
-| Task | Action | Depends on | Files | Validate |
-| :--- | :----- | :--------- | :---- | :-------- |
-| [`TASK-006`](#task-006-add-mcpserver-support-to-tool-profiles) | Add mcpServer field; integrate mcpToTool() | none | [src/lib/tool-profiles.ts](src/lib/tool-profiles.ts), [**tests**/lib/tool-profiles.test.ts](__tests__/lib/tool-profiles.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/tool-profiles.test.ts` |
+| Task                                                           | Action                                     | Depends on | Files                                                                                                                            | Validate                                                                                         |
+| :------------------------------------------------------------- | :----------------------------------------- | :--------- | :------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------- |
+| [`TASK-006`](#task-006-add-mcpserver-support-to-tool-profiles) | Add mcpServer field; integrate mcpToTool() | none       | [src/lib/tool-profiles.ts](src/lib/tool-profiles.ts), [**tests**/lib/tool-profiles.test.ts](__tests__/lib/tool-profiles.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/lib/tool-profiles.test.ts` |
 
 #### TASK-006: Add mcpServer support to tool profiles
 
-| Field      | Value |
-| :--------- | :---- |
-| Depends on | none |
-| Files      | Modify: [src/lib/tool-profiles.ts](src/lib/tool-profiles.ts); Modify: [**tests**/lib/tool-profiles.test.ts](__tests__/lib/tool-profiles.test.ts) |
-| Symbols    | [ToolsSpecOverrides](src/lib/tool-profiles.ts#L188), [buildToolsArray](src/lib/tool-profiles.ts#L392), [resolveProfile](src/lib/tool-profiles.ts#L269) |
+| Field      | Value                                                                                                                                                                                                                    |
+| :--------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Depends on | none                                                                                                                                                                                                                     |
+| Files      | Modify: [src/lib/tool-profiles.ts](src/lib/tool-profiles.ts); Modify: [**tests**/lib/tool-profiles.test.ts](__tests__/lib/tool-profiles.test.ts)                                                                         |
+| Symbols    | [ToolsSpecOverrides](src/lib/tool-profiles.ts#L188), [buildToolsArray](src/lib/tool-profiles.ts#L392), [resolveProfile](src/lib/tool-profiles.ts#L269)                                                                   |
 | Outcome    | `ToolsSpecOverrides` gains `mcpServer?: McpServerSpec` field. When present, `mcpToTool()` converts MCP tool list to Gemini declarations, merged with any raw `functions`. Test verifies MCP tool conversion and merging. |
 
 - [ ] **Step 1: Write failing test** — Add to [**tests**/lib/tool-profiles.test.ts](__tests__/lib/tool-profiles.test.ts)
@@ -537,14 +541,17 @@ test('buildToolsArray — mcpServer spec converts tools via mcpToTool', () => {
         functions: [{ name: 'custom_fn', description: 'custom', parametersJsonSchema: {} }],
       },
     },
-    { toolKey: 'chat' }
+    { toolKey: 'chat' },
   );
 
   const tools = buildToolsArray(resolved);
   const decls = tools.flatMap((t) => ('functionDeclarations' in t ? t.functionDeclarations : []));
 
   assert.ok(decls.length > 0, 'should have function declarations from MCP + custom');
-  assert.ok(decls.some((d) => d.name === 'custom_fn'), 'custom function should be present');
+  assert.ok(
+    decls.some((d) => d.name === 'custom_fn'),
+    'custom function should be present',
+  );
 });
 ```
 
@@ -629,17 +636,17 @@ git commit -m "feat(tool-profiles): add mcpServer support; integrate mcpToTool()
 
 **Goal:** Update [chat](src/tools/chat.ts) to use `ai.interactions.create()` for session turns; drop all rebuild/pending-call logic; use `buildInteractionParams()`.
 
-| Task | Action | Depends on | Files | Validate |
-| :--- | :----- | :--------- | :---- | :-------- |
+| Task                                                          | Action                               | Depends on                                                    | Files                                                                                                | Validate                                                                                  |
+| :------------------------------------------------------------ | :----------------------------------- | :------------------------------------------------------------ | :--------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------- |
 | [`TASK-007`](#task-007-refactor-chat-to-use-interactions-api) | Refactor chat tool main turn handler | [`TASK-005`](#task-005-create-buildinteractionparams-builder) | [src/tools/chat.ts](src/tools/chat.ts), [**tests**/tools/chat.test.ts](__tests__/tools/chat.test.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/tools/chat.test.ts` |
 
 #### TASK-007: Refactor chat to use Interactions API
 
-| Field      | Value |
-| :--------- | :---- |
-| Depends on | [`TASK-005`](#task-005-create-buildinteractionparams-builder) |
-| Files      | Modify: [src/tools/chat.ts](src/tools/chat.ts); Modify: [**tests**/tools/chat.test.ts](__tests__/tools/chat.test.ts) |
-| Symbols    | [chat](src/tools/chat.ts#L956), [buildInteractionParams](src/client.ts#L189) |
+| Field      | Value                                                                                                                                                                                                                                                                             |
+| :--------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Depends on | [`TASK-005`](#task-005-create-buildinteractionparams-builder)                                                                                                                                                                                                                     |
+| Files      | Modify: [src/tools/chat.ts](src/tools/chat.ts); Modify: [**tests**/tools/chat.test.ts](__tests__/tools/chat.test.ts)                                                                                                                                                              |
+| Symbols    | [chat](src/tools/chat.ts#L956), [buildInteractionParams](src/client.ts#L189)                                                                                                                                                                                                      |
 | Outcome    | Chat session turns call `ai.interactions.create()` with `previous_interaction_id` chaining. Function results passed via `tool_results` field. All `buildRebuiltChatContents`, `normalizeFunctionResponses` calls removed. Session store updated with `interactionId`. Tests pass. |
 
 - [ ] **Step 1: Write failing test** — Add to [**tests**/tools/chat.test.ts](__tests__/tools/chat.test.ts)
@@ -666,7 +673,7 @@ test('chat tool with sessionId — uses ai.interactions for multi-turn', async (
           }),
         },
       }),
-    })
+    }),
   );
 
   assert.ok(result.content.length > 0);
@@ -700,7 +707,7 @@ async function chatTool(input: ChatInput, context: ToolContext) {
         systemInstruction: resolveSystemInstruction(input),
         thinkingLevel: input.thinkingLevel,
         maxOutputTokens: 2048,
-      }
+      },
     );
 
     // Add previous interaction if session has one
@@ -750,17 +757,17 @@ git commit -m "refactor(chat): use ai.interactions for session turns; drop rebui
 
 **Goal:** Update the resource handler to proxy `ai.interactions.get()` instead of serving local `rawParts`. Breaking change: typed outputs instead of `Part[]`.
 
-| Task | Action | Depends on | Files | Validate |
-| :--- | :----- | :--------- | :---- | :-------- |
+| Task                                                  | Action                                    | Depends on                                                    | Files                                | Validate                                                                                 |
+| :---------------------------------------------------- | :---------------------------------------- | :------------------------------------------------------------ | :----------------------------------- | :--------------------------------------------------------------------------------------- |
 | [`TASK-008`](#task-008-update-session-parts-resource) | Update resource to proxy Interactions API | [`TASK-007`](#task-007-refactor-chat-to-use-interactions-api) | [src/resources.ts](src/resources.ts) | `node --import tsx/esm --env-file=.env --test --no-warnings __tests__/resources.test.ts` |
 
 #### TASK-008: Update session parts resource
 
-| Field      | Value |
-| :--------- | :---- |
-| Depends on | [`TASK-007`](#task-007-refactor-chat-to-use-interactions-api) |
-| Files      | Modify: [src/resources.ts](src/resources.ts) |
-| Symbols    | [SessionStore](src/resources.ts#L29) |
+| Field      | Value                                                                                                                                                                                                                                       |
+| :--------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Depends on | [`TASK-007`](#task-007-refactor-chat-to-use-interactions-api)                                                                                                                                                                               |
+| Files      | Modify: [src/resources.ts](src/resources.ts)                                                                                                                                                                                                |
+| Symbols    | [SessionStore](src/resources.ts#L29)                                                                                                                                                                                                        |
 | Outcome    | `gemini://sessions/{id}/turns/{n}/parts` resource calls `ai.interactions.get(interactionId)` and maps `Interaction.outputs` into resource payload. Resource format changes from `Part[]` to typed outputs — breaking change. Tests updated. |
 
 - [ ] **Step 1: Write failing test** — Add to test file for resources
@@ -810,7 +817,7 @@ if (uri.startsWith('gemini://sessions/')) {
   // ... parse sessionId, turnIndex
   const session = sessionStore.getOrCreate(sessionId);
   const interaction = await getAI().interactions.get(session.interactionId);
-  
+
   return {
     uri,
     mimeType: 'application/json',
@@ -876,22 +883,22 @@ Expected: output showing mcpToTool usage and mcpServer field handling.
 
 ## 6. Acceptance Criteria
 
-| ID                                 | Observable Outcome                                                                                |
-| :--------------------------------- | :------------------------------------------------------------------------------------------------ |
-| [`AC-001`](#6-acceptance-criteria) | `node scripts/tasks.mjs` exits 0 with all stages green.                                           |
-| [`AC-002`](#6-acceptance-criteria) | `SessionEntry` type has only `interactionId`, `lastAccess`, `transcript`, `events` fields.        |
-| [`AC-003`](#6-acceptance-criteria) | Chat sessions use `ai.interactions.create()` with `previous_interaction_id` chaining.              |
-| [`AC-004`](#6-acceptance-criteria) | `buildInteractionParams()` exported from client.ts, emits snake_case `generation_config`.          |
-| [`AC-005`](#6-acceptance-criteria) | Agent profile supports `mcpServer` field; `mcpToTool()` converts and merges MCP tools.             |
-| [`AC-006`](#6-acceptance-criteria) | `gemini://sessions/{id}/turns/{n}/parts` proxies `ai.interactions.get()`.                         |
+| ID                                 | Observable Outcome                                                                                     |
+| :--------------------------------- | :----------------------------------------------------------------------------------------------------- |
+| [`AC-001`](#6-acceptance-criteria) | `node scripts/tasks.mjs` exits 0 with all stages green.                                                |
+| [`AC-002`](#6-acceptance-criteria) | `SessionEntry` type has only `interactionId`, `lastAccess`, `transcript`, `events` fields.             |
+| [`AC-003`](#6-acceptance-criteria) | Chat sessions use `ai.interactions.create()` with `previous_interaction_id` chaining.                  |
+| [`AC-004`](#6-acceptance-criteria) | `buildInteractionParams()` exported from client.ts, emits snake_case `generation_config`.              |
+| [`AC-005`](#6-acceptance-criteria) | Agent profile supports `mcpServer` field; `mcpToTool()` converts and merges MCP tools.                 |
+| [`AC-006`](#6-acceptance-criteria) | `gemini://sessions/{id}/turns/{n}/parts` proxies `ai.interactions.get()`.                              |
 | [`AC-007`](#6-acceptance-criteria) | Zero references to deleted functions (buildRebuiltChatContents, appendToolResponseTurn, etc.) in code. |
 
 ## 7. Risks / Notes
 
-| ID                            | Type | Detail                                                                                                                                                                                  |
-| :---------------------------- | :--- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`NOTE-001`](#7-risks--notes) | Note | This is Plan 2 of 2. Plan 1 (genai-mechanical-fixes) must be completed and merged before starting Plan 2.                                                                              |
-| [`NOTE-002`](#7-risks--notes) | Note | Breaking change: `gemini://sessions/{id}/turns/{n}/parts` resource format changes from `Part[]` to typed Interaction.outputs. Clients must adapt to new structure.                     |
-| [`NOTE-003`](#7-risks--notes) | Note | MCP tool integration is async; `buildToolsArray()` will need error handling for MCP server startup failures (currently synchronous signature).                                         |
-| [`RISK-001`](#7-risks--notes) | Risk | Session resumption depends on valid `interactionId` stored; if Gemini deletes old interactions, session replay will fail. Mitigation: handle 404 from Interactions API gracefully.      |
+| ID                            | Type | Detail                                                                                                                                                                                    |
+| :---------------------------- | :--- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`NOTE-001`](#7-risks--notes) | Note | This is Plan 2 of 2. Plan 1 (genai-mechanical-fixes) must be completed and merged before starting Plan 2.                                                                                 |
+| [`NOTE-002`](#7-risks--notes) | Note | Breaking change: `gemini://sessions/{id}/turns/{n}/parts` resource format changes from `Part[]` to typed Interaction.outputs. Clients must adapt to new structure.                        |
+| [`NOTE-003`](#7-risks--notes) | Note | MCP tool integration is async; `buildToolsArray()` will need error handling for MCP server startup failures (currently synchronous signature).                                            |
+| [`RISK-001`](#7-risks--notes) | Risk | Session resumption depends on valid `interactionId` stored; if Gemini deletes old interactions, session replay will fail. Mitigation: handle 404 from Interactions API gracefully.        |
 | [`RISK-002`](#7-risks--notes) | Risk | Function call handling changes from client-side pending tracking to server-side state. Ensure all tool call paths properly construct `tool_results` field for `ai.interactions.create()`. |

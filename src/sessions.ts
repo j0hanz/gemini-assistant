@@ -1,25 +1,17 @@
-import type { CallToolResult } from '@modelcontextprotocol/server';
 
 import type {
-  BlockedReason,
-  FinishReason,
-  FunctionResponse,
   GroundingMetadata,
   Part,
   UrlContextMetadata,
 } from '@google/genai';
-
-import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
-import { extractTextContent } from './lib/response.js';
 import type { FunctionCallEntry, StreamAnomalies, ToolEvent } from './lib/streaming.js';
 import type { UsageMetadata } from './schemas/outputs.js';
 
-import { getSessionLimits, getSessionRedactionPatterns, getSlimSessionEvents } from './config.js';
+import { getSessionLimits, getSlimSessionEvents } from './config.js';
 
 const MAX_EVICTED_ENTRIES = 1000;
 const EVICTED_TRIM_TARGET = Math.floor(MAX_EVICTED_ENTRIES / 2);
-const EVICTION_SWEEP_INTERVAL_MS = 60_000;
 
 export interface TranscriptEntry {
   role: 'user' | 'assistant';
@@ -58,43 +50,6 @@ export interface SessionEventEntry {
   taskId?: string;
 }
 
-interface SessionTurnStructuredContent {
-  data?: unknown;
-  schemaWarnings?: string[];
-  diagnostics?: {
-    citationMetadata?: unknown;
-    functionCalls?: FunctionCallEntry[];
-    safetyRatings?: unknown;
-    thoughts?: string;
-    toolEvents?: ToolEvent[];
-    usage?: UsageMetadata;
-  };
-}
-
-interface SessionTurnResult {
-  content: CallToolResult['content'];
-  isError?: boolean | undefined;
-  structuredContent?: unknown;
-}
-
-interface SessionTurnStreamResult {
-  anomalies?: StreamAnomalies;
-  finishMessage?: string;
-  finishReason?: string;
-  groundingMetadata?: GroundingMetadata;
-  parts: Part[];
-  promptBlockReason?: string;
-  promptFeedback?: unknown;
-  urlContextMetadata?: UrlContextMetadata;
-}
-
-interface SessionTurnInput {
-  result: SessionTurnResult;
-  sentMessage?: string;
-  streamResult: SessionTurnStreamResult;
-  toolProfile: string;
-  urls?: string[];
-}
 
 interface SessionEntry {
   interactionId: string;
@@ -105,32 +60,18 @@ interface SessionEntry {
 
 export interface SessionSummary {
   id: string;
-  cacheName?: string;
-  contract?: SessionGenerationContract;
   lastAccess: number;
   transcriptCount: number;
   eventCount: number;
-  rebuiltAt?: number;
 }
 
 export interface SessionAccess {
-  appendContent(id: string, item: ContentEntry): boolean;
   appendEvent(id: string, item: SessionEventEntry): boolean;
   appendTranscript(id: string, item: TranscriptEntry): boolean;
   completeSessionIds(prefix?: string): string[];
-  getSession(id: string): Chat | undefined;
   getSessionEntry(id: string): SessionSummary | undefined;
   isEvicted(id: string): boolean;
-  listContentEntries(id: string): ContentEntry[] | undefined;
   listTranscriptEntries(id: string): TranscriptEntry[] | undefined;
-  replaceSession(id: string, chat: Chat): void;
-  setSession(
-    id: string,
-    chat: Chat,
-    rebuiltAt?: number,
-    cacheName?: string,
-    contract?: SessionGenerationContract,
-  ): void;
 }
 
 export interface SessionChangeEvent {
@@ -149,94 +90,14 @@ interface SessionStoreOptions {
 
 type SessionChangeSubscriber = (event: SessionChangeEvent) => void;
 
-const SESSION_VALUE_MAX_STRING_LENGTH = 2000;
-const SESSION_VALUE_MAX_ARRAY_ITEMS = 20;
-const SESSION_VALUE_MAX_OBJECT_KEYS = 50;
-const SESSION_VALUE_TRUNCATION_SUFFIX = '... [truncated]';
-
-interface SessionFieldRule {
-  key: string;
-  shouldSanitize: (value: unknown) => boolean;
-}
-
-const FUNCTION_CALL_FIELD_RULES: readonly SessionFieldRule[] = [
-  { key: 'args', shouldSanitize: (value) => Boolean(value) },
-];
-
-const TOOL_EVENT_FIELD_RULES: readonly SessionFieldRule[] = [
-  { key: 'args', shouldSanitize: (value) => Boolean(value) },
-  { key: 'code', shouldSanitize: (value) => value !== undefined },
-  { key: 'output', shouldSanitize: (value) => value !== undefined },
-  { key: 'response', shouldSanitize: (value) => Boolean(value) },
-  { key: 'text', shouldSanitize: (value) => value !== undefined },
-];
-
 const SESSION_FREE_TEXT_SECRET_PATTERNS: readonly RegExp[] = [
   /("(?:api[_-]?key|authorization|password|secret|token)"\s*:\s*)"(?:\\.|[^"\\])*"/gi,
   /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi,
   /\b(?:api[_-]?key|authorization|password|secret|token)\s*[:=]\s*[^\s,;]+/gi,
 ];
 
-function shouldRedactSessionValue(keyContext?: string): boolean {
-  if (!keyContext) return false;
-  return getSessionRedactionPatterns().some((pattern) => pattern.test(keyContext));
-}
 
-function sanitizeSessionValue(value: unknown, keyContext?: string): unknown {
-  if (shouldRedactSessionValue(keyContext)) {
-    return '[REDACTED]';
-  }
 
-  if (typeof value === 'string') {
-    if (value.length <= SESSION_VALUE_MAX_STRING_LENGTH) {
-      return value;
-    }
-
-    const maxPrefixLength = Math.max(
-      SESSION_VALUE_MAX_STRING_LENGTH - SESSION_VALUE_TRUNCATION_SUFFIX.length,
-      0,
-    );
-    return `${value.slice(0, maxPrefixLength)}${SESSION_VALUE_TRUNCATION_SUFFIX}`;
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, SESSION_VALUE_MAX_ARRAY_ITEMS)
-      .map((item) => sanitizeSessionValue(item, keyContext));
-  }
-
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value)
-        .slice(0, SESSION_VALUE_MAX_OBJECT_KEYS)
-        .map(([key, nestedValue]) => [key, sanitizeSessionValue(nestedValue, key)]),
-    );
-  }
-
-  return value;
-}
-
-function applySessionFieldRules<T extends object>(item: T, rules: readonly SessionFieldRule[]): T {
-  const source = item as Readonly<Record<string, unknown>>;
-  const out: Record<string, unknown> = { ...source };
-  for (const rule of rules) {
-    const value = source[rule.key];
-    if (rule.shouldSanitize(value)) {
-      out[rule.key] = sanitizeSessionValue(value, rule.key);
-    }
-  }
-  return out as T;
-}
-
-function sanitizeFunctionCalls(functionCalls: FunctionCallEntry[]): FunctionCallEntry[] {
-  return functionCalls.map((functionCall) =>
-    applySessionFieldRules(functionCall, FUNCTION_CALL_FIELD_RULES),
-  );
-}
-
-function sanitizeToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
-  return toolEvents.map((toolEvent) => applySessionFieldRules(toolEvent, TOOL_EVENT_FIELD_RULES));
-}
 
 export function sanitizeSessionText(text: string | undefined): string | undefined {
   if (text === undefined) {
@@ -252,78 +113,8 @@ export function sanitizeSessionText(text: string | undefined): string | undefine
   }, text);
 }
 
-export function buildRebuiltChatContents(contents: ContentEntry[], maxBytes: number): Content[] {
-  return selectReplayWindow(contents, maxBytes)
-    .kept.map((entry) => ({
-      role: entry.role,
-      parts: buildReplayHistoryParts(structuredClone(entry.parts)),
-    }))
-    .filter((content) => content.parts.length > 0);
-}
 
-export function appendToolResponseTurn(
-  sessionId: string,
-  responses: FunctionResponse[],
-  deps: {
-    appendSessionContent: (sessionId: string, item: ContentEntry) => boolean;
-    now: () => number;
-  },
-  taskId?: string,
-): boolean {
-  if (responses.length === 0) return true;
-  return deps.appendSessionContent(sessionId, {
-    role: 'user',
-    parts: responses.map((functionResponse) => ({ functionResponse })),
-    timestamp: deps.now(),
-    ...(taskId ? { taskId } : {}),
-  });
-}
 
-export function getPendingFunctionCalls(entry: {
-  contents: readonly ContentEntry[];
-}): FunctionCallEntry[] {
-  for (let index = entry.contents.length - 1; index >= 0; index -= 1) {
-    const content = entry.contents[index];
-    if (content?.role !== 'model') {
-      continue;
-    }
-
-    const seenIds = new Set<string>();
-    const functionCalls = content.parts.flatMap((part) => {
-      const functionCall = part.functionCall;
-      if (!functionCall) {
-        return [];
-      }
-
-      const id = typeof functionCall.id === 'string' ? functionCall.id : undefined;
-      if (id && seenIds.has(id)) {
-        return [];
-      }
-      if (id) {
-        seenIds.add(id);
-      }
-
-      return [
-        {
-          ...(id ? { id } : {}),
-          ...(typeof functionCall.name === 'string' ? { name: functionCall.name } : {}),
-          ...(functionCall.args && typeof functionCall.args === 'object'
-            ? { args: functionCall.args }
-            : {}),
-          ...(typeof part.thoughtSignature === 'string'
-            ? { thoughtSignature: part.thoughtSignature }
-            : {}),
-        } satisfies FunctionCallEntry,
-      ];
-    });
-
-    if (functionCalls.length > 0) {
-      return functionCalls;
-    }
-  }
-
-  return [];
-}
 
 function cloneValue<T>(value: T): T {
   return structuredClone(value);
@@ -398,25 +189,6 @@ function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
 }
 
 
-/**
- * Produce SDK-faithful Gemini parts for persistence under {@link ContentEntry.rawParts}.
- * Only oversized `inlineData` payloads are dropped (to cap memory); `thought`
- * parts, nameless `functionCall`s, and `thoughtSignature` values are preserved
- * so replay-safe orchestration retains Gemini-native structure.
- */
-function capRawParts(parts: Part[]): Part[] {
-  const inlineDataMaxBytes = getSessionLimits().replayInlineDataMaxBytes;
-  return parts.filter((part) => {
-    if (part.inlineData?.data && part.inlineData.data.length > inlineDataMaxBytes) {
-      logger.child('sessions').debug('Dropping oversized inlineData part from raw parts', {
-        inlineDataBytes: part.inlineData.data.length,
-        inlineDataMaxBytes,
-      });
-      return false;
-    }
-    return true;
-  });
-}
 
 export function buildReplayHistoryParts(parts: Part[]): Part[] {
   const inlineDataMaxBytes = getSessionLimits().replayInlineDataMaxBytes;
@@ -474,166 +246,19 @@ export function buildReplayHistoryParts(parts: Part[]): Part[] {
 function toSessionSummary(id: string, entry: SessionEntry): SessionSummary {
   return {
     id,
-    ...(entry.cacheName ? { cacheName: entry.cacheName } : {}),
-    ...(entry.contract ? { contract: cloneValue(entry.contract) } : {}),
     lastAccess: entry.lastAccess,
     transcriptCount: entry.transcript.length,
     eventCount: entry.events.length,
-    ...(entry.rebuiltAt !== undefined ? { rebuiltAt: entry.rebuiltAt } : {}),
   };
 }
 
-function appendTranscriptPair(
-  sessionId: string,
-  message: string,
-  result: SessionTurnResult,
-  deps: {
-    appendSessionTranscript: (sessionId: string, item: TranscriptEntry) => boolean;
-    now: () => number;
-  },
-  taskId?: string,
-): void {
-  if (result.isError) return;
-  const timestamp = deps.now();
 
-  deps.appendSessionTranscript(sessionId, {
-    role: 'user',
-    text: message,
-    timestamp,
-    ...(taskId ? { taskId } : {}),
-  });
-  deps.appendSessionTranscript(sessionId, {
-    role: 'assistant',
-    text: extractTextContent(result.content),
-    timestamp,
-    ...(taskId ? { taskId } : {}),
-  });
-}
 
-function buildSessionEventRequest(
-  message: string,
-  sentMessage: string,
-  askResult: SessionTurnInput,
-): SessionEventEntry['request'] {
-  return {
-    message,
-    ...(sentMessage !== message ? { sentMessage } : {}),
-    ...(askResult.toolProfile !== 'none' ? { toolProfile: askResult.toolProfile } : {}),
-    ...(askResult.urls ? { urls: askResult.urls } : {}),
-  };
-}
-
-function buildSessionEventResponse(
-  askResult: SessionTurnInput,
-  structured: SessionTurnStructuredContent | undefined,
-): SessionEventEntry['response'] {
-  const { streamResult } = askResult;
-  return {
-    text: extractTextContent(askResult.result.content),
-    ...(streamResult.finishReason !== undefined ? { finishReason: streamResult.finishReason } : {}),
-    ...(streamResult.finishMessage !== undefined
-      ? { finishMessage: streamResult.finishMessage }
-      : {}),
-    ...(streamResult.promptBlockReason !== undefined
-      ? { promptBlockReason: streamResult.promptBlockReason }
-      : {}),
-    ...(structured?.data !== undefined ? { data: sanitizeSessionValue(structured.data) } : {}),
-    ...(structured?.diagnostics?.functionCalls
-      ? { functionCalls: sanitizeFunctionCalls(structured.diagnostics.functionCalls) }
-      : {}),
-    ...(structured?.schemaWarnings ? { schemaWarnings: structured.schemaWarnings } : {}),
-    ...(structured?.diagnostics?.safetyRatings !== undefined
-      ? { safetyRatings: '[REDACTED]' }
-      : {}),
-    ...(structured?.diagnostics?.citationMetadata !== undefined
-      ? { citationMetadata: '[REDACTED]' }
-      : {}),
-    ...(structured?.diagnostics?.thoughts !== undefined
-      ? { thoughts: structured.diagnostics.thoughts }
-      : {}),
-    ...(structured?.diagnostics?.toolEvents
-      ? { toolEvents: sanitizeToolEvents(structured.diagnostics.toolEvents) }
-      : {}),
-    ...(structured?.diagnostics?.usage !== undefined
-      ? { usage: structured.diagnostics.usage }
-      : {}),
-    ...(streamResult.groundingMetadata !== undefined
-      ? {
-          groundingMetadata: '[REDACTED]' as NonNullable<
-            SessionEventEntry['response']['groundingMetadata']
-          >,
-        }
-      : {}),
-    ...(streamResult.urlContextMetadata !== undefined
-      ? {
-          urlContextMetadata: '[REDACTED]' as NonNullable<
-            SessionEventEntry['response']['urlContextMetadata']
-          >,
-        }
-      : {}),
-    ...(streamResult.promptFeedback !== undefined
-      ? { promptFeedback: sanitizeSessionValue(streamResult.promptFeedback, 'promptFeedback') }
-      : {}),
-    ...(streamResult.anomalies !== undefined ? { anomalies: { ...streamResult.anomalies } } : {}),
-  };
-}
-
-export function appendSessionTurn(
-  sessionId: string,
-  askResult: SessionTurnInput,
-  args: { message: string },
-  deps: {
-    appendSessionContent: (sessionId: string, item: ContentEntry) => boolean;
-    appendSessionEvent: (sessionId: string, item: SessionEventEntry) => boolean;
-    appendSessionTranscript: (sessionId: string, item: TranscriptEntry) => boolean;
-    now: () => number;
-  },
-  taskId?: string,
-  sentArgs: { message: string } = args,
-): void {
-  appendTranscriptPair(sessionId, args.message, askResult.result, deps, taskId);
-  if (askResult.result.isError) return;
-  const structured = askResult.result.structuredContent as SessionTurnStructuredContent | undefined;
-  const timestamp = deps.now();
-  const sentMessage = askResult.sentMessage ?? sentArgs.message;
-
-  deps.appendSessionContent(sessionId, {
-    role: 'user',
-    parts: [{ text: sentMessage }],
-    timestamp,
-    ...(taskId ? { taskId } : {}),
-  });
-  deps.appendSessionContent(sessionId, {
-    role: 'model',
-    parts: buildReplayHistoryParts(askResult.streamResult.parts),
-    rawParts: capRawParts(structuredClone(askResult.streamResult.parts)),
-    timestamp,
-    ...(taskId ? { taskId } : {}),
-    ...(askResult.streamResult.finishReason !== undefined
-      ? { finishReason: askResult.streamResult.finishReason as FinishReason }
-      : {}),
-    ...(askResult.streamResult.finishMessage !== undefined
-      ? { finishMessage: askResult.streamResult.finishMessage }
-      : {}),
-    ...(askResult.streamResult.promptBlockReason !== undefined
-      ? { promptBlockReason: askResult.streamResult.promptBlockReason as BlockedReason }
-      : {}),
-  });
-
-  deps.appendSessionEvent(sessionId, {
-    request: buildSessionEventRequest(args.message, sentMessage, askResult),
-    response: buildSessionEventResponse(askResult, structured),
-    timestamp,
-    ...(taskId ? { taskId } : {}),
-  });
-}
 
 export class SessionStore {
   private readonly evictedSessions = new Set<string>();
 
   private evictionTimer: ReturnType<typeof setInterval> | undefined;
-
-  private readonly maxSessions: number;
 
   private readonly maxEventEntries: number;
 
@@ -645,17 +270,13 @@ export class SessionStore {
 
   private readonly subscribers = new Set<SessionChangeSubscriber>();
 
-  private readonly sweepIntervalMs: number;
-
   private readonly ttlMs: number;
 
   constructor(options: SessionStoreOptions = {}) {
     const defaults = getSessionLimits();
     this.maxEventEntries = options.maxEventEntries ?? defaults.maxEventEntries;
-    this.maxSessions = options.maxSessions ?? defaults.maxSessions;
     this.maxTranscriptEntries = options.maxTranscriptEntries ?? defaults.maxTranscriptEntries;
     this.nowFn = options.now ?? (() => Date.now());
-    this.sweepIntervalMs = options.sweepIntervalMs ?? EVICTION_SWEEP_INTERVAL_MS;
     this.ttlMs = options.ttlMs ?? defaults.ttlMs;
   }
 
@@ -703,11 +324,6 @@ export class SessionStore {
     return entry.events.map((item) => cloneSessionEventEntry(item));
   }
 
-  listSessionContentEntries(id: string): ContentEntry[] | undefined {
-    const entry = this.getActiveSessionEntry(id);
-    if (!entry) return undefined;
-    return entry.contents.map((item) => cloneContentEntry(item));
-  }
 
   appendSessionTranscript(id: string, item: TranscriptEntry): boolean {
     return this.appendSessionHistoryEntry(
@@ -719,22 +335,6 @@ export class SessionStore {
     );
   }
 
-  appendSessionContent(id: string, item: ContentEntry): boolean {
-    const entry = this.getActiveSessionEntry(id);
-    if (!entry) return false;
-    entry.contents.push(cloneContentEntry(item));
-    this.trimSessionHistory(entry.contents, this.maxTranscriptEntries);
-    this.touchSessionEntry(id, entry);
-
-    if (item.role === 'model') {
-      // A new model turn exposes a new `gemini://sessions/.../turns/{turnIndex}/parts`
-      // resource URI. Notify subscribers so the resource collection refresh.
-      const turnIndex = entry.contents.length - 1;
-      this.notifyChange(true, { sessionId: id, turnIndex });
-    }
-
-    return true;
-  }
 
   appendSessionEvent(id: string, item: SessionEventEntry): boolean {
     return this.appendSessionHistoryEntry(
@@ -779,44 +379,8 @@ export class SessionStore {
     return this.evictedSessions.has(id);
   }
 
-  getSession(id: string): Chat | undefined {
-    const entry = this.getActiveSessionEntry(id);
-    if (!entry) return undefined;
-    return this.updateSessionAccess(id, entry);
-  }
 
-  setSession(
-    id: string,
-    chat: Chat,
-    rebuiltAt?: number,
-    cacheName?: string,
-    contract?: SessionGenerationContract,
-  ): void {
-    if (this.sessions.has(id)) {
-      throw new AppError('sessions', `Session already exists: ${id}`);
-    }
-    if (this.sessions.size >= this.maxSessions) {
-      this.evictOldest();
-    }
-    this.createSession(id, chat, rebuiltAt, cacheName, contract);
-    this.startEvictionTimer();
-    this.notifyChange(true);
-  }
 
-  replaceSession(id: string, chat: Chat): void {
-    const entry = this.sessions.get(id);
-    if (!entry) {
-      this.setSession(id, chat);
-      return;
-    }
-
-    entry.chat = chat;
-    this.setSessionEntry(id, entry);
-    this.startEvictionTimer();
-    // Replacement preserves collection membership (same id).
-    // Do NOT fire `notifications/resources/list_changed`.
-    this.notifyChange(false);
-  }
 
   private notifyChange(
     listChanged = true,
@@ -862,40 +426,8 @@ export class SessionStore {
     this.setSessionEntry(id, entry);
   }
 
-  private updateSessionAccess(id: string, entry: SessionEntry): Chat {
-    this.touchSessionEntry(id, entry);
-    return entry.chat;
-  }
 
-  private createSession(
-    id: string,
-    chat: Chat,
-    rebuiltAt?: number,
-    cacheName?: string,
-    contract?: SessionGenerationContract,
-  ): void {
-    this.storeSession(id, chat, rebuiltAt, cacheName, contract);
-  }
 
-  private storeSession(
-    id: string,
-    chat: Chat,
-    rebuiltAt?: number,
-    cacheName?: string,
-    contract?: SessionGenerationContract,
-  ): void {
-    this.evictedSessions.delete(id);
-    this.setSessionEntry(id, {
-      chat,
-      ...(cacheName ? { cacheName } : {}),
-      ...(contract ? { contract: cloneValue(contract) } : {}),
-      contents: [],
-      events: [],
-      lastAccess: this.now(),
-      ...(rebuiltAt !== undefined ? { rebuiltAt } : {}),
-      transcript: [],
-    });
-  }
 
   private trimEvictedSessions(): void {
     if (this.evictedSessions.size <= MAX_EVICTED_ENTRIES) return;
@@ -913,19 +445,6 @@ export class SessionStore {
     entries.splice(0, entries.length - maxEntries);
   }
 
-  private evictExpiredSessions(): string[] {
-    const currentTime = this.now();
-    const evictedIds: string[] = [];
-
-    for (const [id, entry] of this.sessions) {
-      if (currentTime - entry.lastAccess > this.ttlMs) {
-        this.removeSession(id, true);
-        evictedIds.push(id);
-      }
-    }
-
-    return evictedIds;
-  }
 
   private hasExpired(entry: SessionEntry): boolean {
     return this.now() - entry.lastAccess > this.ttlMs;
@@ -943,42 +462,16 @@ export class SessionStore {
     return undefined;
   }
 
-  private startEvictionTimer(): void {
-    if (this.evictionTimer) return;
-    this.evictionTimer = setInterval(() => {
-      const evictedIds = this.evictExpiredSessions();
-      if (evictedIds.length > 0) this.notifyChange(true);
-    }, this.sweepIntervalMs);
-    this.evictionTimer.unref();
-  }
-
-  private oldestSessionId(): string | undefined {
-    const oldest = this.sessions.keys().next();
-    return oldest.done ? undefined : oldest.value;
-  }
-
-  private evictOldest(): string | undefined {
-    const oldestId = this.oldestSessionId();
-    if (oldestId) {
-      this.removeSession(oldestId, true);
-    }
-    return oldestId;
-  }
 }
 
 export function createSessionAccess(store: SessionStore): SessionAccess {
   return {
-    appendContent: store.appendSessionContent.bind(store),
     appendEvent: store.appendSessionEvent.bind(store),
     appendTranscript: store.appendSessionTranscript.bind(store),
     completeSessionIds: store.completeSessionIds.bind(store),
-    getSession: store.getSession.bind(store),
     getSessionEntry: store.getSessionEntry.bind(store),
     isEvicted: store.isEvicted.bind(store),
-    listContentEntries: store.listSessionContentEntries.bind(store),
     listTranscriptEntries: store.listSessionTranscriptEntries.bind(store),
-    replaceSession: store.replaceSession.bind(store),
-    setSession: store.setSession.bind(store),
   };
 }
 
@@ -986,45 +479,3 @@ export function createSessionStore(options?: SessionStoreOptions): SessionStore 
   return new SessionStore(options);
 }
 
-interface ReplayWindowSelection {
-  dropped: number;
-  kept: ContentEntry[];
-}
-
-function entryBytes(entry: ContentEntry): number {
-  return JSON.stringify(entry.parts).length;
-}
-
-export function selectReplayWindow(
-  contents: readonly ContentEntry[],
-  maxBytes: number,
-): ReplayWindowSelection {
-  if (contents.length === 0) {
-    return { kept: [], dropped: 0 };
-  }
-
-  const kept: ContentEntry[] = [];
-  let totalBytes = 0;
-
-  for (let index = contents.length - 1; index >= 0; index -= 1) {
-    const entry = contents[index];
-    if (!entry) continue;
-
-    const nextBytes = totalBytes + entryBytes(entry);
-    if (nextBytes > maxBytes) {
-      break;
-    }
-
-    kept.unshift(entry);
-    totalBytes = nextBytes;
-  }
-
-  while (kept[0] && kept[0].role !== 'user') {
-    kept.shift();
-  }
-
-  return {
-    kept,
-    dropped: contents.length - kept.length,
-  };
-}

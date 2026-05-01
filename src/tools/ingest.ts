@@ -489,15 +489,12 @@ async function handleDeleteDocument(
   input: IngestInput,
   ai: ReturnType<typeof getAI>,
 ): Promise<IngestOutput> {
-  // Schema's superRefine guarantees documentName is present for delete-document.
   const documentName = input.documentName;
   if (documentName === undefined) {
     throw new Error("documentName is required when operation = 'delete-document'");
   }
 
-  const storeName = input.storeName.startsWith('fileSearchStores/')
-    ? input.storeName
-    : `fileSearchStores/${input.storeName}`;
+  const { name: storeName } = await resolveStore(ai, input.storeName, { createIfMissing: false });
   const fullDocName = documentName.includes('/documents/')
     ? documentName
     : `${storeName}/documents/${documentName}`;

@@ -82,104 +82,24 @@ const SKIPPED_EXTENSIONS = new Set([
 // Explicit MIME types for non-obvious extensions. The Gemini File Search SDK
 // rejects uploads when it cannot determine a MIME type from the path, so we
 // fall back to `text/plain` for any source-like file we recognise.
+// MIME types accepted by the Gemini File Search API. The API rejects
+// non-IANA `x-*` subtypes (e.g. `text/x-typescript`), so source code uploads
+// must use `text/plain`. We only use specific MIME types for formats the API
+// is known to accept; everything else falls back to `text/plain`.
 const MIME_BY_EXTENSION: Record<string, string> = {
-  // Docs / data
   '.md': 'text/markdown',
   '.markdown': 'text/markdown',
-  '.txt': 'text/plain',
   '.json': 'application/json',
   '.jsonc': 'application/json',
   '.json5': 'application/json',
+  '.ipynb': 'application/json',
   '.csv': 'text/csv',
   '.tsv': 'text/tab-separated-values',
   '.html': 'text/html',
   '.htm': 'text/html',
   '.xml': 'application/xml',
-  '.yaml': 'application/yaml',
-  '.yml': 'application/yaml',
-  '.toml': 'application/toml',
-  '.ini': 'text/plain',
-  '.env': 'text/plain',
-  '.pdf': 'application/pdf',
-  // JavaScript / TypeScript
-  '.js': 'text/javascript',
-  '.mjs': 'text/javascript',
-  '.cjs': 'text/javascript',
-  '.jsx': 'text/javascript',
-  '.ts': 'text/x-typescript',
-  '.tsx': 'text/x-typescript',
-  '.mts': 'text/x-typescript',
-  '.cts': 'text/x-typescript',
-  // Web
   '.css': 'text/css',
-  '.scss': 'text/x-scss',
-  '.sass': 'text/x-sass',
-  '.less': 'text/x-less',
-  '.vue': 'text/plain',
-  '.svelte': 'text/plain',
-  // Python
-  '.py': 'text/x-python',
-  '.pyi': 'text/x-python',
-  '.ipynb': 'application/json',
-  // JVM
-  '.java': 'text/x-java-source',
-  '.kt': 'text/x-kotlin',
-  '.kts': 'text/x-kotlin',
-  '.scala': 'text/x-scala',
-  '.groovy': 'text/x-groovy',
-  // Systems
-  '.c': 'text/x-c',
-  '.h': 'text/x-c',
-  '.cc': 'text/x-c++',
-  '.cpp': 'text/x-c++',
-  '.cxx': 'text/x-c++',
-  '.hpp': 'text/x-c++',
-  '.hh': 'text/x-c++',
-  '.m': 'text/x-objective-c',
-  '.mm': 'text/x-objective-c',
-  '.rs': 'text/x-rust',
-  '.go': 'text/x-go',
-  '.zig': 'text/plain',
-  // .NET
-  '.cs': 'text/x-csharp',
-  '.fs': 'text/x-fsharp',
-  '.vb': 'text/plain',
-  // Scripting
-  '.rb': 'text/x-ruby',
-  '.php': 'text/x-php',
-  '.pl': 'text/x-perl',
-  '.lua': 'text/x-lua',
-  '.r': 'text/x-r',
-  '.jl': 'text/x-julia',
-  // Functional
-  '.hs': 'text/x-haskell',
-  '.elm': 'text/plain',
-  '.ex': 'text/x-elixir',
-  '.exs': 'text/x-elixir',
-  '.erl': 'text/x-erlang',
-  '.clj': 'text/x-clojure',
-  '.cljs': 'text/x-clojure',
-  // Mobile
-  '.swift': 'text/x-swift',
-  '.dart': 'text/plain',
-  // Shell
-  '.sh': 'application/x-sh',
-  '.bash': 'application/x-sh',
-  '.zsh': 'application/x-sh',
-  '.fish': 'application/x-sh',
-  '.ps1': 'text/plain',
-  '.bat': 'text/plain',
-  '.cmd': 'text/plain',
-  // Build / config
-  '.dockerfile': 'text/plain',
-  '.makefile': 'text/plain',
-  '.gradle': 'text/plain',
-  '.cmake': 'text/plain',
-  // Query / DB
-  '.sql': 'application/sql',
-  '.graphql': 'application/graphql',
-  '.gql': 'application/graphql',
-  '.proto': 'text/plain',
+  '.pdf': 'application/pdf',
 };
 
 // Filenames without an extension that are still worth ingesting as plain text.

@@ -103,30 +103,9 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   '.pdf': 'application/pdf',
 };
 
-// Filenames without an extension that are still worth ingesting as plain text.
-const TEXT_BASENAMES = new Set([
-  'dockerfile',
-  'makefile',
-  'rakefile',
-  'gemfile',
-  'procfile',
-  'jenkinsfile',
-  'license',
-  'readme',
-  'changelog',
-  'authors',
-  'contributors',
-  'notice',
-]);
-
 function inferMimeType(filePath: string): string {
   const ext = extname(filePath).toLowerCase();
-  if (ext.length > 0) {
-    return MIME_BY_EXTENSION[ext] ?? 'text/plain';
-  }
-  const base = filePath.split(/[\\/]/).pop()?.toLowerCase() ?? '';
-  if (TEXT_BASENAMES.has(base)) return 'text/plain';
-  return 'text/plain';
+  return MIME_BY_EXTENSION[ext] ?? 'text/plain';
 }
 
 /**

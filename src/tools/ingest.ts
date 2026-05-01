@@ -30,10 +30,7 @@ function validateUploadPath(filePath: string): void {
 /**
  * Handle create-store operation
  */
-function handleCreateStore(
-  input: Extract<IngestInput, { operation: 'create-store' }>,
-  _ai: ReturnType<typeof getAI>,
-): IngestOutput {
+function handleCreateStore(input: IngestInput, _ai: ReturnType<typeof getAI>): IngestOutput {
   // The Gemini SDK fileSearchStores API may not be available in all versions
   // When available, this would call: await ai.fileSearchStores.create()
   // For now, we simulate a successful store creation
@@ -49,16 +46,19 @@ function handleCreateStore(
 /**
  * Handle upload operation
  */
-function handleUpload(
-  input: Extract<IngestInput, { operation: 'upload' }>,
-  _ai: ReturnType<typeof getAI>,
-): IngestOutput {
+function handleUpload(input: IngestInput, _ai: ReturnType<typeof getAI>): IngestOutput {
+  // Schema's superRefine guarantees filePath is present for upload.
+  const filePath = input.filePath;
+  if (filePath === undefined) {
+    throw new Error("filePath is required when operation = 'upload'");
+  }
+
   // Validate file path
-  validateUploadPath(input.filePath);
+  validateUploadPath(filePath);
 
   // Read file from disk
   try {
-    readFileSync(input.filePath);
+    readFileSync(filePath);
   } catch (error) {
     throw new Error(
       error instanceof Error ? `Failed to read file: ${error.message}` : 'Failed to read file',
@@ -82,10 +82,7 @@ function handleUpload(
 /**
  * Handle delete-store operation
  */
-function handleDeleteStore(
-  input: Extract<IngestInput, { operation: 'delete-store' }>,
-  _ai: ReturnType<typeof getAI>,
-): IngestOutput {
+function handleDeleteStore(input: IngestInput, _ai: ReturnType<typeof getAI>): IngestOutput {
   // The Gemini SDK fileSearchStores API may not be available in all versions
   // When available, this would call: await ai.fileSearchStores.deleteFileSearchStore()
 
@@ -99,17 +96,20 @@ function handleDeleteStore(
 /**
  * Handle delete-document operation
  */
-function handleDeleteDocument(
-  input: Extract<IngestInput, { operation: 'delete-document' }>,
-  _ai: ReturnType<typeof getAI>,
-): IngestOutput {
+function handleDeleteDocument(input: IngestInput, _ai: ReturnType<typeof getAI>): IngestOutput {
+  // Schema's superRefine guarantees documentName is present for delete-document.
+  const documentName = input.documentName;
+  if (documentName === undefined) {
+    throw new Error("documentName is required when operation = 'delete-document'");
+  }
+
   // The Gemini SDK fileSearchStores API may not be available in all versions
   // When available, this would call: await ai.fileSearchStores.deleteDocument()
 
   return {
     operation: 'delete-document',
     storeName: input.storeName,
-    documentName: input.documentName,
+    documentName,
     message: `Document deleted from store '${input.storeName}'.`,
   };
 }
@@ -148,7 +148,7 @@ async function ingestWork(input: IngestInput, ctx: ServerContext): Promise<CallT
       }
 
       default: {
-        const _exhaustive: never = input;
+        const _exhaustive: never = input.operation;
         throw new Error(`Unknown operation: ${String(_exhaustive)}`);
       }
     }

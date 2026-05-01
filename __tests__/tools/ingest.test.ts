@@ -181,6 +181,23 @@ test('ingestWork: NOT seeding structuredContent causes safeValidateStructuredCon
   );
 });
 
+test('ingest schema: output with created field validates correctly', () => {
+  const output: IngestOutput = {
+    operation: 'upload',
+    storeName: 'fileSearchStores/abc123',
+    created: true,
+    message: 'Store auto-created and file uploaded successfully.',
+  };
+
+  const result = IngestOutputSchema.safeParse(output);
+  assert.ok(result.success);
+  if (result.success) {
+    assert.strictEqual(result.data.operation, 'upload');
+    assert.strictEqual(result.data.storeName, 'fileSearchStores/abc123');
+    assert.strictEqual(result.data.created, true);
+  }
+});
+
 test('single-file display name: relative(dirname(target), target) yields basename', () => {
   const target = '/workspace/project/src/config.ts';
   const displayName = relative(dirname(target), target) || target;

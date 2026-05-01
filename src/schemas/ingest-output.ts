@@ -29,6 +29,9 @@ export const IngestOutputSchema = z.strictObject({
       'Sample of uploaded file paths (truncated to first 200)',
     ),
   ),
+  created: optionalField(
+    withFieldMetadata(z.boolean(), 'True if the store was auto-created during this upload'),
+  ),
   message: textField('Human-readable result message'),
 });
 

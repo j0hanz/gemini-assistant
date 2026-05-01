@@ -1,6 +1,6 @@
 {
   "name": "@j0hanz/gemini-assistant",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Workflow-first MCP server for Google Gemini with sessions and workspace context",
   "type": "module",
   "main": "dist/index.js",

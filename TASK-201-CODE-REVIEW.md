@@ -1,5 +1,7 @@
 # Code Quality Review: TASK-201 Streaming Module
+
 ## Commit: `cc548c5`
+
 **Review Date:** 2026-05-01  
 **Files:** `src/lib/streaming.ts`, `__tests__/lib/streaming.test.ts`, schema documentation
 
@@ -18,6 +20,7 @@ This is a production issue for long-running streams with multiple metadata chunk
 ## Quality Checklist Assessment
 
 ### ✅ Logic Correctness
+
 - **mergeGroundingMetadata() accumulates events:** YES, but with data loss
   - ❌ **ISSUE:** Latest event overwrites previous metadata
   - The function returns `groundingMetadata: next` (line 235), discarding fields from `current` that aren't in `next`
@@ -42,6 +45,7 @@ This is a production issue for long-running streams with multiple metadata chunk
   - Recommendation: Add `if (next && typeof next === 'object')` check
 
 ### ⚠️ Performance
+
 - **Array accumulation:** O(n) per event where n = previous event count
   - Spread operator `[...(events ?? []), next]` creates a new array on every chunk
   - For a 100-chunk stream, this is O(1+2+3+...+100) = O(n²) total allocations
@@ -52,6 +56,7 @@ This is a production issue for long-running streams with multiple metadata chunk
 - **Direct field assignments:** ✓ GOOD
 
 ### ✅ Type Safety
+
 - **GroundingMetadata imported correctly:** YES (`@google/genai`)
 - **groundingMetadataEvents type:** YES `GroundingMetadata[] | undefined`
 - **Optional fields use `| undefined`:** PARTIAL
@@ -62,6 +67,7 @@ This is a production issue for long-running streams with multiple metadata chunk
 - **No unsafe `any` types:** ✓ VERIFIED
 
 ### ✅ API Design
+
 - **StreamResult fields are clear:** YES
   - `groundingMetadata` — latest event (backward compat)
   - `groundingMetadataEvents` — array of all events (for aggregation)
@@ -76,15 +82,16 @@ This is a production issue for long-running streams with multiple metadata chunk
   - Only needed by `updateStreamMetadata`
 
 ### ✓ Code Style
+
 - **Function naming:** `mergeGroundingMetadata` — clear intent, though implementation doesn't "merge" arrays
 - **Comments present but insufficient:**
   - Line 230: "// Accumulate events" — good, but doesn't explain why raw events are stored separately
   - Recommendation: Add comment explaining that TASK-202 will consume events for rollup
-  
 - **No console.log:** ✓ CORRECT (uses `mcpLog` on line 616)
 - **Indentation and formatting:** ✓ CONSISTENT
 
 ### ✓ Testing
+
 - **Test documents the feature:** YES
   - Test `accumulates groundingMetadata from completion events` (lines 87–100)
   - Clearly states expected behavior for TASK-202 ✓
@@ -126,7 +133,7 @@ function mergeGroundingMetadata(
   const updatedEvents = [...(events ?? []), next];
 
   return {
-    groundingMetadata: next,  // ❌ OVERWRITES entire object
+    groundingMetadata: next, // ❌ OVERWRITES entire object
     groundingMetadataEvents: updatedEvents,
   };
 }
@@ -135,6 +142,7 @@ function mergeGroundingMetadata(
 **Symptom:**
 
 If a Gemini stream produces two chunks:
+
 - **Chunk 1:** `{ groundingChunks: [ {...}, {...} ] }`
 - **Chunk 2:** `{ searchEntryPoint: "..." }`
 
@@ -143,6 +151,7 @@ The final `streamResult.groundingMetadata` contains **only** `searchEntryPoint`,
 **Root Cause:**
 
 GroundingMetadata is an object with multiple optional array fields:
+
 - `groundingChunks: GroundingChunk[]` — web search results
 - `groundingSupports: GroundingSupport[]` — citation anchors
 - `searchEntryPoint?: SearchEntryPoint` — search UI snippet
@@ -185,14 +194,8 @@ function mergeGroundingMetadata(
     ...current,
     ...next,
     // Concatenate cumulative arrays
-    groundingChunks: [
-      ...(current.groundingChunks ?? []),
-      ...(next.groundingChunks ?? []),
-    ],
-    groundingSupports: [
-      ...(current.groundingSupports ?? []),
-      ...(next.groundingSupports ?? []),
-    ],
+    groundingChunks: [...(current.groundingChunks ?? []), ...(next.groundingChunks ?? [])],
+    groundingSupports: [...(current.groundingSupports ?? []), ...(next.groundingSupports ?? [])],
     ...(next.webSearchQueries ? { webSearchQueries: next.webSearchQueries } : {}),
     // searchEntryPoint is scalar; later value wins
   };
@@ -278,7 +281,7 @@ if (candidate.groundingMetadata) {
   const result = mergeGroundingMetadata(
     metadata.groundingMetadata,
     metadata.groundingMetadataEvents,
-    candidate.groundingMetadata,  // ← No type check
+    candidate.groundingMetadata, // ← No type check
   );
 }
 ```
@@ -346,15 +349,15 @@ The following responsibilities are correctly deferred to TASK-202 (SessionStore 
 
 ## Summary Table
 
-| Checklist Item | Status | Notes |
-|---|---|---|
-| **Logic Correctness** | ❌ FAIL | Data loss in `mergeGroundingMetadata()` (Issue #1) |
-| **Performance** | 🟡 CONCERN | O(n²) array accumulation (Issue #2) |
-| **Type Safety** | ✅ PASS | Correct use of SDK types |
-| **API Design** | ✅ PASS | Clear field separation, backward compatible |
-| **Code Style** | ✅ PASS | Consistent with repo patterns |
-| **Testing** | ⚠️ PARTIAL | Placeholder test OK, but needs merging test case |
-| **Error Handling** | 🟡 CONCERN | No validation of metadata object (Issue #3) |
+| Checklist Item        | Status     | Notes                                              |
+| --------------------- | ---------- | -------------------------------------------------- |
+| **Logic Correctness** | ❌ FAIL    | Data loss in `mergeGroundingMetadata()` (Issue #1) |
+| **Performance**       | 🟡 CONCERN | O(n²) array accumulation (Issue #2)                |
+| **Type Safety**       | ✅ PASS    | Correct use of SDK types                           |
+| **API Design**        | ✅ PASS    | Clear field separation, backward compatible        |
+| **Code Style**        | ✅ PASS    | Consistent with repo patterns                      |
+| **Testing**           | ⚠️ PARTIAL | Placeholder test OK, but needs merging test case   |
+| **Error Handling**    | 🟡 CONCERN | No validation of metadata object (Issue #3)        |
 
 ---
 
@@ -365,11 +368,13 @@ The following responsibilities are correctly deferred to TASK-202 (SessionStore 
 The streaming module is architecturally sound and shows good design discipline (backward compat, clean separation). However, the `mergeGroundingMetadata()` function has a critical data-loss bug that must be fixed before merging. The fix is straightforward and aligns with the overall design.
 
 **Estimated effort to fix:**
+
 - Issue #1: ~5 min (add field merging logic + test)
 - Issue #2: ~2 min (replace spread operator)
 - Issue #3: ~1 min (add type guard)
 
 **Next steps:**
+
 1. Implement Issue #1 fix (critical)
 2. Add test case for multi-chunk merging
 3. Run `npm run test` to verify
@@ -383,10 +388,10 @@ GroundingMetadata fields (from `@google/genai`):
 
 ```typescript
 interface GroundingMetadata {
-  groundingChunks?: GroundingChunk[];  // Web search results
-  groundingSupports?: GroundingSupport[];  // Citation references
-  searchEntryPoint?: SearchEntryPoint;  // Search UI snippet
-  webSearchQueries?: string[];  // Inferred queries
+  groundingChunks?: GroundingChunk[]; // Web search results
+  groundingSupports?: GroundingSupport[]; // Citation references
+  searchEntryPoint?: SearchEntryPoint; // Search UI snippet
+  webSearchQueries?: string[]; // Inferred queries
 }
 ```
 

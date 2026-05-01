@@ -652,6 +652,27 @@ export class WorkspaceCacheManagerImpl {
     }
   }
 
+  /**
+   * Get cache metadata (enabled status, size, entry count, creation time).
+   * Returns cache status information suitable for resource metadata response.
+   */
+  getCacheMetadata(): WorkspaceCacheStatus {
+    return this.getCacheStatus();
+  }
+
+  /**
+   * Get full cache contents including metadata and indexed files.
+   * Returns the cache status plus a files array derived from sources.
+   */
+  getCacheContents(): { metadata: WorkspaceCacheStatus; files: { path: string }[] } {
+    const status = this.getCacheStatus();
+    const files = status.sources.map((path) => ({ path }));
+    return {
+      metadata: status,
+      files,
+    };
+  }
+
   private async deleteCacheBestEffort(cacheName: string, signal?: AbortSignal): Promise<void> {
     if (!cacheName) {
       return;

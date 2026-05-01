@@ -2,7 +2,7 @@
 
 ## Commit: `cc548c5`
 
-**Review Date:** 2026-05-01  
+**Review Date:** 2026-05-01
 **Files:** `src/lib/streaming.ts`, `__tests__/lib/streaming.test.ts`, schema documentation
 
 ---

@@ -7,6 +7,7 @@ import { COMBO_MATRIX, PROFILES, TOOL_PROFILE_NAMES } from './lib/tool-profiles.
 import { buildServerRootsFetcher, getAllowedRoots, type RootsFetcher } from './lib/validation.js';
 import {
   assembleWorkspaceContext,
+  createWorkspaceAccess,
   summarizeRootForDashboard,
   type WorkspaceCacheManagerImpl,
 } from './lib/workspace-context.js';
@@ -27,6 +28,7 @@ import {
   getWorkspaceCacheEnabled,
   getWorkspaceCacheTtl,
 } from './config.js';
+import { registerWorkspaceResources as registerWorkspaceResourcesNew } from './resources/workspace.js';
 import type { SessionStore, SessionSummary } from './sessions.js';
 
 const DISCOVER_CATALOG_URI = 'discover://catalog' as const;
@@ -909,4 +911,7 @@ export function registerResources(
   registerGeminiStaticResources(server);
   registerContextResource(server, sessionStore, rootsFetcher, workspaceCacheManagerInstance);
   registerWorkspaceResources(server, rootsFetcher, workspaceCacheManagerInstance);
+  // Register new gemini:// workspace resources
+  const workspaceAccess = createWorkspaceAccess(workspaceCacheManagerInstance, rootsFetcher);
+  registerWorkspaceResourcesNew(server, { workspace: workspaceAccess });
 }

@@ -1,4 +1,4 @@
-import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontextprotocol/server';
 import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server';
 
 import { readFile } from 'node:fs/promises';
@@ -184,7 +184,7 @@ export function registerWorkspaceResources(
   // Register resource template: gemini://workspace/files/{path}
   server.registerResource(
     'workspace-files-gemini',
-    FILE_RESOURCE_TEMPLATE,
+    new ResourceTemplate(FILE_RESOURCE_TEMPLATE, { list: undefined }),
     {
       description: 'Workspace file contents',
       mimeType: 'text/plain',

@@ -3,7 +3,11 @@ import { test } from 'node:test';
 
 import type { GroundingMetadata, Part } from '@google/genai';
 
-import { createSessionStore, sanitizeSessionText } from '../src/sessions.js';
+import {
+  createSessionStore,
+  sanitizeSessionText,
+  type SessionEventEntry,
+} from '../src/sessions.js';
 
 test('sanitizeSessionText — redacts API key patterns', () => {
   const text = 'API_KEY=abc123xyz apikey=secret OTHER=keep';
@@ -278,4 +282,86 @@ test('SessionStore — multiple turns maintain separate data', () => {
 
   assert.strictEqual(rawParts0?.[0].text, 'turn 1');
   assert.strictEqual(rawParts1?.[0].text, 'turn 2');
+});
+
+test('appendSessionEvent + listSessionEventEntries — mutations to original do not affect stored copy', () => {
+  const store = createSessionStore();
+  const sessionId = 'test-session-clone-1';
+
+  store.initializeSession(sessionId, 'interaction-clone-1');
+
+  const originalEvent: SessionEventEntry = {
+    request: { message: 'original message' },
+    response: { text: 'original response', data: { key: 'value' } },
+    timestamp: Date.now(),
+  };
+
+  store.appendSessionEvent(sessionId, originalEvent);
+
+  // Mutate the original
+  originalEvent.request.message = 'mutated message';
+  (originalEvent.response.data as Record<string, unknown>).key = 'mutated';
+
+  // Retrieve stored copy
+  const storedEvents = store.listSessionEventEntries(sessionId);
+  assert.strictEqual(storedEvents?.[0].request.message, 'original message');
+  assert.strictEqual((storedEvents?.[0].response.data as Record<string, unknown>)?.key, 'value');
+});
+
+test('listSessionEventEntries — mutations to returned copy do not affect stored data', () => {
+  const store = createSessionStore();
+  const sessionId = 'test-session-clone-2';
+
+  store.initializeSession(sessionId, 'interaction-clone-2');
+
+  const event: SessionEventEntry = {
+    request: { message: 'original message' },
+    response: { text: 'original response', data: { key: 'value' } },
+    timestamp: Date.now(),
+  };
+
+  store.appendSessionEvent(sessionId, event);
+
+  // Get returned copy and mutate it
+  const returnedEvents = store.listSessionEventEntries(sessionId);
+  if (returnedEvents?.[0]) {
+    returnedEvents[0].request.message = 'mutated';
+    (returnedEvents[0].response.data as Record<string, unknown>).key = 'mutated';
+  }
+
+  // Verify stored data unchanged
+  const freshRetrieved = store.listSessionEventEntries(sessionId);
+  assert.strictEqual(freshRetrieved?.[0].request.message, 'original message');
+  assert.strictEqual((freshRetrieved?.[0].response.data as Record<string, unknown>)?.key, 'value');
+});
+
+test('appendSessionEvent + listSessionEventEntries — functionCalls are shallow-copied', () => {
+  const store = createSessionStore();
+  const sessionId = 'test-session-clone-3';
+
+  store.initializeSession(sessionId, 'interaction-clone-3');
+
+  const originalCall = { name: 'func1', id: 'call-1' };
+  const event: SessionEventEntry = {
+    request: { message: 'message' },
+    response: {
+      text: 'response',
+      functionCalls: [originalCall],
+    },
+    timestamp: Date.now(),
+  };
+
+  store.appendSessionEvent(sessionId, event);
+  // Get returned copy and verify it has a different array
+  const retrieved = store.listSessionEventEntries(sessionId);
+  const retrievedCalls = retrieved?.[0].response.functionCalls;
+
+  assert(Array.isArray(retrievedCalls), 'functionCalls should be an array');
+  assert.notStrictEqual(
+    event.response.functionCalls,
+    retrievedCalls,
+    'array should be different object',
+  );
+  // The elements inside should have been shallow-copied
+  assert.deepStrictEqual(retrievedCalls?.[0], originalCall);
 });

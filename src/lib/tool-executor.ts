@@ -15,7 +15,9 @@ import { TOOL_LABELS } from '../public-contract.js';
 import { AppError } from './errors.js';
 import { logContext, logger, maybeSummarizePayload, mcpLog, type ScopedLogger } from './logger.js';
 import {
+  buildOrchestrationRequestFromInputs,
   type BuiltInToolSpec,
+  type CommonToolInputs,
   type OrchestrationRequest,
   resolveOrchestrationFromRequest,
 } from './orchestration.js';
@@ -63,7 +65,7 @@ export function createToolContext(toolKey: ToolLabelKey, ctx: ServerContext) {
   };
 }
 
-export type StreamResponseBuilder<T extends Record<string, unknown>> = (
+type StreamResponseBuilder<T extends Record<string, unknown>> = (
   streamResult: StreamResult,
   text: string,
 ) => {
@@ -132,75 +134,87 @@ function appendWarningsToContent(
   ];
 }
 
-
-
-export function finalizeStreamExecution<T extends Record<string, unknown>>(
-  result: CallToolResult,
-  streamResult: StreamResult,
-  responseBuilder: StreamResponseBuilder<T>,
-): { result: CallToolResult; reportMessage?: string | undefined } {
-  if (result.isError) {
-    return { result };
-  }
-
-  const text = extractTextContent(result.content);
-  const built = responseBuilder(streamResult, text);
-  const resultOverlay = built.resultMod ? built.resultMod(result) : {};
-  const overlayStructuredContent =
-    resultOverlay.structuredContent && typeof resultOverlay.structuredContent === 'object'
-      ? resultOverlay.structuredContent
-      : undefined;
-  const baseStructuredContent =
-    result.structuredContent && typeof result.structuredContent === 'object'
-      ? result.structuredContent
-      : undefined;
-  const sharedStructuredContent = buildSharedStructuredMetadata({
-    ...(streamResult.warnings ? { warnings: streamResult.warnings } : {}),
-  });
-  const mergedWarnings = [
-    ...getStructuredWarnings(baseStructuredContent),
-    ...getStructuredWarnings(overlayStructuredContent),
-    ...getStructuredWarnings(built.structuredContent),
-    ...getStructuredWarnings(sharedStructuredContent),
-  ];
-  const finalResult: CallToolResult = {
-    ...result,
-    ...resultOverlay,
-    content: appendWarningsToContent(
-      resultOverlay.content ?? result.content,
-      streamResult.warnings ?? [],
-    ),
+interface GeminiPipelineRequest<T extends Record<string, unknown>> {
+  toolName: string;
+  label: string;
+  cacheName?: string | undefined;
+  commonInputs?: CommonToolInputs | undefined;
+  builtInToolSpecs?: readonly BuiltInToolSpec[] | undefined;
+  buildContents: (activeCapabilities: Set<string>) => {
+    contents: ContentListUnion;
+    systemInstruction?: string | undefined;
   };
-
-  const mergedDiagnostics = mergeDiagnostics([
-    overlayStructuredContent,
-    built.structuredContent,
-    sharedStructuredContent as Record<string, unknown>,
-  ]);
-  const mergedResult = mergeStructured(
-    {
-      ...finalResult,
-      ...(baseStructuredContent ? { structuredContent: baseStructuredContent } : {}),
-    },
-    baseStructuredContent || overlayStructuredContent || built.structuredContent
-      ? {
-          ...(overlayStructuredContent ?? {}),
-          ...(built.structuredContent ?? {}),
-          ...sharedStructuredContent,
-          ...(mergedDiagnostics ? { diagnostics: mergedDiagnostics } : {}),
-        }
-      : undefined,
-    mergedWarnings.length > 0 ? { warnings: mergedWarnings } : undefined,
-  );
-
-  return {
-    result: mergedResult,
-    reportMessage: built.reportMessage,
-  };
+  config: Omit<GeminiStreamRequest<T>['config'], 'cacheName'>;
+  responseBuilder?: StreamResponseBuilder<T>;
 }
 
 class ToolExecutor {
   constructor(private readonly scopedLogger: ScopedLogger) {}
+
+  private finalizeStreamExecution<T extends Record<string, unknown>>(
+    result: CallToolResult,
+    streamResult: StreamResult,
+    responseBuilder: StreamResponseBuilder<T>,
+  ): { result: CallToolResult; reportMessage?: string | undefined } {
+    if (result.isError) {
+      return { result };
+    }
+
+    const text = extractTextContent(result.content);
+    const built = responseBuilder(streamResult, text);
+    const resultOverlay = built.resultMod ? built.resultMod(result) : {};
+    const overlayStructuredContent =
+      resultOverlay.structuredContent && typeof resultOverlay.structuredContent === 'object'
+        ? resultOverlay.structuredContent
+        : undefined;
+    const baseStructuredContent =
+      result.structuredContent && typeof result.structuredContent === 'object'
+        ? result.structuredContent
+        : undefined;
+    const sharedStructuredContent = buildSharedStructuredMetadata({
+      ...(streamResult.warnings ? { warnings: streamResult.warnings } : {}),
+    });
+    const mergedWarnings = [
+      ...getStructuredWarnings(baseStructuredContent),
+      ...getStructuredWarnings(overlayStructuredContent),
+      ...getStructuredWarnings(built.structuredContent),
+      ...getStructuredWarnings(sharedStructuredContent),
+    ];
+    const finalResult: CallToolResult = {
+      ...result,
+      ...resultOverlay,
+      content: appendWarningsToContent(
+        resultOverlay.content ?? result.content,
+        streamResult.warnings ?? [],
+      ),
+    };
+
+    const mergedDiagnostics = mergeDiagnostics([
+      overlayStructuredContent,
+      built.structuredContent,
+      sharedStructuredContent as Record<string, unknown>,
+    ]);
+    const mergedResult = mergeStructured(
+      {
+        ...finalResult,
+        ...(baseStructuredContent ? { structuredContent: baseStructuredContent } : {}),
+      },
+      baseStructuredContent || overlayStructuredContent || built.structuredContent
+        ? {
+            ...(overlayStructuredContent ?? {}),
+            ...(built.structuredContent ?? {}),
+            ...sharedStructuredContent,
+            ...(mergedDiagnostics ? { diagnostics: mergedDiagnostics } : {}),
+          }
+        : undefined,
+      mergedWarnings.length > 0 ? { warnings: mergedWarnings } : undefined,
+    );
+
+    return {
+      result: mergedResult,
+      reportMessage: built.reportMessage,
+    };
+  }
 
   private async executeWithTracing(
     ctx: ServerContext,
@@ -364,7 +378,7 @@ class ToolExecutor {
           streamGenerator,
           getWorkSignal(ctx),
         );
-        return finalizeStreamExecution(result, streamResult, responseBuilder);
+        return this.finalizeStreamExecution(result, streamResult, responseBuilder);
       },
       true,
     );
@@ -432,7 +446,7 @@ class ToolExecutor {
           streamGenerator,
           getWorkSignal(ctx),
         );
-        return finalizeStreamExecution(
+        return this.finalizeStreamExecution(
           result,
           streamResult,
           request.responseBuilder ?? (() => ({})),
@@ -442,7 +456,33 @@ class ToolExecutor {
     );
   }
 
+  async executeGeminiPipeline<T extends Record<string, unknown>>(
+    ctx: ServerContext,
+    request: GeminiPipelineRequest<T>,
+  ): Promise<CallToolResult> {
+    const baseOrchestration = buildOrchestrationRequestFromInputs(request.commonInputs ?? {});
+    const mergedSpecs: BuiltInToolSpec[] = [
+      ...(baseOrchestration.builtInToolSpecs ?? []),
+      ...(request.builtInToolSpecs ?? []),
+    ];
 
+    const orchestration: OrchestrationRequest = {
+      ...baseOrchestration,
+      builtInToolSpecs: mergedSpecs,
+    };
+
+    return await this.runGeminiStream(ctx, {
+      toolName: request.toolName,
+      label: request.label,
+      orchestration,
+      buildContents: request.buildContents,
+      config: {
+        ...request.config,
+        cacheName: request.cacheName,
+      },
+      ...(request.responseBuilder ? { responseBuilder: request.responseBuilder } : {}),
+    });
+  }
 }
 
 export const executor = new ToolExecutor(logger.child('executor'));

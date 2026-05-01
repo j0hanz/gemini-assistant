@@ -99,7 +99,7 @@ export interface OrchestrationRequest {
   urls?: readonly string[] | undefined;
 }
 
-interface CommonToolInputs {
+export interface CommonToolInputs {
   googleSearch?: boolean | undefined;
   urls?: readonly string[] | undefined;
   codeExecution?: boolean | undefined;

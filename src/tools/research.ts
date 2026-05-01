@@ -17,7 +17,7 @@ import {
   buildGroundedAnswerPrompt,
   type Capabilities,
 } from '../lib/model-prompts.js';
-import { buildOrchestrationRequestFromInputs, resolveOrchestration } from '../lib/orchestration.js';
+import { resolveOrchestration } from '../lib/orchestration.js';
 import { PROGRESS_TOTAL, sendProgress } from '../lib/progress.js';
 import {
   appendSources,
@@ -854,11 +854,11 @@ export async function analyzeUrlWork(
   await progress.send(0, undefined, 'Fetching');
   await mcpLog(ctx, 'info', `Analyze URL requested for ${urls.length} urls`);
 
-  const baseOrchestration = buildOrchestrationRequestFromInputs({ urls });
-  return await executor.runGeminiStream(ctx, {
+  return await executor.executeGeminiPipeline(ctx, {
     toolName: 'analyze_url',
     label: TOOL_LABELS.analyzeUrl,
-    orchestration: baseOrchestration,
+    cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
+    commonInputs: { urls },
     buildContents: () => ({
       contents: [prompt.promptText],
       systemInstruction: prompt.systemInstruction,
@@ -868,7 +868,6 @@ export async function analyzeUrlWork(
       thinkingLevel,
       maxOutputTokens,
       safetySettings,
-      cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
     },
     responseBuilder: buildAnalyzeUrlResult,
   });

@@ -128,59 +128,60 @@ function transformGroundingMetadata(
 
   return rollup;
 }
-function cloneValue<T>(value: T): T {
-  return structuredClone(value);
-}
-
-type ResponseField = SessionEventEntry['response'];
-type ResponseCloneStrategy = 'direct' | 'structuredClone' | 'shallowSpread' | 'arrayShallow';
-interface ResponseFieldRule {
-  key: keyof ResponseField;
-  slimOnly: boolean;
-  clone: ResponseCloneStrategy;
-}
-
-const RESPONSE_FIELD_RULES: readonly ResponseFieldRule[] = [
-  { key: 'finishReason', slimOnly: false, clone: 'direct' },
-  { key: 'promptBlockReason', slimOnly: false, clone: 'direct' },
-  { key: 'data', slimOnly: false, clone: 'structuredClone' },
-  { key: 'functionCalls', slimOnly: false, clone: 'arrayShallow' },
-  { key: 'citationMetadata', slimOnly: true, clone: 'structuredClone' },
-  { key: 'safetyRatings', slimOnly: true, clone: 'structuredClone' },
-  { key: 'finishMessage', slimOnly: false, clone: 'direct' },
-  { key: 'schemaWarnings', slimOnly: false, clone: 'arrayShallow' },
-  { key: 'thoughts', slimOnly: true, clone: 'direct' },
-  { key: 'toolEvents', slimOnly: true, clone: 'arrayShallow' },
-  { key: 'usage', slimOnly: false, clone: 'shallowSpread' },
-  { key: 'groundingMetadata', slimOnly: true, clone: 'structuredClone' },
-  { key: 'urlContextMetadata', slimOnly: true, clone: 'structuredClone' },
-  { key: 'promptFeedback', slimOnly: true, clone: 'structuredClone' },
-  { key: 'anomalies', slimOnly: false, clone: 'shallowSpread' },
-];
-
-function applyResponseClone(value: unknown, strategy: ResponseCloneStrategy): unknown {
-  switch (strategy) {
-    case 'direct':
-      return value;
-    case 'structuredClone':
-      return cloneValue(value);
-    case 'shallowSpread':
-      return { ...(value as object) };
-    case 'arrayShallow':
-      return (value as readonly unknown[]).map((entry) =>
-        entry !== null && typeof entry === 'object' ? { ...entry } : entry,
-      );
-  }
-}
 
 function cloneSessionEventEntry(item: SessionEventEntry): SessionEventEntry {
   const slim = getSlimSessionEvents();
-  const response: ResponseField = { text: item.response.text };
-  for (const rule of RESPONSE_FIELD_RULES) {
-    if (rule.slimOnly && slim) continue;
-    const value = item.response[rule.key];
-    if (value === undefined) continue;
-    (response as Record<string, unknown>)[rule.key] = applyResponseClone(value, rule.clone);
+  const response: SessionEventEntry['response'] = { text: item.response.text };
+
+  // Always clone these fields
+  if (item.response.finishReason !== undefined) {
+    response.finishReason = item.response.finishReason;
+  }
+  if (item.response.promptBlockReason !== undefined) {
+    response.promptBlockReason = item.response.promptBlockReason;
+  }
+  if (item.response.data !== undefined) {
+    response.data = structuredClone(item.response.data);
+  }
+  if (item.response.functionCalls !== undefined) {
+    response.functionCalls = item.response.functionCalls.map((entry) => ({ ...entry }));
+  }
+  if (item.response.finishMessage !== undefined) {
+    response.finishMessage = item.response.finishMessage;
+  }
+  if (item.response.schemaWarnings !== undefined) {
+    response.schemaWarnings = [...item.response.schemaWarnings];
+  }
+  if (item.response.usage !== undefined) {
+    response.usage = { ...(item.response.usage as Record<string, unknown>) };
+  }
+  if (item.response.anomalies !== undefined) {
+    response.anomalies = { ...(item.response.anomalies as Record<string, unknown>) };
+  }
+
+  // Slim-only fields (only included when not in slim mode)
+  if (!slim) {
+    if (item.response.citationMetadata !== undefined) {
+      response.citationMetadata = structuredClone(item.response.citationMetadata);
+    }
+    if (item.response.safetyRatings !== undefined) {
+      response.safetyRatings = structuredClone(item.response.safetyRatings);
+    }
+    if (item.response.thoughts !== undefined) {
+      response.thoughts = item.response.thoughts;
+    }
+    if (item.response.toolEvents !== undefined) {
+      response.toolEvents = item.response.toolEvents.map((entry) => ({ ...entry }));
+    }
+    if (item.response.groundingMetadata !== undefined) {
+      response.groundingMetadata = structuredClone(item.response.groundingMetadata);
+    }
+    if (item.response.urlContextMetadata !== undefined) {
+      response.urlContextMetadata = structuredClone(item.response.urlContextMetadata);
+    }
+    if (item.response.promptFeedback !== undefined) {
+      response.promptFeedback = structuredClone(item.response.promptFeedback);
+    }
   }
 
   return {

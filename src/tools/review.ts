@@ -10,7 +10,7 @@ import { z } from 'zod/v4';
 import { withUploadsAndPipeline } from '../lib/file.js';
 import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
 import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
-import { buildOrchestrationRequestFromInputs, resolveOrchestration, type ToolsSpecInput } from '../lib/orchestration.js';
+import { resolveOrchestration, type ToolsSpecInput } from '../lib/orchestration.js';
 import {
   buildSuccessfulStructuredContent,
   pickDefined,
@@ -1262,11 +1262,10 @@ async function analyzePrWork(
   });
 
   await tasks.phase('composing');
-  const baseOrchestration = buildOrchestrationRequestFromInputs({});
-  const result = await executor.runGeminiStream(ctx, {
+  const result = await executor.executeGeminiPipeline(ctx, {
     toolName: 'analyze_pr',
     label: TOOL_LABELS.review,
-    orchestration: baseOrchestration,
+    cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
     buildContents: () => ({
       contents: [modelPrompt.promptText],
       systemInstruction: modelPrompt.systemInstruction,
@@ -1277,7 +1276,6 @@ async function analyzePrWork(
       responseSchema: AnalyzePrModelResponseSchema,
       maxOutputTokens,
       safetySettings,
-      cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
     },
     responseBuilder: (_streamResult, textContent: string) => {
       const parsedOutput = parseAnalyzePrModelOutput(textContent);

@@ -9,7 +9,6 @@ import { withUploadsAndPipeline } from '../lib/file.js';
 import { mcpLog } from '../lib/logger.js';
 import { buildDiagramGenerationPrompt, buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import {
-  buildOrchestrationRequestFromInputs,
   type BuiltInToolSpec,
   resolveOrchestration,
   type ToolsSpecInput,
@@ -146,11 +145,11 @@ function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher, services?: ToolSe
         await mcpLog(ctx, 'info', `Analyzing file content`);
         await progress.step(1, 2, 'Analyzing content');
 
-        const baseOrchestration = buildOrchestrationRequestFromInputs({});
-        return await executor.runGeminiStream(ctx, {
+        return await executor.executeGeminiPipeline(ctx, {
           toolName: 'analyze_file',
           label: TOOL_LABELS.analyzeFile,
-          orchestration: baseOrchestration,
+          cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
+          commonInputs: {},
           buildContents: () => {
             const { promptText, systemInstruction } = buildFileAnalysisPrompt({
               goal,
@@ -167,7 +166,6 @@ function createAnalyzeFileWork(rootsFetcher: ToolRootsFetcher, services?: ToolSe
             mediaResolution,
             maxOutputTokens,
             safetySettings,
-            cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
           },
           responseBuilder: (_streamResult, textContent: string) => ({
             structuredContent: {
@@ -324,20 +322,12 @@ async function analyzeDiagramWork(
       await mcpLog(ctx, 'info', `Generating ${args.diagramType} diagram`);
 
       const diagramSpecs = pickDiagramBuiltInTools(args);
-      const baseOrchestration = buildOrchestrationRequestFromInputs({});
-      const mergedSpecs = [
-        ...(baseOrchestration.builtInToolSpecs ?? []),
-        ...diagramSpecs,
-      ];
-      const orchestration = {
-        ...baseOrchestration,
-        builtInToolSpecs: mergedSpecs,
-      };
 
-      return await executor.runGeminiStream(ctx, {
+      return await executor.executeGeminiPipeline(ctx, {
         toolName: 'analyze_diagram',
         label: TOOL_LABELS.analyzeDiagram,
-        orchestration,
+        cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
+        builtInToolSpecs: diagramSpecs,
         buildContents: () => {
           const prompt = buildDiagramGenerationPrompt({
             attachedParts,
@@ -352,7 +342,6 @@ async function analyzeDiagramWork(
           thinkingLevel: args.thinkingLevel,
           maxOutputTokens: args.maxOutputTokens,
           safetySettings: args.safetySettings,
-          cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
         },
         responseBuilder: (streamResult, textContent: string) => {
           const extracted = extractDiagram(textContent, args.diagramType, ctx);

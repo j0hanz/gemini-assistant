@@ -87,8 +87,7 @@ describe('IngestOutputSchema', () => {
     });
   });
 
-  describe('type inference', () => {
-  });
+  describe('type inference', () => {});
 
   describe('structuredContent and operation enum', () => {
     it('rejects unknown structuredContent field', () => {

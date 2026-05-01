@@ -1,7 +1,7 @@
 import { z } from 'zod/v4';
 
-import { IngestOperationEnum } from './ingest-input.js';
 import { optionalField, textField, withFieldMetadata } from './fields.js';
+import { IngestOperationEnum } from './ingest-input.js';
 
 export const IngestOutputSchema = z.strictObject({
   operation: withFieldMetadata(

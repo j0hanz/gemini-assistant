@@ -4,6 +4,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 
 import { logger } from '../lib/logger.js';
+import { sendProgress } from '../lib/progress.js';
 import { MUTABLE_ANNOTATIONS, registerWorkTool } from '../lib/tasks.js';
 import type { ToolRootsFetcher, ToolServices } from '../lib/tool-context.js';
 import { createToolContext } from '../lib/tool-executor.js';
@@ -259,18 +260,23 @@ async function uploadOne(
 }
 
 /**
- * Upload an array of files with bounded concurrency.
+ * Upload an array of files with bounded concurrency. Sends progress
+ * notifications after each file so MCP clients (which apply a per-request
+ * timeout that resets on progress) don't time out on large workspace uploads.
  */
 async function uploadAll(
   ai: ReturnType<typeof getAI>,
   fileSearchStoreName: string,
   files: string[],
   rootDir: string,
+  ctx: ServerContext | undefined,
 ): Promise<{ uploaded: string[]; failed: number; firstError: string | undefined }> {
   const uploaded: string[] = [];
   let failed = 0;
   let firstError: string | undefined;
   let cursor = 0;
+  let completed = 0;
+  const total = files.length;
 
   async function worker(): Promise<void> {
     while (cursor < files.length) {
@@ -283,6 +289,19 @@ async function uploadAll(
       } else {
         failed += 1;
         firstError ??= result.error;
+      }
+      completed += 1;
+      if (ctx !== undefined) {
+        try {
+          await sendProgress(
+            ctx,
+            completed,
+            total,
+            `ingest: uploaded ${String(completed)}/${String(total)} (failed: ${String(failed)})`,
+          );
+        } catch {
+          // Progress is best-effort.
+        }
       }
     }
   }
@@ -369,6 +388,7 @@ async function handleUpload(
   input: IngestInput,
   ai: ReturnType<typeof getAI>,
   rootsFetcher: ToolRootsFetcher,
+  ctx: ServerContext,
 ): Promise<IngestOutput> {
   const { name: fileSearchStoreName, created: storeCreated } = await resolveStore(
     ai,
@@ -425,7 +445,13 @@ async function handleUpload(
     };
   }
 
-  const { uploaded, failed, firstError } = await uploadAll(ai, fileSearchStoreName, files, target);
+  const { uploaded, failed, firstError } = await uploadAll(
+    ai,
+    fileSearchStoreName,
+    files,
+    target,
+    ctx,
+  );
   const scope = isWorkspaceRoot ? 'workspace' : target;
   const failureSuffix =
     failed > 0 && firstError !== undefined ? ` First failure: ${firstError}` : '';
@@ -510,7 +536,7 @@ async function ingestWork(
       }
 
       case 'upload': {
-        output = await handleUpload(input, ai, rootsFetcher);
+        output = await handleUpload(input, ai, rootsFetcher, ctx);
         break;
       }
 

@@ -1,7 +1,7 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
 import { readdir, stat } from 'node:fs/promises';
-import { extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 
 import { logger } from '../lib/logger.js';
 import { sendProgress } from '../lib/progress.js';
@@ -414,7 +414,13 @@ async function handleUpload(
   // ── Single-file upload ────────────────────────────────────────────────────
   const createdSuffix = storeCreated ? ' (auto-created)' : '';
   if (info.isFile()) {
-    const result = await uploadOne(ai, fileSearchStoreName, target, target, input.mimeType);
+    const result = await uploadOne(
+      ai,
+      fileSearchStoreName,
+      target,
+      dirname(target),
+      input.mimeType,
+    );
     if (!result.ok) {
       throw new Error(`Upload failed for ${target}: ${result.error}`);
     }

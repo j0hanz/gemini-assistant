@@ -1,6 +1,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 
 import { strict as assert } from 'node:assert';
+import { dirname, relative } from 'node:path';
 import { test } from 'node:test';
 
 import { safeValidateStructuredContent } from '../../src/lib/response.js';
@@ -178,4 +179,10 @@ test('ingestWork: NOT seeding structuredContent causes safeValidateStructuredCon
     undefined,
     'structuredContent must be absent when not seeded',
   );
+});
+
+test('single-file display name: relative(dirname(target), target) yields basename', () => {
+  const target = '/workspace/project/src/config.ts';
+  const displayName = relative(dirname(target), target) || target;
+  assert.strictEqual(displayName, 'config.ts');
 });

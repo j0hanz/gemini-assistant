@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-import { ResourceMemo } from '../../src/lib/resource-memo.js';
+import { ResourceMemo } from '../../src/resources/index.js';
 
 test('ResourceMemo — returns cached value within TTL', async () => {
   const memo = new ResourceMemo<string, string>();

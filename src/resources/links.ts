@@ -9,7 +9,7 @@ import {
   sessionTranscriptUri,
   WORKSPACE_CACHE_CONTENTS_URI,
   WORKSPACE_CACHE_URI,
-} from '../resources/uris.js';
+} from './uris.js';
 
 /**
  * Options for appendResourceLinks()

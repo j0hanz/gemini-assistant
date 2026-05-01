@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { AppError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
-import { ResourceNotifier } from './lib/resource-notifier.js';
 import { createSharedTaskInfra, type SharedTaskInfra } from './lib/tasks.js';
 import type { ToolServices } from './lib/tool-context.js';
 import { buildServerRootsFetcher, type RootsFetcher } from './lib/validation.js';
@@ -15,7 +14,7 @@ import { createWorkspaceAccess, createWorkspaceCacheManager } from './lib/worksp
 import { getExposeSessionResources, getStatelessTransportFlag } from './config.js';
 import { registerPrompts } from './prompts.js';
 import { PUBLIC_TOOL_NAMES } from './public-contract.js';
-import { registerAllResources } from './resources/index.js';
+import { registerAllResources, ResourceNotifier } from './resources/index.js';
 import { sessionResourceUri, turnPartsUri } from './resources/uris.js';
 import {
   createSessionAccess,

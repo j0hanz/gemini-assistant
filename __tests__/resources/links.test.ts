@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-import { appendResourceLinks } from '../../src/lib/resource-links.js';
+import { appendResourceLinks } from '../../src/resources/index.js';
 
 test('chat tool suggests session and catalog links', () => {
   const sessionId = 'test-session-123';

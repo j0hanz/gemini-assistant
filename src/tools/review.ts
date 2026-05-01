@@ -11,7 +11,6 @@ import { withUploadsAndPipeline } from '../lib/file.js';
 import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
 import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { resolveOrchestration, type ToolsSpecInput } from '../lib/orchestration.js';
-import { appendResourceLinks } from '../lib/resource-links.js';
 import { buildSuccessfulStructuredContent, tryParseJsonResponse } from '../lib/response.js';
 import {
   getTaskEmitter,
@@ -41,6 +40,7 @@ import { DocumentationDriftSchema, ReviewOutputSchema } from '../schemas/outputs
 import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getGeminiModel, getReviewDocs } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
+import { appendResourceLinks } from '../resources/index.js';
 
 const execFileAsync = promisify(execFile);
 const reviewGitRunner = execFileAsync;

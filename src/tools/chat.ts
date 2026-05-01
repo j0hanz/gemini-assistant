@@ -16,7 +16,6 @@ import { buildInteractionParams } from '../lib/interactions.js';
 import { logger } from '../lib/logger.js';
 import { appendFunctionCallingInstruction } from '../lib/model-prompts.js';
 import { resolveOrchestration } from '../lib/orchestration.js';
-import { appendResourceLinks } from '../lib/resource-links.js';
 import {
   buildBaseStructuredOutput,
   buildStructuredResponse,
@@ -66,6 +65,7 @@ import {
   getWorkspaceCacheEnabled,
 } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
+import { appendResourceLinks } from '../resources/index.js';
 import {
   sessionEventsUri,
   sessionResourceUri,

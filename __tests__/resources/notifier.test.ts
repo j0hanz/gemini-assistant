@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-import { ResourceNotifier } from '../../src/lib/resource-notifier.js';
+import { ResourceNotifier } from '../../src/resources/index.js';
 
 interface MockNotifierServer {
   sendResourceListChanged: () => void;

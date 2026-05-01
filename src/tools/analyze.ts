@@ -13,7 +13,6 @@ import {
   resolveOrchestration,
   type ToolsSpecInput,
 } from '../lib/orchestration.js';
-import { appendResourceLinks } from '../lib/resource-links.js';
 import {
   buildSuccessfulStructuredContent,
   deriveDiagramSyntaxValidation,
@@ -37,6 +36,7 @@ import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getGeminiModel } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
+import { appendResourceLinks } from '../resources/index.js';
 import { analyzeUrlWork } from './research.js';
 
 interface AnalyzeDiagramInput {

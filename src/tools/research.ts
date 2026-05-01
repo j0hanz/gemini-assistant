@@ -19,7 +19,6 @@ import {
 } from '../lib/model-prompts.js';
 import { resolveOrchestration } from '../lib/orchestration.js';
 import { PROGRESS_TOTAL, sendProgress } from '../lib/progress.js';
-import { appendResourceLinks } from '../lib/resource-links.js';
 import {
   appendSources,
   appendUrlStatus,
@@ -67,6 +66,7 @@ import { ResearchOutputSchema } from '../schemas/outputs.js';
 import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getGeminiModel } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
+import { appendResourceLinks } from '../resources/index.js';
 
 const MAX_DEEP_RESEARCH_TURNS = 4;
 const log = logger.child('research');

@@ -1,9 +1,8 @@
 import type { ReadResourceResult } from '@modelcontextprotocol/server';
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 
-import { ResourceMemo } from '../lib/resource-memo.js';
-
 import type { SessionStore } from '../sessions.js';
+import { ResourceMemo } from './index.js';
 import { buildResourceMeta } from './metadata.js';
 import { decodeTemplateParam, requireTemplateParam, SESSIONS_LIST_URI } from './uris.js';
 

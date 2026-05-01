@@ -1,7 +1,6 @@
 import type { ReadResourceResult } from '@modelcontextprotocol/server';
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 
-import { ResourceMemo } from '../lib/resource-memo.js';
 import { PROFILES, TOOL_PROFILE_NAMES } from '../lib/tool-profiles.js';
 
 import {
@@ -10,6 +9,7 @@ import {
   renderDiscoveryCatalogMarkdown,
   renderWorkflowCatalogMarkdown,
 } from '../catalog.js';
+import { ResourceMemo } from './index.js';
 import { buildResourceMeta } from './metadata.js';
 import {
   ASSISTANT_CATALOG_URI,

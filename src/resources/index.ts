@@ -49,3 +49,7 @@ export function registerAllResources(server: McpServer, services: ResourceServic
   // Register workspace resources (cache metadata, cache contents, file access)
   registerWorkspaceResources(server, services.toolServices);
 }
+
+export * from './links.js';
+export * from './memo.js';
+export * from './notifier.js';

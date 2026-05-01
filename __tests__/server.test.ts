@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-import { ResourceNotifier } from '../src/lib/resource-notifier.js';
+import { ResourceNotifier } from '../src/resources/index.js';
 import { sessionResourceUri, turnPartsUri } from '../src/resources/uris.js';
 import { createSessionStore } from '../src/sessions.js';
 

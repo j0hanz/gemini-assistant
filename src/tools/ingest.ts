@@ -79,6 +79,31 @@ const SKIPPED_EXTENSIONS = new Set([
   '.map',
 ]);
 
+// Explicit MIME types for non-obvious extensions. The Gemini File Search SDK
+// rejects uploads when it cannot determine a MIME type from the path, so we
+// fall back to `text/plain` for any source-like file we recognise.
+const MIME_BY_EXTENSION: Record<string, string> = {
+  '.md': 'text/markdown',
+  '.markdown': 'text/markdown',
+  '.txt': 'text/plain',
+  '.json': 'application/json',
+  '.jsonc': 'application/json',
+  '.csv': 'text/csv',
+  '.tsv': 'text/tab-separated-values',
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.xml': 'application/xml',
+  '.yaml': 'application/yaml',
+  '.yml': 'application/yaml',
+  '.toml': 'application/toml',
+  '.pdf': 'application/pdf',
+};
+
+function inferMimeType(filePath: string): string {
+  const ext = extname(filePath).toLowerCase();
+  return MIME_BY_EXTENSION[ext] ?? 'text/plain';
+}
+
 /**
  * Ensure an absolute path lives inside one of the allowed workspace roots.
  * Prevents traversal outside the workspace without rejecting legitimate
@@ -192,12 +217,13 @@ async function uploadOne(
 ): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
   const displayName = relative(rootDir, filePath) || filePath;
   try {
+    const resolvedMime = mimeType ?? inferMimeType(filePath);
     const op = await ai.fileSearchStores.uploadToFileSearchStore({
       fileSearchStoreName,
       file: filePath,
       config: {
         displayName,
-        ...(mimeType !== undefined ? { mimeType } : {}),
+        mimeType: resolvedMime,
       },
     });
     return { ok: true, name: op.response?.documentName ?? op.name ?? displayName };

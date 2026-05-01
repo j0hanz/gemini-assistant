@@ -11,6 +11,7 @@ import type {
 } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
+import { appendResourceLinks } from '../lib/resource-links.js';
 import { consumeInteractionStream } from '../lib/interaction-stream.js';
 import { buildInteractionParams } from '../lib/interactions.js';
 import { logger } from '../lib/logger.js';
@@ -1133,7 +1134,14 @@ async function chatWork(
   );
 
   await tasks.phase('finalizing');
-  return assembleChatOutput(result, args.sessionId, ctx.task?.id, ctx);
+  const output = assembleChatOutput(result, args.sessionId, ctx.task?.id, ctx);
+  const resourceLinks = appendResourceLinks('chat', {
+    sessionId: args.sessionId,
+  });
+  return {
+    ...output,
+    resourceLink: resourceLinks,
+  };
 }
 
 export function registerChatTool(server: McpServer, services: ToolServices): void {

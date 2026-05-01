@@ -6,6 +6,7 @@ import type { Part } from '@google/genai';
 import type { z } from 'zod/v4';
 
 import { withUploadsAndPipeline } from '../lib/file.js';
+import { appendResourceLinks } from '../lib/resource-links.js';
 import { mcpLog } from '../lib/logger.js';
 import { buildDiagramGenerationPrompt, buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import {
@@ -390,30 +391,6 @@ async function analyzeDiagramWork(
   );
 }
 
-async function analyzeWork(
-  rootsFetcher: ToolRootsFetcher,
-  fileWork: ReturnType<typeof createAnalyzeFileWork>,
-  args: AnalyzeInput,
-  ctx: ServerContext,
-  services?: ToolServices,
-): Promise<CallToolResult> {
-  const result =
-    args.outputKind === 'diagram'
-      ? await analyzeDiagramWork(rootsFetcher, args as AnalyzeDiagramInput, ctx, services)
-      : await runAnalyzeTarget(rootsFetcher, fileWork, args, ctx, services);
-
-  if (result.isError) {
-    return result;
-  }
-
-  const structured = result.structuredContent ?? {};
-  return createToolContext('analyze', ctx).validateOutput(
-    AnalyzeOutputSchema,
-    buildAnalyzeStructuredContent(args, ctx, structured),
-    result,
-  );
-}
-
 async function runAnalyzeTarget(
   rootsFetcher: ToolRootsFetcher,
   fileWork: ReturnType<typeof createAnalyzeFileWork>,
@@ -492,6 +469,37 @@ function buildAnalyzeStructuredContent(
       },
     }),
   });
+}
+
+async function analyzeWork(
+  rootsFetcher: ToolRootsFetcher,
+  fileWork: ReturnType<typeof createAnalyzeFileWork>,
+  args: AnalyzeInput,
+  ctx: ServerContext,
+  services?: ToolServices,
+): Promise<CallToolResult> {
+  const result =
+    args.outputKind === 'diagram'
+      ? await analyzeDiagramWork(rootsFetcher, args as AnalyzeDiagramInput, ctx, services)
+      : await runAnalyzeTarget(rootsFetcher, fileWork, args, ctx, services);
+
+  if (result.isError) {
+    return result;
+  }
+
+  const structured = result.structuredContent ?? {};
+  const output = createToolContext('analyze', ctx).validateOutput(
+    AnalyzeOutputSchema,
+    buildAnalyzeStructuredContent(args, ctx, structured),
+    result,
+  );
+
+  const resourceLinkOptions = args.targetKind === 'file' ? { filePaths: [args.filePath] } : undefined;
+  const resourceLinks = appendResourceLinks('analyze', resourceLinkOptions);
+  return {
+    ...output,
+    resourceLink: resourceLinks,
+  };
 }
 
 export function registerAnalyzeTool(server: McpServer, services?: ToolServices): void {

@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { z } from 'zod/v4';
 
 import { withUploadsAndPipeline } from '../lib/file.js';
+import { appendResourceLinks } from '../lib/resource-links.js';
 import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
 import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { resolveOrchestration, type ToolsSpecInput } from '../lib/orchestration.js';
@@ -1409,11 +1410,16 @@ async function reviewWork(
   }
 
   const structured = result.structuredContent ?? {};
-  return createToolContext('review', ctx).validateOutput(
+  const output = createToolContext('review', ctx).validateOutput(
     ReviewOutputSchema,
     buildReviewStructuredContent(structured),
     result,
   );
+  const resourceLinks = appendResourceLinks('review');
+  return {
+    ...output,
+    resourceLink: resourceLinks,
+  };
 }
 
 export function registerReviewTool(server: McpServer, services?: ToolServices): void {

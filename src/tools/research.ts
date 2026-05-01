@@ -3,6 +3,7 @@ import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprot
 import type { GroundingMetadata, Interactions, UrlContextMetadata } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
+import { appendResourceLinks } from '../lib/resource-links.js';
 import {
   builtInsToInteractionTools,
   createBackgroundInteraction,
@@ -1114,11 +1115,16 @@ async function researchWork(
   }
 
   const structured = result.structuredContent ?? {};
-  return createToolContext('research', ctx).validateOutput(
+  const output = createToolContext('research', ctx).validateOutput(
     ResearchOutputSchema,
     buildResearchStructuredContent(args, ctx, structured),
     result,
   );
+  const resourceLinks = appendResourceLinks('research');
+  return {
+    ...output,
+    resourceLink: resourceLinks,
+  };
 }
 
 export function registerResearchTool(server: McpServer, services?: ToolServices): void {

@@ -228,11 +228,48 @@ function mergeGroundingMetadata(
     return { groundingMetadata: current, groundingMetadataEvents: events };
   }
 
+  // Type guard: validate next is a proper object
+  if (typeof next !== 'object' || Array.isArray(next)) {
+    return { groundingMetadata: current, groundingMetadataEvents: events };
+  }
+
   // Accumulate events
-  const updatedEvents = [...(events ?? []), next];
+  const updatedEvents = (events ?? []).concat(next);
+
+  // If no current grounding metadata, return next as-is
+  if (!current) {
+    return { groundingMetadata: next, groundingMetadataEvents: updatedEvents };
+  }
+
+  // Merge array fields from current and next, use last-write-wins for scalars
+  const merged: GroundingMetadata = {
+    // Array fields: concatenate to avoid data loss
+    ...(current.imageSearchQueries || next.imageSearchQueries
+      ? { imageSearchQueries: (current.imageSearchQueries ?? []).concat(next.imageSearchQueries ?? []) }
+      : {}),
+    ...(current.groundingChunks || next.groundingChunks
+      ? { groundingChunks: (current.groundingChunks ?? []).concat(next.groundingChunks ?? []) }
+      : {}),
+    ...(current.groundingSupports || next.groundingSupports
+      ? { groundingSupports: (current.groundingSupports ?? []).concat(next.groundingSupports ?? []) }
+      : {}),
+    ...(current.webSearchQueries || next.webSearchQueries
+      ? { webSearchQueries: (current.webSearchQueries ?? []).concat(next.webSearchQueries ?? []) }
+      : {}),
+    ...(current.retrievalQueries || next.retrievalQueries
+      ? { retrievalQueries: (current.retrievalQueries ?? []).concat(next.retrievalQueries ?? []) }
+      : {}),
+    ...(current.sourceFlaggingUris || next.sourceFlaggingUris
+      ? { sourceFlaggingUris: (current.sourceFlaggingUris ?? []).concat(next.sourceFlaggingUris ?? []) }
+      : {}),
+    // Scalar/object fields: use last-write-wins
+    ...(next.retrievalMetadata ? { retrievalMetadata: next.retrievalMetadata } : current.retrievalMetadata ? { retrievalMetadata: current.retrievalMetadata } : {}),
+    ...(next.searchEntryPoint ? { searchEntryPoint: next.searchEntryPoint } : current.searchEntryPoint ? { searchEntryPoint: current.searchEntryPoint } : {}),
+    ...(next.googleMapsWidgetContextToken ? { googleMapsWidgetContextToken: next.googleMapsWidgetContextToken } : current.googleMapsWidgetContextToken ? { googleMapsWidgetContextToken: current.googleMapsWidgetContextToken } : {}),
+  };
 
   return {
-    groundingMetadata: next,
+    groundingMetadata: merged,
     groundingMetadataEvents: updatedEvents,
   };
 }

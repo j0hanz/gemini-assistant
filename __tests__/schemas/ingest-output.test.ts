@@ -7,16 +7,10 @@ describe('IngestOutputSchema', () => {
   describe('valid output', () => {
     it('validates with all fields', () => {
       const output = {
-        operation: 'upload',
+        operation: 'upload' as const,
         storeName: 'my-store',
         documentName: 'doc-123',
         message: 'File uploaded successfully',
-        structuredContent: {
-          operation: 'upload',
-          storeName: 'my-store',
-          documentName: 'doc-123',
-          message: 'File uploaded successfully',
-        },
       };
       const result = IngestOutputSchema.safeParse(output);
       assert.equal(result.success, true);
@@ -43,22 +37,11 @@ describe('IngestOutputSchema', () => {
       }
     });
 
-    it('validates with structuredContent', () => {
-      const output = {
-        operation: 'delete-store',
-        storeName: 'my-store',
-        message: 'Store deleted',
-        structuredContent: {
-          operation: 'delete-store',
-          storeName: 'my-store',
-          message: 'Store deleted',
-        },
-      };
-      const result = IngestOutputSchema.safeParse(output);
-      assert.equal(result.success, true);
-      if (result.success) {
-        assert.ok(result.data.structuredContent);
-        assert.equal(result.data.structuredContent.operation, 'delete-store');
+    it('accepts all valid operation enum values', () => {
+      for (const op of ['create-store', 'upload', 'delete-store', 'delete-document'] as const) {
+        const output = { operation: op, message: 'done' };
+        const result = IngestOutputSchema.safeParse(output);
+        assert.equal(result.success, true, `expected ${op} to be valid`);
       }
     });
 
@@ -105,13 +88,23 @@ describe('IngestOutputSchema', () => {
   });
 
   describe('type inference', () => {
-    it('allows any string for operation field', () => {
+  });
+
+  describe('structuredContent and operation enum', () => {
+    it('rejects unknown structuredContent field', () => {
       const output = {
-        operation: 'custom-operation',
-        message: 'Operation completed',
+        operation: 'upload',
+        message: 'done',
+        structuredContent: { operation: 'upload', message: 'dup' },
       };
       const result = IngestOutputSchema.safeParse(output);
-      assert.equal(result.success, true);
+      assert.strictEqual(result.success, false);
+    });
+
+    it('rejects non-enum operation value', () => {
+      const output = { operation: 'custom-operation', message: 'done' };
+      const result = IngestOutputSchema.safeParse(output);
+      assert.strictEqual(result.success, false);
     });
   });
 });

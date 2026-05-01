@@ -1,11 +1,12 @@
 import { z } from 'zod/v4';
 
+import { IngestOperationEnum } from './ingest-input.js';
 import { optionalField, textField, withFieldMetadata } from './fields.js';
 
 export const IngestOutputSchema = z.strictObject({
   operation: withFieldMetadata(
-    z.string(),
-    'Which operation was performed (create-store, upload, delete-store, delete-document, etc.)',
+    IngestOperationEnum,
+    'Which operation was performed (create-store, upload, delete-store, delete-document)',
   ),
   storeName: optionalField(
     withFieldMetadata(z.string(), 'The store name involved in the operation'),
@@ -29,16 +30,6 @@ export const IngestOutputSchema = z.strictObject({
     ),
   ),
   message: textField('Human-readable result message'),
-  structuredContent: optionalField(
-    z.strictObject({
-      operation: withFieldMetadata(z.string(), 'Operation name'),
-      storeName: optionalField(withFieldMetadata(z.string(), 'Store name')),
-      documentName: optionalField(withFieldMetadata(z.string(), 'Document name')),
-      uploadedCount: optionalField(withFieldMetadata(z.number(), 'Files uploaded')),
-      skippedCount: optionalField(withFieldMetadata(z.number(), 'Files skipped')),
-      message: textField('Result message'),
-    }),
-  ),
 });
 
 export type IngestOutput = z.infer<typeof IngestOutputSchema>;

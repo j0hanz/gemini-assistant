@@ -18,7 +18,7 @@ import { FileSearchStoreNameSchema, optionalField, textField } from './fields.js
  * Workspace-wide uploads are intentionally unsupported: large workspaces
  * exceed MCP request timeouts. Always scope to a directory like `src`.
  */
-const IngestOperationEnum = z.enum([
+export const IngestOperationEnum = z.enum([
   'create-store',
   'upload',
   'delete-store',

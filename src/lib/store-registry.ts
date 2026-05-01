@@ -1,6 +1,7 @@
 /**
  * StoreRegistry provides caching for Gemini File Search Stores with 30-second TTL.
  */
+import { getAI } from '../client.js';
 
 export interface StoreEntry {
   name: string;
@@ -66,14 +67,7 @@ export function createStoreRegistry(options: StoreRegistryOptions = {}): StoreRe
     if (listStoresFn) {
       stores = await listStoresFn();
     } else {
-      // In production, this would use the Gemini SDK:
-      // const response = await ai.fileSearchStores.list();
-      // stores = response.stores.map(store => ({
-      //   name: store.name,
-      //   displayName: store.displayName,
-      //   updateTime: store.updateTime,
-      // }));
-      throw new Error('listStoresFn must be provided for store listing');
+      stores = await defaultListStores();
     }
 
     storesCache.set(null, { data: stores, timestamp: now });
@@ -92,15 +86,7 @@ export function createStoreRegistry(options: StoreRegistryOptions = {}): StoreRe
     if (listDocumentsFn) {
       documents = await listDocumentsFn(storeName);
     } else {
-      // In production, this would use the Gemini SDK:
-      // const response = await ai.fileSearchStores.documents.list(storeName);
-      // documents = response.documents.map(doc => ({
-      //   name: doc.name,
-      //   displayName: doc.displayName,
-      //   mimeType: doc.mimeType,
-      //   createTime: doc.createTime,
-      // }));
-      throw new Error(`listDocuments(${storeName}) not implemented`);
+      documents = await defaultListDocuments(storeName);
     }
 
     documentsCache.set(storeName, { data: documents, timestamp: now });
@@ -117,4 +103,47 @@ export function createStoreRegistry(options: StoreRegistryOptions = {}): StoreRe
     listDocuments,
     invalidate,
   };
+}
+
+/**
+ * Default implementation: lists all File Search Stores via the Gemini SDK.
+ */
+async function defaultListStores(): Promise<StoreEntry[]> {
+  const ai = getAI();
+  const pager = await ai.fileSearchStores.list();
+  const out: StoreEntry[] = [];
+  for await (const store of pager) {
+    if (typeof store.name !== 'string') continue;
+    out.push({
+      name: store.name,
+      ...(typeof store.displayName === 'string' ? { displayName: store.displayName } : {}),
+      ...(typeof store.updateTime === 'string' ? { updateTime: store.updateTime } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * Default implementation: lists all documents in a File Search Store via the Gemini SDK.
+ *
+ * @param storeName Short store name (without the `fileSearchStores/` prefix). The full resource
+ *   name is constructed automatically.
+ */
+async function defaultListDocuments(storeName: string): Promise<DocumentEntry[]> {
+  const ai = getAI();
+  const parent = storeName.startsWith('fileSearchStores/')
+    ? storeName
+    : `fileSearchStores/${storeName}`;
+  const pager = await ai.fileSearchStores.documents.list({ parent });
+  const out: DocumentEntry[] = [];
+  for await (const doc of pager) {
+    if (typeof doc.name !== 'string') continue;
+    out.push({
+      name: doc.name,
+      ...(typeof doc.displayName === 'string' ? { displayName: doc.displayName } : {}),
+      ...(typeof doc.mimeType === 'string' ? { mimeType: doc.mimeType } : {}),
+      ...(typeof doc.createTime === 'string' ? { createTime: doc.createTime } : {}),
+    });
+  }
+  return out;
 }

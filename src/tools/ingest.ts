@@ -30,23 +30,30 @@ function validateUploadPath(filePath: string): void {
 /**
  * Handle create-store operation
  */
-function handleCreateStore(input: IngestInput, _ai: ReturnType<typeof getAI>): IngestOutput {
-  // The Gemini SDK fileSearchStores API may not be available in all versions
-  // When available, this would call: await ai.fileSearchStores.create()
-  // For now, we simulate a successful store creation
-  const storeName = `stores/${input.storeName}`;
+async function handleCreateStore(
+  input: IngestInput,
+  ai: ReturnType<typeof getAI>,
+): Promise<IngestOutput> {
+  const displayName = input.displayName ?? input.storeName;
+  const created = await ai.fileSearchStores.create({
+    config: { displayName },
+  });
+  const resourceName = created.name ?? `fileSearchStores/${input.storeName}`;
 
   return {
     operation: 'create-store',
-    storeName,
-    message: `Store '${storeName}' created successfully.`,
+    storeName: resourceName,
+    message: `Store '${resourceName}' created successfully.`,
   };
 }
 
 /**
  * Handle upload operation
  */
-function handleUpload(input: IngestInput, _ai: ReturnType<typeof getAI>): IngestOutput {
+async function handleUpload(
+  input: IngestInput,
+  ai: ReturnType<typeof getAI>,
+): Promise<IngestOutput> {
   // Schema's superRefine guarantees filePath is present for upload.
   const filePath = input.filePath;
   if (filePath === undefined) {
@@ -56,7 +63,7 @@ function handleUpload(input: IngestInput, _ai: ReturnType<typeof getAI>): Ingest
   // Validate file path
   validateUploadPath(filePath);
 
-  // Read file from disk
+  // Verify file is readable before sending to SDK
   try {
     readFileSync(filePath);
   } catch (error) {
@@ -66,58 +73,82 @@ function handleUpload(input: IngestInput, _ai: ReturnType<typeof getAI>): Ingest
     );
   }
 
-  // The Gemini SDK fileSearchStores API may not be available in all versions
-  // When available, this would call: await ai.fileSearchStores.uploadToFileSearchStore()
-  // For now, we simulate a successful document upload
-  const documentName = `documents/${input.storeName}/${input.displayName ?? 'document'}`;
+  const fileSearchStoreName = input.storeName.startsWith('fileSearchStores/')
+    ? input.storeName
+    : `fileSearchStores/${input.storeName}`;
+
+  const operation = await ai.fileSearchStores.uploadToFileSearchStore({
+    fileSearchStoreName,
+    file: filePath,
+    config: {
+      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+      ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
+    },
+  });
+
+  const documentName = operation.response?.documentName ?? operation.name ?? fileSearchStoreName;
 
   return {
     operation: 'upload',
-    storeName: input.storeName,
+    storeName: fileSearchStoreName,
     documentName,
-    message: `Document uploaded to store '${input.storeName}'.`,
+    message: `Document upload started for store '${fileSearchStoreName}' (operation: ${operation.name ?? 'unknown'}).`,
   };
 }
 
 /**
  * Handle delete-store operation
  */
-function handleDeleteStore(input: IngestInput, _ai: ReturnType<typeof getAI>): IngestOutput {
-  // The Gemini SDK fileSearchStores API may not be available in all versions
-  // When available, this would call: await ai.fileSearchStores.deleteFileSearchStore()
+async function handleDeleteStore(
+  input: IngestInput,
+  ai: ReturnType<typeof getAI>,
+): Promise<IngestOutput> {
+  const name = input.storeName.startsWith('fileSearchStores/')
+    ? input.storeName
+    : `fileSearchStores/${input.storeName}`;
+
+  await ai.fileSearchStores.delete({ name, config: { force: true } });
 
   return {
     operation: 'delete-store',
-    storeName: input.storeName,
-    message: `Store '${input.storeName}' deleted successfully.`,
+    storeName: name,
+    message: `Store '${name}' deleted successfully.`,
   };
 }
 
 /**
  * Handle delete-document operation
  */
-function handleDeleteDocument(input: IngestInput, _ai: ReturnType<typeof getAI>): IngestOutput {
+async function handleDeleteDocument(
+  input: IngestInput,
+  ai: ReturnType<typeof getAI>,
+): Promise<IngestOutput> {
   // Schema's superRefine guarantees documentName is present for delete-document.
   const documentName = input.documentName;
   if (documentName === undefined) {
     throw new Error("documentName is required when operation = 'delete-document'");
   }
 
-  // The Gemini SDK fileSearchStores API may not be available in all versions
-  // When available, this would call: await ai.fileSearchStores.deleteDocument()
+  const storeName = input.storeName.startsWith('fileSearchStores/')
+    ? input.storeName
+    : `fileSearchStores/${input.storeName}`;
+  const fullDocName = documentName.includes('/documents/')
+    ? documentName
+    : `${storeName}/documents/${documentName}`;
+
+  await ai.fileSearchStores.documents.delete({ name: fullDocName });
 
   return {
     operation: 'delete-document',
-    storeName: input.storeName,
-    documentName,
-    message: `Document deleted from store '${input.storeName}'.`,
+    storeName,
+    documentName: fullDocName,
+    message: `Document '${fullDocName}' deleted successfully.`,
   };
 }
 
 /**
  * Main ingest tool handler
  */
-// eslint-disable-next-line @typescript-eslint/require-await
 async function ingestWork(input: IngestInput, ctx: ServerContext): Promise<CallToolResult> {
   const toolContext = createToolContext('ingest', ctx);
 
@@ -128,22 +159,22 @@ async function ingestWork(input: IngestInput, ctx: ServerContext): Promise<CallT
     // Dispatch to operation handler
     switch (input.operation) {
       case 'create-store': {
-        output = handleCreateStore(input, ai);
+        output = await handleCreateStore(input, ai);
         break;
       }
 
       case 'upload': {
-        output = handleUpload(input, ai);
+        output = await handleUpload(input, ai);
         break;
       }
 
       case 'delete-store': {
-        output = handleDeleteStore(input, ai);
+        output = await handleDeleteStore(input, ai);
         break;
       }
 
       case 'delete-document': {
-        output = handleDeleteDocument(input, ai);
+        output = await handleDeleteDocument(input, ai);
         break;
       }
 

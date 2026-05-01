@@ -276,9 +276,9 @@ Create `__tests__/lib/orchestration.test.ts`:
 
 ```typescript
 import assert from 'node:assert';
+import { test } from 'node:test';
 
 import { FunctionCallingConfigMode } from '@google/genai';
-import { test } from 'node:test';
 
 import {
   buildOrchestrationDiagnostics,
@@ -582,7 +582,6 @@ Create `__tests__/lib/tool-executor.test.ts`:
 import type { CallToolResult } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert';
-
 import { test } from 'node:test';
 
 import type { StreamResult } from '../../src/lib/streaming.js';

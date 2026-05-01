@@ -555,14 +555,16 @@ async function ingestWork(
     }
 
     // Validate and return structured response
-    const validated = toolContext.validateOutput(IngestOutputSchema, output, {
+    const baseResult: CallToolResult = {
       content: [
         {
           type: 'text' as const,
           text: JSON.stringify(output),
         },
       ],
-    });
+      structuredContent: output,
+    };
+    const validated = toolContext.validateOutput(IngestOutputSchema, output, baseResult);
 
     const resourceLinks = appendResourceLinks('ingest');
     return {

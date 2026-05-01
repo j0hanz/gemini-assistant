@@ -1,8 +1,13 @@
+import type { CallToolResult } from '@modelcontextprotocol/server';
+
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 
+import { safeValidateStructuredContent } from '../../src/lib/response.js';
 import { IngestInputSchema } from '../../src/schemas/ingest-input.js';
 import type { IngestInput } from '../../src/schemas/ingest-input.js';
+import { IngestOutputSchema } from '../../src/schemas/ingest-output.js';
+import type { IngestOutput } from '../../src/schemas/ingest-output.js';
 
 test('ingest schema: create-store operation validates correctly', () => {
   const input: IngestInput = {
@@ -130,4 +135,47 @@ test('ingest schema: rejects invalid operation', () => {
 
   const result = IngestInputSchema.safeParse(input);
   assert.strictEqual(result.success, false);
+});
+
+test('ingestWork: seeding structuredContent enables safeValidateStructuredContent to attach it', () => {
+  const output: IngestOutput = {
+    operation: 'create-store',
+    storeName: 'fileSearchStores/abc123',
+    message: "Store 'fileSearchStores/abc123' created successfully.",
+  };
+
+  // Simulate the pattern ingestWork must use after the fix
+  const baseResult: CallToolResult = {
+    content: [{ type: 'text', text: JSON.stringify(output) }],
+    structuredContent: output,
+  };
+
+  const validated = safeValidateStructuredContent('ingest', IngestOutputSchema, output, baseResult);
+
+  assert.ok(validated.structuredContent !== undefined, 'structuredContent must be attached');
+  const sc = validated.structuredContent as IngestOutput;
+  assert.strictEqual(sc.operation, 'create-store');
+  assert.strictEqual(sc.storeName, 'fileSearchStores/abc123');
+});
+
+test('ingestWork: NOT seeding structuredContent causes safeValidateStructuredContent to skip attachment', () => {
+  const output: IngestOutput = {
+    operation: 'create-store',
+    storeName: 'fileSearchStores/abc123',
+    message: "Store 'fileSearchStores/abc123' created successfully.",
+  };
+
+  // Simulate the CURRENT (broken) pattern: no structuredContent on the base result
+  const baseResult: CallToolResult = {
+    content: [{ type: 'text', text: JSON.stringify(output) }],
+    // structuredContent intentionally absent
+  };
+
+  const validated = safeValidateStructuredContent('ingest', IngestOutputSchema, output, baseResult);
+
+  assert.strictEqual(
+    validated.structuredContent,
+    undefined,
+    'structuredContent must be absent when not seeded',
+  );
 });

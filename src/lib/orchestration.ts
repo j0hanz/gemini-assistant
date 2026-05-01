@@ -99,7 +99,7 @@ export interface OrchestrationRequest {
   urls?: readonly string[] | undefined;
 }
 
-export interface CommonToolInputs {
+interface CommonToolInputs {
   googleSearch?: boolean | undefined;
   urls?: readonly string[] | undefined;
   codeExecution?: boolean | undefined;
@@ -252,6 +252,52 @@ function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationC
   return config;
 }
 
+interface OrchestrationDiagnostic {
+  level: 'info' | 'warning';
+  message: string;
+}
+
+export function buildOrchestrationDiagnostics(
+  request: OrchestrationRequest & { urls?: readonly string[] | undefined },
+  toolKey: string,
+  config?: OrchestrationConfig,
+): OrchestrationDiagnostic[] {
+  const resolvedConfig = config ?? buildOrchestrationConfig(request);
+  const diagnostics: OrchestrationDiagnostic[] = [];
+
+  // Info: resolved profile
+  diagnostics.push({
+    level: 'info',
+    message: `orchestration resolved: ${toolKey} -> ${resolvedConfig.toolProfile}`,
+  });
+
+  // Warning: URLs without urlContext capability
+  const urlCount = request.urls?.length ?? 0;
+  if (urlCount > 0 && !resolvedConfig.activeCapabilities.has('urlContext')) {
+    diagnostics.push({
+      level: 'warning',
+      message: `orchestration: ${toolKey} received ${String(urlCount)} URL(s) but resolved profile '${resolvedConfig.toolProfile}' does not expose URL Context`,
+    });
+  }
+
+  // Warning: fileSearch stores validation
+  const fileSearchSpec = (request.builtInToolSpecs ?? []).find(
+    (spec) => spec.kind === 'fileSearch',
+  );
+  if (
+    resolvedConfig.activeCapabilities.has('fileSearch') &&
+    fileSearchSpec?.kind === 'fileSearch' &&
+    fileSearchSpec.fileSearchStoreNames.length === 0
+  ) {
+    diagnostics.push({
+      level: 'warning',
+      message: `orchestration: ${toolKey} resolved File Search without fileSearchStoreNames`,
+    });
+  }
+
+  return diagnostics;
+}
+
 type ResolveOrchestrationResult =
   | { config: OrchestrationConfig; error?: undefined }
   | { config?: undefined; error: CallToolResult };
@@ -269,6 +315,17 @@ export async function resolveOrchestrationFromRequest(
   }
 
   const config = buildOrchestrationConfig(request);
+  const diagnostics = buildOrchestrationDiagnostics(request, toolKey, config);
+
+  // Log diagnostics (side-effect remains, but pure function is extracted)
+  for (const diag of diagnostics) {
+    if (diag.level === 'info') {
+      await mcpLog(ctx, 'info', diag.message);
+    } else {
+      await mcpLog(ctx, 'warning', diag.message);
+    }
+  }
+
   const urlCount = request.urls?.length ?? 0;
   const serverSideToolInvocations =
     config.toolConfig?.includeServerSideToolInvocations === true ? true : undefined;
@@ -281,31 +338,7 @@ export async function resolveOrchestrationFromRequest(
     urlCount,
   };
 
-  await mcpLog(ctx, 'info', `orchestration resolved: ${toolKey} -> ${config.toolProfile}`);
   logger.child(toolKey).info('orchestration resolved', payload);
-
-  if (urlCount > 0 && !config.activeCapabilities.has('urlContext')) {
-    await mcpLog(
-      ctx,
-      'warning',
-      `orchestration: ${toolKey} received ${String(urlCount)} URL(s) but resolved profile '${config.toolProfile}' does not expose URL Context`,
-    );
-  }
-
-  const fileSearchSpec = (request.builtInToolSpecs ?? []).find(
-    (spec) => spec.kind === 'fileSearch',
-  );
-  if (
-    config.activeCapabilities.has('fileSearch') &&
-    fileSearchSpec?.kind === 'fileSearch' &&
-    fileSearchSpec.fileSearchStoreNames.length === 0
-  ) {
-    await mcpLog(
-      ctx,
-      'warning',
-      `orchestration: ${toolKey} resolved File Search without fileSearchStoreNames`,
-    );
-  }
 
   return { config };
 }

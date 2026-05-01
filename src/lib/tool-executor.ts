@@ -15,9 +15,7 @@ import { TOOL_LABELS } from '../public-contract.js';
 import { AppError } from './errors.js';
 import { logContext, logger, maybeSummarizePayload, mcpLog, type ScopedLogger } from './logger.js';
 import {
-  buildOrchestrationRequestFromInputs,
   type BuiltInToolSpec,
-  type CommonToolInputs,
   type OrchestrationRequest,
   resolveOrchestrationFromRequest,
 } from './orchestration.js';
@@ -134,19 +132,7 @@ function appendWarningsToContent(
   ];
 }
 
-interface GeminiPipelineRequest<T extends Record<string, unknown>> {
-  toolName: string;
-  label: string;
-  cacheName?: string | undefined;
-  commonInputs?: CommonToolInputs | undefined;
-  builtInToolSpecs?: readonly BuiltInToolSpec[] | undefined;
-  buildContents: (activeCapabilities: Set<string>) => {
-    contents: ContentListUnion;
-    systemInstruction?: string | undefined;
-  };
-  config: Omit<GeminiStreamRequest<T>['config'], 'cacheName'>;
-  responseBuilder?: StreamResponseBuilder<T>;
-}
+
 
 export function finalizeStreamExecution<T extends Record<string, unknown>>(
   result: CallToolResult,
@@ -456,33 +442,7 @@ class ToolExecutor {
     );
   }
 
-  async executeGeminiPipeline<T extends Record<string, unknown>>(
-    ctx: ServerContext,
-    request: GeminiPipelineRequest<T>,
-  ): Promise<CallToolResult> {
-    const baseOrchestration = buildOrchestrationRequestFromInputs(request.commonInputs ?? {});
-    const mergedSpecs: BuiltInToolSpec[] = [
-      ...(baseOrchestration.builtInToolSpecs ?? []),
-      ...(request.builtInToolSpecs ?? []),
-    ];
 
-    const orchestration: OrchestrationRequest = {
-      ...baseOrchestration,
-      builtInToolSpecs: mergedSpecs,
-    };
-
-    return await this.runGeminiStream(ctx, {
-      toolName: request.toolName,
-      label: request.label,
-      orchestration,
-      buildContents: request.buildContents,
-      config: {
-        ...request.config,
-        cacheName: request.cacheName,
-      },
-      ...(request.responseBuilder ? { responseBuilder: request.responseBuilder } : {}),
-    });
-  }
 }
 
 export const executor = new ToolExecutor(logger.child('executor'));

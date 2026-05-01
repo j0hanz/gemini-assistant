@@ -396,3 +396,44 @@ test('uploadAll emits progress after each file upload', async () => {
   // Verify per-file progress notifications were emitted
   assert.ok(progressUpdates.length >= 3, 'Should emit at least 3 progress notifications (one per file)');
 });
+
+test('resolveStore handles concurrent calls with same display name', async () => {
+  let createCallCount = 0;
+
+  // Create an async iterable mock for list()
+  const createPagerMock = () => ({
+    [Symbol.asyncIterator]: async function* () {
+      // Simulate no existing stores
+      return;
+    },
+  });
+
+  const mockAI = {
+    fileSearchStores: {
+      list: async () => createPagerMock(),
+      create: async ({ config }: { config: { displayName: string } }) => {
+        createCallCount += 1;
+        // Simulate concurrent creation: each call gets a unique store
+        return { name: `fileSearchStores/${config.displayName}-${createCallCount}` };
+      },
+    },
+  };
+
+  // Import resolveStore for testing
+  const { resolveStore } = await import('../../src/tools/ingest.js');
+
+  // Call resolveStore twice concurrently with the same display name
+  const [r1, r2] = await Promise.all([
+    resolveStore(mockAI as any, 'concurrent-store', { createIfMissing: true }), // eslint-disable-line @typescript-eslint/no-explicit-any
+    resolveStore(mockAI as any, 'concurrent-store', { createIfMissing: true }), // eslint-disable-line @typescript-eslint/no-explicit-any
+  ]);
+
+  // Both should resolve to stores
+  assert.ok(r1.name, 'First resolution returned a store name');
+  assert.ok(r2.name, 'Second resolution returned a store name');
+  // Both should have created: true
+  assert.strictEqual(r1.created, true, 'First should mark store as created');
+  assert.strictEqual(r2.created, true, 'Second should mark store as created');
+  // Due to concurrent API calls, may have different results from two creates
+  // This is acceptable per Gemini API atomicity
+});

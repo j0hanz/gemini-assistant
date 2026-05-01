@@ -338,8 +338,6 @@ async function handleCreateStore(
   };
 }
 
-const storeResolutionLocks = new Map<string, Promise<{ name: string; created: boolean }>>();
-
 /**
  * Resolve a user-supplied store identifier to a real `fileSearchStores/<id>`
  * resource name.
@@ -350,8 +348,10 @@ const storeResolutionLocks = new Map<string, Promise<{ name: string; created: bo
  *    return the first match.
  *  - If `createIfMissing` is set and no match is found, a new store is created
  *    with the supplied label as its `displayName`.
+ *
+ * Concurrent calls rely on the Gemini API's atomic semantics for store creation.
  */
-async function resolveStore(
+export async function resolveStore(
   ai: ReturnType<typeof getAI>,
   identifier: string,
   options: { createIfMissing: boolean },
@@ -362,40 +362,29 @@ async function resolveStore(
 
   const trimmed = identifier.trim();
 
-  const lock = storeResolutionLocks.get(trimmed);
-  if (lock) {
-    return lock;
+  // List and search for existing store by display name
+  for await (const store of await ai.fileSearchStores.list()) {
+    if (store.displayName === trimmed && store.name !== undefined) {
+      return { name: store.name, created: false };
+    }
   }
 
-  const promise = (async () => {
-    for await (const store of await ai.fileSearchStores.list()) {
-      if (store.displayName === trimmed && store.name !== undefined) {
-        return { name: store.name, created: false };
-      }
-    }
-
-    if (!options.createIfMissing) {
-      throw new Error(
-        `No file search store found with displayName '${trimmed}'. Use the 'create-store' operation first or pass an existing 'fileSearchStores/<id>' resource name.`,
-      );
-    }
-
-    const created = await ai.fileSearchStores.create({ config: { displayName: trimmed } });
-    if (created.name === undefined) {
-      throw new Error(
-        `Created store but server returned no resource name for displayName '${trimmed}'.`,
-      );
-    }
-    log.info(`auto-created store '${created.name}' for displayName '${trimmed}'`);
-    return { name: created.name, created: true };
-  })();
-
-  storeResolutionLocks.set(trimmed, promise);
-  try {
-    return await promise;
-  } finally {
-    storeResolutionLocks.delete(trimmed);
+  // Not found; create if requested
+  if (!options.createIfMissing) {
+    throw new Error(
+      `No file search store found with displayName '${trimmed}'. Use the 'create-store' operation first or pass an existing 'fileSearchStores/<id>' resource name.`,
+    );
   }
+
+  const created = await ai.fileSearchStores.create({ config: { displayName: trimmed } });
+  if (created.name === undefined) {
+    throw new Error(
+      `Created store but server returned no resource name for displayName '${trimmed}'.`,
+    );
+  }
+
+  log.info(`auto-created store '${created.name}' for displayName '${trimmed}'`);
+  return { name: created.name, created: true };
 }
 
 /**

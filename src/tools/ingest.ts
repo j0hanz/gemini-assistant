@@ -225,7 +225,7 @@ async function collectFiles(rootDir: string): Promise<{ files: string[]; skipped
 /**
  * Upload a single file. Returns the document name on success, or an error message on failure.
  */
-async function uploadOne(
+export async function uploadOne(
   ai: ReturnType<typeof getAI>,
   fileSearchStoreName: string,
   filePath: string,
@@ -243,7 +243,11 @@ async function uploadOne(
         mimeType: resolvedMime,
       },
     });
-    return { ok: true, name: op.response?.documentName ?? op.name ?? displayName };
+    const documentName = op.response?.documentName ?? op.name;
+    if (!documentName) {
+      return { ok: false, error: 'SDK returned no documentName' };
+    }
+    return { ok: true, name: documentName };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log.warn(`upload failed for ${filePath}`, { error: message });
@@ -579,10 +583,19 @@ async function ingestWork(
     };
     const validated = toolContext.validateOutput(IngestOutputSchema, output, baseResult);
 
-    const resourceLink = appendResourceLinks('ingest');
+    // Append resource links as content items
+    const resourceLinks = appendResourceLinks('ingest');
+    const resourceLinkContent = resourceLinks.map((link) => ({
+      type: 'resource_link' as const,
+      uri: link.uri,
+      name: link.name ?? link.uri,
+      description: link.description,
+      mimeType: link.mimeType,
+    }));
+
     return {
       ...validated,
-      resourceLink,
+      content: [...validated.content, ...resourceLinkContent],
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';

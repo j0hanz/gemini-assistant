@@ -9,6 +9,7 @@ import { IngestInputSchema } from '../../src/schemas/ingest-input.js';
 import type { IngestInput } from '../../src/schemas/ingest-input.js';
 import { IngestOutputSchema } from '../../src/schemas/ingest-output.js';
 import type { IngestOutput } from '../../src/schemas/ingest-output.js';
+import { uploadOne } from '../../src/tools/ingest.js';
 
 test('ingest schema: create-store operation validates correctly', () => {
   const input: IngestInput = {
@@ -202,4 +203,26 @@ test('single-file display name: relative(dirname(target), target) yields basenam
   const target = '/workspace/project/src/config.ts';
   const displayName = relative(dirname(target), target) || target;
   assert.strictEqual(displayName, 'config.ts');
+});
+
+test('uploadOne: fails fast when SDK returns no documentName or name', async () => {
+  // Mock AI object with uploadToFileSearchStore that returns no documentName or name
+  const mockAI = {
+    fileSearchStores: {
+      uploadToFileSearchStore: async () => ({
+        response: undefined, // no documentName
+        // no name field either
+      }),
+    },
+  };
+
+  const result = await uploadOne(
+    mockAI as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    'fileSearchStores/store-123',
+    '/workspace/test-file.txt',
+    '/workspace',
+  );
+
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.error, 'SDK returned no documentName');
 });

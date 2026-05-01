@@ -47,6 +47,7 @@ memory_db/
 .agents/*
 .claude/
 !.github/workflows/
+!.github/resources.md
 .vscode/*
 !.vscode/extensions.json
 !.vscode/tasks.json

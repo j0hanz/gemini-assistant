@@ -41,7 +41,8 @@ function resolvePackageVersion(): string {
       if (typeof parsed.version === 'string' && parsed.version.length > 0) {
         return parsed.version;
       }
-    } catch {
+    } catch (err) {
+      log.warn(`resolvePackageVersion: ${candidatePath}: ${AppError.formatMessage(err)}`);
       continue;
     }
   }
@@ -51,6 +52,7 @@ function resolvePackageVersion(): string {
     return envVersion;
   }
 
+  log.warn('resolvePackageVersion: falling back to 0.0.0');
   return '0.0.0';
 }
 

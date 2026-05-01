@@ -1,5 +1,7 @@
 import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 
+import { setTimeout as delayAsync } from 'node:timers/promises';
+
 import { ApiError, FinishReason } from '@google/genai';
 
 type AppErrorCategory = 'client' | 'server' | 'safety' | 'cancelled' | 'internal';
@@ -267,22 +269,6 @@ function computeDelay(attempt: number, retryAfterMs?: number): number {
   return exponential + jitter;
 }
 
-function delayWithAbort(delayMs: number, signal?: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new DOMException('Aborted', 'AbortError'));
-    };
-
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, delayMs);
-
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
 export async function withRetry<T>(
   fn: () => Promise<T>,
   options: {
@@ -304,7 +290,7 @@ export async function withRetry<T>(
       if (onRetry) {
         await onRetry(attempt + 1, maxRetries, Math.round(delay));
       }
-      await delayWithAbort(delay, signal);
+      await delayAsync(delay, undefined, signal ? { signal } : undefined);
     }
   }
 }

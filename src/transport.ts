@@ -188,6 +188,9 @@ const log = logger.child('transport');
 
 const APPLICATION_JSON = 'application/json' as const;
 const BROAD_BIND_HOSTS = new Set(['0.0.0.0', '::', '']);
+const HEADERS_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 30_000;
+const KEEP_ALIVE_TIMEOUT_MS = 5_000;
 
 function isLoopbackBindHost(host: string): boolean {
   return host === '127.0.0.1' || host === '::1' || host === 'localhost';
@@ -1047,6 +1050,10 @@ export async function startHttpTransport(
       reject(err instanceof Error ? err : new Error(String(err)));
       return;
     }
+
+    srv.headersTimeout = HEADERS_TIMEOUT_MS;
+    srv.requestTimeout = REQUEST_TIMEOUT_MS;
+    srv.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
 
     srv.once('error', onError);
     srv.once('listening', onListening);

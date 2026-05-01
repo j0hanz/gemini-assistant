@@ -1,3 +1,5 @@
+import { setTimeout as delayAsync } from 'node:timers/promises';
+
 import type { Interactions, Part } from '@google/genai';
 
 import {
@@ -135,7 +137,7 @@ export async function pollUntilComplete(
     }
 
     try {
-      await interruptibleDelay(POLL_INTERVAL_MS, signal);
+      await delayAsync(POLL_INTERVAL_MS, undefined, signal ? { signal } : undefined);
     } catch {
       return cancelAndThrow(ai, interactionId);
     }
@@ -148,22 +150,6 @@ export async function pollUntilComplete(
   }
 
   return current;
-}
-
-function interruptibleDelay(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new DOMException('Aborted', 'AbortError'));
-    };
-
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
 }
 
 async function cancelAndThrow(ai: ReturnType<typeof getAI>, interactionId: string): Promise<never> {

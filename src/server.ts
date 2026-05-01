@@ -179,7 +179,21 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
   );
   let closed = false;
   const detachLogger = logger.attachServer(server);
-  const notifier = new ResourceNotifier(server.server);
+  const subscriptions = new Set<string>();
+  const notifier = new ResourceNotifier(server.server, {
+    isSubscribed: (uri: string) => subscriptions.has(uri),
+  });
+
+  // Advertised resources.subscribe capability requires explicit handlers;
+  // the SDK's McpServer does not auto-register them.
+  server.server.setRequestHandler('resources/subscribe', (request) => {
+    subscriptions.add(request.params.uri);
+    return {};
+  });
+  server.server.setRequestHandler('resources/unsubscribe', (request) => {
+    subscriptions.delete(request.params.uri);
+    return {};
+  });
 
   const unsubscribeSessionChange = sessionStore.subscribe(
     ({ listChanged, turnPartsAdded }: SessionChangeEvent) => {

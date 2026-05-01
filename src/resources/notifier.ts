@@ -15,14 +15,30 @@ function fileResourceUri(path: string): string {
   return `gemini://workspace/files/${path}`;
 }
 
+interface ResourceNotifierOptions {
+  /**
+   * Optional predicate to filter `notifications/resources/updated` emissions
+   * to only URIs the client has subscribed to via `resources/subscribe`.
+   * If omitted, all updates are broadcast unconditionally.
+   */
+  isSubscribed?: (uri: string) => boolean;
+}
+
 export class ResourceNotifier {
   private disposed = false;
   private readonly log = logger.child('resource-notifier');
+  private readonly isSubscribed: (uri: string) => boolean;
 
-  constructor(private readonly server: NotifierServer) {}
+  constructor(
+    private readonly server: NotifierServer,
+    options: ResourceNotifierOptions = {},
+  ) {
+    this.isSubscribed = options.isSubscribed ?? ((): boolean => true);
+  }
 
   async notifyUpdated(uri: string): Promise<void> {
     if (this.disposed) return;
+    if (!this.isSubscribed(uri)) return;
     try {
       await this.server.sendResourceUpdated({ uri });
     } catch (err) {

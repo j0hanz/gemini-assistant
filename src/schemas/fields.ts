@@ -14,7 +14,7 @@ import { z } from 'zod/v4';
 import { TOOL_PROFILE_NAMES } from '../lib/tool-profiles.js';
 import { isPublicHttpUrl } from '../lib/validation.js';
 
-import { PUBLIC_TOOL_NAMES, THINKING_LEVELS } from '../public-contract.js';
+import { THINKING_LEVELS } from '../public-contract.js';
 import { validateGeminiJsonSchema } from './validators.js';
 
 const WINDOWS_DRIVE_RELATIVE_PATH_PATTERN = /^[A-Za-z]:(?![\\/])/;
@@ -51,8 +51,6 @@ export function enumField<const Values extends readonly [string, ...string[]]>(
 ) {
   return withFieldMetadata(z.enum(values), description);
 }
-
-export const PublicJobNameSchema = enumField(PUBLIC_TOOL_NAMES, 'Public job name');
 
 export function textField(description: string, maxLength?: number) {
   return withFieldMetadata(buildTextSchema(maxLength), description);

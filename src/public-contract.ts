@@ -2,7 +2,7 @@ type PublicJobName = 'chat' | 'research' | 'analyze' | 'review';
 export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
 export type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
 
-export type PublicPromptName = 'discover' | 'research' | 'review';
+export type PublicPromptName = 'discover' | 'chat' | 'research' | 'analyze' | 'review';
 export type PublicWorkflowName = 'start-here' | 'chat' | 'research' | 'analyze' | 'review';
 type PublicResourceUri =
   | 'assistant://discover/catalog'
@@ -66,7 +66,9 @@ export const PUBLIC_TOOL_NAMES = [
 
 const PUBLIC_PROMPT_NAMES = [
   'discover',
+  'chat',
   'research',
+  'analyze',
   'review',
 ] as const satisfies readonly PublicPromptName[];
 
@@ -244,11 +246,22 @@ const PROMPT_DISCOVERY_DETAILS = {
       { kind: 'resource', name: 'assistant://discover/workflows' },
     ],
   },
+  chat: {
+    title: 'Chat Prompt',
+    bestFor: 'Starting or continuing a conversational interaction with server-managed sessions.',
+    whenToUse: 'Use when the user wants direct chat and may need multiple turns.',
+    inputs: ['goal', 'sessionId?', 'systemInstruction?', 'thinkingLevel?'],
+    returns: 'A conversational prompt that frames the chat job and session resources.',
+    related: [
+      { kind: 'tool', name: 'chat' },
+      { kind: 'resource', name: 'assistant://discover/workflows' },
+    ],
+  },
   research: {
     title: 'Research Prompt',
     bestFor: 'Packaging a research goal into the quick-versus-deep decision flow.',
     whenToUse: 'Use to guide a client on how to explain a research task.',
-    inputs: ['goal', 'mode?', 'deliverable?'],
+    inputs: ['goal', 'mode?', 'deliverable?', 'searchDepth?', 'systemInstruction?'],
     returns:
       'A workflow-oriented prompt that points to the research job and supporting discovery resources.',
     related: [
@@ -256,15 +269,42 @@ const PROMPT_DISCOVERY_DETAILS = {
       { kind: 'resource', name: 'assistant://discover/workflows' },
     ],
   },
+  analyze: {
+    title: 'Analyze Prompt',
+    bestFor: 'Framing a bounded analysis task on one file, URL, or small file set.',
+    whenToUse: 'Use when the user has a focused analysis or diagram-generation task.',
+    inputs: [
+      'goal',
+      'targetKind',
+      'outputKind?',
+      'filePath?',
+      'urls?',
+      'filePaths?',
+      'diagramType?',
+    ],
+    returns: 'An analysis-oriented prompt that frames the analyze job and variant options.',
+    related: [
+      { kind: 'tool', name: 'analyze' },
+      { kind: 'resource', name: 'assistant://discover/workflows' },
+    ],
+  },
   review: {
     title: 'Review Prompt',
     bestFor: 'Helping a client frame a diff review, file comparison, or failure triage request.',
     whenToUse: 'Use to clarify the type of review needed.',
-    inputs: ['subject?', 'focus?'],
+    inputs: [
+      'subjectKind',
+      'language?',
+      'filePathA?',
+      'filePathB?',
+      'question?',
+      'error?',
+      'codeContext?',
+    ],
     returns: 'A review-oriented prompt that points to the appropriate review subject variant.',
     related: [
       { kind: 'tool', name: 'review' },
-      { kind: 'resource', name: 'discover://workflows' },
+      { kind: 'resource', name: 'assistant://discover/workflows' },
     ],
   },
 } as const satisfies Record<PublicPromptName, DiscoveryEntryMetadata>;
@@ -422,7 +462,7 @@ export const WORKFLOW_ENTRIES = [
       'When MCP_EXPOSE_SESSION_RESOURCES=true, use gemini://session/{sessionId}/turn/{turnIndex}/parts when an orchestrator needs replay-safe raw turn parts.',
     ],
     recommendedTools: ['chat'],
-    recommendedPrompts: ['discover'],
+    recommendedPrompts: ['chat'],
     relatedResources: [
       'gemini://sessions',
       'gemini://session/{sessionId}/transcript',
@@ -454,7 +494,7 @@ export const WORKFLOW_ENTRIES = [
       'Choose outputKind=diagram when you want a diagram instead of a summary.',
     ],
     recommendedTools: ['analyze'],
-    recommendedPrompts: ['discover'],
+    recommendedPrompts: ['analyze'],
     relatedResources: ['gemini://workspace/cache/contents', 'assistant://discover/catalog'],
   },
   {

@@ -44,3 +44,40 @@ test('listWorkflowEntries — all entries have names', () => {
     assert(typeof entry.name === 'string' && entry.name.length > 0);
   }
 });
+
+test('listDiscoveryEntries — contains chat prompt', () => {
+  const entries = listDiscoveryEntries();
+  const e = entries.find((x) => x.kind === 'prompt' && x.name === 'chat');
+  assert(e !== undefined);
+  assert.deepStrictEqual(e.inputs, ['goal', 'sessionId?', 'systemInstruction?', 'thinkingLevel?']);
+});
+
+test('listDiscoveryEntries — contains analyze prompt', () => {
+  const entries = listDiscoveryEntries();
+  const e = entries.find((x) => x.kind === 'prompt' && x.name === 'analyze');
+  assert(e !== undefined);
+  assert.deepStrictEqual(e.inputs, [
+    'goal',
+    'targetKind',
+    'outputKind?',
+    'filePath?',
+    'urls?',
+    'filePaths?',
+    'diagramType?',
+  ]);
+});
+
+test('listDiscoveryEntries — review uses subjectKind (not subject?)', () => {
+  const entries = listDiscoveryEntries();
+  const e = entries.find((x) => x.kind === 'prompt' && x.name === 'review');
+  assert(e !== undefined);
+  assert.deepStrictEqual(e.inputs, [
+    'subjectKind',
+    'language?',
+    'filePathA?',
+    'filePathB?',
+    'question?',
+    'error?',
+    'codeContext?',
+  ]);
+});

@@ -181,7 +181,7 @@ async function collectFiles(rootDir: string): Promise<{ files: string[]; skipped
 }
 
 /**
- * Upload a single file. Returns the document name on success or undefined on failure.
+ * Upload a single file. Returns the document name on success, or an error message on failure.
  */
 async function uploadOne(
   ai: ReturnType<typeof getAI>,
@@ -189,7 +189,7 @@ async function uploadOne(
   filePath: string,
   rootDir: string,
   mimeType?: string,
-): Promise<string | undefined> {
+): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
   const displayName = relative(rootDir, filePath) || filePath;
   try {
     const op = await ai.fileSearchStores.uploadToFileSearchStore({
@@ -200,12 +200,11 @@ async function uploadOne(
         ...(mimeType !== undefined ? { mimeType } : {}),
       },
     });
-    return op.response?.documentName ?? op.name ?? displayName;
+    return { ok: true, name: op.response?.documentName ?? op.name ?? displayName };
   } catch (error) {
-    log.warn(`upload failed for ${filePath}`, {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    log.warn(`upload failed for ${filePath}`, { error: message });
+    return { ok: false, error: message };
   }
 }
 
@@ -217,9 +216,10 @@ async function uploadAll(
   fileSearchStoreName: string,
   files: string[],
   rootDir: string,
-): Promise<{ uploaded: string[]; failed: number }> {
+): Promise<{ uploaded: string[]; failed: number; firstError: string | undefined }> {
   const uploaded: string[] = [];
   let failed = 0;
+  let firstError: string | undefined;
   let cursor = 0;
 
   async function worker(): Promise<void> {
@@ -227,11 +227,12 @@ async function uploadAll(
       const index = cursor++;
       const file = files[index];
       if (file === undefined) break;
-      const docName = await uploadOne(ai, fileSearchStoreName, file, rootDir);
-      if (docName !== undefined) {
+      const result = await uploadOne(ai, fileSearchStoreName, file, rootDir);
+      if (result.ok) {
         uploaded.push(file);
       } else {
         failed += 1;
+        firstError ??= result.error;
       }
     }
   }
@@ -240,7 +241,7 @@ async function uploadAll(
     worker(),
   );
   await Promise.all(workers);
-  return { uploaded, failed };
+  return { uploaded, failed, firstError };
 }
 
 /**
@@ -298,14 +299,14 @@ async function handleUpload(
 
   // ── Single-file upload ────────────────────────────────────────────────────
   if (info.isFile()) {
-    const documentName = await uploadOne(ai, fileSearchStoreName, target, target, input.mimeType);
-    if (documentName === undefined) {
-      throw new Error(`Upload failed for ${target}`);
+    const result = await uploadOne(ai, fileSearchStoreName, target, target, input.mimeType);
+    if (!result.ok) {
+      throw new Error(`Upload failed for ${target}: ${result.error}`);
     }
     return {
       operation: 'upload',
       storeName: fileSearchStoreName,
-      documentName,
+      documentName: result.name,
       uploadedCount: 1,
       skippedCount: 0,
       message: `Uploaded 1 file to '${fileSearchStoreName}'.`,
@@ -328,8 +329,10 @@ async function handleUpload(
     };
   }
 
-  const { uploaded, failed } = await uploadAll(ai, fileSearchStoreName, files, target);
+  const { uploaded, failed, firstError } = await uploadAll(ai, fileSearchStoreName, files, target);
   const scope = isWorkspaceRoot ? 'workspace' : target;
+  const failureSuffix =
+    failed > 0 && firstError !== undefined ? ` First failure: ${firstError}` : '';
 
   return {
     operation: 'upload',
@@ -337,7 +340,7 @@ async function handleUpload(
     uploadedCount: uploaded.length,
     skippedCount: skipped + failed,
     uploadedFiles: uploaded.slice(0, 200).map((f) => relative(target, f) || f),
-    message: `Uploaded ${String(uploaded.length)}/${String(files.length)} files from ${scope} to '${fileSearchStoreName}' (skipped: ${String(skipped)}, failed: ${String(failed)}).`,
+    message: `Uploaded ${String(uploaded.length)}/${String(files.length)} files from ${scope} to '${fileSearchStoreName}' (skipped: ${String(skipped)}, failed: ${String(failed)}).${failureSuffix}`,
   };
 }
 

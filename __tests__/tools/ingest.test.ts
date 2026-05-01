@@ -336,3 +336,63 @@ test('uploadAll: stops uploads and throws error when signal is aborted mid-batch
     'Only first batch (4 uploads) should complete before abort is detected',
   );
 });
+
+test('uploadAll emits progress after each file upload', async () => {
+  const progressUpdates: Array<{ completed: number; total: number; message: string }> = [];
+
+  const mockAI = {
+    fileSearchStores: {
+      uploadToFileSearchStore: async (opts: unknown) => {
+        const filePath = (opts as { file?: string }).file ?? 'unknown';
+        // Simulate failure for one file
+        if (filePath.endsWith('fail.txt')) {
+          throw new Error('Simulated upload failure');
+        }
+        return {
+          response: { documentName: `${filePath}-doc` },
+        };
+      },
+    },
+  };
+
+  const mockCtx = {
+    mcpReq: {
+      signal: { aborted: false },
+      _meta: { progressToken: 'test-token' },
+      notify: async (notification: unknown) => {
+        const params = (notification as { params?: unknown }).params as {
+          progress?: number;
+          total?: number;
+          message?: string;
+        };
+        if (params.progress !== undefined && params.total !== undefined) {
+          progressUpdates.push({
+            completed: params.progress,
+            total: params.total,
+            message: params.message ?? '',
+          });
+        }
+      },
+      log: async () => {
+        // no-op
+      },
+    },
+    task: { id: 'test-task', cancellationSignal: undefined },
+  };
+
+  const files = ['/workspace/file1.txt', '/workspace/file2.txt', '/workspace/fail.txt'];
+  const result = await uploadAll(
+    mockAI as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    'fileSearchStores/store-123',
+    files,
+    '/workspace',
+    mockCtx as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+  );
+
+  // Verify results
+  assert.strictEqual(result.uploaded.length, 2, 'Should have uploaded 2 files successfully');
+  assert.strictEqual(result.failed, 1, 'Should have 1 failed file');
+
+  // Verify per-file progress notifications were emitted
+  assert.ok(progressUpdates.length >= 3, 'Should emit at least 3 progress notifications (one per file)');
+});

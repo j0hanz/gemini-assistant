@@ -10,6 +10,11 @@ import { FileSearchStoreNameSchema, optionalField, textField } from './fields.js
  * `anyOf` that most clients cannot render as a form, leaving the user with no
  * visible inputs. We therefore expose all fields on a single `z.strictObject`
  * and enforce per-operation requirements via `superRefine`.
+ *
+ * Path semantics for the `upload` operation:
+ *   - empty / omitted → walk every workspace root and upload all eligible files
+ *   - a file path     → upload that single file
+ *   - a directory     → walk that directory and upload all eligible files
  */
 const IngestOperationEnum = z.enum([
   'create-store',
@@ -27,7 +32,7 @@ const RawIngestInputSchema = z.strictObject({
   ),
   filePath: optionalField(
     textField(
-      'Absolute or workspace-relative path to the file to upload (required when operation = upload).',
+      'Path to a file or directory (upload only). Leave empty to upload the entire workspace. Absolute or workspace-relative.',
     ),
   ),
   documentName: optionalField(
@@ -39,36 +44,20 @@ const RawIngestInputSchema = z.strictObject({
     textField('Human-readable display name (optional, used by create-store and upload).', 256),
   ),
   mimeType: optionalField(
-    textField('MIME type of the uploaded file, e.g. text/plain (optional, upload only).', 128),
+    textField('MIME type override for single-file upload (optional, ignored for batch).', 128),
   ),
 });
 
 export const IngestInputSchema = RawIngestInputSchema.superRefine((value, ctx) => {
-  switch (value.operation) {
-    case 'upload': {
-      if (value.filePath === undefined || value.filePath.length === 0) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['filePath'],
-          message: "filePath is required when operation = 'upload'",
-        });
-      }
-      break;
-    }
-    case 'delete-document': {
-      if (value.documentName === undefined || value.documentName.length === 0) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['documentName'],
-          message: "documentName is required when operation = 'delete-document'",
-        });
-      }
-      break;
-    }
-    case 'create-store':
-    case 'delete-store':
-      // No additional fields required beyond storeName.
-      break;
+  if (
+    value.operation === 'delete-document' &&
+    (value.documentName === undefined || value.documentName.length === 0)
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['documentName'],
+      message: "documentName is required when operation = 'delete-document'",
+    });
   }
 });
 

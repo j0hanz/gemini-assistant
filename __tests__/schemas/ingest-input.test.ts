@@ -82,13 +82,13 @@ describe('IngestInputSchema', () => {
       }
     });
 
-    it('rejects when filePath is missing', () => {
+    it('accepts upload without filePath (defaults to entire workspace)', () => {
       const input = {
         operation: 'upload',
         storeName: 'my-store',
       };
       const result = IngestInputSchema.safeParse(input);
-      assert.equal(result.success, false);
+      assert.equal(result.success, true);
     });
 
     it('rejects unknown fields (strict object)', () => {

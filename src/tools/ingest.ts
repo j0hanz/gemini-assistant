@@ -1,11 +1,13 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import { readFileSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
+import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 
 import { logger } from '../lib/logger.js';
 import { MUTABLE_ANNOTATIONS, registerWorkTool } from '../lib/tasks.js';
-import type { ToolServices } from '../lib/tool-context.js';
+import type { ToolRootsFetcher, ToolServices } from '../lib/tool-context.js';
 import { createToolContext } from '../lib/tool-executor.js';
+import { getAllowedRoots } from '../lib/validation.js';
 import type { IngestInput } from '../schemas/ingest-input.js';
 import { IngestInputSchema } from '../schemas/ingest-input.js';
 import { type IngestOutput, IngestOutputSchema } from '../schemas/ingest-output.js';
@@ -16,6 +18,68 @@ import { validateScanPath } from '../resources/metadata.js';
 
 const log = logger.child('ingest');
 
+// ── Bulk upload limits ───────────────────────────────────────────────────────
+const MAX_FILES_PER_UPLOAD = 200;
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+const UPLOAD_CONCURRENCY = 4;
+
+// Directories that are never recursed into.
+const SKIP_DIRECTORIES = new Set([
+  'node_modules',
+  '.git',
+  '.svn',
+  '.hg',
+  'dist',
+  'build',
+  'out',
+  '.next',
+  '.nuxt',
+  '.turbo',
+  'coverage',
+  '.cache',
+  '.idea',
+  '.vscode',
+  '__pycache__',
+  '.venv',
+  'venv',
+  'target',
+  'bin',
+  'obj',
+]);
+
+// Binary / non-text extensions skipped during workspace walks. Single-file uploads
+// (where the user explicitly provided a path) bypass this filter.
+const SKIPPED_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.bmp',
+  '.ico',
+  '.svg',
+  '.mp3',
+  '.mp4',
+  '.mov',
+  '.avi',
+  '.webm',
+  '.zip',
+  '.tar',
+  '.gz',
+  '.rar',
+  '.7z',
+  '.pdf',
+  '.exe',
+  '.dll',
+  '.so',
+  '.dylib',
+  '.class',
+  '.jar',
+  '.wasm',
+  '.lock',
+  '.map',
+]);
+
 /**
  * Validate file path security
  */
@@ -25,6 +89,152 @@ function validateUploadPath(filePath: string): void {
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : 'Invalid file path', { cause: error });
   }
+}
+
+/**
+ * Resolve the upload target to an absolute path.
+ *
+ * - If `filePath` is empty, returns the first workspace root.
+ * - If `filePath` is absolute, returns it as-is.
+ * - Otherwise resolves relative to the first workspace root.
+ */
+async function resolveUploadTarget(
+  filePath: string | undefined,
+  rootsFetcher: ToolRootsFetcher,
+): Promise<{ target: string; isWorkspaceRoot: boolean }> {
+  const roots = await getAllowedRoots(rootsFetcher);
+  const primaryRoot = roots[0] ?? process.cwd();
+
+  if (filePath === undefined || filePath.length === 0) {
+    return { target: primaryRoot, isWorkspaceRoot: true };
+  }
+
+  const absolute = isAbsolute(filePath) ? filePath : resolve(primaryRoot, filePath);
+  return { target: absolute, isWorkspaceRoot: false };
+}
+
+/**
+ * Collect every eligible file under a directory tree.
+ *
+ * Skips: standard build/VCS directories, oversized files, and binary/lockfile extensions.
+ * Caps the result at `MAX_FILES_PER_UPLOAD`; further matches contribute only to `skipped`.
+ */
+async function collectFiles(rootDir: string): Promise<{ files: string[]; skipped: number }> {
+  const files: string[] = [];
+  let skipped = 0;
+  const queue: string[] = [rootDir];
+
+  while (queue.length > 0) {
+    const dir = queue.shift();
+    if (dir === undefined) break;
+
+    let entries: { name: string; isDirectory: () => boolean; isFile: () => boolean }[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (SKIP_DIRECTORIES.has(entry.name) || entry.name.startsWith('.')) {
+          continue;
+        }
+        queue.push(full);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+
+      const ext = extname(entry.name).toLowerCase();
+      if (SKIPPED_EXTENSIONS.has(ext)) {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        const info = await stat(full);
+        if (info.size === 0 || info.size > MAX_FILE_SIZE_BYTES) {
+          skipped += 1;
+          continue;
+        }
+      } catch {
+        skipped += 1;
+        continue;
+      }
+
+      if (files.length >= MAX_FILES_PER_UPLOAD) {
+        skipped += 1;
+        continue;
+      }
+      files.push(full);
+    }
+  }
+
+  return { files, skipped };
+}
+
+/**
+ * Upload a single file. Returns the document name on success or undefined on failure.
+ */
+async function uploadOne(
+  ai: ReturnType<typeof getAI>,
+  fileSearchStoreName: string,
+  filePath: string,
+  rootDir: string,
+  mimeType?: string,
+): Promise<string | undefined> {
+  const displayName = relative(rootDir, filePath) || filePath;
+  try {
+    const op = await ai.fileSearchStores.uploadToFileSearchStore({
+      fileSearchStoreName,
+      file: filePath,
+      config: {
+        displayName,
+        ...(mimeType !== undefined ? { mimeType } : {}),
+      },
+    });
+    return op.response?.documentName ?? op.name ?? displayName;
+  } catch (error) {
+    log.warn(`upload failed for ${filePath}`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return undefined;
+  }
+}
+
+/**
+ * Upload an array of files with bounded concurrency.
+ */
+async function uploadAll(
+  ai: ReturnType<typeof getAI>,
+  fileSearchStoreName: string,
+  files: string[],
+  rootDir: string,
+): Promise<{ uploaded: string[]; failed: number }> {
+  const uploaded: string[] = [];
+  let failed = 0;
+  let cursor = 0;
+
+  async function worker(): Promise<void> {
+    while (cursor < files.length) {
+      const index = cursor++;
+      const file = files[index];
+      if (file === undefined) break;
+      const docName = await uploadOne(ai, fileSearchStoreName, file, rootDir);
+      if (docName !== undefined) {
+        uploaded.push(file);
+      } else {
+        failed += 1;
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(UPLOAD_CONCURRENCY, files.length) }, () =>
+    worker(),
+  );
+  await Promise.all(workers);
+  return { uploaded, failed };
 }
 
 /**
@@ -48,51 +258,77 @@ async function handleCreateStore(
 }
 
 /**
- * Handle upload operation
+ * Handle upload operation.
+ *
+ * Path semantics:
+ *  - empty filePath → walk all workspace roots
+ *  - filePath points to a file → upload just that file
+ *  - filePath points to a directory → walk and upload contents
  */
 async function handleUpload(
   input: IngestInput,
   ai: ReturnType<typeof getAI>,
+  rootsFetcher: ToolRootsFetcher,
 ): Promise<IngestOutput> {
-  // Schema's superRefine guarantees filePath is present for upload.
-  const filePath = input.filePath;
-  if (filePath === undefined) {
-    throw new Error("filePath is required when operation = 'upload'");
-  }
-
-  // Validate file path
-  validateUploadPath(filePath);
-
-  // Verify file is readable before sending to SDK
-  try {
-    readFileSync(filePath);
-  } catch (error) {
-    throw new Error(
-      error instanceof Error ? `Failed to read file: ${error.message}` : 'Failed to read file',
-      { cause: error },
-    );
-  }
-
   const fileSearchStoreName = input.storeName.startsWith('fileSearchStores/')
     ? input.storeName
     : `fileSearchStores/${input.storeName}`;
 
-  const operation = await ai.fileSearchStores.uploadToFileSearchStore({
-    fileSearchStoreName,
-    file: filePath,
-    config: {
-      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
-      ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
-    },
-  });
+  const { target, isWorkspaceRoot } = await resolveUploadTarget(input.filePath, rootsFetcher);
+  validateUploadPath(target);
 
-  const documentName = operation.response?.documentName ?? operation.name ?? fileSearchStoreName;
+  let info: { isFile: () => boolean; isDirectory: () => boolean };
+  try {
+    info = await stat(target);
+  } catch (error) {
+    throw new Error(
+      error instanceof Error ? `Path not accessible: ${error.message}` : 'Path not accessible',
+      { cause: error },
+    );
+  }
+
+  // ── Single-file upload ────────────────────────────────────────────────────
+  if (info.isFile()) {
+    const documentName = await uploadOne(ai, fileSearchStoreName, target, target, input.mimeType);
+    if (documentName === undefined) {
+      throw new Error(`Upload failed for ${target}`);
+    }
+    return {
+      operation: 'upload',
+      storeName: fileSearchStoreName,
+      documentName,
+      uploadedCount: 1,
+      skippedCount: 0,
+      message: `Uploaded 1 file to '${fileSearchStoreName}'.`,
+    };
+  }
+
+  // ── Directory or workspace walk ───────────────────────────────────────────
+  if (!info.isDirectory()) {
+    throw new Error(`Path is neither a file nor a directory: ${target}`);
+  }
+
+  const { files, skipped } = await collectFiles(target);
+  if (files.length === 0) {
+    return {
+      operation: 'upload',
+      storeName: fileSearchStoreName,
+      uploadedCount: 0,
+      skippedCount: skipped,
+      message: `No eligible files found under ${target} (skipped: ${skipped}).`,
+    };
+  }
+
+  const { uploaded, failed } = await uploadAll(ai, fileSearchStoreName, files, target);
+  const scope = isWorkspaceRoot ? 'workspace' : target;
 
   return {
     operation: 'upload',
     storeName: fileSearchStoreName,
-    documentName,
-    message: `Document upload started for store '${fileSearchStoreName}' (operation: ${operation.name ?? 'unknown'}).`,
+    uploadedCount: uploaded.length,
+    skippedCount: skipped + failed,
+    uploadedFiles: uploaded.slice(0, 200).map((f) => relative(target, f) || f),
+    message: `Uploaded ${String(uploaded.length)}/${String(files.length)} files from ${scope} to '${fileSearchStoreName}' (skipped: ${String(skipped)}, failed: ${String(failed)}).`,
   };
 }
 
@@ -149,7 +385,11 @@ async function handleDeleteDocument(
 /**
  * Main ingest tool handler
  */
-async function ingestWork(input: IngestInput, ctx: ServerContext): Promise<CallToolResult> {
+async function ingestWork(
+  input: IngestInput,
+  ctx: ServerContext,
+  rootsFetcher: ToolRootsFetcher,
+): Promise<CallToolResult> {
   const toolContext = createToolContext('ingest', ctx);
 
   try {
@@ -164,7 +404,7 @@ async function ingestWork(input: IngestInput, ctx: ServerContext): Promise<CallT
       }
 
       case 'upload': {
-        output = await handleUpload(input, ai);
+        output = await handleUpload(input, ai, rootsFetcher);
         break;
       }
 
@@ -219,18 +459,19 @@ async function ingestWork(input: IngestInput, ctx: ServerContext): Promise<CallT
 /**
  * Register the ingest tool with the MCP server
  */
-export function registerIngestTool(server: McpServer, _services?: ToolServices): void {
+export function registerIngestTool(server: McpServer, services?: ToolServices): void {
+  const rootsFetcher: ToolRootsFetcher = services?.rootsFetcher ?? (() => Promise.resolve([]));
   registerWorkTool<IngestInput>({
     server,
     tool: {
       name: 'ingest',
       title: 'Ingest',
       description:
-        'Manage File Search Stores: create, upload documents, delete stores or documents.',
+        "Manage Gemini File Search Stores. 'upload' with empty filePath ingests the entire workspace; with a directory path ingests that subtree; with a file path uploads one file.",
       inputSchema: IngestInputSchema,
       outputSchema: IngestOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,
     },
-    work: (args, ctx) => ingestWork(args, ctx),
+    work: (args, ctx) => ingestWork(args, ctx, rootsFetcher),
   });
 }

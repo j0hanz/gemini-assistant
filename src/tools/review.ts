@@ -1323,14 +1323,15 @@ function buildReviewStructuredContent(
     );
   }
 
-  return buildSuccessfulStructuredContent({
+  const result = buildSuccessfulStructuredContent({
     warnings: warnings.length > 0 ? warnings : undefined,
     domain: {
       summary: typeof structured.summary === 'string' ? structured.summary : '',
       stats: structured.stats,
       documentationDrift: structured.documentationDrift,
     },
-  }) as unknown as z.infer<typeof ReviewOutputSchema>;
+  });
+  return ReviewOutputSchema.parse(result);
 }
 
 function requireReviewField(

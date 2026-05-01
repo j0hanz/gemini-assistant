@@ -18,6 +18,12 @@ interface StreamEmitter {
  * Returns result compatible with SessionEventEntry recording.
  * Validates event properties before accessing them and handles errors gracefully.
  */
+function asObject(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 export async function consumeInteractionStream(
   eventStream: AsyncIterable<unknown>,
   emitter: StreamEmitter,
@@ -35,12 +41,13 @@ export async function consumeInteractionStream(
 
   try {
     for await (const event of eventStream) {
-      const evt = event as Record<string, unknown>;
+      const evt = asObject(event);
+      if (!evt) continue;
 
       // Parse content deltas
-      if (evt.type === 'content_part_delta' && evt.delta) {
-        const delta = evt.delta as Record<string, unknown>;
-        if (typeof delta.text === 'string') {
+      if (evt.type === 'content_part_delta') {
+        const delta = asObject(evt.delta);
+        if (delta && typeof delta.text === 'string') {
           fullText += delta.text;
           emitter.emit('progress', { delta: delta.text });
         }

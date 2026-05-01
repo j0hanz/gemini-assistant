@@ -947,8 +947,7 @@ export async function startHttpTransport(
 
   if (allowedHosts) {
     app.use('/mcp', (req, res, next) => {
-      const headers = req.headers as Record<string, string | string[] | undefined>;
-      const rawHost = headers.host;
+      const rawHost = req.headers.host as string | string[] | undefined;
       const hostHeader = Array.isArray(rawHost) ? (rawHost[0] ?? null) : (rawHost ?? null);
 
       if (!validateHostHeader(hostHeader, allowedHosts)) {

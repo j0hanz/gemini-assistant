@@ -70,23 +70,15 @@ export function buildInteractionParams(
   // Build tools array from builtIns
   const tools = builtInsToInteractionTools(profile.builtIns);
 
-  // Build the final params object, initially as unknown to avoid unsafe assignment errors
-  const paramsObj: Record<string, unknown> = {
+  // Build the final params object with conditional spreads for optional fields
+  return {
     model,
     input: prompt,
     system_instruction: resolvedInstruction,
     generation_config: generationConfig,
+    ...(tools.length > 0 ? { tools } : {}),
+    ...(previousInteractionId ? { previous_interaction_id: previousInteractionId } : {}),
   };
-
-  if (tools.length > 0) {
-    paramsObj.tools = tools;
-  }
-
-  if (previousInteractionId) {
-    paramsObj.previous_interaction_id = previousInteractionId;
-  }
-
-  return paramsObj as unknown as Interactions.InteractionCreateParams;
 }
 
 interface BackgroundInteractionParams {

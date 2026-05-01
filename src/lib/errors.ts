@@ -89,7 +89,10 @@ export class AppError extends Error {
       case 'abort':
         return new CancelledError(toolName);
       case 'http':
-        return AppError.fromHttpError(toolName, err as Error & { status: number });
+        if (hasHttpStatus(err)) {
+          return AppError.fromHttpError(toolName, err);
+        }
+        return new AppError(toolName, `${toolName} failed: ${AppError.formatMessage(err)}`);
       case 'other':
         return new AppError(toolName, `${toolName} failed: ${AppError.formatMessage(err)}`);
       default:

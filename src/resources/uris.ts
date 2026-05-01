@@ -125,3 +125,17 @@ export function requireTemplateParam(value: string | string[] | undefined, label
   }
   return decoded;
 }
+
+// ============================== gemini://stores ================================
+
+const STORES_LIST_URI = 'gemini://stores' as const;
+const STORES_DETAIL_TEMPLATE = 'gemini://stores/{storeName}' as const;
+const STORE_DOCUMENTS_TEMPLATE = 'gemini://stores/{storeName}/documents' as const;
+
+function storeDetailUri(storeName: string): string {
+  return `gemini://stores/${encodeURIComponent(storeName)}`;
+}
+
+function storeDocumentsUri(storeName: string): string {
+  return `gemini://stores/${encodeURIComponent(storeName)}/documents`;
+}

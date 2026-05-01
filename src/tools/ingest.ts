@@ -5,7 +5,7 @@ import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path
 
 import { logger } from '../lib/logger.js';
 import { sendProgress } from '../lib/progress.js';
-import { MUTABLE_ANNOTATIONS, registerWorkTool } from '../lib/tasks.js';
+import { DESTRUCTIVE_ANNOTATIONS, registerWorkTool } from '../lib/tasks.js';
 import type { ToolRootsFetcher, ToolServices } from '../lib/tool-context.js';
 import { createToolContext } from '../lib/tool-executor.js';
 import { getAllowedRoots } from '../lib/validation.js';
@@ -602,7 +602,21 @@ async function ingestWork(
 }
 
 /**
- * Register the ingest tool with the MCP server
+ * Register the ingest tool with the MCP server.
+ *
+ * **Why destructive annotations?**
+ *
+ * The ingest tool handles four operations:
+ * - `create-store` — creates a new Gemini File Search Store (mutable, reversible)
+ * - `upload` — uploads files to a store (mutable, reversible)
+ * - `delete-store` — deletes a store with `force: true` (irreversible, destructive)
+ * - `delete-document` — removes documents from a store (irreversible, destructive)
+ *
+ * In MCP, tool annotations are applied at the tool level, not per-operation.
+ * Since the ingest tool contains irreversible destructive operations (delete-store and
+ * delete-document), the entire tool must declare `destructiveHint: true` to signal to
+ * MCP clients that some operations can permanently delete resources. This alerts them
+ * that ingest operations should be gated behind user confirmation or careful authorization.
  */
 export function registerIngestTool(server: McpServer, services?: ToolServices): void {
   const rootsFetcher: ToolRootsFetcher = services?.rootsFetcher ?? (() => Promise.resolve([]));
@@ -615,7 +629,7 @@ export function registerIngestTool(server: McpServer, services?: ToolServices): 
         "Manage Gemini File Search Stores. For 'upload', provide a filePath like 'src' to ingest a directory subtree, or a path to a single file.",
       inputSchema: IngestInputSchema,
       outputSchema: IngestOutputSchema,
-      annotations: MUTABLE_ANNOTATIONS,
+      annotations: DESTRUCTIVE_ANNOTATIONS,
     },
     work: (args, ctx) => ingestWork(args, ctx, rootsFetcher),
   });

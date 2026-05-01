@@ -4,8 +4,8 @@ import assert from 'node:assert';
 import { test } from 'node:test';
 
 import type { StoreRegistry } from '../../src/lib/store-registry.js';
-import { STORES_LIST_URI, storeDocumentsUri } from '../../src/resources/uris.js';
 import { registerStoreResources } from '../../src/resources/stores.js';
+import { storeDocumentsUri, STORES_LIST_URI } from '../../src/resources/uris.js';
 
 interface MockServer {
   registerResource: (

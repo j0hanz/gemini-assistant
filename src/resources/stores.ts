@@ -2,6 +2,7 @@ import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontex
 import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server';
 
 import type { StoreRegistry } from '../lib/store-registry.js';
+
 import { buildResourceMeta } from './metadata.js';
 import { decodeTemplateParam, STORE_DOCUMENTS_TEMPLATE, STORES_LIST_URI } from './uris.js';
 

@@ -432,7 +432,7 @@ const ProfileThinkingLevelSchema = withFieldMetadata(
   'Thinking depth override for this profile (lowercase: minimal, low, medium, high). The top-level thinkingLevel uses uppercase (MINIMAL-HIGH).',
 );
 
-const FileSearchStoreNameSchema = z
+export const FileSearchStoreNameSchema = z
   .string()
   .min(1)
   .max(256)

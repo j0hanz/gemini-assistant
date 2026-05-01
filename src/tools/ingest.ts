@@ -14,7 +14,6 @@ import { type IngestOutput, IngestOutputSchema } from '../schemas/ingest-output.
 
 import { getAI } from '../client.js';
 import { appendResourceLinks } from '../resources/index.js';
-import { validateScanPath } from '../resources/metadata.js';
 
 const log = logger.child('ingest');
 
@@ -81,13 +80,19 @@ const SKIPPED_EXTENSIONS = new Set([
 ]);
 
 /**
- * Validate file path security
+ * Ensure an absolute path lives inside one of the allowed workspace roots.
+ * Prevents traversal outside the workspace without rejecting legitimate
+ * absolute paths produced by `resolveUploadTarget`.
  */
-function validateUploadPath(filePath: string): void {
-  try {
-    validateScanPath(filePath);
-  } catch (error) {
-    throw new Error(error instanceof Error ? error.message : 'Invalid file path', { cause: error });
+function assertWithinRoots(target: string, roots: readonly string[]): void {
+  if (roots.length === 0) return;
+  const normalizedTarget = resolve(target);
+  const inside = roots.some((root) => {
+    const rel = relative(resolve(root), normalizedTarget);
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  });
+  if (!inside) {
+    throw new Error('Path is outside the allowed workspace roots');
   }
 }
 
@@ -101,17 +106,17 @@ function validateUploadPath(filePath: string): void {
 async function resolveUploadTarget(
   filePath: string | undefined,
   rootsFetcher: ToolRootsFetcher,
-): Promise<{ target: string; isWorkspaceRoot: boolean }> {
+): Promise<{ target: string; isWorkspaceRoot: boolean; roots: string[] }> {
   const roots = await getAllowedRoots(rootsFetcher);
   const primaryRoot = roots[0] ?? process.cwd();
 
   const trimmed = filePath?.trim() ?? '';
   if (trimmed.length === 0) {
-    return { target: primaryRoot, isWorkspaceRoot: true };
+    return { target: primaryRoot, isWorkspaceRoot: true, roots };
   }
 
   const absolute = isAbsolute(trimmed) ? trimmed : resolve(primaryRoot, trimmed);
-  return { target: absolute, isWorkspaceRoot: false };
+  return { target: absolute, isWorkspaceRoot: false, roots };
 }
 
 /**
@@ -275,8 +280,11 @@ async function handleUpload(
     ? input.storeName
     : `fileSearchStores/${input.storeName}`;
 
-  const { target, isWorkspaceRoot } = await resolveUploadTarget(input.filePath, rootsFetcher);
-  validateUploadPath(target);
+  const { target, isWorkspaceRoot, roots } = await resolveUploadTarget(
+    input.filePath,
+    rootsFetcher,
+  );
+  assertWithinRoots(target, roots);
 
   let info: { isFile: () => boolean; isDirectory: () => boolean };
   try {

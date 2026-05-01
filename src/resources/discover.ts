@@ -1,4 +1,4 @@
-import type { ReadResourceResult } from '@modelcontextprotocol/server';
+import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server';
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 
 import { PROFILES, TOOL_PROFILE_NAMES } from '../lib/tool-profiles.js';
@@ -378,58 +378,31 @@ function getHandler(): DiscoverResourceHandler {
 }
 
 /**
- * Create a ReadResourceResult for the given URI and content.
- */
-function readResourceContent(uri: string, content: string): ReadResourceResult {
-  // Determine MIME type based on URI
-  const mimeType = uri === ASSISTANT_PROFILES_URI ? 'application/json' : 'text/markdown';
-
-  return {
-    contents: [
-      {
-        uri,
-        mimeType,
-        text: content,
-      },
-    ],
-  };
-}
-
-/**
- * Resource request object.
- */
-interface ResourceRequest {
-  uri: string;
-}
-
-/**
  * Register discover resources under the assistant:// scheme.
  * This provides read-only access to catalogs, workflows, context, profiles, and instructions.
  */
-export function registerDiscoverResources(server: {
-  setResourceContentsHandler(
-    handler: (request: ResourceRequest) => Promise<ReadResourceResult>,
-  ): void;
-}): void {
+export function registerDiscoverResources(server: McpServer): void {
   const handler = getHandler();
 
-  server.setResourceContentsHandler(async (request): Promise<ReadResourceResult> => {
-    const uri = request.uri;
-    const validUris = [
-      ASSISTANT_CATALOG_URI,
-      ASSISTANT_WORKFLOWS_URI,
-      ASSISTANT_CONTEXT_URI,
-      ASSISTANT_PROFILES_URI,
-      ASSISTANT_INSTRUCTIONS_URI,
-    ];
+  const staticResources: [string, string, string][] = [
+    [ASSISTANT_CATALOG_URI, 'assistant-catalog', 'text/markdown'],
+    [ASSISTANT_WORKFLOWS_URI, 'assistant-workflows', 'text/markdown'],
+    [ASSISTANT_CONTEXT_URI, 'assistant-context', 'text/markdown'],
+    [ASSISTANT_PROFILES_URI, 'assistant-profiles', 'application/json'],
+    [ASSISTANT_INSTRUCTIONS_URI, 'assistant-instructions', 'text/markdown'],
+  ];
 
-    if (!validUris.includes(uri as typeof ASSISTANT_CATALOG_URI)) {
-      throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Unknown resource: ${uri}`);
-    }
-
-    const content = await handler.readResource(uri);
-    return readResourceContent(uri, content);
-  });
+  for (const [uri, name, mimeType] of staticResources) {
+    server.registerResource(
+      name,
+      uri,
+      { mimeType },
+      async (resourceUri): Promise<ReadResourceResult> => {
+        const content = await handler.readResource(uri);
+        return { contents: [{ uri: resourceUri.href, mimeType, text: content }] };
+      },
+    );
+  }
 }
 
 export function invalidateDiscoverResourceCache(uri?: string): void {

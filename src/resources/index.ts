@@ -19,18 +19,6 @@ interface ResourceServices {
 }
 
 /**
- * Structural type for server objects that support resource content handlers.
- * Used by discover and session resource registrars.
- */
-interface ServerWithResourceContentHandler {
-  setResourceContentsHandler(
-    handler: (request: { uri: string }) => Promise<{
-      contents: { uri: string; text: string; mimeType?: string }[];
-    }>,
-  ): void;
-}
-
-/**
  * Register all resource modules with the MCP server.
  * Discovers, sessions/turns, and workspace resources.
  *
@@ -38,15 +26,8 @@ interface ServerWithResourceContentHandler {
  * @param services Combined services containing sessionStore, toolServices, and rootsFetcher
  */
 export function registerAllResources(server: McpServer, services: ResourceServices): void {
-  // Register discover resources (catalogs, workflows, context, profiles, instructions)
-  // Cast server to structural type that has setResourceContentsHandler
-  const serverForDiscover = server as unknown as ServerWithResourceContentHandler;
-  registerDiscoverResources(serverForDiscover);
-
-  // Register session resources (sessions list, transcripts, events, turn parts)
-  registerSessionResources(serverForDiscover, services);
-
-  // Register workspace resources (cache metadata, cache contents, file access)
+  registerDiscoverResources(server);
+  registerSessionResources(server, services);
   registerWorkspaceResources(server, services.toolServices);
 }
 

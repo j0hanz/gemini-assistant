@@ -13,32 +13,46 @@ import {
   ASSISTANT_WORKFLOWS_URI,
 } from '../../src/resources/uris.js';
 
-test('discover resources — registers assistant:// resources', () => {
-  const mockServer = {
-    setResourceContentsHandler: (_handler: (request: { uri: string }) => Promise<unknown>) => {
-      // Mock implementation
+type ReadCallback = (
+  uri: URL,
+) => Promise<{ contents: { uri: string; mimeType: string; text: string }[] }>;
+
+function makeMockServer() {
+  const resources = new Map<string, ReadCallback>();
+  return {
+    registerResource: (
+      _name: string,
+      uriOrTemplate: unknown,
+      _config: unknown,
+      callback: ReadCallback,
+    ) => {
+      const uri =
+        typeof uriOrTemplate === 'string'
+          ? uriOrTemplate
+          : (uriOrTemplate as { uriTemplate: { template: string } }).uriTemplate.template;
+      resources.set(uri, callback);
+    },
+    async read(uri: string) {
+      const cb = resources.get(uri);
+      if (!cb) throw new Error(`No resource registered for ${uri}`);
+      return cb(new URL(uri));
+    },
+    size() {
+      return resources.size;
     },
   };
+}
 
-  // Should not throw
-  registerDiscoverResources(mockServer);
-  assert.ok(true);
+test('discover resources — registers assistant:// resources', () => {
+  const mockServer = makeMockServer();
+  registerDiscoverResources(mockServer as never);
+  assert.strictEqual(mockServer.size(), 5);
 });
 
 test('discover resources — can register without error', () => {
-  // Create a mock server with the basic handler
-  const handlers: ((request: { uri: string }) => Promise<unknown>)[] = [];
-  const mockServer = {
-    setResourceContentsHandler: (handler: (request: { uri: string }) => Promise<unknown>) => {
-      handlers.push(handler);
-    },
-  };
-
-  // Test that the handler can be registered without error
-  registerDiscoverResources(mockServer);
-
-  // Verify handler was registered
-  assert(handlers.length > 0);
+  const mockServer = makeMockServer();
+  registerDiscoverResources(mockServer as never);
+  assert(mockServer.size() > 0);
 });
 
 test('discover resources — catalog content is markdown', async () => {
@@ -102,7 +116,6 @@ test('discover resources — workflows metadata includes 1 hour ttl', async () =
 });
 
 test('discover resources — context content is markdown', async () => {
-  // Test context content builder
   const markdown = `# Assistant Context
 
 ## Overview
@@ -146,7 +159,6 @@ test('discover resources — profiles content is valid json', async () => {
   assert(typeof content === 'string');
   assert(content.length > 0);
 
-  // Verify it can be parsed back
   const parsed = JSON.parse(content);
   assert(Object.keys(parsed).length > 0);
   assert(parsed.plain !== undefined);
@@ -231,18 +243,35 @@ test('discover resources — metadata has generatedAt timestamp', async () => {
 
   assert(meta.generatedAt !== undefined);
   assert(typeof meta.generatedAt === 'string');
-  // Should be valid ISO string
   assert(!Number.isNaN(Date.parse(meta.generatedAt)));
 });
 
 test('discover resources — invalidate clears cache', async () => {
-  // Test the invalidate function
   invalidateDiscoverResourceCache();
   assert.ok(true);
 });
 
 test('discover resources — invalidate with uri clears specific resource', async () => {
-  // Test the invalidate function with specific URI
   invalidateDiscoverResourceCache(ASSISTANT_CATALOG_URI);
   assert.ok(true);
+});
+
+test('discover resources — catalog callback returns markdown content', async () => {
+  const mockServer = makeMockServer();
+  registerDiscoverResources(mockServer as never);
+
+  const result = await mockServer.read(ASSISTANT_CATALOG_URI);
+  assert(result.contents.length > 0);
+  assert.strictEqual(result.contents[0].mimeType, 'text/markdown');
+  assert(result.contents[0].text.length > 0);
+});
+
+test('discover resources — profiles callback returns json content', async () => {
+  const mockServer = makeMockServer();
+  registerDiscoverResources(mockServer as never);
+
+  const result = await mockServer.read(ASSISTANT_PROFILES_URI);
+  assert(result.contents.length > 0);
+  assert.strictEqual(result.contents[0].mimeType, 'application/json');
+  assert(result.contents[0].text.length > 0);
 });

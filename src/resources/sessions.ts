@@ -1,10 +1,19 @@
-import type { ReadResourceResult } from '@modelcontextprotocol/server';
-import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server';
+import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontextprotocol/server';
 
 import type { SessionStore } from '../sessions.js';
 import { ResourceMemo } from './index.js';
 import { buildResourceMeta } from './metadata.js';
-import { decodeTemplateParam, requireTemplateParam, SESSIONS_LIST_URI } from './uris.js';
+import {
+  decodeTemplateParam,
+  requireTemplateParam,
+  SESSION_DETAIL_TEMPLATE,
+  SESSION_EVENTS_TEMPLATE,
+  SESSION_TRANSCRIPT_TEMPLATE,
+  SESSIONS_LIST_URI,
+  TURN_GROUNDING_TEMPLATE,
+  TURN_PARTS_TEMPLATE,
+} from './uris.js';
 
 /**
  * Parse a URI and extract template parameters.
@@ -349,64 +358,63 @@ class SessionResourceHandler {
 }
 
 /**
- * Create a ReadResourceResult for the given URI and content.
- */
-function readResourceContent(uri: string, content: string): ReadResourceResult {
-  // Determine MIME type based on resource type
-  let mimeType = 'application/json';
-  if (uri.endsWith('/transcript')) {
-    mimeType = 'text/markdown';
-  }
-
-  return {
-    contents: [
-      {
-        uri,
-        mimeType,
-        text: content,
-      },
-    ],
-  };
-}
-
-/**
  * Register session resources under the gemini:// scheme.
  * This provides read-only access to session lists, details, transcripts, events, and turn data.
  */
 export function registerSessionResources(
-  server: {
-    setResourceContentsHandler(
-      handler: (request: { uri: string }) => Promise<ReadResourceResult>,
-    ): void;
-  },
+  server: McpServer,
   services: { sessionStore: SessionStore },
 ): void {
   const { sessionStore } = services;
   const handler = new SessionResourceHandler(sessionStore);
 
-  server.setResourceContentsHandler(async (request): Promise<ReadResourceResult> => {
-    const uri = request.uri;
-
-    // Validate that the URI is a session resource
-    const isSessionsList = uri === SESSIONS_LIST_URI;
-    const isSessionDetail = /^gemini:\/\/session\/[^/]+$/.exec(uri);
-    const isSessionTranscript = /^gemini:\/\/session\/[^/]+\/transcript$/.exec(uri);
-    const isSessionEvents = /^gemini:\/\/session\/[^/]+\/events$/.exec(uri);
-    const isTurnParts = /^gemini:\/\/session\/[^/]+\/turn\/\d+\/parts$/.exec(uri);
-    const isTurnGrounding = /^gemini:\/\/session\/[^/]+\/turn\/\d+\/grounding$/.exec(uri);
-
-    if (
-      !isSessionsList &&
-      !isSessionDetail &&
-      !isSessionTranscript &&
-      !isSessionEvents &&
-      !isTurnParts &&
-      !isTurnGrounding
-    ) {
-      throw new ProtocolError(ProtocolErrorCode.ResourceNotFound, `Unknown resource: ${uri}`);
-    }
-
-    const content = await handler.readResource(uri);
-    return readResourceContent(uri, content);
+  const makeJsonResult = (uri: URL, content: string): ReadResourceResult => ({
+    contents: [{ uri: uri.href, mimeType: 'application/json', text: content }],
   });
+
+  const makeMarkdownResult = (uri: URL, content: string): ReadResourceResult => ({
+    contents: [{ uri: uri.href, mimeType: 'text/markdown', text: content }],
+  });
+
+  server.registerResource(
+    'sessions-list',
+    SESSIONS_LIST_URI,
+    { mimeType: 'application/json' },
+    async (uri) => makeJsonResult(uri, await handler.readResource(uri.href)),
+  );
+
+  server.registerResource(
+    'session-detail',
+    new ResourceTemplate(SESSION_DETAIL_TEMPLATE, { list: undefined }),
+    { mimeType: 'application/json' },
+    async (uri) => makeJsonResult(uri, await handler.readResource(uri.href)),
+  );
+
+  server.registerResource(
+    'session-transcript',
+    new ResourceTemplate(SESSION_TRANSCRIPT_TEMPLATE, { list: undefined }),
+    { mimeType: 'text/markdown' },
+    async (uri) => makeMarkdownResult(uri, await handler.readResource(uri.href)),
+  );
+
+  server.registerResource(
+    'session-events',
+    new ResourceTemplate(SESSION_EVENTS_TEMPLATE, { list: undefined }),
+    { mimeType: 'application/json' },
+    async (uri) => makeJsonResult(uri, await handler.readResource(uri.href)),
+  );
+
+  server.registerResource(
+    'session-turn-parts',
+    new ResourceTemplate(TURN_PARTS_TEMPLATE, { list: undefined }),
+    { mimeType: 'application/json' },
+    async (uri) => makeJsonResult(uri, await handler.readResource(uri.href)),
+  );
+
+  server.registerResource(
+    'session-turn-grounding',
+    new ResourceTemplate(TURN_GROUNDING_TEMPLATE, { list: undefined }),
+    { mimeType: 'application/json' },
+    async (uri) => makeJsonResult(uri, await handler.readResource(uri.href)),
+  );
 }

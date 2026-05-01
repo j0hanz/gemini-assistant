@@ -1,5 +1,6 @@
 import { z } from 'zod/v4';
-import { withFieldMetadata, textField, optionalField } from './fields.js';
+
+import { optionalField, textField, withFieldMetadata } from './fields.js';
 
 export const IngestOutputSchema = z.strictObject({
   operation: withFieldMetadata(
@@ -16,12 +17,8 @@ export const IngestOutputSchema = z.strictObject({
   structuredContent: optionalField(
     z.strictObject({
       operation: withFieldMetadata(z.string(), 'Operation name'),
-      storeName: optionalField(
-        withFieldMetadata(z.string(), 'Store name'),
-      ),
-      documentName: optionalField(
-        withFieldMetadata(z.string(), 'Document name'),
-      ),
+      storeName: optionalField(withFieldMetadata(z.string(), 'Store name')),
+      documentName: optionalField(withFieldMetadata(z.string(), 'Document name')),
       message: textField('Result message'),
     }),
   ),

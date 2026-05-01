@@ -29,7 +29,7 @@ interface ResourceLinkOptions {
  * @returns Array of ResourceLink objects suggesting relevant resources
  */
 export function appendResourceLinks(
-  toolName: 'chat' | 'research' | 'analyze' | 'review',
+  toolName: 'chat' | 'research' | 'analyze' | 'review' | 'ingest',
   options?: ResourceLinkOptions,
 ): ResourceLink[] {
   const links: ResourceLink[] = [];
@@ -139,6 +139,26 @@ export function appendResourceLinks(
         uri: WORKSPACE_CACHE_CONTENTS_URI,
         name: 'Workspace Contents',
         description: 'Workspace context for the review',
+        mimeType: 'application/json',
+      });
+
+      break;
+    }
+
+    case 'ingest': {
+      // Tool catalog
+      links.push({
+        uri: ASSISTANT_CATALOG_URI,
+        name: 'Tool Catalog',
+        description: 'Available tools and their capabilities',
+        mimeType: 'text/markdown',
+      });
+
+      // Workspace context
+      links.push({
+        uri: WORKSPACE_CACHE_CONTENTS_URI,
+        name: 'Workspace Contents',
+        description: 'Workspace context for ingestion',
         mimeType: 'application/json',
       });
 

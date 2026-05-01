@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { AppError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
+import { createStoreRegistry } from './lib/store-registry.js';
 import { createSharedTaskInfra, type SharedTaskInfra } from './lib/tasks.js';
 import type { ToolServices } from './lib/tool-context.js';
 import { buildServerRootsFetcher, type RootsFetcher } from './lib/validation.js';
@@ -24,6 +25,7 @@ import {
 } from './sessions.js';
 import { registerAnalyzeTool } from './tools/analyze.js';
 import { registerChatTool } from './tools/chat.js';
+import { registerIngestTool } from './tools/ingest.js';
 import { registerResearchTool } from './tools/research.js';
 import { registerReviewTool } from './tools/review.js';
 import type { ServerInstance } from './transport.js';
@@ -80,6 +82,9 @@ const SERVER_TOOL_REGISTRARS = [
   (server, services) => {
     registerReviewTool(server, services.toolServices);
   },
+  (server, services) => {
+    registerIngestTool(server, services.toolServices);
+  },
 ] as const satisfies readonly ServerRegistrar[];
 
 const SERVER_INSTRUCTIONS =
@@ -88,7 +93,8 @@ const SERVER_INSTRUCTIONS =
   'chat sessions are server-memory only, expire/evict over time, and require a stateful transport path), ' +
   'research (explicit quick or deep grounded research), ' +
   'analyze (file, URL, small file-set analysis, or diagram generation), ' +
-  'review (diff review, file comparison, or failure diagnosis). ' +
+  'review (diff review, file comparison, or failure diagnosis), ' +
+  'ingest (manage Gemini File Search Stores). ' +
   'Tasks (the tools/call task-aware path) are process-local and lost across restarts; ' +
   'when STATELESS=true, task-aware tools/call requests are unavailable because the tasks capability is not advertised. ' +
   'deep research tasks may take several minutes — poll tasks/get until terminal. ' +
@@ -136,6 +142,7 @@ function throwCloseErrors(closeErrors: Error[]): void {
 
 export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerInstance {
   const sessionStore = createSessionStore();
+  const storeRegistry = createStoreRegistry();
   const taskInfra = sharedTaskInfra ?? createSharedTaskInfra();
   const ownTaskInfra = sharedTaskInfra ? undefined : taskInfra;
   const { taskStore, taskMessageQueue } = taskInfra;
@@ -238,6 +245,7 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
     sessionStore,
     toolServices,
     rootsFetcher,
+    storeRegistry,
   });
 
   return {

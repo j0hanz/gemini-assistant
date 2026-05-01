@@ -1,4 +1,4 @@
-type PublicJobName = 'chat' | 'research' | 'analyze' | 'review';
+type PublicJobName = 'chat' | 'research' | 'analyze' | 'review' | 'ingest';
 export const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] as const;
 export type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
 
@@ -14,6 +14,9 @@ type PublicResourceUri =
   | 'gemini://session/{sessionId}/transcript'
   | 'gemini://session/{sessionId}/events'
   | 'gemini://session/{sessionId}/turn/{turnIndex}/parts'
+  | 'gemini://stores'
+  | 'gemini://stores/{storeName}'
+  | 'gemini://stores/{storeName}/documents'
   | 'gemini://workspace/cache/contents'
   | 'gemini://workspace/cache';
 
@@ -62,6 +65,7 @@ export const PUBLIC_TOOL_NAMES = [
   'research',
   'analyze',
   'review',
+  'ingest',
 ] as const satisfies readonly PublicJobName[];
 
 const PUBLIC_PROMPT_NAMES = [
@@ -78,6 +82,7 @@ const PUBLIC_STATIC_RESOURCE_URIS = [
   'assistant://discover/workflows',
   'gemini://profiles',
   'gemini://sessions',
+  'gemini://stores',
   'gemini://workspace/cache/contents',
   'gemini://workspace/cache',
 ] as const satisfies readonly PublicResourceUri[];
@@ -87,6 +92,8 @@ const PUBLIC_RESOURCE_TEMPLATES = [
   'gemini://session/{sessionId}/transcript',
   'gemini://session/{sessionId}/events',
   'gemini://session/{sessionId}/turn/{turnIndex}/parts',
+  'gemini://stores/{storeName}',
+  'gemini://stores/{storeName}/documents',
 ] as const satisfies readonly PublicResourceUri[];
 
 const PUBLIC_RESOURCE_URIS = [
@@ -230,6 +237,24 @@ const TOOL_DISCOVERY_DETAILS = {
     related: [
       { kind: 'prompt', name: 'review' },
       { kind: 'resource', name: 'assistant://discover/workflows' },
+    ],
+  },
+  ingest: {
+    title: 'Ingest',
+    bestFor:
+      'Managing Gemini File Search Stores: create stores, upload documents, and manage cleanup.',
+    whenToUse: 'Use to set up and maintain file search stores for grounded research and analysis.',
+    inputs: ['operation', 'storeName?', 'filePath?', 'documentId?'],
+    returns:
+      'Store metadata (storeName, message) or operation confirmation with error details on failure.',
+    limitations: [
+      'File Search Stores API support depends on the Gemini SDK version; simulate/partial implementations may be active.',
+      'Input caps: filePath max 4096 chars.',
+      'Store operations are idempotent; attempting to create an existing store or delete a non-existent store are safe no-ops.',
+    ],
+    related: [
+      { kind: 'resource', name: 'gemini://stores' },
+      { kind: 'resource', name: 'gemini://stores/{storeName}/documents' },
     ],
   },
 } as const satisfies Record<PublicJobName, DiscoveryEntryMetadata>;
@@ -395,6 +420,37 @@ const RESOURCE_DISCOVERY_DETAILS = {
     limitations: ['Raw turn-parts access requires MCP_EXPOSE_SESSION_RESOURCES=true.'],
     related: [{ kind: 'resource', name: 'gemini://session/{sessionId}' }],
   },
+  'gemini://stores': {
+    title: 'Stores List Resource',
+    bestFor: 'Browsing available Gemini File Search Stores.',
+    whenToUse: 'Use to inspect or manage file search stores for research.',
+    inputs: [],
+    returns: 'JSON list of available store metadata (storeName, documentCount, createdAt).',
+    related: [{ kind: 'tool', name: 'ingest' }],
+  },
+  'gemini://stores/{storeName}': {
+    title: 'Store Detail Resource',
+    bestFor: 'Inspecting details for a specific Gemini File Search Store.',
+    whenToUse: 'Use to get store-level metadata and configuration.',
+    inputs: ['storeName'],
+    returns: 'JSON metadata for the selected store.',
+    related: [
+      { kind: 'resource', name: 'gemini://stores' },
+      { kind: 'resource', name: 'gemini://stores/{storeName}/documents' },
+    ],
+  },
+  'gemini://stores/{storeName}/documents': {
+    title: 'Store Documents Resource',
+    bestFor: 'Listing documents in a specific Gemini File Search Store.',
+    whenToUse: 'Use to browse or manage documents within a store.',
+    inputs: ['storeName'],
+    returns:
+      'JSON list of documents in the selected store (documentId, fileName, sizeBytes, uploadedAt).',
+    related: [
+      { kind: 'resource', name: 'gemini://stores' },
+      { kind: 'resource', name: 'gemini://stores/{storeName}' },
+    ],
+  },
   'gemini://workspace/cache/contents': {
     title: 'Workspace Context Resource',
     bestFor: 'Viewing the assembled workspace context used for Gemini calls.',
@@ -524,4 +580,5 @@ export const TOOL_LABELS = {
   review: 'Review Diff',
   compareFiles: 'Compare Files',
   reviewFailure: 'Review Failure',
+  ingest: 'Ingest',
 } as const;

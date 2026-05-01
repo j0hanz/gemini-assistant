@@ -1,12 +1,11 @@
 import { z } from 'zod/v4';
-import { FileSearchStoreNameSchema, textField, optionalField } from './fields.js';
+
+import { FileSearchStoreNameSchema, optionalField, textField } from './fields.js';
 
 const CreateStoreSchema = z.strictObject({
   operation: z.literal('create-store').describe('Literal: create-store'),
   storeName: FileSearchStoreNameSchema.describe('Store name. Format: alphanumerics, _, -, /.'),
-  displayName: optionalField(
-    textField('Human-readable store display name', 256),
-  ),
+  displayName: optionalField(textField('Human-readable store display name', 256)),
 });
 
 const UploadSchema = z.strictObject({
@@ -15,12 +14,8 @@ const UploadSchema = z.strictObject({
   filePath: textField('Absolute or workspace-relative path to file').describe(
     'Absolute or workspace-relative path to file',
   ),
-  displayName: optionalField(
-    textField('Human-readable document display name', 256),
-  ),
-  mimeType: optionalField(
-    textField('MIME type (e.g. text/plain, application/json)', 128),
-  ),
+  displayName: optionalField(textField('Human-readable document display name', 256)),
+  mimeType: optionalField(textField('MIME type (e.g. text/plain, application/json)', 128)),
 });
 
 const DeleteStoreSchema = z.strictObject({

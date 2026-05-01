@@ -15,7 +15,7 @@ export interface DocumentEntry {
 	createTime?: string;
 }
 
-export interface StoreRegistryOptions {
+interface StoreRegistryOptions {
 	ttlMs?: number;
 	listStoresFn?: () => Promise<StoreEntry[]>;
 	listDocumentsFn?: (storeName: string) => Promise<DocumentEntry[]>;

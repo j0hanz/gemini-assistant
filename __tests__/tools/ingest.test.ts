@@ -338,7 +338,7 @@ test('uploadAll: stops uploads and throws error when signal is aborted mid-batch
 });
 
 test('uploadAll emits progress after each file upload', async () => {
-  const progressUpdates: Array<{ completed: number; total: number; message: string }> = [];
+  const progressUpdates: { completed: number; total: number; message: string }[] = [];
 
   const mockAI = {
     fileSearchStores: {
@@ -394,17 +394,20 @@ test('uploadAll emits progress after each file upload', async () => {
   assert.strictEqual(result.failed, 1, 'Should have 1 failed file');
 
   // Verify per-file progress notifications were emitted
-  assert.ok(progressUpdates.length >= 3, 'Should emit at least 3 progress notifications (one per file)');
+  assert.ok(
+    progressUpdates.length >= 3,
+    'Should emit at least 3 progress notifications (one per file)',
+  );
 });
 
 test('resolveStore handles concurrent calls with same display name', async () => {
   let createCallCount = 0;
 
   // Create an async iterable mock for list()
+
   const createPagerMock = () => ({
     [Symbol.asyncIterator]: async function* () {
       // Simulate no existing stores
-      return;
     },
   });
 
@@ -457,4 +460,68 @@ test('uploadOne logs error with file path and store name', async () => {
 
   assert.strictEqual(result.ok, false);
   assert.ok(result.error.includes('Network timeout'), 'Error message preserved');
+});
+
+test('uploadAll sends progress notification after each file success', async () => {
+  const mockAI = {
+    fileSearchStores: {
+      uploadToFileSearchStore: async ({ file }: { file: string }) => {
+        // All files succeed
+        return {
+          name: `fileSearchStores/test`,
+          response: { documentName: `${file}-doc` },
+        };
+      },
+    },
+  };
+
+  const files = ['file1.txt', 'file2.txt', 'file3.txt'];
+  const mockCtx = {
+    task: { cancellationSignal: undefined },
+  };
+
+  const result = await uploadAll(
+    mockAI as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    'test-store',
+    files,
+    '/root',
+    mockCtx as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+  );
+
+  assert.strictEqual(result.uploaded.length, 3, 'All 3 files uploaded');
+  assert.strictEqual(result.failed, 0, '0 files failed');
+});
+
+test('uploadAll sends progress for successful and failed files', async () => {
+  const mockAI = {
+    fileSearchStores: {
+      uploadToFileSearchStore: async ({ file }: { file: string }) => {
+        if (file.includes('fail')) {
+          throw new Error('Simulated failure');
+        }
+        return {
+          name: `fileSearchStores/test`,
+          response: { documentName: `${file}-doc` },
+        };
+      },
+    },
+  };
+
+  const files = ['good1.txt', 'fail.txt', 'good2.txt'];
+  const mockCtx = {
+    task: { cancellationSignal: undefined },
+  };
+
+  const result = await uploadAll(
+    mockAI as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    'test-store',
+    files,
+    '/root',
+    mockCtx as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+  );
+
+  assert.strictEqual(result.uploaded.length, 2, '2 files uploaded');
+  assert.strictEqual(result.failed, 1, '1 file failed');
+  assert.ok(result.firstError, 'First error captured');
+  assert.ok(result.firstError.includes('Simulated failure'), 'Error message preserved');
 });

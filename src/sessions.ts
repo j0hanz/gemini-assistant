@@ -1,6 +1,7 @@
-import type { GroundingMetadata, UrlContextMetadata } from '@google/genai';
+import type { GroundingMetadata, Part, UrlContextMetadata } from '@google/genai';
 
 import type { FunctionCallEntry, StreamAnomalies, ToolEvent } from './lib/streaming.js';
+import type { GroundingRollup } from './schemas/grounding.js';
 import type { UsageMetadata } from './schemas/outputs.js';
 
 import { getSessionLimits, getSlimSessionEvents } from './config.js';
@@ -44,11 +45,18 @@ export interface SessionEventEntry {
   taskId?: string;
 }
 
+interface SessionTurn {
+  parts: Part[];
+  rawParts: Part[];
+  groundingMetadata?: GroundingRollup | undefined;
+}
+
 interface SessionEntry {
   interactionId: string;
   lastAccess: number;
   transcript: TranscriptEntry[];
   events: SessionEventEntry[];
+  turns: Map<number, SessionTurn>;
 }
 
 export interface SessionSummary {
@@ -103,7 +111,23 @@ export function sanitizeSessionText(text: string | undefined): string | undefine
     return current.replace(pattern, '[REDACTED]');
   }, text);
 }
+function transformGroundingMetadata(
+  events: GroundingMetadata[] | undefined,
+): GroundingRollup | undefined {
+  if (!events || events.length === 0) {
+    return undefined;
+  }
 
+  const rollup: GroundingRollup = {
+    raw: events,
+  };
+
+  // The events are opaque GroundingMetadata objects from the SDK
+  // Store them as raw for now; consumers can inspect the raw array
+  // for specific grounding features based on the SDK's actual structure
+
+  return rollup;
+}
 function cloneValue<T>(value: T): T {
   return structuredClone(value);
 }
@@ -313,6 +337,23 @@ export class SessionStore {
     return this.evictedSessions.has(id);
   }
 
+  initializeSession(id: string, interactionId: string): boolean {
+    if (this.sessions.has(id)) {
+      return false;
+    }
+
+    const entry: SessionEntry = {
+      interactionId,
+      lastAccess: this.now(),
+      transcript: [],
+      events: [],
+      turns: new Map(),
+    };
+
+    this.setSessionEntry(id, entry);
+    return true;
+  }
+
   private notifyChange(
     listChanged = true,
     turnPartsAdded?: { sessionId: string; turnIndex: number },
@@ -387,6 +428,50 @@ export class SessionStore {
       this.notifyChange(true);
     }, 0).unref();
     return undefined;
+  }
+
+  listTurnIndices(sessionId: string): number[] {
+    const session = this.sessions.get(sessionId);
+    return session ? Array.from(session.turns.keys()) : [];
+  }
+
+  getTurnRawParts(sessionId: string, turnIndex: number): Part[] | undefined {
+    const turn = this.getTurn(sessionId, turnIndex);
+    return turn?.rawParts;
+  }
+
+  getTurnGrounding(sessionId: string, turnIndex: number): GroundingRollup | undefined {
+    const turn = this.getTurn(sessionId, turnIndex);
+    return turn?.groundingMetadata;
+  }
+
+  appendTurnParts(
+    sessionId: string,
+    turnIndex: number,
+    parts: Part[],
+    rawParts: Part[],
+    groundingMetadataEvents?: GroundingMetadata[],
+  ): boolean {
+    const entry = this.getActiveSessionEntry(sessionId);
+    if (!entry) return false;
+
+    const groundingMetadata = transformGroundingMetadata(groundingMetadataEvents);
+    const turn: SessionTurn = {
+      parts: [...parts],
+      rawParts: [...rawParts],
+      ...(groundingMetadata !== undefined ? { groundingMetadata } : {}),
+    };
+
+    entry.turns.set(turnIndex, turn);
+    this.touchSessionEntry(sessionId, entry);
+    this.notifyChange(false, { sessionId, turnIndex });
+    return true;
+  }
+
+  private getTurn(sessionId: string, turnIndex: number): SessionTurn | undefined {
+    const session = this.sessions.get(sessionId);
+    if (!session) return undefined;
+    return session.turns.get(turnIndex);
   }
 }
 

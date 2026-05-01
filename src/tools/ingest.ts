@@ -458,6 +458,7 @@ async function handleUpload(
       documentName: result.name,
       uploadedCount: 1,
       skippedCount: 0,
+      created: storeCreated,
       message: `Uploaded 1 file to '${fileSearchStoreName}'${createdSuffix}.`,
     };
   }
@@ -474,6 +475,7 @@ async function handleUpload(
       storeName: fileSearchStoreName,
       uploadedCount: 0,
       skippedCount: skipped,
+      created: storeCreated,
       message: `No eligible files found under ${target} (skipped: ${skipped}).`,
     };
   }
@@ -495,6 +497,7 @@ async function handleUpload(
     uploadedCount: uploaded.length,
     skippedCount: skipped + failed,
     uploadedFiles: uploaded.slice(0, 200).map((f) => relative(target, f) || f),
+    created: storeCreated,
     message: `Uploaded ${String(uploaded.length)}/${String(files.length)} files from ${target} to '${fileSearchStoreName}'${createdSuffix} (skipped: ${String(skipped)}, failed: ${String(failed)}).${failureSuffix}`,
   };
 }

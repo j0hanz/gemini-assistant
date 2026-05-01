@@ -252,7 +252,11 @@ export async function uploadOne(
     return { ok: true, name: documentName };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    log.warn(`upload failed for ${filePath}`, { error: message });
+    log.warn(`upload failed: ${filePath}`, {
+      error: message,
+      filePath,
+      storeName: fileSearchStoreName,
+    });
     return { ok: false, error: message };
   }
 }
@@ -293,9 +297,11 @@ export async function uploadAll(
     for (const { file, result } of results) {
       if (result.ok) {
         uploaded.push(file);
+        log.debug(`uploaded ${file}`);
       } else {
         failed += 1;
         firstError ??= result.error;
+        log.warn(`upload failed: ${file} — ${result.error}`);
       }
 
       // Emit progress after each file (success or failure)

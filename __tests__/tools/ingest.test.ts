@@ -437,3 +437,24 @@ test('resolveStore handles concurrent calls with same display name', async () =>
   // Due to concurrent API calls, may have different results from two creates
   // This is acceptable per Gemini API atomicity
 });
+
+test('uploadOne logs error with file path and store name', async () => {
+  const mockAI = {
+    fileSearchStores: {
+      uploadToFileSearchStore: async () => {
+        throw new Error('Network timeout');
+      },
+    },
+  };
+
+  const result = await uploadOne(
+    mockAI as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    'fileSearchStores/test-store',
+    '/path/to/file.txt',
+    '/path/to',
+    undefined,
+  );
+
+  assert.strictEqual(result.ok, false);
+  assert.ok(result.error.includes('Network timeout'), 'Error message preserved');
+});

@@ -67,11 +67,11 @@ import {
 } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
 import {
-  sessionDetailUri,
   sessionEventsUri,
+  sessionResourceUri,
   sessionTranscriptUri,
-  sessionTurnPartsUri,
-} from '../resources.js';
+  turnPartsUri,
+} from '../resources/uris.js';
 import type {
   SessionAccess,
   SessionEventEntry,
@@ -542,7 +542,7 @@ function appendSessionResource(
   if (result.isError) return;
   result.content.push(
     withRelatedTaskMeta(
-      createResourceLink(sessionDetailUri(sessionId), `Chat Session ${sessionId}`),
+      createResourceLink(sessionResourceUri(sessionId), `Chat Session ${sessionId}`),
       taskId,
     ),
   );
@@ -565,7 +565,7 @@ function appendSessionResource(
     result.content.push(
       withRelatedTaskMeta(
         createResourceLink(
-          sessionTurnPartsUri(sessionId, turnIndex),
+          turnPartsUri(sessionId, turnIndex),
           `Chat Session ${sessionId} Turn ${String(turnIndex)} Parts`,
         ),
         taskId,

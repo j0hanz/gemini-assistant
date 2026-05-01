@@ -15,7 +15,7 @@ import { createWorkspaceAccess, createWorkspaceCacheManager } from './lib/worksp
 import { getExposeSessionResources, getStatelessTransportFlag } from './config.js';
 import { registerPrompts } from './prompts.js';
 import { PUBLIC_TOOL_NAMES } from './public-contract.js';
-import { registerAllResources } from './resources.js';
+import { registerAllResources } from './resources/index.js';
 import { sessionResourceUri, turnPartsUri } from './resources/uris.js';
 import {
   createSessionAccess,

@@ -47,7 +47,7 @@ test('ingest schema: upload operation validates correctly', () => {
   }
 });
 
-test('ingest schema: upload without filePath defaults to workspace', () => {
+test('ingest schema: upload requires filePath', () => {
   const input = {
     operation: 'upload',
     storeName: 'my-store',
@@ -55,7 +55,7 @@ test('ingest schema: upload without filePath defaults to workspace', () => {
   };
 
   const result = IngestInputSchema.safeParse(input);
-  assert.strictEqual(result.success, true);
+  assert.strictEqual(result.success, false);
 });
 
 test('ingest schema: upload with default mimeType', () => {

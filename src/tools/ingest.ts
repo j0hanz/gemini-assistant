@@ -149,24 +149,21 @@ function assertWithinRoots(target: string, roots: readonly string[]): void {
 /**
  * Resolve the upload target to an absolute path.
  *
- * - If `filePath` is empty, returns the first workspace root.
  * - If `filePath` is absolute, returns it as-is.
  * - Otherwise resolves relative to the first workspace root.
+ *
+ * `filePath` is required by the schema for `upload`, so it is never empty here.
  */
 async function resolveUploadTarget(
-  filePath: string | undefined,
+  filePath: string,
   rootsFetcher: ToolRootsFetcher,
-): Promise<{ target: string; isWorkspaceRoot: boolean; roots: string[] }> {
+): Promise<{ target: string; roots: string[] }> {
   const roots = await getAllowedRoots(rootsFetcher);
   const primaryRoot = roots[0] ?? process.cwd();
 
-  const trimmed = filePath?.trim() ?? '';
-  if (trimmed.length === 0) {
-    return { target: primaryRoot, isWorkspaceRoot: true, roots };
-  }
-
+  const trimmed = filePath.trim();
   const absolute = isAbsolute(trimmed) ? trimmed : resolve(primaryRoot, trimmed);
-  return { target: absolute, isWorkspaceRoot: false, roots };
+  return { target: absolute, roots };
 }
 
 /**
@@ -396,10 +393,12 @@ async function handleUpload(
     { createIfMissing: true },
   );
 
-  const { target, isWorkspaceRoot, roots } = await resolveUploadTarget(
-    input.filePath,
-    rootsFetcher,
-  );
+  if (input.filePath === undefined || input.filePath.length === 0) {
+    // Defensive: schema enforces this, but keep an explicit guard.
+    throw new Error("filePath is required for 'upload' (e.g. 'src' or an absolute path).");
+  }
+
+  const { target, roots } = await resolveUploadTarget(input.filePath, rootsFetcher);
   assertWithinRoots(target, roots);
 
   let info: { isFile: () => boolean; isDirectory: () => boolean };
@@ -452,7 +451,6 @@ async function handleUpload(
     target,
     ctx,
   );
-  const scope = isWorkspaceRoot ? 'workspace' : target;
   const failureSuffix =
     failed > 0 && firstError !== undefined ? ` First failure: ${firstError}` : '';
 
@@ -462,7 +460,7 @@ async function handleUpload(
     uploadedCount: uploaded.length,
     skippedCount: skipped + failed,
     uploadedFiles: uploaded.slice(0, 200).map((f) => relative(target, f) || f),
-    message: `Uploaded ${String(uploaded.length)}/${String(files.length)} files from ${scope} to '${fileSearchStoreName}'${createdSuffix} (skipped: ${String(skipped)}, failed: ${String(failed)}).${failureSuffix}`,
+    message: `Uploaded ${String(uploaded.length)}/${String(files.length)} files from ${target} to '${fileSearchStoreName}'${createdSuffix} (skipped: ${String(skipped)}, failed: ${String(failed)}).${failureSuffix}`,
   };
 }
 
@@ -599,7 +597,7 @@ export function registerIngestTool(server: McpServer, services?: ToolServices): 
       name: 'ingest',
       title: 'Ingest',
       description:
-        "Manage Gemini File Search Stores. 'upload' with empty filePath ingests the entire workspace; with a directory path ingests that subtree; with a file path uploads one file.",
+        "Manage Gemini File Search Stores. For 'upload', provide a filePath like 'src' to ingest a directory subtree, or a path to a single file.",
       inputSchema: IngestInputSchema,
       outputSchema: IngestOutputSchema,
       annotations: MUTABLE_ANNOTATIONS,

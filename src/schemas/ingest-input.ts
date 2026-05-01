@@ -12,9 +12,11 @@ import { FileSearchStoreNameSchema, optionalField, textField } from './fields.js
  * and enforce per-operation requirements via `superRefine`.
  *
  * Path semantics for the `upload` operation:
- *   - empty / omitted → walk every workspace root and upload all eligible files
  *   - a file path     → upload that single file
  *   - a directory     → walk that directory and upload all eligible files
+ *
+ * Workspace-wide uploads are intentionally unsupported: large workspaces
+ * exceed MCP request timeouts. Always scope to a directory like `src`.
  */
 const IngestOperationEnum = z.enum([
   'create-store',
@@ -32,10 +34,11 @@ const RawIngestInputSchema = z.strictObject({
   ),
   filePath: z
     .string()
+    .trim()
     .max(4096)
     .optional()
     .describe(
-      'Path to a file or directory (upload only). Leave empty to upload the entire workspace. Absolute or workspace-relative.',
+      "Path to a file or directory (required for 'upload'). Absolute or workspace-relative (e.g. 'src').",
     ),
   documentName: optionalField(
     textField(
@@ -51,6 +54,17 @@ const RawIngestInputSchema = z.strictObject({
 });
 
 export const IngestInputSchema = RawIngestInputSchema.superRefine((value, ctx) => {
+  if (
+    value.operation === 'upload' &&
+    (value.filePath === undefined || value.filePath.length === 0)
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['filePath'],
+      message:
+        "filePath is required when operation = 'upload' (e.g. 'src', 'docs', or an absolute path).",
+    });
+  }
   if (
     value.operation === 'delete-document' &&
     (value.documentName === undefined || value.documentName.length === 0)

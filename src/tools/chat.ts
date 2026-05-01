@@ -238,13 +238,13 @@ function buildAskStructuredContent(
   }
 
   return buildStructuredResponse(
-    {
+    pickDefined({
       answer,
-      ...(parsedData !== undefined ? { data: parsedData } : {}),
-      ...(warnings.length > 0 ? { warnings } : {}),
-    },
-    {
-      ...(contextUsed ? { contextUsed } : {}),
+      data: parsedData,
+      warnings: warnings.length > 0 ? warnings : undefined,
+    }),
+    pickDefined({
+      contextUsed,
       functionCalls: streamResult.functionCalls,
       includeThoughts: getExposeThoughts(),
       thoughtText: streamResult.thoughtText,
@@ -255,7 +255,7 @@ function buildAskStructuredContent(
       citationMetadata: streamResult.citationMetadata,
       groundingMetadata: streamResult.groundingMetadata,
       urlContextMetadata: streamResult.urlContextMetadata,
-    },
+    }),
   );
 }
 
@@ -873,84 +873,57 @@ function appendSessionTurn(
 ): void {
   const structured = getAskStructuredContent(askResult.result);
   const usage = extractUsage(askResult.streamResult.usageMetadata);
+  const streamResult = askResult.streamResult;
 
-  const response: SessionEventEntry['response'] = {
+  const response: SessionEventEntry['response'] = pickDefined({
     text: extractTextContent(askResult.result.content),
-  };
+    data: structured?.data,
+    schemaWarnings: structured?.warnings?.length ? structured.warnings : undefined,
+    finishReason: streamResult.finishReason,
+    functionCalls: streamResult.functionCalls.length > 0 ? streamResult.functionCalls : undefined,
+    toolEvents: streamResult.toolEvents.length > 0 ? streamResult.toolEvents : undefined,
+    usage,
+    thoughts: streamResult.thoughtText || undefined,
+    safetyRatings: streamResult.safetyRatings,
+    finishMessage: streamResult.finishMessage,
+    citationMetadata: streamResult.citationMetadata,
+    groundingMetadata: streamResult.groundingMetadata,
+    urlContextMetadata: streamResult.urlContextMetadata,
+    anomalies: streamResult.anomalies,
+  });
 
-  if (structured?.data !== undefined) {
-    response.data = structured.data;
-  }
-  if (structured?.warnings !== undefined && structured.warnings.length > 0) {
-    response.schemaWarnings = structured.warnings;
-  }
-  if (askResult.streamResult.finishReason !== undefined) {
-    response.finishReason = askResult.streamResult.finishReason;
-  }
-  if (askResult.streamResult.functionCalls.length > 0) {
-    response.functionCalls = askResult.streamResult.functionCalls;
-  }
-  if (askResult.streamResult.toolEvents.length > 0) {
-    response.toolEvents = askResult.streamResult.toolEvents;
-  }
-  if (usage !== undefined) {
-    response.usage = usage;
-  }
-  if (askResult.streamResult.thoughtText) {
-    response.thoughts = askResult.streamResult.thoughtText;
-  }
-  if (askResult.streamResult.safetyRatings !== undefined) {
-    response.safetyRatings = askResult.streamResult.safetyRatings;
-  }
-  if (askResult.streamResult.finishMessage !== undefined) {
-    response.finishMessage = askResult.streamResult.finishMessage;
-  }
-  if (askResult.streamResult.citationMetadata !== undefined) {
-    response.citationMetadata = askResult.streamResult.citationMetadata;
-  }
-  if (askResult.streamResult.groundingMetadata !== undefined) {
-    response.groundingMetadata = askResult.streamResult.groundingMetadata;
-  }
-  if (askResult.streamResult.urlContextMetadata !== undefined) {
-    response.urlContextMetadata = askResult.streamResult.urlContextMetadata;
-  }
-  if (askResult.streamResult.anomalies !== undefined) {
-    response.anomalies = askResult.streamResult.anomalies;
-  }
-
-  const request: SessionEventEntry['request'] = {
+  const request: SessionEventEntry['request'] = pickDefined({
     message: args.message,
-  };
-  if (askResult.toolProfile) {
-    request.toolProfile = askResult.toolProfile;
-  }
-  if (askResult.urls !== undefined) {
-    request.urls = askResult.urls;
-  }
+    toolProfile: askResult.toolProfile || undefined,
+    urls: askResult.urls,
+  });
 
-  const event: SessionEventEntry = {
+  const event: SessionEventEntry = pickDefined({
     request,
     response,
     timestamp: deps.now(),
-  };
-
-  if (taskId !== undefined) {
-    event.taskId = taskId;
-  }
+    taskId,
+  });
 
   deps.appendSessionEvent(sessionId, event);
-  deps.appendSessionTranscript(sessionId, {
-    role: 'user',
-    text: args.message,
-    timestamp: deps.now(),
-    ...(taskId !== undefined ? { taskId } : {}),
-  });
-  deps.appendSessionTranscript(sessionId, {
-    role: 'assistant',
-    text: extractTextContent(askResult.result.content),
-    timestamp: deps.now(),
-    ...(taskId !== undefined ? { taskId } : {}),
-  });
+  deps.appendSessionTranscript(
+    sessionId,
+    pickDefined({
+      role: 'user' as const,
+      text: args.message,
+      timestamp: deps.now(),
+      taskId,
+    }),
+  );
+  deps.appendSessionTranscript(
+    sessionId,
+    pickDefined({
+      role: 'assistant' as const,
+      text: extractTextContent(askResult.result.content),
+      timestamp: deps.now(),
+      taskId,
+    }),
+  );
 }
 
 interface PreparedAskRequest {
@@ -1076,16 +1049,7 @@ function assembleChatOutput(
     ? structured.warnings.filter((value): value is string => typeof value === 'string')
     : undefined;
   const sessionId = extractSessionId(result, sessionIdHint);
-  const session =
-    sessionId && typeof structured.session === 'object' && structured.session !== null
-      ? {
-          id: sessionId,
-        }
-      : sessionId
-        ? {
-            id: sessionId,
-          }
-        : undefined;
+  const session = sessionId ? { id: sessionId } : undefined;
   return createToolContext('chat', ctx).validateOutput(
     ChatOutputSchema,
     pickDefined({

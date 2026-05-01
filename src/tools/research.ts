@@ -470,45 +470,33 @@ function combineCitationMetadata(
 }
 
 function sumUsageMetadata(results: readonly StreamResult[]): StreamResult['usageMetadata'] {
-  let usageMetadata: StreamResult['usageMetadata'];
+  const usages = results
+    .map((r) => r.usageMetadata)
+    .filter((u): u is NonNullable<typeof u> => u !== undefined);
+  if (usages.length === 0) return undefined;
 
-  for (const result of results) {
-    const usage = result.usageMetadata;
-    if (!usage) {
-      continue;
-    }
+  const sum = (
+    key:
+      | 'promptTokenCount'
+      | 'candidatesTokenCount'
+      | 'totalTokenCount'
+      | 'cachedContentTokenCount'
+      | 'thoughtsTokenCount'
+      | 'toolUsePromptTokenCount',
+  ) => usages.reduce((acc, u) => acc + (u[key] ?? 0), 0);
 
-    const merged: NonNullable<StreamResult['usageMetadata']> = {
-      promptTokenCount: (usageMetadata?.promptTokenCount ?? 0) + (usage.promptTokenCount ?? 0),
-      candidatesTokenCount:
-        (usageMetadata?.candidatesTokenCount ?? 0) + (usage.candidatesTokenCount ?? 0),
-      totalTokenCount: (usageMetadata?.totalTokenCount ?? 0) + (usage.totalTokenCount ?? 0),
-      cachedContentTokenCount:
-        (usageMetadata?.cachedContentTokenCount ?? 0) + (usage.cachedContentTokenCount ?? 0),
-      thoughtsTokenCount:
-        (usageMetadata?.thoughtsTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0),
-      toolUsePromptTokenCount:
-        (usageMetadata?.toolUsePromptTokenCount ?? 0) + (usage.toolUsePromptTokenCount ?? 0),
-    };
-
-    const promptTokensDetails = usage.promptTokensDetails ?? usageMetadata?.promptTokensDetails;
-    if (promptTokensDetails) {
-      merged.promptTokensDetails = promptTokensDetails;
-    }
-    const cacheTokensDetails = usage.cacheTokensDetails ?? usageMetadata?.cacheTokensDetails;
-    if (cacheTokensDetails) {
-      merged.cacheTokensDetails = cacheTokensDetails;
-    }
-    const candidatesTokensDetails =
-      usage.candidatesTokensDetails ?? usageMetadata?.candidatesTokensDetails;
-    if (candidatesTokensDetails) {
-      merged.candidatesTokensDetails = candidatesTokensDetails;
-    }
-
-    usageMetadata = merged;
-  }
-
-  return usageMetadata;
+  return pickDefined({
+    promptTokenCount: sum('promptTokenCount'),
+    candidatesTokenCount: sum('candidatesTokenCount'),
+    totalTokenCount: sum('totalTokenCount'),
+    cachedContentTokenCount: sum('cachedContentTokenCount'),
+    thoughtsTokenCount: sum('thoughtsTokenCount'),
+    toolUsePromptTokenCount: sum('toolUsePromptTokenCount'),
+    promptTokensDetails: usages.findLast((u) => u.promptTokensDetails)?.promptTokensDetails,
+    cacheTokensDetails: usages.findLast((u) => u.cacheTokensDetails)?.cacheTokensDetails,
+    candidatesTokensDetails: usages.findLast((u) => u.candidatesTokensDetails)
+      ?.candidatesTokensDetails,
+  });
 }
 
 function combineUrlContextMetadata(
@@ -885,6 +873,30 @@ export async function analyzeUrlWork(
   });
 }
 
+async function promptForConstraints(
+  ctx: ServerContext,
+  topic: string,
+  searchDepth: number,
+  deliverable?: string,
+): Promise<string> {
+  if (searchDepth >= 5 || (searchDepth >= 4 && !deliverable)) {
+    try {
+      const constraint = await elicitTaskInput(
+        ctx,
+        `High depth research requested (${searchDepth}). What specific aspect should the agent focus on? (Or reply 'none' to proceed)`,
+        'Waiting for constraints for deep research',
+      );
+      if (constraint && constraint.trim().toLowerCase() !== 'none') {
+        return `${topic}\n\nAdditional User Constraint: ${constraint}`;
+      }
+    } catch (err) {
+      await mcpLog(ctx, 'warning', 'Elicitation skipped; continuing without extra constraints');
+      log.warn('Elicitation skipped or failed', { error: AppError.formatMessage(err) });
+    }
+  }
+  return topic;
+}
+
 async function agenticSearchWork(
   {
     deliverable,
@@ -899,22 +911,7 @@ async function agenticSearchWork(
   services: ToolServices,
 ): Promise<CallToolResult> {
   const tasks = getTaskEmitter(ctx);
-  let topic = goal;
-  if (searchDepth >= 5 || (searchDepth >= 4 && !deliverable)) {
-    try {
-      const constraint = await elicitTaskInput(
-        ctx,
-        `High depth research requested (${searchDepth}). What specific aspect should the agent focus on? (Or reply 'none' to proceed)`,
-        'Waiting for constraints for deep research',
-      );
-      if (constraint && constraint.trim().toLowerCase() !== 'none') {
-        topic = `${topic}\n\nAdditional User Constraint: ${constraint}`;
-      }
-    } catch (err) {
-      await mcpLog(ctx, 'warning', 'Elicitation skipped; continuing without extra constraints');
-      log.warn('Elicitation skipped or failed', { error: AppError.formatMessage(err) });
-    }
-  }
+  const topic = await promptForConstraints(ctx, goal, searchDepth, deliverable);
 
   await tasks.phase('enriching-topic');
   const enrichedTopic = await enrichTopicWithSampling(topic, searchDepth, ctx, services);

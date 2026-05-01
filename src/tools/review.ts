@@ -11,7 +11,11 @@ import { withUploadsAndPipeline } from '../lib/file.js';
 import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
 import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { resolveOrchestration, type ToolsSpecInput } from '../lib/orchestration.js';
-import { buildSuccessfulStructuredContent, tryParseJsonResponse } from '../lib/response.js';
+import {
+  buildSuccessfulStructuredContent,
+  pickDefined,
+  tryParseJsonResponse,
+} from '../lib/response.js';
 import {
   getTaskEmitter,
   getWorkSignal,
@@ -974,37 +978,42 @@ function parseAnalyzePrModelOutput(textContent: string): {
   documentationDrift?: { file: string; driftDescription: string; suggestedUpdate: string }[];
   schemaWarnings: string[];
 } {
-  if (textContent.trim().length === 0) {
-    return {
-      summary: '',
-      schemaWarnings: [],
-    };
+  const trimmed = textContent.trim();
+  if (trimmed.length === 0) {
+    return { summary: '', schemaWarnings: [] };
   }
 
-  let summary = textContent || '';
-  const schemaWarnings: string[] = [];
-  let documentationDrift:
-    | { file: string; driftDescription: string; suggestedUpdate: string }[]
-    | undefined;
-
-  const parsedJson = tryParseJsonResponse(textContent);
+  const parsedJson = tryParseJsonResponse(trimmed);
   const parsedData = AnalyzePrModelOutputSchema.safeParse(parsedJson);
 
   if (parsedData.success) {
-    summary = parsedData.data.summary.trim();
-    if (parsedData.data.documentationDrift?.length) {
-      documentationDrift = parsedData.data.documentationDrift;
-    }
-    return {
-      summary,
-      ...(documentationDrift ? { documentationDrift } : {}),
-      schemaWarnings,
-    };
+    const { summary, documentationDrift } = parsedData.data;
+    return pickDefined({
+      summary: summary.trim(),
+      documentationDrift: documentationDrift?.length ? documentationDrift : undefined,
+      schemaWarnings: [],
+    });
   }
 
-  schemaWarnings.push(
-    `review structured output failed schema validation: ${z.prettifyError(parsedData.error)}`,
-  );
+  return fallbackParseAnalyzePrModelOutput(trimmed, parsedJson, parsedData.error);
+}
+
+function fallbackParseAnalyzePrModelOutput(
+  fallbackSummary: string,
+  parsedJson: unknown,
+  originalError: z.ZodError,
+): {
+  summary: string;
+  documentationDrift?: { file: string; driftDescription: string; suggestedUpdate: string }[];
+  schemaWarnings: string[];
+} {
+  let summary = fallbackSummary;
+  let documentationDrift:
+    | { file: string; driftDescription: string; suggestedUpdate: string }[]
+    | undefined;
+  const schemaWarnings = [
+    `review structured output failed schema validation: ${z.prettifyError(originalError)}`,
+  ];
 
   const parsedFallback = z
     .object({
@@ -1030,11 +1039,11 @@ function parseAnalyzePrModelOutput(textContent: string): {
     }
   }
 
-  return {
+  return pickDefined({
     summary,
-    ...(documentationDrift ? { documentationDrift } : {}),
+    documentationDrift,
     schemaWarnings,
-  };
+  });
 }
 
 function buildNoChangesAnalysis(snapshot: LocalDiffSnapshot): string {

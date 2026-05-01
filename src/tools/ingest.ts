@@ -231,6 +231,7 @@ export async function uploadOne(
   filePath: string,
   rootDir: string,
   mimeType?: string,
+  signal?: AbortSignal,
 ): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
   const displayName = relative(rootDir, filePath) || filePath;
   try {
@@ -241,6 +242,7 @@ export async function uploadOne(
       config: {
         displayName,
         mimeType: resolvedMime,
+        ...(signal ? { abortSignal: signal } : {}),
       },
     });
     const documentName = op.response?.documentName ?? op.name;
@@ -260,12 +262,13 @@ export async function uploadOne(
  * notifications after each batch so MCP clients (which apply a per-request
  * timeout that resets on progress) don't time out on large workspace uploads.
  */
-async function uploadAll(
+export async function uploadAll(
   ai: ReturnType<typeof getAI>,
   fileSearchStoreName: string,
   files: string[],
   rootDir: string,
   ctx: ServerContext | undefined,
+  signal?: AbortSignal,
 ): Promise<{ uploaded: string[]; failed: number; firstError: string | undefined }> {
   const uploaded: string[] = [];
   let failed = 0;
@@ -273,10 +276,17 @@ async function uploadAll(
   const total = files.length;
 
   for (let i = 0; i < files.length; i += UPLOAD_CONCURRENCY) {
+    if (signal?.aborted) {
+      throw new Error('Upload cancelled');
+    }
+
     const batch = files.slice(i, i + UPLOAD_CONCURRENCY);
     const results = await Promise.all(
       batch.map((file) =>
-        uploadOne(ai, fileSearchStoreName, file, rootDir).then((r) => ({ file, result: r })),
+        uploadOne(ai, fileSearchStoreName, file, rootDir, undefined, signal).then((r) => ({
+          file,
+          result: r,
+        })),
       ),
     );
 
@@ -407,9 +417,11 @@ async function handleUpload(
     { createIfMissing: true },
   );
 
-  if (input.filePath === undefined || input.filePath.length === 0) {
-    // Defensive: schema enforces this, but keep an explicit guard.
-    throw new Error("filePath is required for 'upload' (e.g. 'src' or an absolute path).");
+  // Type guard: schema guarantees filePath for upload operation
+  if (!input.filePath) {
+    throw new Error(
+      'Impossible: schema validation should prevent filePath being undefined for upload',
+    );
   }
 
   const { target, roots } = await resolveUploadTarget(input.filePath, rootsFetcher);
@@ -427,6 +439,7 @@ async function handleUpload(
 
   // ── Single-file upload ────────────────────────────────────────────────────
   const createdSuffix = storeCreated ? ' (auto-created)' : '';
+  const signal = (ctx.task as { cancellationSignal?: AbortSignal } | undefined)?.cancellationSignal;
   if (info.isFile()) {
     const result = await uploadOne(
       ai,
@@ -434,6 +447,7 @@ async function handleUpload(
       target,
       dirname(target),
       input.mimeType,
+      signal,
     );
     if (!result.ok) {
       throw new Error(`Upload failed for ${target}: ${result.error}`);
@@ -470,6 +484,7 @@ async function handleUpload(
     files,
     target,
     ctx,
+    signal,
   );
   const failureSuffix =
     failed > 0 && firstError !== undefined ? ` First failure: ${firstError}` : '';
@@ -510,8 +525,12 @@ async function handleDeleteDocument(
   ai: ReturnType<typeof getAI>,
 ): Promise<IngestOutput> {
   const documentName = input.documentName;
-  if (documentName === undefined) {
-    throw new Error("documentName is required when operation = 'delete-document'");
+
+  // Type guard: schema guarantees documentName for delete-document operation
+  if (!documentName) {
+    throw new Error(
+      'Impossible: schema validation should prevent documentName being undefined for delete-document',
+    );
   }
 
   const { name: storeName } = await resolveStore(ai, input.storeName, { createIfMissing: false });

@@ -9,7 +9,7 @@ import { IngestInputSchema } from '../../src/schemas/ingest-input.js';
 import type { IngestInput } from '../../src/schemas/ingest-input.js';
 import { IngestOutputSchema } from '../../src/schemas/ingest-output.js';
 import type { IngestOutput } from '../../src/schemas/ingest-output.js';
-import { uploadOne } from '../../src/tools/ingest.js';
+import { uploadAll, uploadOne } from '../../src/tools/ingest.js';
 
 test('ingest schema: create-store operation validates correctly', () => {
   const input: IngestInput = {
@@ -225,4 +225,114 @@ test('uploadOne: fails fast when SDK returns no documentName or name', async () 
 
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.error, 'SDK returned no documentName');
+});
+
+test('uploadOne: forwards AbortSignal to SDK config', async () => {
+  let receivedConfig: unknown;
+  const mockAI = {
+    fileSearchStores: {
+      uploadToFileSearchStore: async (opts: unknown) => {
+        receivedConfig = (opts as { config?: unknown }).config;
+        return {
+          response: { documentName: 'documents/test-123' },
+        };
+      },
+    },
+  };
+
+  const abortController = new AbortController();
+  const result = await uploadOne(
+    mockAI as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    'fileSearchStores/store-123',
+    '/workspace/test-file.txt',
+    '/workspace',
+    'text/plain',
+    abortController.signal,
+  );
+
+  assert.strictEqual(result.ok, true);
+  assert.ok(
+    (receivedConfig as { abortSignal?: AbortSignal }).abortSignal === abortController.signal,
+    'AbortSignal must be passed to SDK config',
+  );
+});
+
+test('uploadOne: does not include abortSignal in config when signal is undefined', async () => {
+  let receivedConfig: unknown;
+  const mockAI = {
+    fileSearchStores: {
+      uploadToFileSearchStore: async (opts: unknown) => {
+        receivedConfig = (opts as { config?: unknown }).config;
+        return {
+          response: { documentName: 'documents/test-123' },
+        };
+      },
+    },
+  };
+
+  const result = await uploadOne(
+    mockAI as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    'fileSearchStores/store-123',
+    '/workspace/test-file.txt',
+    '/workspace',
+    'text/plain',
+    undefined,
+  );
+
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(
+    (receivedConfig as { abortSignal?: AbortSignal }).abortSignal,
+    undefined,
+    'abortSignal must not be in config when signal is undefined',
+  );
+});
+
+test('uploadAll: stops uploads and throws error when signal is aborted mid-batch', async () => {
+  const uploadCalls: string[] = [];
+  const abortController = new AbortController();
+
+  const mockAI = {
+    fileSearchStores: {
+      uploadToFileSearchStore: async (opts: unknown) => {
+        const filePath = (opts as { file?: string }).file ?? 'unknown';
+        uploadCalls.push(filePath);
+
+        // After the first batch (4 files with UPLOAD_CONCURRENCY=4), abort the signal
+        if (uploadCalls.length === 4) {
+          abortController.abort();
+        }
+
+        return {
+          response: { documentName: 'documents/test-123' },
+        };
+      },
+    },
+  };
+
+  // Create a file list larger than one batch so we have multiple batches
+  const files = Array.from({ length: 8 }, (_, i) => `/workspace/file${i}.txt`);
+
+  let error: Error | undefined;
+  try {
+    await uploadAll(
+      mockAI as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+      'fileSearchStores/store-123',
+      files,
+      '/workspace',
+      undefined,
+      abortController.signal,
+    );
+  } catch (e) {
+    error = e as Error;
+  }
+
+  assert.ok(
+    error instanceof Error && error.message === 'Upload cancelled',
+    'uploadAll must throw "Upload cancelled" error when signal is aborted mid-batch',
+  );
+  assert.strictEqual(
+    uploadCalls.length,
+    4,
+    'Only first batch (4 uploads) should complete before abort is detected',
+  );
 });

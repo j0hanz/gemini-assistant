@@ -248,11 +248,6 @@ interface WorkspaceContextResult {
   sources: string[];
 }
 
-interface WorkspaceDashboardRootSummary {
-  fileCount: number;
-  fileNames: string[];
-}
-
 interface WorkspaceCacheStatus {
   enabled: boolean;
   cacheName: string | undefined;
@@ -324,14 +319,6 @@ async function scanRootForFiles(root: string): Promise<Map<string, string>> {
     }
   }
   return files;
-}
-
-async function summarizeRootForDashboard(root: string): Promise<WorkspaceDashboardRootSummary> {
-  const fileNames = (await listScanFileNames(root)).sort((a, b) => a.localeCompare(b));
-  return {
-    fileCount: fileNames.length,
-    fileNames,
-  };
 }
 
 function dynamicFence(content: string): string {

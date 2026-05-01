@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { AppError } from './lib/errors.js';
 import { InMemoryEventStore } from './lib/event-store.js';
 import { logger } from './lib/logger.js';
+import { ResourceNotifier } from './lib/resource-notifier.js';
 import { createSharedTaskInfra, type SharedTaskInfra } from './lib/tasks.js';
 import type { ToolServices } from './lib/tool-context.js';
 import { buildServerRootsFetcher, type RootsFetcher } from './lib/validation.js';
@@ -13,13 +14,9 @@ import { createWorkspaceAccess, createWorkspaceCacheManager } from './lib/worksp
 
 import { getExposeSessionResources, getStatelessTransportFlag } from './config.js';
 import { registerPrompts } from './prompts.js';
-import { PUBLIC_STATIC_RESOURCE_URIS, PUBLIC_TOOL_NAMES } from './public-contract.js';
-import {
-  registerAllResources,
-  sessionDetailUri,
-  SESSIONS_LIST_URI,
-  sessionTurnPartsUri,
-} from './resources.js';
+import { PUBLIC_TOOL_NAMES } from './public-contract.js';
+import { registerAllResources } from './resources.js';
+import { sessionResourceUri, turnPartsUri } from './resources/uris.js';
 import {
   createSessionAccess,
   createSessionStore,
@@ -96,46 +93,6 @@ const SERVER_INSTRUCTIONS =
   'deep research tasks may take several minutes — poll tasks/get until terminal. ' +
   'Use discover://catalog and discover://workflows for the canonical public surface.';
 
-const STATIC_RESOURCE_URIS = new Set<string>(PUBLIC_STATIC_RESOURCE_URIS);
-const SESSION_DETAIL_URI_PATTERN = /^session:\/\/[^/]+$/;
-const SESSION_TRANSCRIPT_URI_PATTERN = /^session:\/\/[^/]+\/transcript$/;
-const SESSION_EVENTS_URI_PATTERN = /^session:\/\/[^/]+\/events$/;
-const SESSION_TURN_PARTS_URI_PATTERN = /^gemini:\/\/sessions\/[^/]+\/turns\/\d+\/parts$/;
-
-function isKnownResourceUri(uri: string): boolean {
-  return (
-    STATIC_RESOURCE_URIS.has(uri) ||
-    SESSION_DETAIL_URI_PATTERN.test(uri) ||
-    SESSION_TRANSCRIPT_URI_PATTERN.test(uri) ||
-    SESSION_EVENTS_URI_PATTERN.test(uri) ||
-    SESSION_TURN_PARTS_URI_PATTERN.test(uri)
-  );
-}
-
-function sendResourceChangedForServer(server: McpServer, listUri: string | undefined): void {
-  if (!server.isConnected()) return;
-  if (!listUri) return;
-  if (!isKnownResourceUri(listUri)) {
-    log.warn(`Blocked resource notification with unregistered URI: ${listUri}`);
-    return;
-  }
-  server.sendResourceListChanged();
-}
-
-function sendResourceUpdatedForServer(server: McpServer, uri: string): void {
-  if (!server.isConnected()) return;
-  if (!isKnownResourceUri(uri)) {
-    log.warn(`Blocked resource updated notification with unregistered URI: ${uri}`);
-    return;
-  }
-  void server.server.sendResourceUpdated({ uri }).catch((err: unknown) => {
-    log.warn('sendResourceUpdated failed', {
-      uri,
-      error: AppError.formatMessage(err),
-    });
-  });
-}
-
 function registerServerTools(server: McpServer, services: ServerServices): void {
   for (const register of SERVER_TOOL_REGISTRARS) {
     register(server, services);
@@ -196,7 +153,7 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
         logging: {},
         completions: {},
         prompts: {},
-        resources: { listChanged: true },
+        resources: { listChanged: true, subscribe: true },
         tools: {},
         ...(isStateless
           ? {}
@@ -221,6 +178,8 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
   );
   let closed = false;
   const detachLogger = logger.attachServer(server);
+  const notifier = new ResourceNotifier(server.server);
+
   const unsubscribeSessionChange = sessionStore.subscribe(
     ({ listChanged, turnPartsAdded }: SessionChangeEvent) => {
       if (turnPartsAdded) {
@@ -228,17 +187,20 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
         // when MCP_EXPOSE_SESSION_RESOURCES=true; suppress the broadcast
         // otherwise so non-exposed installs don't notify on every model turn.
         if (!getExposeSessionResources()) return;
-        sendResourceChangedForServer(server, SESSIONS_LIST_URI);
+
+        void notifier.notifyListChanged();
         // Targeted updates so subscribers to specific session resources are
         // notified without re-listing the entire collection.
-        sendResourceUpdatedForServer(
-          server,
-          sessionTurnPartsUri(turnPartsAdded.sessionId, turnPartsAdded.turnIndex),
+        void notifier.notifyUpdated(
+          turnPartsUri(turnPartsAdded.sessionId, turnPartsAdded.turnIndex),
         );
-        sendResourceUpdatedForServer(server, sessionDetailUri(turnPartsAdded.sessionId));
+        void notifier.notifyUpdated(sessionResourceUri(turnPartsAdded.sessionId));
         return;
       }
-      sendResourceChangedForServer(server, listChanged ? SESSIONS_LIST_URI : undefined);
+
+      if (listChanged) {
+        void notifier.notifyListChanged();
+      }
     },
   );
 
@@ -270,6 +232,9 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
       closed = true;
       const closeErrors: Error[] = [];
       runCloseStep(closeErrors, 'unsubscribeSessionChange', unsubscribeSessionChange);
+      runCloseStep(closeErrors, 'notifier.dispose', () => {
+        notifier.dispose();
+      });
       await runCloseStepAsync(closeErrors, 'workspaceCacheManager.close', () =>
         workspaceCacheManager.close(),
       );

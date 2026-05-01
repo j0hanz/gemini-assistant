@@ -9,8 +9,6 @@ import {
   sessionEventsUri as buildSessionEventsUri,
   sessionTranscriptUri as buildSessionTranscriptUri,
   sessionResourceUri,
-  SESSIONS_LIST_URI,
-  turnGroundingUri,
   turnPartsUri,
 } from './resources/uris.js';
 import { registerWorkspaceResources } from './resources/workspace.js';
@@ -59,8 +57,6 @@ export function registerAllResources(server: McpServer, services: ResourceServic
 }
 
 // Re-export URI helpers for backward compatibility with server.ts and tools
-export { SESSIONS_LIST_URI };
-
 /**
  * Build a session detail URI for the given session ID.
  * Alias for sessionResourceUri for backward compatibility.
@@ -91,9 +87,4 @@ export function sessionEventsUri(sessionId: string): string {
  */
 export function sessionTurnPartsUri(sessionId: string, turnIndex: number): string {
   return turnPartsUri(sessionId, turnIndex);
-}
-
-// Also provide turn grounding URI builder (currently unused, prefixed for consistency)
-export function _sessionTurnGroundingUri(sessionId: string, turnIndex: number): string {
-  return turnGroundingUri(sessionId, turnIndex);
 }

@@ -6,7 +6,6 @@ import type { McpServerSpec } from '../schemas/fields.js';
 import type { AskThinkingLevel } from '../public-contract.js';
 
 type BuiltInCapability = 'googleSearch' | 'urlContext' | 'codeExecution' | 'fileSearch';
-type CapabilityKey = BuiltInCapability | 'functions';
 
 /** Lowercase thinking levels used in the public ToolsSpec input. */
 type ProfileThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
@@ -112,44 +111,6 @@ export const PROFILES: Readonly<Record<ToolProfileName, ProfileDefinition>> = {
     defaultThinkingLevel: 'minimal',
     meta: true,
     notes: 'Meta: requires responseSchemaJson modifier.',
-  },
-};
-
-const COMBO_MATRIX: Readonly<Record<CapabilityKey, Readonly<Record<CapabilityKey, boolean>>>> = {
-  googleSearch: {
-    googleSearch: true,
-    urlContext: true,
-    codeExecution: true,
-    fileSearch: false,
-    functions: true,
-  },
-  urlContext: {
-    googleSearch: true,
-    urlContext: true,
-    codeExecution: true,
-    fileSearch: false,
-    functions: true,
-  },
-  codeExecution: {
-    googleSearch: true,
-    urlContext: true,
-    codeExecution: true,
-    fileSearch: false,
-    functions: true,
-  },
-  fileSearch: {
-    googleSearch: false,
-    urlContext: false,
-    codeExecution: false,
-    fileSearch: true,
-    functions: false,
-  },
-  functions: {
-    googleSearch: true,
-    urlContext: true,
-    codeExecution: true,
-    fileSearch: false,
-    functions: true,
   },
 };
 

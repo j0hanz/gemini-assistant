@@ -5,17 +5,17 @@ export type AskThinkingLevel = (typeof THINKING_LEVELS)[number];
 export type PublicPromptName = 'discover' | 'research' | 'review';
 export type PublicWorkflowName = 'start-here' | 'chat' | 'research' | 'analyze' | 'review';
 type PublicResourceUri =
-  | 'discover://catalog'
-  | 'discover://context'
-  | 'discover://workflows'
+  | 'assistant://discover/catalog'
+  | 'assistant://discover/context'
+  | 'assistant://discover/workflows'
   | 'gemini://profiles'
-  | 'session://'
-  | 'session://{sessionId}'
-  | 'session://{sessionId}/transcript'
-  | 'session://{sessionId}/events'
-  | 'gemini://sessions/{sessionId}/turns/{turnIndex}/parts'
-  | 'workspace://context'
-  | 'workspace://cache';
+  | 'gemini://sessions'
+  | 'gemini://session/{sessionId}'
+  | 'gemini://session/{sessionId}/transcript'
+  | 'gemini://session/{sessionId}/events'
+  | 'gemini://session/{sessionId}/turn/{turnIndex}/parts'
+  | 'gemini://workspace/cache/contents'
+  | 'gemini://workspace/cache';
 
 export type DiscoveryKind = 'tool' | 'prompt' | 'resource';
 
@@ -70,21 +70,21 @@ const PUBLIC_PROMPT_NAMES = [
   'review',
 ] as const satisfies readonly PublicPromptName[];
 
-export const PUBLIC_STATIC_RESOURCE_URIS = [
-  'discover://catalog',
-  'discover://context',
-  'discover://workflows',
+const PUBLIC_STATIC_RESOURCE_URIS = [
+  'assistant://discover/catalog',
+  'assistant://discover/context',
+  'assistant://discover/workflows',
   'gemini://profiles',
-  'session://',
-  'workspace://context',
-  'workspace://cache',
+  'gemini://sessions',
+  'gemini://workspace/cache/contents',
+  'gemini://workspace/cache',
 ] as const satisfies readonly PublicResourceUri[];
 
 const PUBLIC_RESOURCE_TEMPLATES = [
-  'session://{sessionId}',
-  'session://{sessionId}/transcript',
-  'session://{sessionId}/events',
-  'gemini://sessions/{sessionId}/turns/{turnIndex}/parts',
+  'gemini://session/{sessionId}',
+  'gemini://session/{sessionId}/transcript',
+  'gemini://session/{sessionId}/events',
+  'gemini://session/{sessionId}/turn/{turnIndex}/parts',
 ] as const satisfies readonly PublicResourceUri[];
 
 const PUBLIC_RESOURCE_URIS = [
@@ -128,9 +128,9 @@ const TOOL_DISCOVERY_DETAILS = {
       'Workspace cache reuse is skipped when a chat call sets systemInstruction or seed; the response may include warnings when cache reuse is skipped.',
     ],
     related: [
-      { kind: 'resource', name: 'session://' },
-      { kind: 'resource', name: 'session://{sessionId}/events' },
-      { kind: 'resource', name: 'gemini://sessions/{sessionId}/turns/{turnIndex}/parts' },
+      { kind: 'resource', name: 'gemini://sessions' },
+      { kind: 'resource', name: 'gemini://session/{sessionId}/events' },
+      { kind: 'resource', name: 'gemini://session/{sessionId}/turn/{turnIndex}/parts' },
     ],
   },
   research: {
@@ -161,7 +161,7 @@ const TOOL_DISCOVERY_DETAILS = {
     ],
     related: [
       { kind: 'prompt', name: 'research' },
-      { kind: 'resource', name: 'discover://workflows' },
+      { kind: 'resource', name: 'assistant://discover/workflows' },
     ],
   },
   analyze: {
@@ -194,7 +194,7 @@ const TOOL_DISCOVERY_DETAILS = {
     ],
     related: [
       { kind: 'tool', name: 'research' },
-      { kind: 'resource', name: 'workspace://context' },
+      { kind: 'resource', name: 'gemini://workspace/cache/contents' },
     ],
   },
   review: {
@@ -227,7 +227,7 @@ const TOOL_DISCOVERY_DETAILS = {
     ],
     related: [
       { kind: 'prompt', name: 'review' },
-      { kind: 'resource', name: 'discover://workflows' },
+      { kind: 'resource', name: 'assistant://discover/workflows' },
     ],
   },
 } as const satisfies Record<PublicJobName, DiscoveryEntryMetadata>;
@@ -240,8 +240,8 @@ const PROMPT_DISCOVERY_DETAILS = {
     inputs: ['job?', 'goal?'],
     returns: 'A single prompt that frames the discover workflow and related public resources.',
     related: [
-      { kind: 'resource', name: 'discover://catalog' },
-      { kind: 'resource', name: 'discover://workflows' },
+      { kind: 'resource', name: 'assistant://discover/catalog' },
+      { kind: 'resource', name: 'assistant://discover/workflows' },
     ],
   },
   research: {
@@ -253,7 +253,7 @@ const PROMPT_DISCOVERY_DETAILS = {
       'A workflow-oriented prompt that points to the research job and supporting discovery resources.',
     related: [
       { kind: 'tool', name: 'research' },
-      { kind: 'resource', name: 'discover://workflows' },
+      { kind: 'resource', name: 'assistant://discover/workflows' },
     ],
   },
   review: {
@@ -270,7 +270,7 @@ const PROMPT_DISCOVERY_DETAILS = {
 } as const satisfies Record<PublicPromptName, DiscoveryEntryMetadata>;
 
 const RESOURCE_DISCOVERY_DETAILS = {
-  'discover://catalog': {
+  'assistant://discover/catalog': {
     title: 'Discovery Catalog Resource',
     bestFor: 'Browsing the full public surface from one shared metadata source.',
     whenToUse: 'Use for a machine-readable list of public tools, prompts, and resources.',
@@ -278,24 +278,24 @@ const RESOURCE_DISCOVERY_DETAILS = {
     returns: 'JSON and Markdown discovery catalog content.',
     related: [{ kind: 'resource', name: 'discover://workflows' }],
   },
-  'discover://context': {
+  'assistant://discover/context': {
     title: 'Server Context Dashboard',
     bestFor: 'Inspecting the server knowledge state: workspace files, sessions, and config.',
     whenToUse: 'Use to understand available server context.',
     inputs: [],
     returns: 'JSON snapshot of the server context state.',
     related: [
-      { kind: 'resource', name: 'discover://catalog' },
-      { kind: 'resource', name: 'workspace://context' },
+      { kind: 'resource', name: 'assistant://discover/catalog' },
+      { kind: 'resource', name: 'gemini://workspace/cache/contents' },
     ],
   },
-  'discover://workflows': {
+  'assistant://discover/workflows': {
     title: 'Workflow Catalog Resource',
     bestFor: 'Browsing job-first starter workflows instead of a raw list of names.',
     whenToUse: 'Use to find recommended entry points for common jobs.',
     inputs: [],
     returns: 'JSON and Markdown workflow catalog content.',
-    related: [{ kind: 'resource', name: 'discover://catalog' }],
+    related: [{ kind: 'resource', name: 'assistant://discover/catalog' }],
   },
   'gemini://profiles': {
     title: 'Tool Profiles Resource',
@@ -306,9 +306,9 @@ const RESOURCE_DISCOVERY_DETAILS = {
     inputs: [],
     returns:
       'JSON catalog of all 11 tool profiles with builtIns, defaultThinkingLevel, notes, and a comboMatrix of valid capability combinations.',
-    related: [{ kind: 'resource', name: 'discover://catalog' }],
+    related: [{ kind: 'resource', name: 'assistant://discover/catalog' }],
   },
-  'session://': {
+  'gemini://sessions': {
     title: 'Session List Resource',
     bestFor: 'Browsing active in-memory chat sessions.',
     whenToUse: 'Use to inspect or resume a chat session.',
@@ -316,36 +316,36 @@ const RESOURCE_DISCOVERY_DETAILS = {
     returns: 'JSON list of active session summaries (id, lastAccess, and related metadata).',
     related: [{ kind: 'tool', name: 'chat' }],
   },
-  'session://{sessionId}': {
+  'gemini://session/{sessionId}': {
     title: 'Session Detail Resource',
     bestFor: 'Inspecting a single active session entry.',
     whenToUse: 'Use to get details for one session.',
     inputs: ['sessionId'],
     returns: 'JSON metadata for the selected session.',
     related: [
-      { kind: 'resource', name: 'session://' },
-      { kind: 'resource', name: 'session://{sessionId}/transcript' },
+      { kind: 'resource', name: 'gemini://sessions' },
+      { kind: 'resource', name: 'gemini://session/{sessionId}/transcript' },
     ],
   },
-  'session://{sessionId}/transcript': {
+  'gemini://session/{sessionId}/transcript': {
     title: 'Session Transcript Resource',
     bestFor: 'Inspecting the text transcript for one active session.',
     whenToUse: 'Use for read-only visibility into recent turns.',
     inputs: ['sessionId'],
     returns: 'JSON and Markdown transcript entries.',
     limitations: ['Transcript access requires MCP_EXPOSE_SESSION_RESOURCES=true.'],
-    related: [{ kind: 'resource', name: 'session://{sessionId}' }],
+    related: [{ kind: 'resource', name: 'gemini://session/{sessionId}' }],
   },
-  'session://{sessionId}/events': {
+  'gemini://session/{sessionId}/events': {
     title: 'Session Events Resource',
     bestFor: 'Inspecting normalized Gemini tool and function activity for one active session.',
     whenToUse: 'Use to get the server-managed inspection summary.',
     inputs: ['sessionId'],
     returns: 'JSON and Markdown event summaries.',
     limitations: ['Events access requires MCP_EXPOSE_SESSION_RESOURCES=true.'],
-    related: [{ kind: 'resource', name: 'session://{sessionId}' }],
+    related: [{ kind: 'resource', name: 'gemini://session/{sessionId}' }],
   },
-  'gemini://sessions/{sessionId}/turns/{turnIndex}/parts': {
+  'gemini://session/{sessionId}/turn/{turnIndex}/parts': {
     title: 'Session Turn Parts Resource',
     bestFor: 'Retrieving SDK-faithful Gemini `Part[]` for one persisted model turn.',
     whenToUse: 'Use for replay-safe multi-turn orchestration that needs SDK-faithful parts.',
@@ -353,23 +353,23 @@ const RESOURCE_DISCOVERY_DETAILS = {
     returns:
       'JSON array of Gemini `Part` objects for the selected persisted turn. Oversized `inlineData` payloads are elided but all other parts — including `thought` and `thoughtSignature` — are served verbatim.',
     limitations: ['Raw turn-parts access requires MCP_EXPOSE_SESSION_RESOURCES=true.'],
-    related: [{ kind: 'resource', name: 'session://{sessionId}' }],
+    related: [{ kind: 'resource', name: 'gemini://session/{sessionId}' }],
   },
-  'workspace://context': {
+  'gemini://workspace/cache/contents': {
     title: 'Workspace Context Resource',
     bestFor: 'Viewing the assembled workspace context used for Gemini calls.',
     whenToUse: 'Use to inspect which local files are summarized for the model.',
     inputs: [],
     returns: 'Markdown workspace context with sources and token estimate.',
-    related: [{ kind: 'resource', name: 'workspace://cache' }],
+    related: [{ kind: 'resource', name: 'gemini://workspace/cache' }],
   },
-  'workspace://cache': {
+  'gemini://workspace/cache': {
     title: 'Workspace Cache Resource',
     bestFor: 'Inspecting automatic workspace cache state.',
     whenToUse: 'Use to verify workspace caching status.',
     inputs: [],
     returns: 'JSON workspace cache status.',
-    related: [{ kind: 'resource', name: 'workspace://context' }],
+    related: [{ kind: 'resource', name: 'gemini://workspace/cache/contents' }],
   },
 } as const satisfies Record<PublicResourceUri, DiscoveryEntryMetadata>;
 
@@ -397,14 +397,18 @@ export const WORKFLOW_ENTRIES = [
     goal: 'Orient a new client to the public jobs and the recommended next step.',
     whenToUse: 'Use when the user asks what this server does.',
     steps: [
-      'Read discover://catalog for the current public surface.',
-      'Read discover://workflows for the guided entry points.',
+      'Read assistant://discover/catalog for the current public surface.',
+      'Read assistant://discover/workflows for the guided entry points.',
       'Treat HTTP deployments as local-first unless the operator supplies durable task/session infrastructure outside this server.',
       'Use chat for direct conversation once the starting point is clear.',
     ],
     recommendedTools: ['chat'],
     recommendedPrompts: ['discover'],
-    relatedResources: ['discover://catalog', 'discover://workflows', 'session://'],
+    relatedResources: [
+      'assistant://discover/catalog',
+      'assistant://discover/workflows',
+      'gemini://sessions',
+    ],
   },
   {
     name: 'chat',
@@ -413,17 +417,17 @@ export const WORKFLOW_ENTRIES = [
     steps: [
       'Call chat with a goal and optional sessionId.',
       'If Gemini returns functionCalls, execute them in the MCP client and call chat again with the same sessionId plus functionResponses.',
-      'Inspect session:// if you need to find an active session.',
-      'When MCP_EXPOSE_SESSION_RESOURCES=true, inspect session://{sessionId}/transcript or /events when you need read-only inspection.',
-      'When MCP_EXPOSE_SESSION_RESOURCES=true, use gemini://sessions/{sessionId}/turns/{turnIndex}/parts when an orchestrator needs replay-safe raw turn parts.',
+      'Inspect gemini://sessions if you need to find an active session.',
+      'When MCP_EXPOSE_SESSION_RESOURCES=true, inspect gemini://session/{sessionId}/transcript or /events when you need read-only inspection.',
+      'When MCP_EXPOSE_SESSION_RESOURCES=true, use gemini://session/{sessionId}/turn/{turnIndex}/parts when an orchestrator needs replay-safe raw turn parts.',
     ],
     recommendedTools: ['chat'],
     recommendedPrompts: ['discover'],
     relatedResources: [
-      'session://',
-      'session://{sessionId}/transcript',
-      'session://{sessionId}/events',
-      'gemini://sessions/{sessionId}/turns/{turnIndex}/parts',
+      'gemini://sessions',
+      'gemini://session/{sessionId}/transcript',
+      'gemini://session/{sessionId}/events',
+      'gemini://session/{sessionId}/turn/{turnIndex}/parts',
     ],
   },
   {
@@ -433,11 +437,11 @@ export const WORKFLOW_ENTRIES = [
     steps: [
       'Pick research.mode=quick for one grounded answer.',
       'Pick research.mode=deep when the task needs synthesis across multiple search steps.',
-      'Use discover://catalog if you need a recommendation before committing to a mode.',
+      'Use assistant://discover/catalog if you need a recommendation before committing to a mode.',
     ],
     recommendedTools: ['research'],
     recommendedPrompts: ['research'],
-    relatedResources: ['discover://catalog', 'discover://workflows'],
+    relatedResources: ['assistant://discover/catalog', 'assistant://discover/workflows'],
   },
   {
     name: 'analyze',
@@ -451,7 +455,7 @@ export const WORKFLOW_ENTRIES = [
     ],
     recommendedTools: ['analyze'],
     recommendedPrompts: ['discover'],
-    relatedResources: ['workspace://context', 'discover://catalog'],
+    relatedResources: ['gemini://workspace/cache/contents', 'assistant://discover/catalog'],
   },
   {
     name: 'review',
@@ -464,7 +468,7 @@ export const WORKFLOW_ENTRIES = [
     ],
     recommendedTools: ['review'],
     recommendedPrompts: ['review'],
-    relatedResources: ['discover://workflows', 'session://'],
+    relatedResources: ['assistant://discover/workflows', 'gemini://sessions'],
   },
 ] as const satisfies readonly WorkflowEntry[];
 

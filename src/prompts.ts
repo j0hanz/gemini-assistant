@@ -1,4 +1,9 @@
-import { completable, type McpServer } from '@modelcontextprotocol/server';
+import {
+  completable,
+  type McpServer,
+  ProtocolError,
+  ProtocolErrorCode,
+} from '@modelcontextprotocol/server';
 
 import { z } from 'zod/v4';
 
@@ -90,7 +95,7 @@ function renderPromptBody(spec: PromptBodySpec): string {
 }
 
 // ── Meta Builder ─────────────────────────────────────────────────────────────
-
+const META_NS = 'gemini-assistant';
 interface MetaArgs {
   promptName: PublicPromptName;
   thinkingLevelKey: string;
@@ -98,26 +103,21 @@ interface MetaArgs {
   nextTool?: string | undefined;
 }
 
-interface PromptMeta {
-  suggestedArgs?: Record<string, unknown> | undefined;
-  thinkingLevel: ThinkingLevel;
-  nextTool?: string | undefined;
-  [key: string]: unknown;
-}
+type PromptMeta = Record<string, unknown>;
 
 function buildMeta(args: MetaArgs): PromptMeta {
   const thinkingLevel =
     (args.suggestedArgs?.thinkingLevel as ThinkingLevel | undefined) ??
     THINKING_LEVELS[args.thinkingLevelKey] ??
     'LOW';
-  const meta: PromptMeta = { thinkingLevel };
+  const meta: PromptMeta = { [`${META_NS}/thinkingLevel`]: thinkingLevel };
 
   if (args.suggestedArgs) {
-    meta.suggestedArgs = args.suggestedArgs;
+    meta[`${META_NS}/suggestedArgs`] = args.suggestedArgs;
   }
 
   if (args.nextTool !== undefined && args.promptName !== 'discover') {
-    meta.nextTool = args.nextTool;
+    meta[`${META_NS}/nextTool`] = args.nextTool;
   }
 
   return meta;
@@ -139,23 +139,14 @@ interface PromptResult {
     | {
         role: 'user';
         content: {
-          type: 'resource';
-          resource: {
-            uri: string;
-            text: string;
-          };
+          type: 'resource_link';
+          uri: string;
+          name: string;
+          mimeType: string;
         };
       }
   )[];
   _meta: PromptMeta;
-}
-
-interface PromptError {
-  [x: string]: unknown;
-  isError: true;
-  description: string;
-  messages: never[];
-  _meta: Record<string, unknown>;
 }
 
 interface ResultArgs {
@@ -182,11 +173,10 @@ function buildResult(args: ResultArgs): PromptResult {
       {
         role: 'user' as const,
         content: {
-          type: 'resource' as const,
-          resource: {
-            uri: resourceUri,
-            text: '',
-          },
+          type: 'resource_link' as const,
+          uri: resourceUri,
+          name: args.promptName,
+          mimeType: 'application/json',
         },
       },
     ],
@@ -199,22 +189,13 @@ function buildResult(args: ResultArgs): PromptResult {
   };
 }
 
-function promptError(message: string): PromptError {
-  return {
-    isError: true,
-    description: message,
-    messages: [] as never[],
-    _meta: {},
-  };
-}
-
 // ── Utility: Pick Defined ────────────────────────────────────────────────────
 
-function pickDefined<K extends string>(
-  src: Record<K, unknown>,
-  keys: readonly K[],
-): Partial<Record<K, unknown>> {
-  const result: Partial<Record<K, unknown>> = {};
+function pickDefined(
+  src: Record<string, unknown>,
+  keys: readonly string[],
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
   for (const key of keys) {
     if (src[key] !== undefined) {
       result[key] = src[key];
@@ -225,107 +206,114 @@ function pickDefined<K extends string>(
 
 // ── Prompt Schemas ───────────────────────────────────────────────────────────
 
-const ChatPromptSchema = z
-  .strictObject({
-    goal: goalText('User goal or requested outcome'),
-    sessionId: optionalField(textField('Session ID to resume', 256)),
-    systemInstruction: optionalField(textField('Custom system instruction for this chat')),
-    thinkingLevel: optionalField(enumField(THINKING_LEVEL_OPTIONS, 'Thinking level override')),
-  })
-  .describe('Chat with direct Gemini interaction and optional server-managed sessions.');
+const ChatPromptSchema = z.strictObject({
+  goal: goalText('User goal or requested outcome'),
+  sessionId: optionalField(textField('Session ID to resume', 256)),
+  systemInstruction: optionalField(textField('Custom system instruction for this chat')),
+  thinkingLevel: optionalField(
+    completable(
+      enumField(THINKING_LEVEL_OPTIONS, 'Thinking level override'),
+      enumComplete(THINKING_LEVEL_OPTIONS),
+    ),
+  ),
+});
 
-const ResearchPromptSchema = z
-  .strictObject({
-    goal: goalText('Research goal or question'),
-    mode: optionalField(enumField(RESEARCH_MODE_OPTIONS, 'Research mode (quick or deep)')),
-    deliverable: optionalField(textField('Requested output form')),
-    searchDepth: optionalField(z.int().positive()),
-    systemInstruction: optionalField(textField('Custom system instruction')),
-  })
-  .describe('Research with quick or deep web-grounded lookup.');
+const ResearchPromptSchema = z.strictObject({
+  goal: goalText('Research goal or question'),
+  mode: optionalField(
+    completable(
+      enumField(RESEARCH_MODE_OPTIONS, 'Research mode (quick or deep)'),
+      enumComplete(RESEARCH_MODE_OPTIONS),
+    ),
+  ),
+  deliverable: optionalField(textField('Requested output form')),
+  systemInstruction: optionalField(textField('Custom system instruction')),
+});
 
 const ANALYZE_TARGET_OPTIONS = ['file', 'url', 'multi'] as const;
 const ANALYZE_OUTPUT_OPTIONS = ['summary', 'diagram'] as const;
 const DIAGRAM_TYPE_OPTIONS = ['mermaid', 'plantuml'] as const;
 
-const AnalyzePromptSchema = z
-  .strictObject({
-    goal: goalText('Analysis goal or requested outcome'),
-    targetKind: enumField(ANALYZE_TARGET_OPTIONS, 'Analysis target type'),
-    outputKind: optionalField(enumField(ANALYZE_OUTPUT_OPTIONS, 'Output format')),
-    filePath: optionalField(textField('Path to file for analysis')),
-    urls: optionalField(z.array(z.string())),
-    filePaths: optionalField(z.array(z.string()).min(2)),
-    diagramType: optionalField(enumField(DIAGRAM_TYPE_OPTIONS, 'Diagram syntax type')),
-  })
-  .describe('Analyze files, URLs, or generate diagrams.');
+const AnalyzePromptSchema = z.strictObject({
+  goal: goalText('Analysis goal or requested outcome'),
+  targetKind: completable(
+    enumField(ANALYZE_TARGET_OPTIONS, 'Analysis target type'),
+    enumComplete(ANALYZE_TARGET_OPTIONS),
+  ),
+  outputKind: optionalField(
+    completable(
+      enumField(ANALYZE_OUTPUT_OPTIONS, 'Output format'),
+      enumComplete(ANALYZE_OUTPUT_OPTIONS),
+    ),
+  ),
+  filePath: optionalField(textField('Path to file for analysis')),
+  diagramType: optionalField(
+    completable(
+      enumField(DIAGRAM_TYPE_OPTIONS, 'Diagram syntax type'),
+      enumComplete(DIAGRAM_TYPE_OPTIONS),
+    ),
+  ),
+});
 
-const ReviewPromptSchema = z
-  .strictObject({
-    subjectKind: enumField(REVIEW_SUBJECT_OPTIONS, 'Review variant type'),
-    language: optionalField(textField('Primary language hint for code review')),
-    filePathA: optionalField(textField('First file path for comparison')),
-    filePathB: optionalField(textField('Second file path for comparison')),
-    question: optionalField(textField('Comparison focus question')),
-    error: optionalField(textField('Error message or stack trace', 32000)),
-    codeContext: optionalField(textField('Relevant source code context', 16000)),
-  })
-  .describe('Review diffs, compare files, or diagnose failures.');
+const ReviewPromptSchema = z.strictObject({
+  subjectKind: completable(
+    enumField(REVIEW_SUBJECT_OPTIONS, 'Review variant type'),
+    enumComplete(REVIEW_SUBJECT_OPTIONS),
+  ),
+  language: optionalField(textField('Primary language hint for code review')),
+  filePathA: optionalField(textField('First file path for comparison')),
+  filePathB: optionalField(textField('Second file path for comparison')),
+  question: optionalField(textField('Comparison focus question')),
+  error: optionalField(textField('Error message or stack trace', 32000)),
+  codeContext: optionalField(textField('Relevant source code context', 16000)),
+});
 
 // ── Validation Functions ─────────────────────────────────────────────────────
 
-function validateAnalyze(args: z.infer<typeof AnalyzePromptSchema>): PromptError | null {
-  const { targetKind, outputKind, filePath, urls, filePaths, diagramType } = args;
+function validateAnalyze(args: z.infer<typeof AnalyzePromptSchema>): void {
+  const { targetKind, outputKind, filePath, diagramType } = args;
 
   if (targetKind === 'file' && !filePath) {
-    return promptError('targetKind=file requires filePath');
-  }
-
-  if (targetKind === 'url' && (!urls || urls.length === 0)) {
-    return promptError('targetKind=url requires urls (non-empty array)');
-  }
-
-  if (targetKind === 'multi' && (!filePaths || filePaths.length < 2)) {
-    return promptError('targetKind=multi requires filePaths with at least 2 items');
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'targetKind=file requires filePath');
   }
 
   if (outputKind === 'diagram' && !diagramType) {
-    return promptError('outputKind=diagram requires diagramType');
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      'outputKind=diagram requires diagramType',
+    );
   }
-
-  return null;
 }
 
-function validateReview(args: z.infer<typeof ReviewPromptSchema>): PromptError | null {
+function validateReview(args: z.infer<typeof ReviewPromptSchema>): void {
   const { subjectKind, filePathA, filePathB, error } = args;
 
   if (subjectKind === 'comparison' && (!filePathA || !filePathB)) {
-    return promptError('subjectKind=comparison requires filePathA and filePathB');
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      'subjectKind=comparison requires filePathA and filePathB',
+    );
   }
 
   if (subjectKind === 'failure' && !error) {
-    return promptError('subjectKind=failure requires error');
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'subjectKind=failure requires error');
   }
-
-  return null;
 }
 
 // ── Discover Prompt ──────────────────────────────────────────────────────────
 
-const DiscoverPromptSchema = z
-  .strictObject({
-    job: optionalField(
-      completable(
-        enumField(['chat', 'research', 'analyze', 'review'] as const, 'Public job to focus on'),
-        enumComplete(['chat', 'research', 'analyze', 'review'] as const),
-      ),
+const DiscoverPromptSchema = z.strictObject({
+  job: optionalField(
+    completable(
+      enumField(['chat', 'research', 'analyze', 'review'] as const, 'Public job to focus on'),
+      enumComplete(['chat', 'research', 'analyze', 'review'] as const),
     ),
-    goal: optionalField(textField('User outcome to optimize for')),
-  })
-  .describe('Guide a client to the best public job, prompt, and resource.');
+  ),
+  goal: optionalField(textField('User outcome to optimize for')),
+});
 
 function buildDiscover(args: z.infer<typeof DiscoverPromptSchema>): PromptResult {
-  const suggestedArgs = pickDefined(args as Record<string, unknown>, ['job', 'goal']);
+  const suggestedArgs = pickDefined(args, ['job', 'goal']);
 
   const body: PromptBodySpec = {
     role: 'Discovery guide for the public gemini-assistant MCP server.',
@@ -368,7 +356,7 @@ const CHAT_BODY: PromptBodySpec = {
 };
 
 function buildChat(args: z.infer<typeof ChatPromptSchema>): PromptResult {
-  const suggestedArgs = pickDefined(args as Record<string, unknown>, [
+  const suggestedArgs = pickDefined(args, [
     'goal',
     'sessionId',
     'systemInstruction',
@@ -396,7 +384,7 @@ const RESEARCH_BODY: PromptBodySpec = {
     'Choose quick mode for single-search grounded answers.',
     'Choose deep mode for multi-step research synthesis across sources.',
     'Provide source attribution and claim-level citations.',
-    'Respect searchDepth and deliverable preferences if supplied.',
+    'Respect deliverable preference if supplied.',
   ],
   outputFormat:
     'A summary with grounding status, grounding signals, claim-linked source attributions, and tool-usage details.',
@@ -413,13 +401,7 @@ function buildResearch(args: z.infer<typeof ResearchPromptSchema>): PromptResult
     variant,
   };
 
-  const suggestedArgs = pickDefined(args as Record<string, unknown>, [
-    'goal',
-    'mode',
-    'deliverable',
-    'searchDepth',
-    'systemInstruction',
-  ]);
+  const suggestedArgs = pickDefined(args, ['goal', 'mode', 'deliverable', 'systemInstruction']);
 
   return buildResult({
     promptName: 'research',
@@ -448,11 +430,8 @@ const ANALYZE_BODY: PromptBodySpec = {
   nextAction: 'Use the analyze job directly to execute the chosen analysis.',
 };
 
-function buildAnalyze(args: z.infer<typeof AnalyzePromptSchema>): PromptResult | PromptError {
-  const validationError = validateAnalyze(args);
-  if (validationError) {
-    return validationError;
-  }
+function buildAnalyze(args: z.infer<typeof AnalyzePromptSchema>): PromptResult {
+  validateAnalyze(args);
 
   const outputKind = args.outputKind ?? 'summary';
   let variant = `Analyze ${args.targetKind}`;
@@ -468,13 +447,11 @@ function buildAnalyze(args: z.infer<typeof AnalyzePromptSchema>): PromptResult |
     variant,
   };
 
-  const suggestedArgs = pickDefined(args as Record<string, unknown>, [
+  const suggestedArgs = pickDefined(args, [
     'goal',
     'targetKind',
     'outputKind',
     'filePath',
-    'urls',
-    'filePaths',
     'diagramType',
   ]);
 
@@ -506,11 +483,8 @@ const REVIEW_BODY: PromptBodySpec = {
   nextAction: 'Use the review job directly to execute the chosen review type.',
 };
 
-function buildReview(args: z.infer<typeof ReviewPromptSchema>): PromptResult | PromptError {
-  const validationError = validateReview(args);
-  if (validationError) {
-    return validationError;
-  }
+function buildReview(args: z.infer<typeof ReviewPromptSchema>): PromptResult {
+  validateReview(args);
 
   const variant = `Review ${args.subjectKind}`;
   const thinkingLevelKey = `review:${args.subjectKind}`;
@@ -520,7 +494,7 @@ function buildReview(args: z.infer<typeof ReviewPromptSchema>): PromptResult | P
     variant,
   };
 
-  const suggestedArgs = pickDefined(args as Record<string, unknown>, [
+  const suggestedArgs = pickDefined(args, [
     'subjectKind',
     'language',
     'filePathA',

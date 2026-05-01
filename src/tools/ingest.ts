@@ -237,7 +237,7 @@ async function uploadOne(
 
 /**
  * Upload an array of files with bounded concurrency. Sends progress
- * notifications after each file so MCP clients (which apply a per-request
+ * notifications after each batch so MCP clients (which apply a per-request
  * timeout that resets on progress) don't time out on large workspace uploads.
  */
 async function uploadAll(
@@ -250,42 +250,40 @@ async function uploadAll(
   const uploaded: string[] = [];
   let failed = 0;
   let firstError: string | undefined;
-  let cursor = 0;
-  let completed = 0;
   const total = files.length;
 
-  async function worker(): Promise<void> {
-    while (cursor < files.length) {
-      const index = cursor++;
-      const file = files[index];
-      if (file === undefined) break;
-      const result = await uploadOne(ai, fileSearchStoreName, file, rootDir);
+  for (let i = 0; i < files.length; i += UPLOAD_CONCURRENCY) {
+    const batch = files.slice(i, i + UPLOAD_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map((file) =>
+        uploadOne(ai, fileSearchStoreName, file, rootDir).then((r) => ({ file, result: r })),
+      ),
+    );
+
+    for (const { file, result } of results) {
       if (result.ok) {
         uploaded.push(file);
       } else {
         failed += 1;
         firstError ??= result.error;
       }
-      completed += 1;
-      if (ctx !== undefined) {
-        try {
-          await sendProgress(
-            ctx,
-            completed,
-            total,
-            `ingest: uploaded ${String(completed)}/${String(total)} (failed: ${String(failed)})`,
-          );
-        } catch {
-          // Progress is best-effort.
-        }
+    }
+
+    if (ctx !== undefined) {
+      const completed = Math.min(i + UPLOAD_CONCURRENCY, files.length);
+      try {
+        await sendProgress(
+          ctx,
+          completed,
+          total,
+          `ingest: uploaded ${String(completed)}/${String(total)} (failed: ${String(failed)})`,
+        );
+      } catch {
+        // Progress is best-effort.
       }
     }
   }
 
-  const workers = Array.from({ length: Math.min(UPLOAD_CONCURRENCY, files.length) }, () =>
-    worker(),
-  );
-  await Promise.all(workers);
   return { uploaded, failed, firstError };
 }
 

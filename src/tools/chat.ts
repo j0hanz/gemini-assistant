@@ -11,12 +11,12 @@ import type {
 } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
-import { appendResourceLinks } from '../lib/resource-links.js';
 import { consumeInteractionStream } from '../lib/interaction-stream.js';
 import { buildInteractionParams } from '../lib/interactions.js';
 import { logger } from '../lib/logger.js';
 import { appendFunctionCallingInstruction } from '../lib/model-prompts.js';
 import { resolveOrchestration } from '../lib/orchestration.js';
+import { appendResourceLinks } from '../lib/resource-links.js';
 import {
   buildBaseStructuredOutput,
   buildStructuredResponse,

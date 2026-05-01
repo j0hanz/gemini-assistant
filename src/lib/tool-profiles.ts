@@ -115,9 +115,7 @@ export const PROFILES: Readonly<Record<ToolProfileName, ProfileDefinition>> = {
   },
 };
 
-export const COMBO_MATRIX: Readonly<
-  Record<CapabilityKey, Readonly<Record<CapabilityKey, boolean>>>
-> = {
+const COMBO_MATRIX: Readonly<Record<CapabilityKey, Readonly<Record<CapabilityKey, boolean>>>> = {
   googleSearch: {
     googleSearch: true,
     urlContext: true,

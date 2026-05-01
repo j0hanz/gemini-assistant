@@ -371,13 +371,6 @@ function readResourceContent(uri: string, content: string): ReadResourceResult {
 }
 
 /**
- * ToolServices bag containing SessionStore.
- */
-interface ToolServices {
-  sessionStore: SessionStore;
-}
-
-/**
  * Register session resources under the gemini:// scheme.
  * This provides read-only access to session lists, details, transcripts, events, and turn data.
  */
@@ -387,7 +380,7 @@ export function registerSessionResources(
       handler: (request: { uri: string }) => Promise<ReadResourceResult>,
     ): void;
   },
-  services: ToolServices,
+  services: { sessionStore: SessionStore },
 ): void {
   const { sessionStore } = services;
   const handler = new SessionResourceHandler(sessionStore);

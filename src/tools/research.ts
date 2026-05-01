@@ -3,7 +3,6 @@ import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprot
 import type { GroundingMetadata, Interactions, UrlContextMetadata } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
-import { appendResourceLinks } from '../lib/resource-links.js';
 import {
   builtInsToInteractionTools,
   createBackgroundInteraction,
@@ -20,6 +19,7 @@ import {
 } from '../lib/model-prompts.js';
 import { resolveOrchestration } from '../lib/orchestration.js';
 import { PROGRESS_TOTAL, sendProgress } from '../lib/progress.js';
+import { appendResourceLinks } from '../lib/resource-links.js';
 import {
   appendSources,
   appendUrlStatus,

@@ -1,19 +1,20 @@
 import type { ResourceLink } from '../schemas/resource-meta.js';
+
 import {
   ASSISTANT_CATALOG_URI,
   ASSISTANT_CONTEXT_URI,
-  SESSIONS_LIST_URI,
-  WORKSPACE_CACHE_CONTENTS_URI,
-  WORKSPACE_CACHE_URI,
   fileResourceUri,
   sessionResourceUri,
+  SESSIONS_LIST_URI,
   sessionTranscriptUri,
+  WORKSPACE_CACHE_CONTENTS_URI,
+  WORKSPACE_CACHE_URI,
 } from '../resources/uris.js';
 
 /**
  * Options for appendResourceLinks()
  */
-export interface ResourceLinkOptions {
+interface ResourceLinkOptions {
   sessionId?: string | undefined;
   context?: string | undefined;
   filePaths?: string[] | undefined;

@@ -8,10 +8,10 @@ import { promisify } from 'node:util';
 import { z } from 'zod/v4';
 
 import { withUploadsAndPipeline } from '../lib/file.js';
-import { appendResourceLinks } from '../lib/resource-links.js';
 import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
 import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { resolveOrchestration, type ToolsSpecInput } from '../lib/orchestration.js';
+import { appendResourceLinks } from '../lib/resource-links.js';
 import { buildSuccessfulStructuredContent, tryParseJsonResponse } from '../lib/response.js';
 import {
   getTaskEmitter,

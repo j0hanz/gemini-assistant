@@ -326,9 +326,7 @@ async function scanRootForFiles(root: string): Promise<Map<string, string>> {
   return files;
 }
 
-export async function summarizeRootForDashboard(
-  root: string,
-): Promise<WorkspaceDashboardRootSummary> {
+async function summarizeRootForDashboard(root: string): Promise<WorkspaceDashboardRootSummary> {
   const fileNames = (await listScanFileNames(root)).sort((a, b) => a.localeCompare(b));
   return {
     fileCount: fileNames.length,
@@ -386,7 +384,7 @@ async function tryLoadContextFile(
   return {};
 }
 
-export async function assembleWorkspaceContext(
+async function assembleWorkspaceContext(
   roots: string[],
   focusText?: string,
 ): Promise<WorkspaceContextResult> {

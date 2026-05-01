@@ -6,7 +6,6 @@ import type { Part } from '@google/genai';
 import type { z } from 'zod/v4';
 
 import { withUploadsAndPipeline } from '../lib/file.js';
-import { appendResourceLinks } from '../lib/resource-links.js';
 import { mcpLog } from '../lib/logger.js';
 import { buildDiagramGenerationPrompt, buildFileAnalysisPrompt } from '../lib/model-prompts.js';
 import {
@@ -14,6 +13,7 @@ import {
   resolveOrchestration,
   type ToolsSpecInput,
 } from '../lib/orchestration.js';
+import { appendResourceLinks } from '../lib/resource-links.js';
 import {
   buildSuccessfulStructuredContent,
   deriveDiagramSyntaxValidation,
@@ -494,7 +494,8 @@ async function analyzeWork(
     result,
   );
 
-  const resourceLinkOptions = args.targetKind === 'file' ? { filePaths: [args.filePath] } : undefined;
+  const resourceLinkOptions =
+    args.targetKind === 'file' ? { filePaths: [args.filePath] } : undefined;
   const resourceLinks = appendResourceLinks('analyze', resourceLinkOptions);
   return {
     ...output,

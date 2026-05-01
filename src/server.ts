@@ -15,7 +15,7 @@ import { getExposeSessionResources, getStatelessTransportFlag } from './config.j
 import { registerPrompts } from './prompts.js';
 import { PUBLIC_STATIC_RESOURCE_URIS, PUBLIC_TOOL_NAMES } from './public-contract.js';
 import {
-  registerResources,
+  registerAllResources,
   sessionDetailUri,
   SESSIONS_LIST_URI,
   sessionTurnPartsUri,
@@ -257,7 +257,11 @@ export function createServerInstance(sharedTaskInfra?: SharedTaskInfra): ServerI
   });
 
   registerPrompts(server);
-  registerResources(server, sessionStore, workspaceCacheManager, rootsFetcher);
+  registerAllResources(server, {
+    sessionStore,
+    toolServices,
+    rootsFetcher,
+  });
 
   return {
     server,

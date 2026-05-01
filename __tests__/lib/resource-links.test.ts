@@ -38,7 +38,11 @@ test('chat tool without sessionId suggests catalog only', () => {
 
   // Should not have session transcript without sessionId
   const transcriptLinks = links.filter((l) => l.uri.includes('transcript'));
-  assert.strictEqual(transcriptLinks.length, 0, 'should not include transcript link without sessionId');
+  assert.strictEqual(
+    transcriptLinks.length,
+    0,
+    'should not include transcript link without sessionId',
+  );
 });
 
 test('research tool suggests cache and context links', () => {
@@ -67,7 +71,11 @@ test('analyze tool suggests file links', () => {
 
   // Check for file links
   const fileLinks = links.filter((l) => l.uri.includes('workspace/files'));
-  assert.strictEqual(fileLinks.length, filePaths.length, `should include ${filePaths.length} file links`);
+  assert.strictEqual(
+    fileLinks.length,
+    filePaths.length,
+    `should include ${filePaths.length} file links`,
+  );
 
   // Verify each file path is represented
   for (const filePath of filePaths) {
@@ -108,7 +116,10 @@ test('resource links have correct structure', () => {
 
   for (const link of links) {
     assert.ok(typeof link.uri === 'string', 'link uri should be a string');
-    assert.ok(link.uri.startsWith('gemini://') || link.uri.startsWith('assistant://'), 'link uri should be absolute');
+    assert.ok(
+      link.uri.startsWith('gemini://') || link.uri.startsWith('assistant://'),
+      'link uri should be absolute',
+    );
     assert.ok(link.name !== undefined, 'link should have a name');
     assert.ok(link.description !== undefined, 'link should have a description');
     assert.ok(link.mimeType !== undefined, 'link should have a mimeType');
@@ -149,6 +160,9 @@ test('appendResourceLinks handles all tool names', () => {
   for (const toolName of toolNames) {
     const links = appendResourceLinks(toolName);
     assert.ok(Array.isArray(links), `appendResourceLinks('${toolName}') should return an array`);
-    assert.ok(links.length > 0, `appendResourceLinks('${toolName}') should return at least one link`);
+    assert.ok(
+      links.length > 0,
+      `appendResourceLinks('${toolName}') should return at least one link`,
+    );
   }
 });

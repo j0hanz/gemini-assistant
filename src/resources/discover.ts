@@ -47,97 +47,114 @@ function buildProfilesContent(): string {
 function buildInstructionsContent(): string {
   return `# Gemini Assistant Server Instructions
 
-## Role
-
-The gemini-assistant is an MCP server that provides a job-first interface over Google Gemini. It exposes four primary tools (chat, research, analyze, review), three prompts for guided workflows, and a set of resources for discovery and introspection.
+role: MCP server that provides a job-first interface over Google Gemini
+primary-purpose: Expose structured tools, prompts, and resources for chat, research, analysis, review, discovery, and introspection
 
 ## Capabilities
 
-### Tools
-- **chat**: Direct conversation with Gemini, with optional session management
-- **research**: Grounded information lookup with web search and synthesis
-- **analyze**: File and URL analysis, code review, and diagram generation
-- **review**: Diff review, file comparison, and failure diagnosis
+tools:
+  chat: Direct conversation with Gemini, with optional session management
+  research: Grounded information lookup with web search and synthesis
+  analyze: File and URL analysis, code review, and diagram generation
+  review: Diff review, file comparison, and failure diagnosis
 
-### Prompts
-- **discover**: Entry point for workflows and resource discovery
-- **research**: Guide for multi-step research workflows
-- **review**: Instructions for PR and code review workflows
+prompts:
+  discover: Entry point for workflows and resource discovery
+  research: Guide for multi-step research workflows
+  review: Instructions for PR and code review workflows
 
-### Resources
+resources:
+  discovery:
+    assistant://discover/catalog: Tool, prompt, and resource catalog
+    assistant://discover/workflows: Guided workflow documentation
+    assistant://discover/context: Server context and configuration snapshot
+    assistant://profiles: Available tool profiles
+    assistant://instructions: Server instruction document
 
-#### Discovery (assistant://)
-- **assistant://discover/catalog**: Tool, prompt, and resource catalog
-- **assistant://discover/workflows**: Guided workflow documentation
-- **assistant://discover/context**: Server context and configuration snapshot
-- **assistant://profiles**: Available tool profiles (plain, grounded, web-research, etc.)
-- **assistant://instructions**: This document
+  sessions:
+    gemini://session/{sessionId}: Individual session details
+    gemini://session/{sessionId}/transcript: Conversation transcript
+    gemini://session/{sessionId}/events: Session events
+    gemini://session/{sessionId}/turn/{turnIndex}/parts: Interaction outputs
 
-#### Sessions (gemini://)
-- **gemini://session/{sessionId}**: Individual session details
-- **gemini://session/{sessionId}/transcript**: Conversation transcript
-- **gemini://session/{sessionId}/events**: Session events
-- **gemini://session/{sessionId}/turn/{turnIndex}/parts**: Interaction outputs
-
-#### Workspace (gemini://)
-- **gemini://workspace/cache**: Cache status and metadata
-- **gemini://workspace/files/{path}**: Individual workspace files
+  workspace:
+    gemini://workspace/cache: Cache status and metadata
+    gemini://workspace/files/{path}: Individual workspace files
 
 ## Constraints
 
-- Session resources are memory-only; enable via \`MCP_EXPOSE_SESSION_RESOURCES=true\`
-- Workspace context cache requires ≥4000 tokens to activate
-- Tool invocations must match registered input schemas
-- All file paths must be workspace-relative (no absolute paths or traversal)
+session-resources: Memory-only
+session-resources-enabled-by: MCP_EXPOSE_SESSION_RESOURCES=true
+workspace-cache-minimum-context: 4000 tokens
+tool-inputs: Must match registered input schemas
+file-paths: Must be workspace-relative
+disallowed-paths:
+
+- absolute paths
+- path traversal
 
 ## Data Model
 
-### Tool Input/Output
-- Tools accept structured JSON input matching Zod schemas
-- Output is either text or structured JSON with optional \`_meta\` blocks
-- Metadata includes generation timestamp, caching info, TTL, and resource links
+tool-input:
+  format: Structured JSON
+  schema-source: Zod schemas
 
-### Profiles
-Tool profiles define which capabilities (search, URLs, code execution, etc.) are available:
-- **plain**: Pure generation
-- **grounded**: Real-time web search with citations
-- **web-research**: Search + read specific pages
-- **deep-research**: Search + synthesis + computation
-- **urls-only**: Caller-supplied URLs only
-- **code-math**: Code execution and visualization
-- **code-math-grounded**: Computation over fresh facts
-- **visual-inspect**: Image analysis with zoom/annotation
-- **rag**: File search (mutually exclusive with others)
-- **agent**: Custom function calling
-- **structured**: Enforced JSON schema output
+tool-output:
+  formats:
+    - text
+    - structured JSON
+  optional-meta-block: _meta
 
-### Sessions
-Sessions store conversation history with both filtered (replay-safe) and raw parts. Each turn includes Gemini content, tool calls, and optional thought outputs (when exposed).
+metadata:
+  includes:
+    - generation timestamp
+    - caching information
+    - TTL
+    - resource links
+
+profiles:
+  plain: Pure generation
+  grounded: Real-time web search with citations
+  web-research: Search plus reading specific pages
+  deep-research: Search, synthesis, and computation
+  urls-only: Caller-supplied URLs only
+  code-math: Code execution and visualization
+  code-math-grounded: Computation over fresh facts
+  visual-inspect: Image analysis with zoom and annotation
+  rag: File search; mutually exclusive with other profiles
+  agent: Custom function calling
+  structured: Enforced JSON schema output
+
+sessions:
+  storage: Conversation history
+  stored-parts:
+    filtered: Replay-safe parts
+    raw: Original Gemini parts
+  turn-contents:
+    - Gemini content
+    - tool calls
+    - optional thought outputs
+
+thought-outputs:
+  exposed-when: MCP_EXPOSE_THOUGHTS=true
 
 ## Workflows
 
-1. **start-here**: Introduction to the server, discovery of tools and resources
-2. **chat**: Conversation setup with optional background context
-3. **research**: Multi-step fact-finding and synthesis
-4. **analyze**: Deep code/document inspection with comparisons
-5. **review**: PR and code quality assessment with actionable feedback
+workflows:
+  start-here:
+    purpose: Introduce the server and discover available tools and resources
 
-## Environment Configuration
+  chat:
+    purpose: Set up conversation with optional background context
 
-Key environment variables:
-- \`GEMINI_API_KEY\`: Required Gemini API key
-- \`MCP_EXPOSE_THOUGHTS\`: Show internal model reasoning (default: false)
-- \`MCP_EXPOSE_SESSION_RESOURCES\`: Enable session transcripts (default: false)
-- \`WORKSPACE_CACHE_ENABLED\`: Enable smart workspace caching (default: false)
-- \`TRANSPORT\`: Select transport: stdio, http, web-standard (default: stdio)
+  research:
+    purpose: Perform multi-step fact-finding and synthesis
 
-## Quick Start
+  analyze:
+    purpose: Inspect code, documents, URLs, and comparisons deeply
 
-1. Start the server with stdio transport: \`npm run inspector\`
-2. Access the **discover://catalog** resource for available tools
-3. Read **assistant://workflows** for guided job workflows
-4. Use **chat** tool for general conversation
-5. Use **research** for fact-finding with citations
+  review:
+    purpose: Assess PRs, diffs, code quality, and failures with actionable feedback
 `;
 }
 
@@ -148,72 +165,97 @@ Key environment variables:
 function buildContextContent(): string {
   return `# Assistant Context
 
-## Overview
+overview: Real-time context resources for inspecting gemini-assistant server state
 
-The gemini-assistant context resources provide real-time insights into the server's state:
-
-- **Workspace**: Files, cache status, and configuration
-- **Sessions**: Active conversations and their transcripts
-- **Metadata**: Generation timestamps, TTLs, and caching information
+context-areas:
+  workspace: Files, cache status, and configuration
+  sessions: Active conversations and transcripts
+  metadata: Generation timestamps, TTLs, and caching information
 
 ## Workspace Context
 
-The workspace cache intelligently scans project files (readme.md, package.json, tsconfig.json, etc.) and makes their content available to the Gemini API via context caching. This reduces token usage for repetitive queries against the same files.
-
-**Status available at**: \`gemini://workspace/cache\`
+workspace-context:
+  purpose: Provide project file context to Gemini through workspace scanning and context caching
+  scanned-files:
+    - readme.md
+    - package.json
+    - tsconfig.json
+    - other project files
+  cache-behavior: Makes workspace content available to the Gemini API via context caching
+  benefit: Reduces token usage for repetitive queries against the same files
+  status-resource: gemini://workspace/cache
 
 ## Sessions
 
-Sessions store conversation history for multi-turn interactions. Each session:
-- Has a unique ID (auto-generated UUID)
-- Stores both user and assistant messages
-- Preserves tool calls and responses
-- Optionally exposes internal model reasoning
-
-**Access sessions at**: \`gemini://session/{sessionId}\`
+sessions:
+  purpose: Store conversation history for multi-turn interactions
+  id-format: Auto-generated UUID
+  stores:
+    - user messages
+    - assistant messages
+    - tool calls
+    - tool responses
+    - optional internal model reasoning
+  access-pattern: gemini://session/{sessionId}
 
 ## Metadata
 
-All resources include \`_meta\` blocks with:
-- \`generatedAt\`: ISO timestamp of resource generation
-- \`source\`: 'gemini-assistant'
-- \`cached\`: Whether the resource is cached
-- \`ttlMs\`: Cache TTL in milliseconds
-- \`size\`: Approximate byte size
-- \`links\`: Resource URIs for navigation
+metadata:
+  block-name: _meta
+  included-in: All resources
+  fields:
+    generatedAt: ISO timestamp of resource generation
+    source: gemini-assistant
+    cached: Whether the resource is cached
+    ttlMs: Cache TTL in milliseconds
+    size: Approximate byte size
+    links: Resource URIs for navigation
 
-Example meta block:
-\`\`\`json
-{
-  "_meta": {
-    "generatedAt": "2026-05-01T12:34:56.789Z",
-    "source": "gemini-assistant",
-    "cached": true,
-    "ttlMs": 3600000,
-    "size": 15234,
-    "links": {
-      "self": {
-        "uri": "assistant://discover/catalog",
-        "name": "Discovery Catalog",
-        "mimeType": "text/markdown"
-      }
-    }
-  }
-}
-\`\`\`
+example-meta:
+  _meta:
+    generatedAt: "2026-05-01T12:34:56.789Z"
+    source: gemini-assistant
+    cached: true
+    ttlMs: 3600000
+    size: 15234
+    links:
+      self:
+        uri: assistant://discover/catalog
+        name: Discovery Catalog
+        mimeType: text/markdown
 
 ## Caching Strategy
 
-Resources use time-based cache invalidation:
-- **Catalog** (1 hour): Tool and prompt metadata rarely changes
-- **Workflows** (1 hour): Workflow documentation is stable
-- **Context** (5 minutes): Workspace state changes frequently
-- **Profiles** (never): Profile definitions are static
-- **Instructions** (30 minutes): Server documentation is semi-stable
+cache-invalidation: Time-based
+
+resource-cache-ttl:
+  catalog:
+    ttl: 1 hour
+    reason: Tool and prompt metadata rarely changes
+
+  workflows:
+    ttl: 1 hour
+    reason: Workflow documentation is stable
+
+  context:
+    ttl: 5 minutes
+    reason: Workspace state changes frequently
+
+  profiles:
+    ttl: never
+    reason: Profile definitions are static
+
+  instructions:
+    ttl: 30 minutes
+    reason: Server documentation is semi-stable
 
 ## Resource Links
 
-All resources are discoverable via resource links in their \`_meta\` blocks. Use the \`links.self\` entry to navigate between related resources.
+resource-links:
+  location: _meta.links
+  purpose: Make resources discoverable and navigable
+  primary-link: links.self
+  usage: Navigate between related resources
 `;
 }
 

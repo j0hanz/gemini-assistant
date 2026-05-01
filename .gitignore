@@ -81,3 +81,4 @@ scripts/*
 !scripts/tasks-parse.mjs
 !scripts/tasks-render.mjs
 !scripts/tasks-history.mjs
+.worktrees/

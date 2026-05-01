@@ -17,6 +17,7 @@ const BUILT_IN_TO_INTERACTION_TOOL: Readonly<Record<string, Interactions.Tool>> 
   googleSearch: { type: 'google_search' },
   urlContext: { type: 'url_context' },
   codeExecution: { type: 'code_execution' },
+  fileSearch: { type: 'file_search' },
 };
 
 const POLL_INTERVAL_MS = 3_000;

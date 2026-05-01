@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-import { buildInteractionParams } from '../../src/lib/interactions.js';
+import { buildInteractionParams, builtInsToInteractionTools } from '../../src/lib/interactions.js';
 import type { ResolvedProfile } from '../../src/lib/tool-profiles.js';
 
 test('buildInteractionParams — builds valid Interactions.CreateInteractionParameters for plain profile', () => {
@@ -218,4 +218,9 @@ test('buildInteractionParams — respects maxOutputTokens override', () => {
     unknown
   >;
   assert.strictEqual(generationConfig.max_output_tokens, 8192);
+});
+
+test('builtInsToInteractionTools maps fileSearch to file_search', () => {
+  const result = builtInsToInteractionTools(['fileSearch']);
+  assert.deepStrictEqual(result, [{ type: 'file_search' }]);
 });

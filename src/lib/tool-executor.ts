@@ -65,7 +65,7 @@ export function createToolContext(toolKey: ToolLabelKey, ctx: ServerContext) {
   };
 }
 
-type StreamResponseBuilder<T extends Record<string, unknown>> = (
+export type StreamResponseBuilder<T extends Record<string, unknown>> = (
   streamResult: StreamResult,
   text: string,
 ) => {
@@ -148,73 +148,73 @@ interface GeminiPipelineRequest<T extends Record<string, unknown>> {
   responseBuilder?: StreamResponseBuilder<T>;
 }
 
+export function finalizeStreamExecution<T extends Record<string, unknown>>(
+  result: CallToolResult,
+  streamResult: StreamResult,
+  responseBuilder: StreamResponseBuilder<T>,
+): { result: CallToolResult; reportMessage?: string | undefined } {
+  if (result.isError) {
+    return { result };
+  }
+
+  const text = extractTextContent(result.content);
+  const built = responseBuilder(streamResult, text);
+  const resultOverlay = built.resultMod ? built.resultMod(result) : {};
+  const overlayStructuredContent =
+    resultOverlay.structuredContent && typeof resultOverlay.structuredContent === 'object'
+      ? resultOverlay.structuredContent
+      : undefined;
+  const baseStructuredContent =
+    result.structuredContent && typeof result.structuredContent === 'object'
+      ? result.structuredContent
+      : undefined;
+  const sharedStructuredContent = buildSharedStructuredMetadata({
+    ...(streamResult.warnings ? { warnings: streamResult.warnings } : {}),
+  });
+  const mergedWarnings = [
+    ...getStructuredWarnings(baseStructuredContent),
+    ...getStructuredWarnings(overlayStructuredContent),
+    ...getStructuredWarnings(built.structuredContent),
+    ...getStructuredWarnings(sharedStructuredContent),
+  ];
+  const finalResult: CallToolResult = {
+    ...result,
+    ...resultOverlay,
+    content: appendWarningsToContent(
+      resultOverlay.content ?? result.content,
+      streamResult.warnings ?? [],
+    ),
+  };
+
+  const mergedDiagnostics = mergeDiagnostics([
+    overlayStructuredContent,
+    built.structuredContent,
+    sharedStructuredContent as Record<string, unknown>,
+  ]);
+  const mergedResult = mergeStructured(
+    {
+      ...finalResult,
+      ...(baseStructuredContent ? { structuredContent: baseStructuredContent } : {}),
+    },
+    baseStructuredContent || overlayStructuredContent || built.structuredContent
+      ? {
+          ...(overlayStructuredContent ?? {}),
+          ...(built.structuredContent ?? {}),
+          ...sharedStructuredContent,
+          ...(mergedDiagnostics ? { diagnostics: mergedDiagnostics } : {}),
+        }
+      : undefined,
+    mergedWarnings.length > 0 ? { warnings: mergedWarnings } : undefined,
+  );
+
+  return {
+    result: mergedResult,
+    reportMessage: built.reportMessage,
+  };
+}
+
 class ToolExecutor {
   constructor(private readonly scopedLogger: ScopedLogger) {}
-
-  private finalizeStreamExecution<T extends Record<string, unknown>>(
-    result: CallToolResult,
-    streamResult: StreamResult,
-    responseBuilder: StreamResponseBuilder<T>,
-  ): { result: CallToolResult; reportMessage?: string | undefined } {
-    if (result.isError) {
-      return { result };
-    }
-
-    const text = extractTextContent(result.content);
-    const built = responseBuilder(streamResult, text);
-    const resultOverlay = built.resultMod ? built.resultMod(result) : {};
-    const overlayStructuredContent =
-      resultOverlay.structuredContent && typeof resultOverlay.structuredContent === 'object'
-        ? resultOverlay.structuredContent
-        : undefined;
-    const baseStructuredContent =
-      result.structuredContent && typeof result.structuredContent === 'object'
-        ? result.structuredContent
-        : undefined;
-    const sharedStructuredContent = buildSharedStructuredMetadata({
-      ...(streamResult.warnings ? { warnings: streamResult.warnings } : {}),
-    });
-    const mergedWarnings = [
-      ...getStructuredWarnings(baseStructuredContent),
-      ...getStructuredWarnings(overlayStructuredContent),
-      ...getStructuredWarnings(built.structuredContent),
-      ...getStructuredWarnings(sharedStructuredContent),
-    ];
-    const finalResult: CallToolResult = {
-      ...result,
-      ...resultOverlay,
-      content: appendWarningsToContent(
-        resultOverlay.content ?? result.content,
-        streamResult.warnings ?? [],
-      ),
-    };
-
-    const mergedDiagnostics = mergeDiagnostics([
-      overlayStructuredContent,
-      built.structuredContent,
-      sharedStructuredContent as Record<string, unknown>,
-    ]);
-    const mergedResult = mergeStructured(
-      {
-        ...finalResult,
-        ...(baseStructuredContent ? { structuredContent: baseStructuredContent } : {}),
-      },
-      baseStructuredContent || overlayStructuredContent || built.structuredContent
-        ? {
-            ...(overlayStructuredContent ?? {}),
-            ...(built.structuredContent ?? {}),
-            ...sharedStructuredContent,
-            ...(mergedDiagnostics ? { diagnostics: mergedDiagnostics } : {}),
-          }
-        : undefined,
-      mergedWarnings.length > 0 ? { warnings: mergedWarnings } : undefined,
-    );
-
-    return {
-      result: mergedResult,
-      reportMessage: built.reportMessage,
-    };
-  }
 
   private async executeWithTracing(
     ctx: ServerContext,
@@ -378,27 +378,10 @@ class ToolExecutor {
           streamGenerator,
           getWorkSignal(ctx),
         );
-        return this.finalizeStreamExecution(result, streamResult, responseBuilder);
+        return finalizeStreamExecution(result, streamResult, responseBuilder);
       },
       true,
     );
-  }
-
-  private async executeStreamWork<T extends Record<string, unknown>>(
-    ctx: ServerContext,
-    toolName: string,
-    toolLabel: string,
-    streamGenerator: () => Promise<AsyncGenerator<GenerateContentResponse>>,
-    responseBuilder: StreamResponseBuilder<T>,
-  ): Promise<{ result: CallToolResult; reportMessage?: string | undefined }> {
-    const { streamResult, result } = await executeToolStream(
-      ctx,
-      toolName,
-      toolLabel,
-      streamGenerator,
-      getWorkSignal(ctx),
-    );
-    return this.finalizeStreamExecution(result, streamResult, responseBuilder);
   }
 
   async runGeminiStream<T extends Record<string, unknown>>(
@@ -441,25 +424,31 @@ class ToolExecutor {
           resolved.config.activeCapabilities,
         );
 
-        return this.executeStreamWork(
+        const streamGenerator = () =>
+          getAI().models.generateContentStream({
+            model: getGeminiModel(),
+            contents,
+            config: buildGenerateContentConfig(
+              {
+                systemInstruction,
+                ...request.config,
+                functionCallingMode: resolved.config.functionCallingMode,
+                tools: resolved.config.tools,
+                toolConfig: resolved.config.toolConfig,
+              },
+              getWorkSignal(ctx),
+            ),
+          });
+        const { streamResult, result } = await executeToolStream(
           ctx,
           request.toolName,
           request.label,
-          () =>
-            getAI().models.generateContentStream({
-              model: getGeminiModel(),
-              contents,
-              config: buildGenerateContentConfig(
-                {
-                  systemInstruction,
-                  ...request.config,
-                  functionCallingMode: resolved.config.functionCallingMode,
-                  tools: resolved.config.tools,
-                  toolConfig: resolved.config.toolConfig,
-                },
-                getWorkSignal(ctx),
-              ),
-            }),
+          streamGenerator,
+          getWorkSignal(ctx),
+        );
+        return finalizeStreamExecution(
+          result,
+          streamResult,
           request.responseBuilder ?? (() => ({})),
         );
       },

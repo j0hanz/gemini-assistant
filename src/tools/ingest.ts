@@ -68,7 +68,6 @@ const SKIPPED_EXTENSIONS = new Set([
   '.gz',
   '.rar',
   '.7z',
-  '.pdf',
   '.exe',
   '.dll',
   '.so',
@@ -129,7 +128,8 @@ function assertWithinRoots(target: string, roots: readonly string[]): void {
  * Resolve the upload target to an absolute path.
  *
  * - If `filePath` is absolute, returns it as-is.
- * - Otherwise resolves relative to the first workspace root.
+ * - Otherwise searches across allowed workspace roots.
+ * - If not found in any root, falls back to resolving relative to the first root.
  *
  * `filePath` is required by the schema for `upload`, so it is never empty here.
  */
@@ -141,8 +141,21 @@ async function resolveUploadTarget(
   const primaryRoot = roots[0] ?? process.cwd();
 
   const trimmed = filePath.trim();
-  const absolute = isAbsolute(trimmed) ? trimmed : resolve(primaryRoot, trimmed);
-  return { target: absolute, roots };
+  if (isAbsolute(trimmed)) {
+    return { target: trimmed, roots };
+  }
+
+  for (const root of roots) {
+    const candidate = resolve(root, trimmed);
+    try {
+      await stat(candidate);
+      return { target: candidate, roots };
+    } catch {
+      // Ignore and try next root
+    }
+  }
+
+  return { target: resolve(primaryRoot, trimmed), roots };
 }
 
 /**
@@ -187,6 +200,9 @@ async function collectFiles(rootDir: string): Promise<{ files: string[]; skipped
       try {
         const info = await stat(full);
         if (info.size === 0 || info.size > MAX_FILE_SIZE_BYTES) {
+          if (info.size > MAX_FILE_SIZE_BYTES) {
+            log.warn(`Skipping file due to size limit (>10MB): ${full} (${info.size} bytes)`);
+          }
           skipped += 1;
           continue;
         }
@@ -307,6 +323,8 @@ async function handleCreateStore(
   };
 }
 
+const storeResolutionLocks = new Map<string, Promise<{ name: string; created: boolean }>>();
+
 /**
  * Resolve a user-supplied store identifier to a real `fileSearchStores/<id>`
  * resource name.
@@ -328,26 +346,41 @@ async function resolveStore(
   }
 
   const trimmed = identifier.trim();
-  for await (const store of await ai.fileSearchStores.list()) {
-    if (store.displayName === trimmed && store.name !== undefined) {
-      return { name: store.name, created: false };
+
+  const lock = storeResolutionLocks.get(trimmed);
+  if (lock) {
+    return lock;
+  }
+
+  const promise = (async () => {
+    for await (const store of await ai.fileSearchStores.list()) {
+      if (store.displayName === trimmed && store.name !== undefined) {
+        return { name: store.name, created: false };
+      }
     }
-  }
 
-  if (!options.createIfMissing) {
-    throw new Error(
-      `No file search store found with displayName '${trimmed}'. Use the 'create-store' operation first or pass an existing 'fileSearchStores/<id>' resource name.`,
-    );
-  }
+    if (!options.createIfMissing) {
+      throw new Error(
+        `No file search store found with displayName '${trimmed}'. Use the 'create-store' operation first or pass an existing 'fileSearchStores/<id>' resource name.`,
+      );
+    }
 
-  const created = await ai.fileSearchStores.create({ config: { displayName: trimmed } });
-  if (created.name === undefined) {
-    throw new Error(
-      `Created store but server returned no resource name for displayName '${trimmed}'.`,
-    );
+    const created = await ai.fileSearchStores.create({ config: { displayName: trimmed } });
+    if (created.name === undefined) {
+      throw new Error(
+        `Created store but server returned no resource name for displayName '${trimmed}'.`,
+      );
+    }
+    log.info(`auto-created store '${created.name}' for displayName '${trimmed}'`);
+    return { name: created.name, created: true };
+  })();
+
+  storeResolutionLocks.set(trimmed, promise);
+  try {
+    return await promise;
+  } finally {
+    storeResolutionLocks.delete(trimmed);
   }
-  log.info(`auto-created store '${created.name}' for displayName '${trimmed}'`);
-  return { name: created.name, created: true };
 }
 
 /**
@@ -546,10 +579,10 @@ async function ingestWork(
     };
     const validated = toolContext.validateOutput(IngestOutputSchema, output, baseResult);
 
-    const resourceLinks = appendResourceLinks('ingest');
+    const resourceLink = appendResourceLinks('ingest');
     return {
       ...validated,
-      resourceLink: resourceLinks,
+      resourceLink,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';

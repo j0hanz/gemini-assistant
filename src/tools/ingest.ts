@@ -395,6 +395,49 @@ async function handleCreateStore(
 }
 
 /**
+ * Resolve a user-supplied store identifier to a real `fileSearchStores/<id>`
+ * resource name.
+ *
+ * Rules:
+ *  - If it already starts with `fileSearchStores/` it is returned as-is.
+ *  - Otherwise it is treated as a display name: we list existing stores and
+ *    return the first match.
+ *  - If `createIfMissing` is set and no match is found, a new store is created
+ *    with the supplied label as its `displayName`.
+ */
+async function resolveStore(
+  ai: ReturnType<typeof getAI>,
+  identifier: string,
+  options: { createIfMissing: boolean },
+): Promise<{ name: string; created: boolean }> {
+  if (identifier.startsWith('fileSearchStores/')) {
+    return { name: identifier, created: false };
+  }
+
+  const trimmed = identifier.trim();
+  for await (const store of await ai.fileSearchStores.list()) {
+    if (store.displayName === trimmed && store.name !== undefined) {
+      return { name: store.name, created: false };
+    }
+  }
+
+  if (!options.createIfMissing) {
+    throw new Error(
+      `No file search store found with displayName '${trimmed}'. Use the 'create-store' operation first or pass an existing 'fileSearchStores/<id>' resource name.`,
+    );
+  }
+
+  const created = await ai.fileSearchStores.create({ config: { displayName: trimmed } });
+  if (created.name === undefined) {
+    throw new Error(
+      `Created store but server returned no resource name for displayName '${trimmed}'.`,
+    );
+  }
+  log.info(`auto-created store '${created.name}' for displayName '${trimmed}'`);
+  return { name: created.name, created: true };
+}
+
+/**
  * Handle upload operation.
  *
  * Path semantics:
@@ -407,9 +450,11 @@ async function handleUpload(
   ai: ReturnType<typeof getAI>,
   rootsFetcher: ToolRootsFetcher,
 ): Promise<IngestOutput> {
-  const fileSearchStoreName = input.storeName.startsWith('fileSearchStores/')
-    ? input.storeName
-    : `fileSearchStores/${input.storeName}`;
+  const { name: fileSearchStoreName, created: storeCreated } = await resolveStore(
+    ai,
+    input.storeName,
+    { createIfMissing: true },
+  );
 
   const { target, isWorkspaceRoot, roots } = await resolveUploadTarget(
     input.filePath,
@@ -428,6 +473,7 @@ async function handleUpload(
   }
 
   // ── Single-file upload ────────────────────────────────────────────────────
+  const createdSuffix = storeCreated ? ' (auto-created)' : '';
   if (info.isFile()) {
     const result = await uploadOne(ai, fileSearchStoreName, target, target, input.mimeType);
     if (!result.ok) {
@@ -439,7 +485,7 @@ async function handleUpload(
       documentName: result.name,
       uploadedCount: 1,
       skippedCount: 0,
-      message: `Uploaded 1 file to '${fileSearchStoreName}'.`,
+      message: `Uploaded 1 file to '${fileSearchStoreName}'${createdSuffix}.`,
     };
   }
 
@@ -470,7 +516,7 @@ async function handleUpload(
     uploadedCount: uploaded.length,
     skippedCount: skipped + failed,
     uploadedFiles: uploaded.slice(0, 200).map((f) => relative(target, f) || f),
-    message: `Uploaded ${String(uploaded.length)}/${String(files.length)} files from ${scope} to '${fileSearchStoreName}' (skipped: ${String(skipped)}, failed: ${String(failed)}).${failureSuffix}`,
+    message: `Uploaded ${String(uploaded.length)}/${String(files.length)} files from ${scope} to '${fileSearchStoreName}'${createdSuffix} (skipped: ${String(skipped)}, failed: ${String(failed)}).${failureSuffix}`,
   };
 }
 
@@ -481,9 +527,7 @@ async function handleDeleteStore(
   input: IngestInput,
   ai: ReturnType<typeof getAI>,
 ): Promise<IngestOutput> {
-  const name = input.storeName.startsWith('fileSearchStores/')
-    ? input.storeName
-    : `fileSearchStores/${input.storeName}`;
+  const { name } = await resolveStore(ai, input.storeName, { createIfMissing: false });
 
   await ai.fileSearchStores.delete({ name, config: { force: true } });
 

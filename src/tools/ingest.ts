@@ -105,11 +105,12 @@ async function resolveUploadTarget(
   const roots = await getAllowedRoots(rootsFetcher);
   const primaryRoot = roots[0] ?? process.cwd();
 
-  if (filePath === undefined || filePath.length === 0) {
+  const trimmed = filePath?.trim() ?? '';
+  if (trimmed.length === 0) {
     return { target: primaryRoot, isWorkspaceRoot: true };
   }
 
-  const absolute = isAbsolute(filePath) ? filePath : resolve(primaryRoot, filePath);
+  const absolute = isAbsolute(trimmed) ? trimmed : resolve(primaryRoot, trimmed);
   return { target: absolute, isWorkspaceRoot: false };
 }
 

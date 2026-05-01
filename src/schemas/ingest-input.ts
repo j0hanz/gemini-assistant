@@ -30,11 +30,13 @@ const RawIngestInputSchema = z.strictObject({
   storeName: FileSearchStoreNameSchema.describe(
     'File Search Store name. Required for all operations. Format: alphanumerics, _, -, /.',
   ),
-  filePath: optionalField(
-    textField(
+  filePath: z
+    .string()
+    .max(4096)
+    .optional()
+    .describe(
       'Path to a file or directory (upload only). Leave empty to upload the entire workspace. Absolute or workspace-relative.',
     ),
-  ),
   documentName: optionalField(
     textField(
       'Document resource name from a previous upload (required when operation = delete-document).',

@@ -16,7 +16,6 @@ import type {
 } from '../schemas/outputs.js';
 
 import { SafetyError } from './errors.js';
-import { parseJson } from './json.js';
 import { logger } from './logger.js';
 import type { ToolEvent } from './streaming.js';
 import { isPublicHttpUrl } from './validation.js';
@@ -715,4 +714,31 @@ export function countOccurrences(values: readonly string[]): Record<string, numb
     acc[value] = (acc[value] ?? 0) + 1;
     return acc;
   }, {});
+}
+
+interface ParseJsonOptions<T> {
+  candidates?: readonly string[];
+  fallback?: T;
+}
+
+export function parseJson<T = unknown>(
+  text: string,
+  options: ParseJsonOptions<T> = {},
+): T | undefined {
+  const candidates = options.candidates ?? [text];
+
+  for (const candidate of candidates) {
+    const trimmed = candidate.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    try {
+      return JSON.parse(trimmed) as T;
+    } catch {
+      continue;
+    }
+  }
+
+  return options.fallback;
 }

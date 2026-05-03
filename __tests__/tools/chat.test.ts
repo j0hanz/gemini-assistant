@@ -2,7 +2,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-import { consumeInteractionStream } from '../../src/lib/interaction-stream.js';
+import { consumeInteractionStream } from '../../src/lib/interactions.js';
 import { buildInteractionParams } from '../../src/lib/interactions.js';
 import type { ResolvedProfile } from '../../src/lib/tool-profiles.js';
 import type { SessionAccess, SessionSummary } from '../../src/sessions.js';

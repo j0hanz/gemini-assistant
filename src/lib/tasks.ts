@@ -29,7 +29,6 @@ import { logger, maybeSummarizePayload } from './logger.js';
 import { hasTerminalProgress, reportCompletion, reportFailure } from './progress.js';
 import { extractTextContent, validateStructuredToolResult } from './response.js';
 import { executor } from './tool-executor.js';
-import { getWorkSignal } from './work-signal.js';
 
 // ── Shared infrastructure ──
 
@@ -297,8 +296,6 @@ type ExtendedTaskContext = TaskContext & {
   cancellationSignal?: AbortSignal;
 };
 type ExtendedServerContext = ServerContext & { task?: ExtendedTaskContext };
-
-export { getWorkSignal };
 
 function isTerminalStatusError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
@@ -790,4 +787,9 @@ export function registerWorkTool<TArgs>(params: RegisterWorkToolParams<TArgs>): 
     return;
   }
   registerTaskTool<TArgs>(server, name, config, work, overrides);
+}
+
+export function getWorkSignal(ctx: ServerContext): AbortSignal {
+  const task = ctx.task as ExtendedTaskContext | undefined;
+  return task?.cancellationSignal ?? ctx.mcpReq.signal;
 }

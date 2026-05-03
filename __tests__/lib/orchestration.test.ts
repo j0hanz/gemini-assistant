@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import {
   buildOrchestrationDiagnostics,
   buildOrchestrationRequestFromInputs,
-} from '../../src/lib/orchestration.js';
+} from '../../src/lib/tool-profiles.js';
 
 test('buildOrchestrationDiagnostics — emits info for resolved profile', () => {
   const request = buildOrchestrationRequestFromInputs({ googleSearch: true });

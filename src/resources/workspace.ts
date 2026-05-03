@@ -3,9 +3,10 @@ import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server
 
 import { readFile } from 'node:fs/promises';
 
+import { normalizeWorkspacePath, validateScanPath } from '../lib/validation.js';
 import type { WorkspaceAccess } from '../lib/workspace-context.js';
 
-import { buildResourceMeta, normalizeWorkspacePath, validateScanPath } from './metadata.js';
+import { buildResourceMeta } from './metadata.js';
 import {
   decodeTemplateParam,
   FILE_RESOURCE_TEMPLATE,

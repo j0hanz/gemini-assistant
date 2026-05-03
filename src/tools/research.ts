@@ -9,7 +9,6 @@ import {
   interactionToStreamResult,
   pollUntilComplete,
 } from '../lib/interactions.js';
-import { parseJson } from '../lib/json.js';
 import { logger, mcpLog } from '../lib/logger.js';
 import {
   buildAgenticResearchPrompt,
@@ -17,7 +16,6 @@ import {
   buildGroundedAnswerPrompt,
   type Capabilities,
 } from '../lib/model-prompts.js';
-import { resolveOrchestration } from '../lib/orchestration.js';
 import { PROGRESS_TOTAL, sendProgress } from '../lib/progress.js';
 import {
   appendSources,
@@ -42,6 +40,7 @@ import {
   formatCountLabel,
   formatSourceLabels,
   mergeSourceDetails,
+  parseJson,
   pickDefined,
 } from '../lib/response.js';
 import {
@@ -59,7 +58,11 @@ import {
 } from '../lib/tasks.js';
 import { createDefaultToolServices, type ToolServices } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
-import { toAskThinkingLevel, type ToolsSpecInput } from '../lib/tool-profiles.js';
+import {
+  resolveOrchestration,
+  toAskThinkingLevel,
+  type ToolsSpecInput,
+} from '../lib/tool-profiles.js';
 import { type AnalyzeInput, type ResearchInput, ResearchInputSchema } from '../schemas/inputs.js';
 import { ResearchOutputSchema } from '../schemas/outputs.js';
 
@@ -796,7 +799,7 @@ async function searchWork(
   await progress.send(0, undefined, 'Starting');
   await mcpLog(ctx, 'info', 'Search requested');
 
-  const resolved = await resolveOrchestration(toolsSpec as ToolsSpecInput | undefined, ctx, {
+  const resolved = await resolveOrchestration(toolsSpec, ctx, {
     toolKey: 'research',
     mode: 'quick',
   });
@@ -923,7 +926,7 @@ async function agenticSearchWork(
         topic: enrichedTopic,
         searchDepth,
         thinkingLevel,
-        tools: toolsSpec as ToolsSpecInput | undefined,
+        tools: toolsSpec,
         maxOutputTokens,
         safetySettings,
       },
@@ -932,7 +935,7 @@ async function agenticSearchWork(
     );
   }
 
-  const resolved = await resolveOrchestration(toolsSpec as ToolsSpecInput | undefined, ctx, {
+  const resolved = await resolveOrchestration(toolsSpec, ctx, {
     toolKey: 'research',
     mode: 'deep',
   });

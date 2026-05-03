@@ -4,7 +4,7 @@ import { z } from 'zod/v4';
 import type { ParsePayload } from 'zod/v4/core';
 
 import { AppError } from '../lib/errors.js';
-import { parseJson } from '../lib/json.js';
+import { parseJson } from '../lib/response.js';
 
 import {
   analyzeOutputKind,

@@ -2,6 +2,8 @@ import {
   type CallToolResult,
   localhostAllowedHostnames,
   type McpServer,
+  ProtocolError,
+  ProtocolErrorCode,
   validateHostHeader as sdkValidateHostHeader,
 } from '@modelcontextprotocol/server';
 
@@ -802,4 +804,57 @@ export function validateGeminiRequest(req: GeminiRequestPreflight): CallToolResu
     if (result) return result;
   }
   return undefined;
+}
+
+/**
+ * Validate a file path for security (prevent path traversal attacks).
+ * Checks for:
+ *  - Directory traversal sequences (e.g., ../)
+ *  - Windows drive letter prefixes (e.g., C:\)
+ *
+ * Workspace-relative paths may include a leading slash.
+ * Examples: 'src/foo.ts' → true, '/src/foo.ts' → true, '../etc/passwd' → error
+ *
+ * @param path - The file path to validate
+ * @returns true if path is valid within workspace
+ * @throws ProtocolError if path is invalid
+ */
+export function validateScanPath(path: string): boolean {
+  if (!path || path.length === 0) {
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Path cannot be empty');
+  }
+  if (/^[A-Za-z]:/.test(path)) {
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Path must be workspace-relative');
+  }
+  const normalized = normalize(path);
+  if (normalized.includes('..') || normalized.startsWith('..')) {
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      'Path traversal detected: cannot use .. sequences',
+    );
+  }
+  return true;
+}
+
+/**
+ * Normalize a file path to canonical form (forward slashes, leading slash).
+ * Handles both Windows (C:\...) and Unix paths.
+ * Adds leading slash if missing.
+ * Converts backslashes to forward slashes.
+ *
+ * @param path - The file path to normalize
+ * @returns Normalized path (e.g., '/src/foo.ts')
+ */
+export function normalizeWorkspacePath(path: string): string {
+  let normalized = path.replace(/^[A-Za-z]:/, '');
+  normalized = normalized.replace(/\\/g, '/');
+  normalized = normalized.replace(/\/+$/, '');
+  if (normalized.length > 0 && !normalized.startsWith('/')) {
+    normalized = `/${normalized}`;
+  }
+  normalized = normalized.replace(/\/+/g, '/');
+  if (normalized === '') {
+    normalized = '/';
+  }
+  return normalized;
 }

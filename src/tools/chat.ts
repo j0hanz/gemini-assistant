@@ -11,11 +11,9 @@ import type {
 } from '@google/genai';
 
 import { AppError } from '../lib/errors.js';
-import { consumeInteractionStream } from '../lib/interaction-stream.js';
-import { buildInteractionParams } from '../lib/interactions.js';
+import { buildInteractionParams, consumeInteractionStream } from '../lib/interactions.js';
 import { logger } from '../lib/logger.js';
 import { appendFunctionCallingInstruction } from '../lib/model-prompts.js';
-import { resolveOrchestration } from '../lib/orchestration.js';
 import {
   buildBaseStructuredOutput,
   buildStructuredResponse,
@@ -44,8 +42,8 @@ import { createToolContext, executor } from '../lib/tool-executor.js';
 import {
   ProfileValidationError,
   type ResolvedProfile,
+  resolveOrchestration,
   resolveProfile,
-  type ToolsSpecInput,
   validateProfile,
 } from '../lib/tool-profiles.js';
 import {
@@ -318,7 +316,7 @@ function hasExpiredSession(
 }
 
 function buildChatResolvedProfile(args: AskArgs): ResolvedProfile {
-  return resolveProfile(args.tools as ToolsSpecInput | undefined, { toolKey: 'chat' });
+  return resolveProfile(args.tools, { toolKey: 'chat' });
 }
 
 function validateAskRequest(
@@ -426,7 +424,7 @@ function normalizeFunctionResponses(
 }
 
 async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
-  const resolved = await resolveOrchestration(args.tools as ToolsSpecInput | undefined, ctx, {
+  const resolved = await resolveOrchestration(args.tools, ctx, {
     toolKey: 'chat',
   });
   if (resolved.error) {

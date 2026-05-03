@@ -10,7 +10,6 @@ import { z } from 'zod/v4';
 import { withUploadsAndPipeline } from '../lib/file.js';
 import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
 import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
-import { resolveOrchestration, type ToolsSpecInput } from '../lib/orchestration.js';
 import {
   buildSuccessfulStructuredContent,
   pickDefined,
@@ -30,6 +29,7 @@ import {
   type ToolWorkspaceCacheManager,
 } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
+import { resolveOrchestration } from '../lib/tool-profiles.js';
 import {
   getAllowedRoots,
   isSensitiveUntrackedPath as isSensitiveUntrackedPathFromValidation,
@@ -276,7 +276,7 @@ function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
     }: ReviewComparisonInput,
     ctx: ServerContext,
   ): Promise<CallToolResult> {
-    const resolved = await resolveOrchestration(tools as ToolsSpecInput | undefined, ctx, {
+    const resolved = await resolveOrchestration(tools, ctx, {
       toolKey: 'review',
       mode: 'comparison',
     });
@@ -358,7 +358,7 @@ async function diagnoseFailureWork(
 ): Promise<CallToolResult> {
   const { error, codeContext, language, maxOutputTokens, safetySettings, tools } = subject;
 
-  const resolved = await resolveOrchestration(tools as ToolsSpecInput | undefined, ctx, {
+  const resolved = await resolveOrchestration(tools, ctx, {
     toolKey: 'review',
     mode: 'failure',
   });

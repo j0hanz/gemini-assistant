@@ -16,6 +16,7 @@ import {
   buildGroundedAnswerPrompt,
   type Capabilities,
 } from '../lib/model-prompts.js';
+import { resolveOrchestration } from '../lib/orchestration.js';
 import { PROGRESS_TOTAL, sendProgress } from '../lib/progress.js';
 import {
   appendSources,
@@ -58,11 +59,7 @@ import {
 } from '../lib/tasks.js';
 import { createDefaultToolServices, type ToolServices } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
-import {
-  resolveOrchestration,
-  toAskThinkingLevel,
-  type ToolsSpecInput,
-} from '../lib/tool-profiles.js';
+import { toAskThinkingLevel, type ToolsSpecInput } from '../lib/tool-profiles.js';
 import { type AnalyzeInput, type ResearchInput, ResearchInputSchema } from '../schemas/inputs.js';
 import { ResearchOutputSchema } from '../schemas/outputs.js';
 

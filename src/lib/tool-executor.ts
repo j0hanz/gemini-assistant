@@ -14,6 +14,13 @@ import { getGeminiModel } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
 import { AppError } from './errors.js';
 import { logContext, logger, maybeSummarizePayload, mcpLog, type ScopedLogger } from './logger.js';
+import {
+  buildOrchestrationRequestFromInputs,
+  type BuiltInToolSpec,
+  type CommonToolInputs,
+  type OrchestrationRequest,
+  resolveOrchestrationFromRequest,
+} from './orchestration.js';
 import { ProgressReporter, reportCompletion, reportFailure } from './progress.js';
 import {
   buildSharedStructuredMetadata,
@@ -23,13 +30,6 @@ import {
 } from './response.js';
 import { executeToolStream, type StreamResult } from './streaming.js';
 import { getWorkSignal } from './tasks.js';
-import {
-  buildOrchestrationRequestFromInputs,
-  type BuiltInToolSpec,
-  type CommonToolInputs,
-  type OrchestrationRequest,
-  resolveOrchestrationFromRequest,
-} from './tool-profiles.js';
 import { type GeminiRequestPreflight, validateGeminiRequest, validateUrls } from './validation.js';
 
 type ToolLabelKey = keyof typeof TOOL_LABELS;

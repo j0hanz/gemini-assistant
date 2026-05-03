@@ -10,6 +10,7 @@ import { z } from 'zod/v4';
 import { withUploadsAndPipeline } from '../lib/file.js';
 import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
 import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
+import { resolveOrchestration } from '../lib/orchestration.js';
 import {
   buildSuccessfulStructuredContent,
   pickDefined,
@@ -29,7 +30,6 @@ import {
   type ToolWorkspaceCacheManager,
 } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
-import { resolveOrchestration } from '../lib/tool-profiles.js';
 import {
   getAllowedRoots,
   isSensitiveUntrackedPath as isSensitiveUntrackedPathFromValidation,

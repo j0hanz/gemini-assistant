@@ -8,6 +8,7 @@ import type { z } from 'zod/v4';
 import { withUploadsAndPipeline } from '../lib/file.js';
 import { mcpLog } from '../lib/logger.js';
 import { buildDiagramGenerationPrompt, buildFileAnalysisPrompt } from '../lib/model-prompts.js';
+import { type BuiltInToolSpec, resolveOrchestration } from '../lib/orchestration.js';
 import {
   buildSuccessfulStructuredContent,
   deriveDiagramSyntaxValidation,
@@ -25,7 +26,6 @@ import {
   type ToolServices,
 } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
-import { type BuiltInToolSpec, resolveOrchestration } from '../lib/tool-profiles.js';
 import { type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 

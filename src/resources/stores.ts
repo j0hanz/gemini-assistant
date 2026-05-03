@@ -1,9 +1,10 @@
-import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontextprotocol/server';
-import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import type { McpServer } from '@modelcontextprotocol/server';
 
 import type { StoreRegistry } from '../lib/store-registry.js';
 
 import { buildResourceMeta } from './metadata.js';
+import { registerStaticResource, registerTemplateResource } from './registry.js';
 import { decodeTemplateParam, STORE_DOCUMENTS_TEMPLATE, STORES_LIST_URI } from './uris.js';
 
 /**
@@ -98,48 +99,17 @@ class StoreResourceHandler {
 export function registerStoreResources(server: McpServer, storeRegistry: StoreRegistry): void {
   const handler = new StoreResourceHandler(storeRegistry);
 
-  // Register resource: gemini://stores
-  server.registerResource(
-    'stores-list-gemini',
-    STORES_LIST_URI,
-    {
-      description: 'File Search Store list',
-      mimeType: 'application/json',
-    },
-    async (): Promise<ReadResourceResult> => {
-      const content = await handler.readResource(STORES_LIST_URI);
-      return {
-        contents: [
-          {
-            uri: STORES_LIST_URI,
-            mimeType: 'application/json',
-            text: content,
-          },
-        ],
-      };
-    },
-  );
+  registerStaticResource(server, STORES_LIST_URI, {
+    id: 'stores-list-gemini',
+    description: 'File Search Store list',
+    mimeType: 'application/json',
+    read: (uri) => handler.readResource(uri),
+  });
 
-  // Register resource template: gemini://stores/{storeName}/documents
-  server.registerResource(
-    'store-documents-gemini',
-    new ResourceTemplate(STORE_DOCUMENTS_TEMPLATE, { list: undefined }),
-    {
-      description: 'Documents in a File Search Store',
-      mimeType: 'application/json',
-    },
-    async (uri): Promise<ReadResourceResult> => {
-      const uriStr = typeof uri === 'string' ? uri : uri.href;
-      const content = await handler.readResource(uriStr);
-      return {
-        contents: [
-          {
-            uri: uriStr,
-            mimeType: 'application/json',
-            text: content,
-          },
-        ],
-      };
-    },
-  );
+  registerTemplateResource(server, STORE_DOCUMENTS_TEMPLATE, {
+    id: 'store-documents-gemini',
+    description: 'Documents in a File Search Store',
+    mimeType: 'application/json',
+    read: (uri) => handler.readResource(uri),
+  });
 }

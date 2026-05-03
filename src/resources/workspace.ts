@@ -1,5 +1,5 @@
-import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontextprotocol/server';
-import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import type { McpServer } from '@modelcontextprotocol/server';
 
 import { readFile } from 'node:fs/promises';
 
@@ -7,6 +7,7 @@ import { normalizeWorkspacePath, validateScanPath } from '../lib/validation.js';
 import type { WorkspaceAccess } from '../lib/workspace-context.js';
 
 import { buildResourceMeta } from './metadata.js';
+import { registerStaticResource, registerTemplateResource } from './registry.js';
 import {
   decodeTemplateParam,
   FILE_RESOURCE_TEMPLATE,
@@ -138,70 +139,24 @@ export function registerWorkspaceResources(
 ): void {
   const handler = new WorkspaceResourceHandler(services.workspace);
 
-  // Register resource: gemini://workspace/cache
-  server.registerResource(
-    'workspace-cache-gemini',
-    WORKSPACE_CACHE_URI,
-    {
-      description: 'Workspace cache metadata',
-      mimeType: 'application/json',
-    },
-    async (): Promise<ReadResourceResult> => {
-      const content = await handler.readResource(WORKSPACE_CACHE_URI);
-      return {
-        contents: [
-          {
-            uri: WORKSPACE_CACHE_URI,
-            mimeType: 'application/json',
-            text: content,
-          },
-        ],
-      };
-    },
-  );
+  registerStaticResource(server, WORKSPACE_CACHE_URI, {
+    id: 'workspace-cache-gemini',
+    description: 'Workspace cache metadata',
+    mimeType: 'application/json',
+    read: (uri) => handler.readResource(uri),
+  });
 
-  // Register resource: gemini://workspace/cache/contents
-  server.registerResource(
-    'workspace-cache-contents-gemini',
-    WORKSPACE_CACHE_CONTENTS_URI,
-    {
-      description: 'Workspace cache full contents',
-      mimeType: 'application/json',
-    },
-    async (): Promise<ReadResourceResult> => {
-      const content = await handler.readResource(WORKSPACE_CACHE_CONTENTS_URI);
-      return {
-        contents: [
-          {
-            uri: WORKSPACE_CACHE_CONTENTS_URI,
-            mimeType: 'application/json',
-            text: content,
-          },
-        ],
-      };
-    },
-  );
+  registerStaticResource(server, WORKSPACE_CACHE_CONTENTS_URI, {
+    id: 'workspace-cache-contents-gemini',
+    description: 'Workspace cache full contents',
+    mimeType: 'application/json',
+    read: (uri) => handler.readResource(uri),
+  });
 
-  // Register resource template: gemini://workspace/files/{path}
-  server.registerResource(
-    'workspace-files-gemini',
-    new ResourceTemplate(FILE_RESOURCE_TEMPLATE, { list: undefined }),
-    {
-      description: 'Workspace file contents',
-      mimeType: 'text/plain',
-    },
-    async (uri): Promise<ReadResourceResult> => {
-      const uriStr = typeof uri === 'string' ? uri : uri.href;
-      const content = await handler.readResource(uriStr);
-      return {
-        contents: [
-          {
-            uri: uriStr,
-            mimeType: 'application/json',
-            text: content,
-          },
-        ],
-      };
-    },
-  );
+  registerTemplateResource(server, FILE_RESOURCE_TEMPLATE, {
+    id: 'workspace-files-gemini',
+    description: 'Workspace file contents',
+    mimeType: 'text/plain',
+    read: (uri) => handler.readResource(uri),
+  });
 }

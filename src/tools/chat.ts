@@ -14,6 +14,7 @@ import { AppError } from '../lib/errors.js';
 import { buildInteractionParams, consumeInteractionStream } from '../lib/interactions.js';
 import { logger } from '../lib/logger.js';
 import { appendFunctionCallingInstruction } from '../lib/model-prompts.js';
+import { resolveOrchestration } from '../lib/orchestration.js';
 import {
   buildBaseStructuredOutput,
   buildStructuredResponse,
@@ -42,7 +43,6 @@ import { createToolContext, executor } from '../lib/tool-executor.js';
 import {
   ProfileValidationError,
   type ResolvedProfile,
-  resolveOrchestration,
   resolveProfile,
   validateProfile,
 } from '../lib/tool-profiles.js';

@@ -430,9 +430,10 @@ async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
   if (resolved.error) {
     return { error: resolved.error } as const;
   }
-  const { functionCallingMode, toolProfile, tools, toolConfig } = resolved.config;
-  const usesUrlContext = resolved.config.activeCapabilities.has('urlContext');
-  const urls = resolved.config.resolvedProfile?.overrides.urls;
+  const { functionCallingMode, tools, toolConfig } = resolved.orchestration.geminiParams;
+  const usesUrlContext = resolved.orchestration.activeCapabilities.has('urlContext');
+  const resolved_profile = buildChatResolvedProfile(args);
+  const urls = resolved_profile.overrides.urls;
 
   // URL Context discovers target URLs from prompt text; keep URLs visible
   // whenever a URL-capable profile is active.
@@ -440,13 +441,13 @@ async function resolveAskTooling(args: AskArgs, ctx: ServerContext) {
 
   return {
     prompt: buildAskPrompt(args.message, promptUrls),
-    toolProfile,
+    toolProfile: buildChatResolvedProfile(args).profile,
     urls: usesUrlContext ? [...(urls ?? [])] : undefined,
     tools,
     toolConfig,
     functionCallingMode,
     serverSideToolInvocations: toolConfig?.includeServerSideToolInvocations === true,
-    resolvedProfile: resolved.config.resolvedProfile,
+    resolvedProfile: resolved_profile,
   } as const;
 }
 
@@ -985,10 +986,6 @@ function createAskWork(deps: AskDependencies, workspace: ToolWorkspaceAccess) {
     const toolingResolved = await resolveAskTooling(effectiveArgs, ctx);
     if ('error' in toolingResolved) {
       return toolingResolved.error;
-    }
-
-    if (!toolingResolved.resolvedProfile) {
-      return new AppError('chat', 'Failed to resolve profile').toToolResult();
     }
 
     const lastInteractionId = deps.getSessionInteractionId(sessionId);

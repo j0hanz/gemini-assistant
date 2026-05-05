@@ -59,7 +59,7 @@ import {
 } from '../lib/tasks.js';
 import { createDefaultToolServices, type ToolServices } from '../lib/tool-context.js';
 import { createToolContext, executor, validateStreamResult } from '../lib/tool-executor.js';
-import { toAskThinkingLevel, type ToolsSpecInput } from '../lib/tool-profiles.js';
+import type { ToolsSpecInput } from '../lib/tool-profiles.js';
 import { type AnalyzeInput, type ResearchInput, ResearchInputSchema } from '../schemas/inputs.js';
 import { ResearchOutputSchema } from '../schemas/outputs.js';
 
@@ -651,12 +651,12 @@ async function runDeepResearchPlan(
       undefined,
       `Retrieving source set ${String(index + 1)}`,
     );
-    const retrievalUrls = resolvedRetrieval.config.resolvedProfile?.overrides.urls;
+    const retrievalUrls = retrievalSpec?.overrides?.urls ?? args.tools?.overrides?.urls;
     const prompt = buildGroundedAnswerPrompt(
       query,
       retrievalUrls,
       undefined,
-      buildPromptCapabilities(resolvedRetrieval.config.activeCapabilities, false),
+      buildPromptCapabilities(resolvedRetrieval.orchestration.activeCapabilities, false),
     );
     await tasks.phase('retrieving');
     const turn = await runDeepResearchTurn(
@@ -667,8 +667,8 @@ async function runDeepResearchPlan(
         systemInstruction: prompt.systemInstruction,
         costProfile: 'research.deep.retrieval',
         safetySettings: args.safetySettings,
-        tools: resolvedRetrieval.config.tools,
-        toolConfig: resolvedRetrieval.config.toolConfig,
+        tools: resolvedRetrieval.orchestration.geminiParams.tools,
+        toolConfig: resolvedRetrieval.orchestration.geminiParams.toolConfig,
       },
     );
     if (turn.result.isError) return turn.result;
@@ -698,18 +698,18 @@ async function runDeepResearchPlan(
   if (resolvedSynthesis.error) return resolvedSynthesis.error;
   const cacheName = await services.workspace.resolveCacheName(ctx);
   const synthesisCanRetrieve =
-    resolvedSynthesis.config.activeCapabilities.has('googleSearch') ||
-    resolvedSynthesis.config.activeCapabilities.has('urlContext') ||
-    resolvedSynthesis.config.activeCapabilities.has('fileSearch');
+    resolvedSynthesis.orchestration.activeCapabilities.has('googleSearch') ||
+    resolvedSynthesis.orchestration.activeCapabilities.has('urlContext') ||
+    resolvedSynthesis.orchestration.activeCapabilities.has('fileSearch');
 
   const synthesisPrompt = buildAgenticResearchPrompt({
     capabilities: buildPromptCapabilities(
-      resolvedSynthesis.config.activeCapabilities,
+      resolvedSynthesis.orchestration.activeCapabilities,
       synthesisCanRetrieve,
     ),
     deliverable: args.deliverable,
     topic: `${args.topic}\n\nRetrieved evidence summaries:\n${retrievalSummaries}`,
-    urls: resolvedRetrieval.config.resolvedProfile?.overrides.urls,
+    urls: retrievalSpec?.overrides?.urls ?? args.tools?.overrides?.urls,
   });
   await tasks.phase('synthesizing');
   const synthesisTurn = await runDeepResearchTurn(
@@ -723,8 +723,8 @@ async function runDeepResearchPlan(
       maxOutputTokens: args.maxOutputTokens,
       safetySettings: args.safetySettings,
       cacheName,
-      tools: resolvedSynthesis.config.tools,
-      toolConfig: resolvedSynthesis.config.toolConfig,
+      tools: resolvedSynthesis.orchestration.geminiParams.tools,
+      toolConfig: resolvedSynthesis.orchestration.geminiParams.toolConfig,
     },
   );
   if (synthesisTurn.result.isError) return synthesisTurn.result;
@@ -804,13 +804,13 @@ async function searchWork(
   });
   if (resolved.error) return resolved.error;
 
-  const { tools, toolConfig } = resolved.config;
-  const resolvedUrls = resolved.config.resolvedProfile?.overrides.urls;
+  const { tools, toolConfig } = resolved.orchestration.geminiParams;
+  const resolvedUrls = toolsSpec?.overrides?.urls;
   const prompt = buildGroundedAnswerPrompt(
     goal,
     resolvedUrls,
     undefined,
-    buildPromptCapabilities(resolved.config.activeCapabilities, false),
+    buildPromptCapabilities(resolved.orchestration.activeCapabilities, false),
   );
 
   await tasks.phase('retrieving');
@@ -939,10 +939,10 @@ async function agenticSearchWork(
     mode: 'deep',
   });
   if (resolved.error) return resolved.error;
-  const resolvedUrls = resolved.config.resolvedProfile?.overrides.urls;
+  const resolvedUrls = toolsSpec?.overrides?.urls;
   await tasks.phase('planning');
   const prompt = buildAgenticResearchPrompt({
-    capabilities: buildPromptCapabilities(resolved.config.activeCapabilities, false),
+    capabilities: buildPromptCapabilities(resolved.orchestration.activeCapabilities, false),
     deliverable,
     topic: enrichedTopic,
     urls: resolvedUrls,
@@ -952,11 +952,16 @@ async function agenticSearchWork(
   await mcpLog(ctx, 'info', 'Agentic search requested');
   log.info('Agentic search requested', { searchDepth });
 
-  const interactionTools = builtInsToInteractionTools(
-    resolved.config.resolvedProfile?.builtIns ?? [],
-  );
+  // Derive builtIns from activeCapabilities
+  const builtInsFromCapabilities: string[] = [];
+  for (const cap of ['googleSearch', 'urlContext', 'codeExecution', 'fileSearch']) {
+    if (resolved.orchestration.activeCapabilities.has(cap)) {
+      builtInsFromCapabilities.push(cap);
+    }
+  }
+  const interactionTools = builtInsToInteractionTools(builtInsFromCapabilities);
   const interactionThinkingLevel = (
-    thinkingLevel ?? toAskThinkingLevel(resolved.config.resolvedProfile?.thinkingLevel ?? 'low')
+    thinkingLevel ?? 'low'
   ).toLowerCase() as Interactions.ThinkingLevel;
 
   const backgroundInteraction = await createBackgroundInteraction({

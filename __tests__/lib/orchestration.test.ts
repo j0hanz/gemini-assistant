@@ -1,9 +1,12 @@
+import type { ServerContext } from '@modelcontextprotocol/server';
+
 import assert from 'node:assert';
 import { test } from 'node:test';
 
 import {
   buildOrchestrationDiagnostics,
   buildOrchestrationRequestFromInputs,
+  resolveOrchestrationFromRequest,
 } from '../../src/lib/orchestration.js';
 
 test('buildOrchestrationDiagnostics — emits info for resolved profile', () => {
@@ -44,4 +47,34 @@ test('buildOrchestrationDiagnostics — warns on empty fileSearch stores', () =>
     (d) => d.level === 'warning' && d.message.includes('File Search'),
   );
   assert.ok(warning, 'must warn when fileSearch has no store names');
+});
+
+function mockCtx(): ServerContext {
+  return {
+    mcpReq: {
+      signal: { aborted: false } as AbortSignal,
+      notify: async () => {},
+      log: async () => {},
+    },
+  } as unknown as ServerContext;
+}
+
+test('resolveOrchestrationFromRequest — result has OrchestrationResult shape', async () => {
+  const request = buildOrchestrationRequestFromInputs({ googleSearch: true });
+  const resolved = await resolveOrchestrationFromRequest(request, mockCtx(), 'test');
+  assert.ok(!resolved.error, 'must not have error');
+  assert.ok(resolved.orchestration, 'result must have orchestration field (not config)');
+  assert.ok(
+    resolved.orchestration.activeCapabilities instanceof Set,
+    'activeCapabilities must be a Set',
+  );
+  assert.ok(
+    resolved.orchestration.activeCapabilities.has('googleSearch'),
+    'activeCapabilities must contain googleSearch',
+  );
+  assert.ok(
+    typeof resolved.orchestration.geminiParams === 'object',
+    'geminiParams must be an object',
+  );
+  assert.ok('tools' in resolved.orchestration.geminiParams, 'geminiParams must contain tools');
 });

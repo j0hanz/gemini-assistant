@@ -323,8 +323,8 @@ function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
                   thinkingLevel,
                   maxOutputTokens,
                   safetySettings,
-                  tools: resolved.config.tools,
-                  toolConfig: resolved.config.toolConfig,
+                  tools: resolved.orchestration.geminiParams.tools,
+                  toolConfig: resolved.orchestration.geminiParams.toolConfig,
                 },
                 getWorkSignal(ctx),
               ),
@@ -364,8 +364,8 @@ async function diagnoseFailureWork(
   });
   if (resolved.error) return resolved.error;
 
-  const googleSearchEnabled = resolved.config.activeCapabilities.has('googleSearch');
-  const resolvedUrls = resolved.config.resolvedProfile?.overrides.urls;
+  const googleSearchEnabled = resolved.orchestration.activeCapabilities.has('googleSearch');
+  const resolvedUrls = tools?.overrides?.urls;
 
   const prompt = buildErrorDiagnosisPrompt({
     codeContext: focus
@@ -396,8 +396,8 @@ async function diagnoseFailureWork(
             thinkingLevel,
             maxOutputTokens,
             safetySettings,
-            tools: resolved.config.tools,
-            toolConfig: resolved.config.toolConfig,
+            tools: resolved.orchestration.geminiParams.tools,
+            toolConfig: resolved.orchestration.geminiParams.toolConfig,
           },
           getWorkSignal(ctx),
         ),

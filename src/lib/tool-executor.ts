@@ -463,6 +463,8 @@ class ToolExecutor {
           return { result: resolved.error };
         }
 
+        const { orchestration } = resolved;
+
         const fileSearchStoreNames = request.orchestration.builtInToolSpecs
           ?.filter(
             (spec): spec is Extract<BuiltInToolSpec, { kind: 'fileSearch' }> =>
@@ -470,7 +472,9 @@ class ToolExecutor {
           )
           .flatMap((spec) => spec.fileSearchStoreNames);
         const preflightError = validateGeminiRequest({
-          activeCapabilities: resolved.config.activeCapabilities,
+          activeCapabilities: orchestration.activeCapabilities as ReadonlySet<
+            'googleSearch' | 'urlContext' | 'codeExecution' | 'fileSearch' | 'functions'
+          >,
           responseSchema: request.config.responseSchema,
           jsonMode: request.config.jsonMode,
           fileSearchStoreNames,
@@ -480,7 +484,7 @@ class ToolExecutor {
         }
 
         const { contents, systemInstruction } = request.buildContents(
-          resolved.config.activeCapabilities,
+          new Set(orchestration.activeCapabilities),
         );
 
         const streamGenerator = () =>
@@ -491,9 +495,7 @@ class ToolExecutor {
               {
                 systemInstruction,
                 ...request.config,
-                functionCallingMode: resolved.config.functionCallingMode,
-                tools: resolved.config.tools,
-                toolConfig: resolved.config.toolConfig,
+                ...orchestration.geminiParams,
               },
               getWorkSignal(ctx),
             ),

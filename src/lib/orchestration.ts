@@ -26,6 +26,15 @@ const BUILT_IN_TOOL_NAMES = ['googleSearch', 'urlContext', 'codeExecution', 'fil
 type BuiltInToolName = (typeof BUILT_IN_TOOL_NAMES)[number];
 type ActiveCapability = BuiltInToolName | 'functions';
 
+interface OrchestrationResult {
+  geminiParams: {
+    tools?: ToolListUnion;
+    toolConfig?: ToolConfig;
+    functionCallingMode?: FunctionCallingConfigMode;
+  };
+  activeCapabilities: ReadonlySet<string>;
+}
+
 export type BuiltInToolSpec =
   | { kind: 'googleSearch' }
   | { kind: 'urlContext' }
@@ -321,8 +330,8 @@ export function buildOrchestrationDiagnostics(
 }
 
 type ResolveOrchestrationResult =
-  | { config: OrchestrationConfig; error?: undefined }
-  | { config?: undefined; error: CallToolResult };
+  | { orchestration: OrchestrationResult; error?: undefined }
+  | { orchestration?: undefined; error: CallToolResult };
 
 // ── Legacy request-based entry point (used by tool-executor.ts) ───────────────
 
@@ -362,7 +371,18 @@ export async function resolveOrchestrationFromRequest(
 
   logger.child(toolKey).info('orchestration resolved', payload);
 
-  return { config };
+  return {
+    orchestration: {
+      activeCapabilities: config.activeCapabilities,
+      geminiParams: {
+        ...(config.tools !== undefined ? { tools: config.tools } : {}),
+        ...(config.toolConfig !== undefined ? { toolConfig: config.toolConfig } : {}),
+        ...(config.functionCallingMode !== undefined
+          ? { functionCallingMode: config.functionCallingMode }
+          : {}),
+      },
+    },
+  };
 }
 
 // ── Profile-driven entry point (new public API) ───────────────────────────────
@@ -400,31 +420,6 @@ export async function resolveOrchestration(
     activeCapabilities.add('functions');
   }
 
-  const fileSearchStoreCount =
-    resolved.profile === 'rag' ? (resolved.overrides.fileSearchStores?.length ?? 0) : undefined;
-  const functionCount = resolved.overrides.functions?.length;
-
-  const toolProfileDetails = buildToolProfileDetails({
-    ...(fileSearchStoreCount !== undefined ? { fileSearchStoreCount } : {}),
-    ...(functionCount !== undefined ? { functionCount } : {}),
-    ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
-    ...(toolConfig?.includeServerSideToolInvocations === true
-      ? { serverSideToolInvocations: true }
-      : {}),
-  });
-
-  const toolProfile = buildToolProfile(tools);
-
-  const config: OrchestrationConfig = {
-    resolvedProfile: resolved,
-    toolProfile,
-    toolProfileDetails,
-    activeCapabilities,
-    ...(tools.length > 0 ? { tools } : {}),
-    ...(toolConfig !== undefined ? { toolConfig } : {}),
-    ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
-  };
-
   const logPayload = {
     toolKey: context.toolKey,
     profile: resolved.profile,
@@ -440,5 +435,14 @@ export async function resolveOrchestration(
   );
   logger.child(context.toolKey).info('tool.profile.resolved', logPayload);
 
-  return { config };
+  return {
+    orchestration: {
+      activeCapabilities,
+      geminiParams: {
+        ...(tools.length > 0 ? { tools } : {}),
+        ...(toolConfig !== undefined ? { toolConfig } : {}),
+        ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
+      },
+    },
+  };
 }

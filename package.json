@@ -1,6 +1,6 @@
 {
   "name": "@j0hanz/gemini-assistant",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Workflow-first MCP server for Google Gemini with sessions and workspace context",
   "type": "module",
   "main": "dist/index.js",
@@ -53,7 +53,7 @@
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
-    "@google/genai": "^1.51",
+    "@google/genai": "^1.52",
     "@modelcontextprotocol/node": "2.0.0-alpha.2",
     "@modelcontextprotocol/server": "2.0.0-alpha.2",
     "express": "^5.2.1",
@@ -70,6 +70,6 @@
     "prettier": "^3.8.3",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.59.1"
+    "typescript-eslint": "^8.59.2"
   }
 }

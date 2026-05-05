@@ -1,10 +1,12 @@
 import assert from 'node:assert';
 import { mock, test } from 'node:test';
 
+import type { GenerateContentResponse } from '@google/genai';
+
 // sendThoughtDelta will be exported from streaming.ts after TASK-003
 // For now this import will fail, which is the expected failure mode.
-import { sendThoughtDelta } from '../../src/lib/streaming.js';
-import type { StreamResult } from '../../src/lib/streaming.js';
+import { consumeStreamWithProgress, sendThoughtDelta } from '../../src/lib/streaming.js';
+import type { StreamObserver, StreamResult } from '../../src/lib/streaming.js';
 import { validateStreamResult } from '../../src/lib/tool-executor.js';
 
 test('sendThoughtDelta — emits notifications/gemini-assistant/thought with correct shape', async () => {
@@ -122,4 +124,72 @@ test('validateStreamResult — returns text content on success', () => {
   assert.strictEqual(r.content.length, 1);
   const c = r.content[0];
   assert.ok(c && 'text' in c && c.text === 'hello world');
+});
+
+function noopObserver(): StreamObserver {
+  return {
+    onProgress: async () => {},
+    onThoughtDelta: async () => {},
+  };
+}
+
+async function* textChunks(...texts: string[]): AsyncGenerator<GenerateContentResponse> {
+  for (const text of texts) {
+    yield {
+      candidates: [{ content: { parts: [{ text }] } }],
+    } as GenerateContentResponse;
+  }
+}
+
+test('consumeStreamWithProgress — accumulates text from multiple chunks', async () => {
+  const result = await consumeStreamWithProgress(textChunks('hello', ' world'), noopObserver());
+  assert.equal(result.text, 'hello world');
+  assert.equal(result.hadCandidate, true);
+});
+
+test('consumeStreamWithProgress — calls onProgress at least once', async () => {
+  let calls = 0;
+  const observer: StreamObserver = {
+    onProgress: async () => {
+      calls += 1;
+    },
+    onThoughtDelta: async () => {},
+  };
+  await consumeStreamWithProgress(textChunks('hi'), observer);
+  assert.ok(calls > 0, 'onProgress must be called at least once');
+});
+
+test('consumeStreamWithProgress — records function call in toolEvents', async () => {
+  const stream = (async function* (): AsyncGenerator<GenerateContentResponse> {
+    yield {
+      candidates: [
+        {
+          content: { parts: [{ functionCall: { name: 'myTool', args: { x: 1 } } }] },
+        },
+      ],
+    } as GenerateContentResponse;
+  })();
+  const result = await consumeStreamWithProgress(stream, noopObserver());
+  assert.equal(result.functionCalls.length, 1);
+  assert.equal(result.functionCalls[0]?.name, 'myTool');
+  const fc = result.toolEvents.find((e) => e.kind === 'function_call');
+  assert.ok(fc, 'function_call event must exist');
+  assert.equal(fc?.name, 'myTool');
+});
+
+test('consumeStreamWithProgress — calls onThoughtDelta for thought parts', async () => {
+  const deltas: string[] = [];
+  const observer: StreamObserver = {
+    onProgress: async () => {},
+    onThoughtDelta: async (delta) => {
+      deltas.push(delta);
+    },
+  };
+  const stream = (async function* (): AsyncGenerator<GenerateContentResponse> {
+    yield {
+      candidates: [{ content: { parts: [{ thought: true, text: 'thinking...' }] } }],
+    } as GenerateContentResponse;
+  })();
+  await consumeStreamWithProgress(stream, observer);
+  assert.ok(deltas.includes('thinking...'), 'thought delta must be forwarded to observer');
 });

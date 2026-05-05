@@ -13,7 +13,6 @@ import type {
 
 import type { ThoughtNotificationParams } from '../public-contract.js';
 import { AppError, withRetry } from './errors.js';
-import { mcpLog } from './logger.js';
 import { advanceProgress, PROGRESS_TOTAL, sendProgress } from './progress.js';
 import { pickDefined } from './response.js';
 
@@ -86,6 +85,11 @@ export interface StreamAnomalies {
   namelessFunctionCalls?: number;
 }
 
+export interface StreamObserver {
+  onProgress(current: number, total: number, message: string): Promise<void>;
+  onThoughtDelta(delta: string, totalLen: number, seq: number): Promise<void>;
+}
+
 const enum Phase {
   Waiting = 0,
   Thinking = 1,
@@ -110,8 +114,6 @@ interface StreamProcessingState extends StreamMetadata {
   toolsUsed: Set<string>;
   toolWaves: number;
 }
-
-type ProgressMessageFormatter = (message: string) => string;
 
 interface ThoughtDeltaCtx {
   mcpReq: {
@@ -365,19 +367,17 @@ function createStreamProcessingState(): StreamProcessingState {
 }
 
 async function advanceAndSendProgress(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   message: string,
 ): Promise<void> {
   state.currentProgress = advanceProgress(state.currentProgress);
-  await sendProgress(ctx, Math.floor(state.currentProgress), PROGRESS_TOTAL, msg(message));
+  await observer.onProgress(Math.floor(state.currentProgress), PROGRESS_TOTAL, message);
 }
 
 async function recordToolActivity(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   progressMessage: string,
   toolName?: string,
 ): Promise<void> {
@@ -392,7 +392,7 @@ async function recordToolActivity(
     state.toolsUsed.add(toolName);
   }
   state.hadToolActivity = true;
-  await advanceAndSendProgress(ctx, state, msg, progressMessage);
+  await advanceAndSendProgress(observer, state, progressMessage);
 }
 
 function normalizeToolName(toolType: string | undefined): string | undefined {
@@ -436,10 +436,9 @@ function toolEvent(
 }
 
 async function maybeReportBuiltInToolProgress(
-  ctx: ServerContext,
+  observer: StreamObserver,
   candidate: NonNullable<GenerateContentResponse['candidates']>[number],
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
 ): Promise<void> {
   const hasGoogleSearchToolCall = (candidate.content?.parts ?? []).some(
     (part) =>
@@ -448,35 +447,33 @@ async function maybeReportBuiltInToolProgress(
   );
   if (candidate.groundingMetadata && !hasGoogleSearchToolCall && !state.groundingProgressReported) {
     state.groundingProgressReported = true;
-    await recordToolActivity(ctx, state, msg, 'Retrieving grounded sources');
+    await recordToolActivity(observer, state, 'Retrieving grounded sources');
   }
   if (candidate.urlContextMetadata && !state.toolsUsed.has('urlContext')) {
-    await recordToolActivity(ctx, state, msg, 'Retrieving URL context', 'urlContext');
+    await recordToolActivity(observer, state, 'Retrieving URL context', 'urlContext');
   }
 }
 
 async function transitionToThinking(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
 ): Promise<void> {
   if (state.phase >= Phase.Thinking) {
     return;
   }
 
   state.phase = Phase.Thinking;
-  await advanceAndSendProgress(ctx, state, msg, 'Thinking');
+  await advanceAndSendProgress(observer, state, 'Thinking');
 }
 
 async function transitionToGenerating(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
 ): Promise<void> {
   if (state.hadToolActivity && state.completedToolWaves < state.toolWaves) {
     state.completedToolWaves = state.toolWaves;
     state.phase = Phase.Generating;
-    await advanceAndSendProgress(ctx, state, msg, 'Compiling results');
+    await advanceAndSendProgress(observer, state, 'Compiling results');
     return;
   }
 
@@ -485,13 +482,12 @@ async function transitionToGenerating(
   }
 
   state.phase = Phase.Generating;
-  await advanceAndSendProgress(ctx, state, msg, 'Generating response');
+  await advanceAndSendProgress(observer, state, 'Generating response');
 }
 
 async function handleFunctionCallPart(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   part: Part,
 ): Promise<void> {
   const functionCall = part.functionCall;
@@ -500,7 +496,6 @@ async function handleFunctionCallPart(
   }
 
   if (!functionCall.name) {
-    await mcpLog(ctx, 'debug', 'Received functionCall with missing name');
     state.namelessFunctionCallCount += 1;
   }
 
@@ -526,13 +521,12 @@ async function handleFunctionCallPart(
       thoughtSignature: part.thoughtSignature,
     }),
   );
-  await recordToolActivity(ctx, state, msg, `Tool: ${fnName ?? 'unnamed function'}`, fnName);
+  await recordToolActivity(observer, state, `Tool: ${fnName ?? 'unnamed function'}`, fnName);
 }
 
 async function handleToolCallPart(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   part: Part,
 ): Promise<void> {
   const toolCall = part.toolCall;
@@ -555,9 +549,8 @@ async function handleToolCallPart(
   if (toolName) state.toolsUsed.add(toolName);
   if (!alreadyReported) {
     await recordToolActivity(
-      ctx,
+      observer,
       state,
-      msg,
       `Built-in tool: ${normalizedToolName ?? toolCall.toolType ?? 'unknown'}`,
       normalizedToolName,
     );
@@ -565,9 +558,8 @@ async function handleToolCallPart(
 }
 
 async function handleToolResponsePart(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   part: Part,
 ): Promise<void> {
   const toolResponse = part.toolResponse;
@@ -590,9 +582,8 @@ async function handleToolResponsePart(
   if (toolName) state.toolsUsed.add(toolName);
   if (!alreadyReported) {
     await recordToolActivity(
-      ctx,
+      observer,
       state,
-      msg,
       `Built-in result: ${normalizedToolName ?? toolResponse.toolType ?? 'unknown'}`,
       normalizedToolName,
     );
@@ -600,12 +591,11 @@ async function handleToolResponsePart(
 }
 
 async function handleThoughtPart(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   partText: string | undefined,
 ): Promise<void> {
-  await transitionToThinking(ctx, state, msg);
+  await transitionToThinking(observer, state);
 
   if (partText === undefined) {
     return;
@@ -614,14 +604,13 @@ async function handleThoughtPart(
   state.thoughtText += partText;
 
   if (partText.length > 0) {
-    await sendThoughtDelta(ctx, partText, state.thoughtText.length, state.thoughtSeq++);
+    await observer.onThoughtDelta(partText, state.thoughtText.length, state.thoughtSeq++);
   }
 }
 
 async function handleExecutableCodePart(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   part: Part,
 ): Promise<boolean> {
   if (!part.executableCode) {
@@ -637,14 +626,13 @@ async function handleExecutableCodePart(
       thoughtSignature: part.thoughtSignature,
     }),
   );
-  await recordToolActivity(ctx, state, msg, 'Executing code', 'codeExecution');
+  await recordToolActivity(observer, state, 'Executing code', 'codeExecution');
   return true;
 }
 
 async function handleCodeExecutionResultPart(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   part: Part,
 ): Promise<boolean> {
   if (!part.codeExecutionResult) {
@@ -660,23 +648,22 @@ async function handleCodeExecutionResultPart(
       thoughtSignature: part.thoughtSignature,
     }),
   );
-  await recordToolActivity(ctx, state, msg, 'Code executed');
+  await recordToolActivity(observer, state, 'Code executed');
   return true;
 }
 
 async function handleToolProtocolPart(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   part: Part,
 ): Promise<boolean> {
   if (part.toolCall) {
-    await handleToolCallPart(ctx, state, msg, part);
+    await handleToolCallPart(observer, state, part);
     return true;
   }
 
   if (part.toolResponse) {
-    await handleToolResponsePart(ctx, state, msg, part);
+    await handleToolResponsePart(observer, state, part);
     return true;
   }
 
@@ -684,13 +671,12 @@ async function handleToolProtocolPart(
 }
 
 async function handleFunctionProtocolPart(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   part: Part,
 ): Promise<boolean> {
   if (part.functionCall) {
-    await handleFunctionCallPart(ctx, state, msg, part);
+    await handleFunctionCallPart(observer, state, part);
     return true;
   }
 
@@ -708,9 +694,8 @@ async function handleFunctionProtocolPart(
     }),
   );
   await recordToolActivity(
-    ctx,
+    observer,
     state,
-    msg,
     `Function result: ${part.functionResponse.name ?? 'tool'}`,
     part.functionResponse.name,
   );
@@ -718,9 +703,8 @@ async function handleFunctionProtocolPart(
 }
 
 async function handleThoughtOrSignaturePart(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   part: Part,
 ): Promise<boolean> {
   const partText = part.text;
@@ -732,7 +716,7 @@ async function handleThoughtOrSignaturePart(
         thoughtSignature: part.thoughtSignature,
       }),
     );
-    await handleThoughtPart(ctx, state, msg, partText);
+    await handleThoughtPart(observer, state, partText);
     return true;
   }
 
@@ -751,9 +735,8 @@ async function handleThoughtOrSignaturePart(
 // channel (`notifications/message`) — clients filter logs by level and would
 // either flood on `info` or silently drop streamed content.
 async function handleTextPart(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   part: Part,
 ): Promise<void> {
   const partText = part.text;
@@ -774,7 +757,7 @@ async function handleTextPart(
       }),
     );
   }
-  await transitionToGenerating(ctx, state, msg);
+  await transitionToGenerating(observer, state);
   state.text += partText;
   const waveIndex = state.textByWave.length - 1;
   state.textByWave[waveIndex] = `${state.textByWave[waveIndex] ?? ''}${partText}`;
@@ -826,9 +809,8 @@ function appendStreamPart(state: StreamProcessingState, part: Part): void {
 }
 
 type PartHandler = (
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   part: Part,
 ) => Promise<boolean>;
 
@@ -841,18 +823,17 @@ const PART_HANDLERS: readonly PartHandler[] = [
 ];
 
 async function handleStreamPart(
-  ctx: ServerContext,
+  observer: StreamObserver,
   state: StreamProcessingState,
-  msg: ProgressMessageFormatter,
   part: Part,
 ): Promise<void> {
   appendStreamPart(state, part);
 
   for (const handler of PART_HANDLERS) {
-    if (await handler(ctx, state, msg, part)) return;
+    if (await handler(observer, state, part)) return;
   }
 
-  await handleTextPart(ctx, state, msg, part);
+  await handleTextPart(observer, state, part);
 }
 
 function toolsUsedOccurrences(toolEvents: ToolEvent[]): string[] {
@@ -961,20 +942,18 @@ export function deriveComputationsFromToolEvents(
   return computations;
 }
 
-async function consumeStreamWithProgress(
+export async function consumeStreamWithProgress(
   stream: AsyncGenerator<GenerateContentResponse>,
-  ctx: ServerContext,
-  toolLabel?: string,
-  signal: AbortSignal = ctx.mcpReq.signal,
+  observer: StreamObserver,
+  signal?: AbortSignal,
 ): Promise<StreamResult> {
   const state = createStreamProcessingState();
-  const msg = (message: string): string => (toolLabel ? `${toolLabel}: ${message}` : message);
 
-  await advanceAndSendProgress(ctx, state, msg, 'Evaluating prompt');
+  await advanceAndSendProgress(observer, state, 'Evaluating prompt');
 
   try {
     for await (const chunk of stream) {
-      if (signal.aborted) {
+      if (signal?.aborted) {
         state.aborted = true;
         break;
       }
@@ -987,10 +966,10 @@ async function consumeStreamWithProgress(
       if (!candidate) continue;
 
       updateStreamMetadata(chunk, candidate, state);
-      await maybeReportBuiltInToolProgress(ctx, candidate, state, msg);
+      await maybeReportBuiltInToolProgress(observer, candidate, state);
 
       for (const part of candidate.content?.parts ?? []) {
-        await handleStreamPart(ctx, state, msg, part);
+        await handleStreamPart(observer, state, part);
       }
     }
   } catch (error) {
@@ -1000,14 +979,6 @@ async function consumeStreamWithProgress(
     }
 
     throw error;
-  }
-
-  if (state.namelessFunctionCallCount > 0) {
-    await mcpLog(
-      ctx,
-      'warning',
-      `Received ${String(state.namelessFunctionCallCount)} functionCall part(s) with missing name`,
-    );
   }
 
   return finalizeStreamResult(state);
@@ -1036,10 +1007,19 @@ export async function executeToolStream(
   signal: AbortSignal = ctx.mcpReq.signal,
 ): Promise<StreamResult> {
   try {
+    const observer: StreamObserver = {
+      onProgress: async (current, total, message) => {
+        await sendProgress(ctx, current, total, `${toolLabel}: ${message}`);
+      },
+      onThoughtDelta: async (delta, totalLen, seq) => {
+        await sendThoughtDelta(ctx, delta, totalLen, seq);
+      },
+    };
+
     const streamResult = await withRetry(
       async () => {
         const stream = await streamGenerator();
-        return await consumeStreamWithProgress(stream, ctx, toolLabel, signal);
+        return await consumeStreamWithProgress(stream, observer, signal);
       },
       {
         signal,

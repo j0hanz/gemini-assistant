@@ -6,18 +6,18 @@ const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 30_000;
 const GIT_MAX_BUFFER = 10 * 1024 * 1024;
 
-export interface DiffArgs {
+interface DiffArgs {
   base: string;
   head?: string | undefined;
   paths?: readonly string[] | undefined;
   extraArgs?: readonly string[] | undefined;
 }
 
-export interface DiffResult {
+interface DiffResult {
   raw: string;
 }
 
-export interface StatusResult {
+interface StatusResult {
   raw: string;
 }
 
@@ -26,6 +26,7 @@ export interface GitReader {
   status(): Promise<StatusResult>;
   show(ref: string, path?: string): Promise<string>;
   isAvailable(): Promise<boolean>;
+  exec(args: readonly string[]): Promise<string>;
 }
 
 // ── Real adapter (wraps execFile) ─────────────────────────────────────
@@ -72,6 +73,15 @@ export class ExecFileGitReader implements GitReader {
       return false;
     }
   }
+
+  async exec(args: readonly string[]): Promise<string> {
+    const { stdout } = await execFileAsync('git', args as string[], {
+      cwd: this.cwd,
+      timeout: GIT_TIMEOUT_MS,
+      maxBuffer: GIT_MAX_BUFFER,
+    });
+    return stdout;
+  }
 }
 
 // ── Test adapter (returns pre-canned data) ────────────────────────────
@@ -81,24 +91,30 @@ interface FixtureConfig {
   statusRaw?: string;
   showOutput?: string;
   available?: boolean;
+  execOutput?: Record<string, string>;
 }
 
 export class FixtureGitReader implements GitReader {
   constructor(private readonly config: FixtureConfig) {}
 
   async diff(_args: DiffArgs): Promise<DiffResult> {
-    return { raw: this.config.diffRaw ?? '' };
+    return await Promise.resolve({ raw: this.config.diffRaw ?? '' });
   }
 
   async status(): Promise<StatusResult> {
-    return { raw: this.config.statusRaw ?? '' };
+    return await Promise.resolve({ raw: this.config.statusRaw ?? '' });
   }
 
   async show(_ref: string, _path?: string): Promise<string> {
-    return this.config.showOutput ?? '';
+    return await Promise.resolve(this.config.showOutput ?? '');
   }
 
   async isAvailable(): Promise<boolean> {
-    return this.config.available ?? false;
+    return await Promise.resolve(this.config.available ?? false);
+  }
+
+  async exec(args: readonly string[]): Promise<string> {
+    const key = args.join(' ');
+    return await Promise.resolve(this.config.execOutput?.[key] ?? '');
   }
 }

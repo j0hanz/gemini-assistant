@@ -1,13 +1,12 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import { execFile } from 'node:child_process';
 import { lstat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 
 import { z } from 'zod/v4';
 
 import { withUploadsAndPipeline } from '../lib/file.js';
+import { ExecFileGitReader, type GitReader } from '../lib/git-reader.js';
 import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
 import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { resolveOrchestration } from '../lib/orchestration.js';
@@ -46,11 +45,6 @@ import { getGeminiModel, getReviewDocs } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
 import { appendResourceLinks } from '../resources/index.js';
 
-const execFileAsync = promisify(execFile);
-const reviewGitRunner = execFileAsync;
-
-const GIT_TIMEOUT_MS = 30_000;
-const GIT_MAX_BUFFER = 10 * 1024 * 1024;
 const MAX_DIFF_CHARS = 200_000;
 const MAX_UNTRACKED_FILE_BYTES = 1024 * 1024;
 const TRUNCATED_DIFF_NOTICE = '\n# Review truncated to fit diff budget.';
@@ -523,76 +517,61 @@ function uniqueSortedPaths(paths: Iterable<string>): string[] {
   return [...new Set(paths)].sort();
 }
 
-async function findGitRoot(signal?: AbortSignal): Promise<string> {
-  const cwd = process.cwd();
-  const { stdout } = await reviewGitRunner('git', ['rev-parse', '--show-toplevel'], {
-    cwd,
-    encoding: 'utf8',
-    timeout: GIT_TIMEOUT_MS,
-    ...(signal ? { signal } : {}),
-  });
+async function runGit(gitReader: GitReader, args: string[]): Promise<string> {
+  return gitReader.exec(args);
+}
+
+async function findGitRoot(reader: GitReader): Promise<string> {
+  const stdout = await runGit(reader, ['rev-parse', '--show-toplevel']);
   return stdout.trim();
 }
 
-async function findGitRootFromDirectory(
-  workingDirectory: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  const { stdout } = await reviewGitRunner('git', ['rev-parse', '--show-toplevel'], {
-    cwd: workingDirectory,
-    encoding: 'utf8',
-    timeout: GIT_TIMEOUT_MS,
-    ...(signal ? { signal } : {}),
-  });
+async function findGitRootFromDirectory(reader: GitReader, _signal?: AbortSignal): Promise<string> {
+  const stdout = await runGit(reader, ['rev-parse', '--show-toplevel']);
   return stdout.trim();
 }
 
-async function runGit(gitRoot: string, args: string[], signal?: AbortSignal): Promise<string> {
-  const { stdout } = await reviewGitRunner('git', args, {
-    cwd: gitRoot,
-    encoding: 'utf8',
-    maxBuffer: GIT_MAX_BUFFER,
-    timeout: GIT_TIMEOUT_MS,
-    ...(signal ? { signal } : {}),
-  });
-  return stdout;
-}
-
-async function hasHeadCommit(gitRoot: string, signal?: AbortSignal): Promise<boolean> {
+async function hasHeadCommit(gitReader: GitReader): Promise<boolean> {
   try {
-    await runGit(gitRoot, ['rev-parse', '--verify', 'HEAD'], signal);
+    await runGit(gitReader, ['rev-parse', '--verify', 'HEAD']);
     return true;
   } catch {
     return false;
   }
 }
 
-async function generateFallbackTrackedDiff(gitRoot: string, signal?: AbortSignal): Promise<string> {
+async function generateFallbackTrackedDiff(
+  gitReader: GitReader,
+  _signal?: AbortSignal,
+): Promise<string> {
   const [stagedDiff, unstagedDiff] = await Promise.all([
-    runGit(gitRoot, buildGitDiffArgs(true), signal),
-    runGit(gitRoot, buildGitDiffArgs(false), signal),
+    runGit(gitReader, buildGitDiffArgs(true)),
+    runGit(gitReader, buildGitDiffArgs(false)),
   ]);
 
   return joinNonEmptyParts([stagedDiff, unstagedDiff]);
 }
 
-async function listFallbackTrackedPaths(gitRoot: string, signal?: AbortSignal): Promise<string[]> {
+async function listFallbackTrackedPaths(
+  gitReader: GitReader,
+  _signal?: AbortSignal,
+): Promise<string[]> {
   const [stagedPaths, unstagedPaths] = await Promise.all([
-    runGit(gitRoot, buildGitNameOnlyArgs(true), signal),
-    runGit(gitRoot, buildGitNameOnlyArgs(false), signal),
+    runGit(gitReader, buildGitNameOnlyArgs(true)),
+    runGit(gitReader, buildGitNameOnlyArgs(false)),
   ]);
 
   return [...parseGitPathList(stagedPaths), ...parseGitPathList(unstagedPaths)];
 }
 
 async function buildTrackedSnapshot(
-  gitRoot: string,
-  signal?: AbortSignal,
+  gitReader: GitReader,
+  _signal?: AbortSignal,
 ): Promise<{ diff: string; paths: string[] }> {
-  if (await hasHeadCommit(gitRoot, signal)) {
+  if (await hasHeadCommit(gitReader)) {
     const [diff, paths] = await Promise.all([
-      runGit(gitRoot, buildGitArgs({ againstHead: true }), signal),
-      runGit(gitRoot, buildGitArgs({ againstHead: true, nameOnly: true }), signal),
+      runGit(gitReader, buildGitArgs({ againstHead: true })),
+      runGit(gitReader, buildGitArgs({ againstHead: true, nameOnly: true })),
     ]);
     return {
       diff,
@@ -601,27 +580,27 @@ async function buildTrackedSnapshot(
   }
 
   const [diff, paths] = await Promise.all([
-    generateFallbackTrackedDiff(gitRoot, signal),
-    listFallbackTrackedPaths(gitRoot, signal),
+    generateFallbackTrackedDiff(gitReader),
+    listFallbackTrackedPaths(gitReader),
   ]);
   return { diff, paths };
 }
 
-async function listUntrackedPaths(gitRoot: string, signal?: AbortSignal): Promise<string[]> {
-  const stdout = await runGit(gitRoot, ['ls-files', '--others', '--exclude-standard'], signal);
+async function listUntrackedPaths(gitReader: GitReader): Promise<string[]> {
+  const stdout = await runGit(gitReader, ['ls-files', '--others', '--exclude-standard']);
   return parseGitPathList(stdout);
 }
 
 async function collectUntrackedResults(
   gitRoot: string,
   untrackedPaths: string[],
-  signal?: AbortSignal,
+  _signal?: AbortSignal,
 ): Promise<UntrackedPatchResult[]> {
   const results: UntrackedPatchResult[] = [];
 
   for (const relativePath of untrackedPaths) {
-    signal?.throwIfAborted();
-    results.push(await buildUntrackedPatch(gitRoot, relativePath, signal));
+    _signal?.throwIfAborted();
+    results.push(await buildUntrackedPatch(gitRoot, relativePath));
   }
 
   return results;
@@ -665,9 +644,9 @@ function buildUntrackedFilePatch(filePath: string, content: string, executable =
 async function buildUntrackedPatch(
   gitRoot: string,
   relativePath: string,
-  signal?: AbortSignal,
+  _signal?: AbortSignal,
 ): Promise<UntrackedPatchResult> {
-  signal?.throwIfAborted();
+  _signal?.throwIfAborted();
   const absolutePath = join(gitRoot, relativePath);
   if (!isPathWithinRoot(absolutePath, gitRoot)) {
     return { path: relativePath, skipReason: 'sensitive' };
@@ -687,7 +666,7 @@ async function buildUntrackedPatch(
     return { path: relativePath, skipReason: 'too_large' };
   }
 
-  const fileBuffer = await readFile(absolutePath, { signal });
+  const fileBuffer = await readFile(absolutePath);
   if (isBinaryContent(fileBuffer)) {
     return { path: relativePath, skipReason: 'binary' };
   }
@@ -1099,19 +1078,20 @@ async function logSnapshotStats(
 }
 
 async function buildLocalDiffSnapshot(
+  gitReader: GitReader,
   workingDirectory = process.cwd(),
-  signal?: AbortSignal,
+  _signal?: AbortSignal,
 ): Promise<LocalDiffSnapshot> {
   const gitRoot =
     workingDirectory === process.cwd()
-      ? await findGitRoot(signal)
-      : await findGitRootFromDirectory(workingDirectory, signal);
+      ? await findGitRoot(gitReader)
+      : await findGitRootFromDirectory(gitReader);
   const [trackedSnapshot, untrackedPaths] = await Promise.all([
-    buildTrackedSnapshot(gitRoot, signal),
-    listUntrackedPaths(gitRoot, signal),
+    buildTrackedSnapshot(gitReader),
+    listUntrackedPaths(gitReader),
   ]);
 
-  const untrackedResults = await collectUntrackedResults(gitRoot, untrackedPaths, signal);
+  const untrackedResults = await collectUntrackedResults(gitRoot, untrackedPaths);
   const {
     includedUntracked,
     skippedBinaryPaths,
@@ -1196,7 +1176,8 @@ async function analyzePrWork(
   let workingDirectory: string;
   try {
     workingDirectory = await resolveReviewWorkingDirectory(resolvedRootsFetcher, log);
-    snapshot = await buildLocalDiffSnapshot(workingDirectory, ctx.mcpReq.signal);
+    const gitReader = new ExecFileGitReader(workingDirectory);
+    snapshot = await buildLocalDiffSnapshot(gitReader, workingDirectory, getWorkSignal(ctx));
   } catch (err) {
     return buildAnalyzePrErrorResult(err);
   }
@@ -1432,7 +1413,11 @@ async function reviewWork(
   };
 }
 
-export function registerReviewTool(server: McpServer, services?: ToolServices): void {
+export function registerReviewTool(
+  server: McpServer,
+  services?: ToolServices,
+  _gitReader?: GitReader,
+): void {
   const resolvedServices = services ?? createDefaultToolServices();
   const compareWork = createCompareFileWork(resolvedServices.rootsFetcher);
 

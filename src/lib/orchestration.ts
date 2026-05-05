@@ -155,6 +155,26 @@ interface ToolProfileDetails {
   serverSideToolInvocations?: boolean;
 }
 
+function buildToolProfileDetails(params: {
+  fileSearchStoreCount?: number;
+  functionCount?: number;
+  functionCallingMode?: string;
+  serverSideToolInvocations?: boolean;
+}): ToolProfileDetails {
+  return {
+    ...(params.fileSearchStoreCount !== undefined
+      ? { fileSearchStoreCount: params.fileSearchStoreCount }
+      : {}),
+    ...(params.functionCount !== undefined && params.functionCount > 0
+      ? { functionCount: params.functionCount }
+      : {}),
+    ...(params.functionCallingMode !== undefined
+      ? { functionCallingMode: params.functionCallingMode }
+      : {}),
+    ...(params.serverSideToolInvocations === true ? { serverSideToolInvocations: true } : {}),
+  };
+}
+
 interface OrchestrationConfig {
   functionCallingMode?: FunctionCallingConfigMode;
   toolConfig?: ToolConfig;
@@ -226,12 +246,12 @@ function buildOrchestrationConfig(request: OrchestrationRequest): OrchestrationC
     request.responseSchemaRequested,
   );
 
-  const toolProfileDetails: ToolProfileDetails = {
+  const toolProfileDetails = buildToolProfileDetails({
     ...(fileSearchStoreCount !== undefined ? { fileSearchStoreCount } : {}),
-    ...(functionCount !== undefined && functionCount > 0 ? { functionCount } : {}),
+    ...(functionCount !== undefined ? { functionCount } : {}),
     ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
     ...(includeServerSideToolInvocations === true ? { serverSideToolInvocations: true } : {}),
-  };
+  });
 
   const config: OrchestrationConfig = {
     toolProfile: buildToolProfile(tools),
@@ -384,20 +404,16 @@ export async function resolveOrchestration(
     resolved.profile === 'rag' ? (resolved.overrides.fileSearchStores?.length ?? 0) : undefined;
   const functionCount = resolved.overrides.functions?.length;
 
-  const toolProfileDetails: ToolProfileDetails = {
+  const toolProfileDetails = buildToolProfileDetails({
     ...(fileSearchStoreCount !== undefined ? { fileSearchStoreCount } : {}),
-    ...(functionCount !== undefined && functionCount > 0 ? { functionCount } : {}),
+    ...(functionCount !== undefined ? { functionCount } : {}),
     ...(functionCallingMode !== undefined ? { functionCallingMode } : {}),
     ...(toolConfig?.includeServerSideToolInvocations === true
       ? { serverSideToolInvocations: true }
       : {}),
-  };
+  });
 
-  const toolProfileParts = [
-    ...resolved.builtIns,
-    ...((resolved.overrides.functions?.length ?? 0) > 0 ? ['functionDeclarations'] : []),
-  ].sort();
-  const toolProfile = toolProfileParts.length === 0 ? 'none' : toolProfileParts.join('+');
+  const toolProfile = buildToolProfile(tools);
 
   const config: OrchestrationConfig = {
     resolvedProfile: resolved,

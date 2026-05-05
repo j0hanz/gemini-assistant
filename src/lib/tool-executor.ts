@@ -12,7 +12,7 @@ import type {
 import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getGeminiModel } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
-import { AppError } from './errors.js';
+import { AppError, finishReasonToError } from './errors.js';
 import { logContext, logger, maybeSummarizePayload, mcpLog, type ScopedLogger } from './logger.js';
 import {
   buildOrchestrationRequestFromInputs,
@@ -26,9 +26,10 @@ import {
   buildSharedStructuredMetadata,
   extractTextContent,
   mergeStructured,
+  promptBlockedError,
   safeValidateStructuredContent,
 } from './response.js';
-import { executeToolStream, type StreamResult } from './streaming.js';
+import { executeToolStream, type StreamResult, type ToolEvent } from './streaming.js';
 import { getWorkSignal } from './tasks.js';
 import { type GeminiRequestPreflight, validateGeminiRequest, validateUrls } from './validation.js';
 
@@ -91,6 +92,63 @@ interface GeminiStreamRequest<T extends Record<string, unknown>> {
   orchestration: OrchestrationRequest;
   responseBuilder?: StreamResponseBuilder<T>;
   toolName: string;
+}
+
+function hasCodeExecutionEvents(toolEvents: readonly ToolEvent[]): boolean {
+  return toolEvents.some(
+    (event) => event.kind === 'executable_code' || event.kind === 'code_execution_result',
+  );
+}
+
+function renderCodeExecutionParts(
+  toolEvents: readonly ToolEvent[] = [],
+): { type: 'text'; text: string }[] {
+  return toolEvents.flatMap((event) => {
+    if (event.kind === 'executable_code') {
+      const language = event.language ?? '';
+      return [{ type: 'text' as const, text: `\`\`\`${language}\n${event.code ?? ''}\n\`\`\`` }];
+    }
+    if (event.kind === 'code_execution_result') {
+      const outcome = event.outcome ? ` (${event.outcome})` : '';
+      const text =
+        event.output === undefined || event.output.length === 0
+          ? `Output${outcome}: (empty)`
+          : `Output${outcome}:\n\`\`\`\n${event.output}\n\`\`\``;
+      return [{ type: 'text' as const, text }];
+    }
+    return [];
+  });
+}
+
+export function validateStreamResult(result: StreamResult, toolName: string): CallToolResult {
+  if (result.aborted) {
+    return new AppError(
+      toolName,
+      `${toolName}: aborted (aborted)`,
+      'cancelled',
+      false,
+    ).toToolResult();
+  }
+  if (result.promptBlockReason) {
+    return promptBlockedError(toolName, result.promptBlockReason);
+  }
+  if (!result.hadCandidate) {
+    return new AppError(
+      toolName,
+      `${toolName}: empty stream from Gemini (empty_stream)`,
+      'internal',
+      true,
+    ).toToolResult();
+  }
+  const errResult = finishReasonToError(result.finishReason, result.text, toolName);
+  if (errResult) return errResult.toToolResult();
+  const toolEvents = (result as Partial<StreamResult>).toolEvents ?? [];
+  return {
+    content: [
+      { type: 'text', text: result.text },
+      ...(hasCodeExecutionEvents(toolEvents) ? renderCodeExecutionParts(toolEvents) : []),
+    ],
+  };
 }
 
 function getStructuredWarnings(value: unknown): string[] {
@@ -371,13 +429,14 @@ class ToolExecutor {
       'stream',
       undefined,
       async () => {
-        const { streamResult, result } = await executeToolStream(
+        const streamResult = await executeToolStream(
           ctx,
           toolName,
           toolLabel,
           streamGenerator,
           getWorkSignal(ctx),
         );
+        const result = validateStreamResult(streamResult, toolName);
         return this.finalizeStreamExecution(result, streamResult, responseBuilder);
       },
       true,
@@ -439,13 +498,14 @@ class ToolExecutor {
               getWorkSignal(ctx),
             ),
           });
-        const { streamResult, result } = await executeToolStream(
+        const streamResult = await executeToolStream(
           ctx,
           request.toolName,
           request.label,
           streamGenerator,
           getWorkSignal(ctx),
         );
+        const result = validateStreamResult(streamResult, request.toolName);
         return this.finalizeStreamExecution(
           result,
           streamResult,

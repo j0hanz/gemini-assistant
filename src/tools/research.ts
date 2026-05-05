@@ -58,7 +58,7 @@ import {
   registerWorkTool,
 } from '../lib/tasks.js';
 import { createDefaultToolServices, type ToolServices } from '../lib/tool-context.js';
-import { createToolContext, executor } from '../lib/tool-executor.js';
+import { createToolContext, executor, validateStreamResult } from '../lib/tool-executor.js';
 import { toAskThinkingLevel, type ToolsSpecInput } from '../lib/tool-profiles.js';
 import { type AnalyzeInput, type ResearchInput, ResearchInputSchema } from '../schemas/inputs.js';
 import { ResearchOutputSchema } from '../schemas/outputs.js';
@@ -558,7 +558,7 @@ async function runDeepResearchTurn(
   config: Parameters<typeof buildGenerateContentConfig>[0],
 ): Promise<{ result: CallToolResult; streamResult: StreamResult }> {
   const signal = getWorkSignal(ctx);
-  return executeToolStream(
+  const streamResult = await executeToolStream(
     ctx,
     'research',
     label,
@@ -570,6 +570,8 @@ async function runDeepResearchTurn(
       }),
     signal,
   );
+  const result = validateStreamResult(streamResult, 'research');
+  return { result, streamResult };
 }
 
 async function runDeepResearchPlan(

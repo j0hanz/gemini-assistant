@@ -4,6 +4,8 @@ import { mock, test } from 'node:test';
 // sendThoughtDelta will be exported from streaming.ts after TASK-003
 // For now this import will fail, which is the expected failure mode.
 import { sendThoughtDelta } from '../../src/lib/streaming.js';
+import type { StreamResult } from '../../src/lib/streaming.js';
+import { validateStreamResult } from '../../src/lib/tool-executor.js';
 
 test('sendThoughtDelta — emits notifications/gemini-assistant/thought with correct shape', async () => {
   const notifications: unknown[] = [];
@@ -83,4 +85,41 @@ test('accumulates groundingMetadata from completion events', async () => {
   // - TASK-202 (SessionStore turn accessors) will use this data to persist grounding
 
   assert.ok(true); // Placeholder; integration tests verify actual accumulation
+});
+
+function makeStreamResult(overrides: Partial<StreamResult> = {}): StreamResult {
+  return {
+    text: '',
+    textByWave: [''],
+    thoughtText: '',
+    parts: [],
+    toolsUsed: [],
+    toolsUsedOccurrences: [],
+    functionCalls: [],
+    toolEvents: [],
+    hadCandidate: true,
+    ...overrides,
+  };
+}
+
+test('validateStreamResult — isError when aborted', () => {
+  const r = validateStreamResult(makeStreamResult({ aborted: true }), 'chat');
+  assert.strictEqual(r.isError, true);
+  const c = r.content[0];
+  assert.ok(c && 'text' in c && c.text.includes('aborted'));
+});
+
+test('validateStreamResult — isError when no candidate', () => {
+  const r = validateStreamResult(makeStreamResult({ hadCandidate: false }), 'chat');
+  assert.strictEqual(r.isError, true);
+  const c = r.content[0];
+  assert.ok(c && 'text' in c && c.text.includes('empty stream'));
+});
+
+test('validateStreamResult — returns text content on success', () => {
+  const r = validateStreamResult(makeStreamResult({ text: 'hello world' }), 'chat');
+  assert.strictEqual(r.isError, undefined);
+  assert.strictEqual(r.content.length, 1);
+  const c = r.content[0];
+  assert.ok(c && 'text' in c && c.text === 'hello world');
 });

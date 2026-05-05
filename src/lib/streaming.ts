@@ -1,4 +1,4 @@
-import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
+import type { ServerContext } from '@modelcontextprotocol/server';
 
 import type {
   BlockedReason,
@@ -12,10 +12,10 @@ import type {
 } from '@google/genai';
 
 import type { ThoughtNotificationParams } from '../public-contract.js';
-import { AppError, finishReasonToError, withRetry } from './errors.js';
+import { AppError, withRetry } from './errors.js';
 import { mcpLog } from './logger.js';
 import { advanceProgress, PROGRESS_TOTAL, sendProgress } from './progress.js';
-import { pickDefined, promptBlockedError } from './response.js';
+import { pickDefined } from './response.js';
 
 export interface FunctionCallEntry {
   id?: string;
@@ -915,34 +915,6 @@ function finalizeStreamResult(state: StreamProcessingState): StreamResult {
   };
 }
 
-function hasCodeExecutionEvents(toolEvents: readonly ToolEvent[]): boolean {
-  return toolEvents.some(
-    (event) => event.kind === 'executable_code' || event.kind === 'code_execution_result',
-  );
-}
-
-function renderCodeExecutionParts(
-  toolEvents: readonly ToolEvent[] = [],
-): { type: 'text'; text: string }[] {
-  return toolEvents.flatMap((event) => {
-    if (event.kind === 'executable_code') {
-      const language = event.language ?? '';
-      return [{ type: 'text' as const, text: `\`\`\`${language}\n${event.code ?? ''}\n\`\`\`` }];
-    }
-
-    if (event.kind === 'code_execution_result') {
-      const outcome = event.outcome ? ` (${event.outcome})` : '';
-      const text =
-        event.output === undefined || event.output.length === 0
-          ? `Output${outcome}: (empty)`
-          : `Output${outcome}:\n\`\`\`\n${event.output}\n\`\`\``;
-      return [{ type: 'text' as const, text }];
-    }
-
-    return [];
-  });
-}
-
 export function deriveComputationsFromToolEvents(
   toolEvents: readonly ToolEvent[],
 ): CodeComputation[] {
@@ -1041,41 +1013,6 @@ async function consumeStreamWithProgress(
   return finalizeStreamResult(state);
 }
 
-function validateStreamResult(result: StreamResult, toolName: string): CallToolResult {
-  if (result.aborted) {
-    return new AppError(
-      toolName,
-      `${toolName}: aborted (aborted)`,
-      'cancelled',
-      false,
-    ).toToolResult();
-  }
-
-  if (result.promptBlockReason) {
-    return promptBlockedError(toolName, result.promptBlockReason);
-  }
-
-  if (!result.hadCandidate) {
-    return new AppError(
-      toolName,
-      `${toolName}: empty stream from Gemini (empty_stream)`,
-      'internal',
-      true,
-    ).toToolResult();
-  }
-
-  const errResult = finishReasonToError(result.finishReason, result.text, toolName);
-  if (errResult) return errResult.toToolResult();
-
-  const toolEvents = (result as Partial<StreamResult>).toolEvents ?? [];
-  return {
-    content: [
-      { type: 'text', text: result.text },
-      ...(hasCodeExecutionEvents(toolEvents) ? renderCodeExecutionParts(toolEvents) : []),
-    ],
-  };
-}
-
 export function extractUsage(meta?: GenerateContentResponseUsageMetadata) {
   if (!meta) return undefined;
   return pickDefined({
@@ -1097,7 +1034,7 @@ export async function executeToolStream(
   toolLabel: string,
   streamGenerator: () => Promise<AsyncGenerator<GenerateContentResponse>>,
   signal: AbortSignal = ctx.mcpReq.signal,
-): Promise<{ streamResult: StreamResult; result: CallToolResult }> {
+): Promise<StreamResult> {
   try {
     const streamResult = await withRetry(
       async () => {
@@ -1116,17 +1053,14 @@ export async function executeToolStream(
         },
       },
     );
-    const result = validateStreamResult(streamResult, toolName);
-    return { streamResult, result };
+    return streamResult;
   } catch (error) {
     if (error instanceof PartialStreamError && AppError.isRetryable(error.cause)) {
       const warning = `${toolName}: returning partial result after stream interruption (${AppError.formatMessage(error.cause)})`;
-      const streamResult: StreamResult = {
+      return {
         ...error.streamResult,
         warnings: [...(error.streamResult.warnings ?? []), warning],
       };
-      const result = validateStreamResult(streamResult, toolName);
-      return { streamResult, result };
     }
 
     throw error instanceof PartialStreamError ? error.cause : error;

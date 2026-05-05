@@ -2,8 +2,6 @@ import { FunctionCallingConfigMode, type ToolConfig, type ToolListUnion } from '
 
 import type { McpServerSpec } from '../schemas/fields.js';
 
-import type { AskThinkingLevel } from '../public-contract.js';
-
 type BuiltInCapability = 'googleSearch' | 'urlContext' | 'codeExecution' | 'fileSearch';
 
 /** Lowercase thinking levels used in the public ToolsSpec input. */
@@ -205,10 +203,6 @@ const THINKING_LEVEL_ORDER: Record<ProfileThinkingLevel, number> = {
 
 function compareThinkingLevels(a: ProfileThinkingLevel, b: ProfileThinkingLevel): number {
   return THINKING_LEVEL_ORDER[a] - THINKING_LEVEL_ORDER[b];
-}
-
-export function toAskThinkingLevel(level: ProfileThinkingLevel): AskThinkingLevel {
-  return level.toUpperCase() as AskThinkingLevel;
 }
 
 // ── Per-tool default profile selection ───────────────────────────────────────

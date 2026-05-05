@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+
 import {
+  isPathWithinRoot,
   isSensitiveUntrackedPath,
   normalizePathForComparison,
-  isPathWithinRoot,
-  validateScanPath,
   normalizeWorkspacePath,
+  validateScanPath,
 } from '../../src/lib/path-guard.js';
 
 describe('path-guard', () => {
@@ -76,24 +77,15 @@ describe('path-guard', () => {
 
   describe('validateScanPath', () => {
     it('throws for empty path', () => {
-      assert.throws(
-        () => validateScanPath(''),
-        /Path cannot be empty/,
-      );
+      assert.throws(() => validateScanPath(''), /Path cannot be empty/);
     });
 
     it('throws for Windows drive letters', () => {
-      assert.throws(
-        () => validateScanPath('C:\\file.ts'),
-        /Path must be workspace-relative/,
-      );
+      assert.throws(() => validateScanPath('C:\\file.ts'), /Path must be workspace-relative/);
     });
 
     it('throws for path traversal', () => {
-      assert.throws(
-        () => validateScanPath('../etc/passwd'),
-        /Path traversal detected/,
-      );
+      assert.throws(() => validateScanPath('../etc/passwd'), /Path traversal detected/);
     });
 
     it('returns true for valid relative path', () => {

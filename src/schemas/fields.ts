@@ -12,7 +12,7 @@ import { z } from 'zod/v4';
 // ── Profile-driven ToolsSpec schemas ─────────────────────────────────────────
 
 import { TOOL_PROFILE_NAMES } from '../lib/tool-profiles.js';
-import { isPublicHttpUrl } from '../lib/validation.js';
+import { isPublicHttpUrl } from '../lib/url-guard.js';
 
 import { THINKING_LEVELS } from '../public-contract.js';
 import { validateGeminiJsonSchema } from './validators.js';

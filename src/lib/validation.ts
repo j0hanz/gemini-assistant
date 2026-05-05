@@ -3,19 +3,9 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 import { AppError } from './errors.js';
 
 // Re-export validation modules for backward compatibility and barrel pattern
-export { parseAllowedHosts, resolveAllowedHosts, validateHostHeader } from './host-guard.js';
-export {
-  isSensitiveUntrackedPath,
-  normalizePathForComparison,
-  isPathWithinRoot,
-  getAllowedRoots,
-  resolveWorkspacePath,
-  buildServerRootsFetcher,
-  validateScanPath,
-  normalizeWorkspacePath,
-} from './path-guard.js';
-export type { RootsFetcher } from './path-guard.js';
-export { isPublicHttpUrl, validateUrls } from './url-guard.js';
+export { parseAllowedHosts, validateHostHeader } from './host-guard.js';
+export { isPathWithinRoot, validateScanPath, normalizeWorkspacePath } from './path-guard.js';
+export { isPublicHttpUrl } from './url-guard.js';
 
 // ── Gemini Request Preflight ──────────────────────────────────────────────
 

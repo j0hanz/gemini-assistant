@@ -1,8 +1,9 @@
-import { dirname, isAbsolute, normalize, parse, relative, resolve } from 'node:path';
-import { realpath, stat } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
+
+import { realpath, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, normalize, parse, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { getRootsEnv, getRootsFallbackCwd } from '../config.js';
 

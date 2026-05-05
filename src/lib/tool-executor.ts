@@ -31,7 +31,8 @@ import {
 } from './response.js';
 import { executeToolStream, type StreamResult, type ToolEvent } from './streaming.js';
 import { getWorkSignal } from './tasks.js';
-import { type GeminiRequestPreflight, validateGeminiRequest, validateUrls } from './validation.js';
+import { validateUrls } from './url-guard.js';
+import { type GeminiRequestPreflight, validateGeminiRequest } from './validation.js';
 
 type ToolLabelKey = keyof typeof TOOL_LABELS;
 

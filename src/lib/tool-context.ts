@@ -1,7 +1,7 @@
 import type { ClientCapabilities } from '@modelcontextprotocol/server';
 
 import { createSessionAccess, createSessionStore, type SessionAccess } from '../sessions.js';
-import { isPathWithinRoot, type RootsFetcher } from './validation.js';
+import { isPathWithinRoot, type RootsFetcher } from './path-guard.js';
 import {
   buildContextUsed,
   createWorkspaceAccess,

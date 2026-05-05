@@ -8,9 +8,9 @@ import { createPartFromUri, type Part } from '@google/genai';
 
 import { getAI } from '../client.js';
 import { cleanupErrorLogger, withRetry } from './errors.js';
+import type { RootsFetcher } from './path-guard.js';
+import { isSensitiveUntrackedPath, resolveWorkspacePath } from './path-guard.js';
 import type { ProgressReporter } from './progress.js';
-import type { RootsFetcher } from './validation.js';
-import { isSensitiveUntrackedPath, resolveWorkspacePath } from './validation.js';
 
 // ── MIME / Size ───────────────────────────────────────────────────────
 

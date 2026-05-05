@@ -18,7 +18,7 @@ import type {
 import { SafetyError } from './errors.js';
 import { logger } from './logger.js';
 import type { ToolEvent } from './streaming.js';
-import { isPublicHttpUrl } from './validation.js';
+import { isPublicHttpUrl } from './url-guard.js';
 
 type PickDefined<T> = {
   [K in keyof T as undefined extends T[K] ? K : never]?: Exclude<T[K], undefined>;

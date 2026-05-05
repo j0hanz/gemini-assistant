@@ -22,7 +22,7 @@ import {
   isPathWithinRoot,
   normalizePathForComparison,
   type RootsFetcher,
-} from './validation.js';
+} from './path-guard.js';
 
 const TOKENS_PER_CHAR = 4;
 

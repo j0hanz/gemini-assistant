@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 
 import { readFile } from 'node:fs/promises';
 
-import { normalizeWorkspacePath, validateScanPath } from '../lib/validation.js';
+import { normalizeWorkspacePath, validateScanPath } from '../lib/path-guard.js';
 import type { WorkspaceAccess } from '../lib/workspace-context.js';
 
 import { buildResourceMeta } from './metadata.js';

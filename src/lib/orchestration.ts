@@ -20,7 +20,7 @@ import {
   type ToolsSpecInput,
   validateProfile,
 } from './tool-profiles.js';
-import { validateUrls } from './validation.js';
+import { validateUrls } from './url-guard.js';
 
 const BUILT_IN_TOOL_NAMES = ['googleSearch', 'urlContext', 'codeExecution', 'fileSearch'] as const;
 type BuiltInToolName = (typeof BUILT_IN_TOOL_NAMES)[number];

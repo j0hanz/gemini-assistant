@@ -12,6 +12,10 @@ import { logger, mcpLog, type ScopedLogger } from '../lib/logger.js';
 import { buildDiffReviewPrompt, buildErrorDiagnosisPrompt } from '../lib/model-prompts.js';
 import { resolveOrchestration } from '../lib/orchestration.js';
 import {
+  getAllowedRoots,
+  isSensitiveUntrackedPath as isSensitiveUntrackedPathFromValidation,
+} from '../lib/path-guard.js';
+import {
   buildSuccessfulStructuredContent,
   pickDefined,
   tryParseJsonResponse,
@@ -30,10 +34,6 @@ import {
   type ToolWorkspaceCacheManager,
 } from '../lib/tool-context.js';
 import { createToolContext, executor } from '../lib/tool-executor.js';
-import {
-  getAllowedRoots,
-  isSensitiveUntrackedPath as isSensitiveUntrackedPathFromValidation,
-} from '../lib/validation.js';
 import {
   type GeminiResponseSchema,
   type ReviewInput,

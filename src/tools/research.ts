@@ -61,8 +61,8 @@ import {
   createDefaultToolServices,
   createToolContext,
   executor,
-  validateStreamResult,
   type ToolServices,
+  validateStreamResult,
 } from '../lib/tool-executor.js';
 import type { ToolsSpecInput } from '../lib/tool-profiles.js';
 import { type AnalyzeInput, type ResearchInput, ResearchInputSchema } from '../schemas/inputs.js';

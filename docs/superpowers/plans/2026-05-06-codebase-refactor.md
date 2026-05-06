@@ -1036,7 +1036,6 @@ This phase lands the one real helper and documents the two deferrals in the comm
 
   ```ts
   import assert from 'node:assert/strict';
-
   import { describe, it } from 'node:test';
 
   import { buildSchemaValidationWarnings, validateSchemaOutput } from '../../src/lib/response.js';

@@ -37,17 +37,17 @@ Those extractions left two artefacts that no longer earn their existence:
 
 The largest remaining files concentrate most of the maintenance pain:
 
-| File                     | Lines |
-| ------------------------ | ----- |
-| `src/tools/review.ts`    | 1445  |
-| `src/transport.ts`       | 1220  |
-| `src/tools/research.ts`  | 1149  |
-| `src/tools/chat.ts`      | 1122  |
-| `src/lib/streaming.ts`   | 1048  |
-| `src/lib/tasks.ts`       | 795   |
-| `src/lib/response.ts`    | 744   |
-| `src/lib/workspace-context.ts` | 713 |
-| `src/tools/ingest.ts`    | 667   |
+| File                           | Lines |
+| ------------------------------ | ----- |
+| `src/tools/review.ts`          | 1445  |
+| `src/transport.ts`             | 1220  |
+| `src/tools/research.ts`        | 1149  |
+| `src/tools/chat.ts`            | 1122  |
+| `src/lib/streaming.ts`         | 1048  |
+| `src/lib/tasks.ts`             | 795   |
+| `src/lib/response.ts`          | 744   |
+| `src/lib/workspace-context.ts` | 713   |
+| `src/tools/ingest.ts`          | 667   |
 
 `tools/review.ts` is really three sub-tools (diff review, file comparison,
 failure diagnosis) sharing path-classification heuristics and git plumbing.
@@ -254,14 +254,14 @@ Six independent landings. Each phase is a single PR / commit. Phases 1–4
 are mechanical and could land in any order; phase 5 must precede phase 6
 because phase 6 consumes the new helpers.
 
-| # | Phase                                                                        | Risk    |
-| - | ---------------------------------------------------------------------------- | ------- |
-| 1 | Delete `validation.ts` barrel; inline imports at ~13 sites                   | Low     |
-| 2 | Fold `tool-context.ts` into `tool-executor.ts`; update importers             | Low     |
-| 3 | Merge `ingest-input.ts` + `ingest-output.ts` → `ingest.ts`                   | Low     |
-| 4 | Reorganise `transport.ts` and `response.ts` with region headers              | Low     |
-| 5 | Extract `buildToolResponse` / `persistToolEvent` / `validateSchemaOutput` into `tool-executor.ts` with unit tests | Medium |
-| 6 | Reorganise `tools/review.ts`, `tools/chat.ts`, `tools/research.ts` with regions; rewire to shared helpers | Medium |
+| #   | Phase                                                                                                             | Risk   |
+| --- | ----------------------------------------------------------------------------------------------------------------- | ------ |
+| 1   | Delete `validation.ts` barrel; inline imports at ~13 sites                                                        | Low    |
+| 2   | Fold `tool-context.ts` into `tool-executor.ts`; update importers                                                  | Low    |
+| 3   | Merge `ingest-input.ts` + `ingest-output.ts` → `ingest.ts`                                                        | Low    |
+| 4   | Reorganise `transport.ts` and `response.ts` with region headers                                                   | Low    |
+| 5   | Extract `buildToolResponse` / `persistToolEvent` / `validateSchemaOutput` into `tool-executor.ts` with unit tests | Medium |
+| 6   | Reorganise `tools/review.ts`, `tools/chat.ts`, `tools/research.ts` with regions; rewire to shared helpers         | Medium |
 
 ### Verification gate
 

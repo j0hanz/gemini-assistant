@@ -1,5 +1,9 @@
 import { ProtocolError } from '@modelcontextprotocol/server';
-import type { CallToolResult, ClientCapabilities, ServerContext } from '@modelcontextprotocol/server';
+import type {
+  CallToolResult,
+  ClientCapabilities,
+  ServerContext,
+} from '@modelcontextprotocol/server';
 
 import { randomUUID } from 'node:crypto';
 
@@ -12,6 +16,7 @@ import type {
 import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getGeminiModel } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
+import { createSessionAccess, createSessionStore, type SessionAccess } from '../sessions.js';
 import { AppError, finishReasonToError } from './errors.js';
 import { logContext, logger, maybeSummarizePayload, mcpLog, type ScopedLogger } from './logger.js';
 import {
@@ -21,6 +26,7 @@ import {
   type OrchestrationRequest,
   resolveOrchestrationFromRequest,
 } from './orchestration.js';
+import { isPathWithinRoot, type RootsFetcher } from './path-guard.js';
 import { ProgressReporter, reportCompletion, reportFailure } from './progress.js';
 import {
   buildSharedStructuredMetadata,
@@ -32,8 +38,6 @@ import {
 import { executeToolStream, type StreamResult, type ToolEvent } from './streaming.js';
 import { getWorkSignal } from './tasks.js';
 import { validateUrls } from './url-guard.js';
-import { createSessionAccess, createSessionStore, type SessionAccess } from '../sessions.js';
-import { isPathWithinRoot, type RootsFetcher } from './path-guard.js';
 import {
   buildContextUsed,
   createWorkspaceAccess,

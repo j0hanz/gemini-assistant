@@ -34,7 +34,7 @@ function dedupeAllowedHosts(hosts: string[]): string[] {
   return [...new Set(hosts)];
 }
 
-export function parseAllowedHosts(): string[] | undefined {
+function parseAllowedHosts(): string[] | undefined {
   const raw = getAllowedHostsEnv();
   if (!raw) return undefined;
   const hosts = raw.split(',').map(normalizeAllowedHostEntry).filter(Boolean);

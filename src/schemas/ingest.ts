@@ -25,7 +25,7 @@ import {
  * Workspace-wide uploads are intentionally unsupported: large workspaces
  * exceed MCP request timeouts. Always scope to a directory like `src`.
  */
-export const IngestOperationEnum = z.enum([
+const IngestOperationEnum = z.enum([
   'create-store',
   'upload',
   'delete-store',

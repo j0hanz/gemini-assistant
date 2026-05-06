@@ -238,9 +238,10 @@ Seven importers update to point at `tool-executor.js`.
 
   ```ts
   // ── Tool services (consolidated from tool-context.ts) ──────────────────────
-
   import type { ClientCapabilities } from '@modelcontextprotocol/server';
+
   import { createSessionAccess, createSessionStore, type SessionAccess } from '../sessions.js';
+  import { isPathWithinRoot, type RootsFetcher } from './path-guard.js';
   import {
     buildContextUsed,
     createWorkspaceAccess,
@@ -249,7 +250,6 @@ Seven importers update to point at `tool-executor.js`.
     type WorkspaceAccess,
     type WorkspaceCacheManagerImpl,
   } from './workspace-context.js';
-  import { isPathWithinRoot, type RootsFetcher } from './path-guard.js';
 
   type ClientCapabilitiesAccessor = () => ClientCapabilities | undefined;
 
@@ -281,7 +281,12 @@ Seven importers update to point at `tool-executor.js`.
   Final import block top of `tool-executor.ts` should now include:
 
   ```ts
-  import type { CallToolResult, ClientCapabilities, ServerContext } from '@modelcontextprotocol/server';
+  import type {
+    CallToolResult,
+    ClientCapabilities,
+    ServerContext,
+  } from '@modelcontextprotocol/server';
+
   // ... existing imports ...
   import { createSessionAccess, createSessionStore, type SessionAccess } from '../sessions.js';
   import { isPathWithinRoot, type RootsFetcher } from './path-guard.js';
@@ -533,7 +538,12 @@ Every `import ... from '../lib/tool-context.js'` (or `'./lib/tool-context.js'` i
   // src/schemas/ingest.ts
   import { z } from 'zod/v4';
 
-  import { FileSearchStoreNameSchema, optionalField, textField, withFieldMetadata } from './fields.js';
+  import {
+    FileSearchStoreNameSchema,
+    optionalField,
+    textField,
+    withFieldMetadata,
+  } from './fields.js';
 
   // ── Operation enum ─────────────────────────────────────────────────────────
 
@@ -1026,12 +1036,10 @@ This phase lands the one real helper and documents the two deferrals in the comm
 
   ```ts
   import assert from 'node:assert/strict';
+
   import { describe, it } from 'node:test';
 
-  import {
-    buildSchemaValidationWarnings,
-    validateSchemaOutput,
-  } from '../../src/lib/response.js';
+  import { buildSchemaValidationWarnings, validateSchemaOutput } from '../../src/lib/response.js';
 
   describe('validateSchemaOutput', () => {
     it('returns no warnings when data matches the schema', () => {
@@ -1110,10 +1118,7 @@ This phase lands the one real helper and documents the two deferrals in the comm
    * Validate parsed JSON against a Gemini response schema.
    * Returns a list of human-readable warnings; an empty list means valid.
    */
-  export function validateSchemaOutput(
-    data: unknown,
-    schema: Record<string, unknown>,
-  ): string[] {
+  export function validateSchemaOutput(data: unknown, schema: Record<string, unknown>): string[] {
     try {
       const validator = new Validator(schema, '2020-12', false);
       const result = validator.validate(data);
@@ -1159,7 +1164,6 @@ This phase lands the one real helper and documents the two deferrals in the comm
 - [ ] **Step 5: Update `chat.ts` to use the new helpers.**
 
   In `src/tools/chat.ts`, do four edits:
-
   - Remove the local `validateJsonAgainstSchema` (lines 132–141) and `buildAskWarnings` (lines 143–159).
   - Remove the unused `import { Validator } from '@cfworker/json-schema';` (line 3).
   - Update the response.ts import block (already imports several names) to include the new helpers:

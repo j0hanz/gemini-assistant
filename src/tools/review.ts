@@ -46,6 +46,8 @@ import { getGeminiModel, getReviewDocs } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
 import { appendResourceLinks } from '../resources/index.js';
 
+// ── Constants ────────────────────────────────────────────────────────────
+
 const MAX_DIFF_CHARS = 200_000;
 const MAX_UNTRACKED_FILE_BYTES = 1024 * 1024;
 const TRUNCATED_DIFF_NOTICE = '\n# Review truncated to fit diff budget.';
@@ -153,6 +155,8 @@ const NOISY_EXCLUDE_PATHSPECS = [
   ...NOISY_SUFFIXES.map((suffix) => `:!*${suffix}`),
 ];
 
+// ── Types ────────────────────────────────────────────────────────────────
+
 interface DiffStats {
   files: number;
   additions: number;
@@ -258,159 +262,31 @@ interface GitDiffArgsOptions {
   staged?: boolean;
 }
 
-function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
-  return async function compareFileWork(
-    {
-      filePathA,
-      filePathB,
-      question,
-      thinkingLevel,
-      maxOutputTokens,
-      safetySettings,
-      tools,
-    }: ReviewComparisonInput,
-    ctx: ServerContext,
-  ): Promise<CallToolResult> {
-    const resolved = await resolveOrchestration(tools, ctx, {
-      toolKey: 'review',
-      mode: 'comparison',
-    });
-    if (resolved.error) return resolved.error;
+// ── Path classification ──────────────────────────────────────────────────
 
-    const { progress } = createToolContext('compareFiles', ctx);
-
-    return await withUploadsAndPipeline(
-      ctx,
-      rootsFetcher,
-      [filePathA, filePathB],
-      progress,
-      (_filePath, index) => `Uploading file ${index === 0 ? 'A' : 'B'}`,
-      async (contents) => {
-        const fileA = contents[0];
-        const fileB = contents[1];
-
-        await mcpLog(ctx, 'info', `Comparing: ${filePathA} vs ${filePathB}`);
-        await progress.step(2, 3, 'Analyzing differences');
-
-        const prompt = buildDiffReviewPrompt({
-          focus: question,
-          mode: 'compare',
-          promptParts: [
-            { text: `File A: ${filePathA}` },
-            fileA ?? { text: '' },
-            { text: `File B: ${filePathB}` },
-            fileB ?? { text: '' },
-          ],
-        });
-
-        return await executor.runStream(
-          ctx,
-          'compare_files',
-          TOOL_LABELS.compareFiles,
-          () =>
-            getAI().models.generateContentStream({
-              model: getGeminiModel(),
-              contents: prompt.promptParts,
-              config: buildGenerateContentConfig(
-                {
-                  systemInstruction: prompt.systemInstruction,
-                  costProfile: 'review.comparison',
-                  thinkingLevel,
-                  maxOutputTokens,
-                  safetySettings,
-                  tools: resolved.orchestration.geminiParams.tools,
-                  toolConfig: resolved.orchestration.geminiParams.toolConfig,
-                },
-                getWorkSignal(ctx),
-              ),
-            }),
-          (_streamResult, textContent: string) => ({
-            structuredContent: {
-              summary: textContent || '',
-            },
-          }),
-        );
-      },
-      0,
-    );
-  };
+function normalizePath(filePath: string): string {
+  return filePath.replaceAll('\\', '/').toLowerCase();
 }
 
-interface FailureReviewSubject {
-  codeContext?: ReviewFailureInput['codeContext'];
-  error: ReviewFailureInput['error'];
-  language?: ReviewFailureInput['language'];
-  maxOutputTokens?: ReviewFailureInput['maxOutputTokens'];
-  safetySettings?: ReviewFailureInput['safetySettings'];
-  tools?: ReviewFailureInput['tools'];
+function splitPathSegments(filePath: string): string[] {
+  return normalizePath(filePath).split('/').filter(Boolean);
 }
 
-async function diagnoseFailureWork(
-  subject: FailureReviewSubject,
-  focus: string | undefined,
-  thinkingLevel: ReviewInput['thinkingLevel'],
-  ctx: ServerContext,
-): Promise<CallToolResult> {
-  const { error, codeContext, language, maxOutputTokens, safetySettings, tools } = subject;
-
-  const resolved = await resolveOrchestration(tools, ctx, {
-    toolKey: 'review',
-    mode: 'failure',
-  });
-  if (resolved.error) return resolved.error;
-
-  const googleSearchEnabled = resolved.orchestration.activeCapabilities.has('googleSearch');
-  const resolvedUrls = tools?.overrides?.urls;
-
-  const prompt = buildErrorDiagnosisPrompt({
-    codeContext: focus
-      ? [codeContext, 'Review focus: ' + focus].filter(Boolean).join('\n\n')
-      : codeContext,
-    error,
-    googleSearchEnabled,
-    language,
-    urls: resolvedUrls,
-  });
-
-  const { progress } = createToolContext('reviewFailure', ctx);
-  await progress.send(0, undefined, 'Diagnosing');
-  await mcpLog(ctx, 'info', `Review failure: ${error.length} chars`);
-
-  return await executor.runStream(
-    ctx,
-    'review_failure',
-    TOOL_LABELS.reviewFailure,
-    () =>
-      getAI().models.generateContentStream({
-        model: getGeminiModel(),
-        contents: [prompt.promptText],
-        config: buildGenerateContentConfig(
-          {
-            systemInstruction: prompt.systemInstruction,
-            costProfile: 'review.failure',
-            thinkingLevel,
-            maxOutputTokens,
-            safetySettings,
-            tools: resolved.orchestration.geminiParams.tools,
-            toolConfig: resolved.orchestration.geminiParams.toolConfig,
-          },
-          getWorkSignal(ctx),
-        ),
-      }),
-    (_streamResult, textContent: string) => ({
-      structuredContent: {
-        summary: textContent || '',
-      },
-    }),
-  );
+function getExtension(basename: string): string {
+  return basename.includes('.') ? `.${basename.split('.').pop() ?? ''}` : '';
 }
 
-function matchesNoisyPath(filePath: string): boolean {
-  return PATH_RULES.isNoisy(filePath);
+function isAdditionLine(line: string): boolean {
+  return line.startsWith('+') && !line.startsWith('+++');
 }
 
-function isSensitiveUntrackedPath(relativePath: string): boolean {
-  return isSensitiveUntrackedPathFromValidation(relativePath);
+function isDeletionLine(line: string): boolean {
+  return line.startsWith('-') && !line.startsWith('---');
+}
+
+function parseDiffPath(diffHeader: string): string {
+  const match = DIFF_HEADER_PATTERN.exec(diffHeader);
+  return match ? (match[3] ?? match[4] ?? diffHeader) : diffHeader;
 }
 
 const PATH_RULES = {
@@ -436,48 +312,23 @@ const PATH_RULES = {
   },
 } as const;
 
-function isAdditionLine(line: string): boolean {
-  return line.startsWith('+') && !line.startsWith('+++');
+function matchesNoisyPath(filePath: string): boolean {
+  return PATH_RULES.isNoisy(filePath);
 }
 
-function isDeletionLine(line: string): boolean {
-  return line.startsWith('-') && !line.startsWith('---');
+function hasHighRiskBasename(basename: string): boolean {
+  return PATH_RULES.isHighRiskBasename(basename);
 }
 
-function parseDiffPath(diffHeader: string): string {
-  const match = DIFF_HEADER_PATTERN.exec(diffHeader);
-  return match ? (match[3] ?? match[4] ?? diffHeader) : diffHeader;
+function scorePathLocation(normalizedPath: string): number {
+  return PATH_RULES.scoreLocation(normalizedPath);
 }
 
-function normalizePath(filePath: string): string {
-  return filePath.replaceAll('\\', '/').toLowerCase();
+function isSensitiveUntrackedPath(relativePath: string): boolean {
+  return isSensitiveUntrackedPathFromValidation(relativePath);
 }
 
-function splitPathSegments(filePath: string): string[] {
-  return normalizePath(filePath).split('/').filter(Boolean);
-}
-
-function computeDiffStats(diff: string): DiffStats {
-  const files = new Set<string>();
-  let additions = 0;
-  let deletions = 0;
-
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('diff --git ')) {
-      files.add(parseDiffPath(line));
-      continue;
-    }
-    if (isAdditionLine(line)) {
-      additions++;
-      continue;
-    }
-    if (isDeletionLine(line)) {
-      deletions++;
-    }
-  }
-
-  return { files: files.size, additions, deletions };
-}
+// ── Git diff plumbing (uses injected GitReader) ──────────────────────────
 
 function buildGitArgs({
   againstHead = false,
@@ -679,6 +530,30 @@ async function buildUntrackedPatch(
   };
 }
 
+function computeDiffStats(diff: string): DiffStats {
+  const files = new Set<string>();
+  let additions = 0;
+  let deletions = 0;
+
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      files.add(parseDiffPath(line));
+      continue;
+    }
+    if (isAdditionLine(line)) {
+      additions++;
+      continue;
+    }
+    if (isDeletionLine(line)) {
+      deletions++;
+    }
+  }
+
+  return { files: files.size, additions, deletions };
+}
+
+// ── Diff budgeting & truncation ──────────────────────────────────────────
+
 function computeUnitStats(text: string): Pick<DiffUnit, 'additions' | 'deletions'> {
   let additions = 0;
   let deletions = 0;
@@ -706,18 +581,6 @@ function splitDiffUnits(diff: string): DiffUnit[] {
         ...computeUnitStats(text),
       };
     });
-}
-
-function getExtension(basename: string): string {
-  return basename.includes('.') ? `.${basename.split('.').pop() ?? ''}` : '';
-}
-
-function hasHighRiskBasename(basename: string): boolean {
-  return PATH_RULES.isHighRiskBasename(basename);
-}
-
-function scorePathLocation(normalizedPath: string): number {
-  return PATH_RULES.scoreLocation(normalizedPath);
 }
 
 function scoreDiffUnitRisk(unit: DiffUnit): number {
@@ -806,6 +669,8 @@ function buildTruncatedDiffUnitText(text: string, remainingChars: number): strin
 
   return `${normalizedText}${TRUNCATED_DIFF_NOTICE}`;
 }
+
+// ── Sub-tool: diff review (analyzePrWork) ────────────────────────────────
 
 function formatGitError(err: unknown): string {
   if (!(err instanceof Error)) {
@@ -1288,6 +1153,159 @@ async function analyzePrWork(
 
   return result;
 }
+
+// ── Sub-tool: file comparison (compareFileWork) ──────────────────────────
+
+function createCompareFileWork(rootsFetcher: ToolRootsFetcher) {
+  return async function compareFileWork(
+    {
+      filePathA,
+      filePathB,
+      question,
+      thinkingLevel,
+      maxOutputTokens,
+      safetySettings,
+      tools,
+    }: ReviewComparisonInput,
+    ctx: ServerContext,
+  ): Promise<CallToolResult> {
+    const resolved = await resolveOrchestration(tools, ctx, {
+      toolKey: 'review',
+      mode: 'comparison',
+    });
+    if (resolved.error) return resolved.error;
+
+    const { progress } = createToolContext('compareFiles', ctx);
+
+    return await withUploadsAndPipeline(
+      ctx,
+      rootsFetcher,
+      [filePathA, filePathB],
+      progress,
+      (_filePath, index) => `Uploading file ${index === 0 ? 'A' : 'B'}`,
+      async (contents) => {
+        const fileA = contents[0];
+        const fileB = contents[1];
+
+        await mcpLog(ctx, 'info', `Comparing: ${filePathA} vs ${filePathB}`);
+        await progress.step(2, 3, 'Analyzing differences');
+
+        const prompt = buildDiffReviewPrompt({
+          focus: question,
+          mode: 'compare',
+          promptParts: [
+            { text: `File A: ${filePathA}` },
+            fileA ?? { text: '' },
+            { text: `File B: ${filePathB}` },
+            fileB ?? { text: '' },
+          ],
+        });
+
+        return await executor.runStream(
+          ctx,
+          'compare_files',
+          TOOL_LABELS.compareFiles,
+          () =>
+            getAI().models.generateContentStream({
+              model: getGeminiModel(),
+              contents: prompt.promptParts,
+              config: buildGenerateContentConfig(
+                {
+                  systemInstruction: prompt.systemInstruction,
+                  costProfile: 'review.comparison',
+                  thinkingLevel,
+                  maxOutputTokens,
+                  safetySettings,
+                  tools: resolved.orchestration.geminiParams.tools,
+                  toolConfig: resolved.orchestration.geminiParams.toolConfig,
+                },
+                getWorkSignal(ctx),
+              ),
+            }),
+          (_streamResult, textContent: string) => ({
+            structuredContent: {
+              summary: textContent || '',
+            },
+          }),
+        );
+      },
+      0,
+    );
+  };
+}
+
+// ── Sub-tool: failure diagnosis (diagnoseFailureWork) ────────────────────
+
+interface FailureReviewSubject {
+  codeContext?: ReviewFailureInput['codeContext'];
+  error: ReviewFailureInput['error'];
+  language?: ReviewFailureInput['language'];
+  maxOutputTokens?: ReviewFailureInput['maxOutputTokens'];
+  safetySettings?: ReviewFailureInput['safetySettings'];
+  tools?: ReviewFailureInput['tools'];
+}
+
+async function diagnoseFailureWork(
+  subject: FailureReviewSubject,
+  focus: string | undefined,
+  thinkingLevel: ReviewInput['thinkingLevel'],
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const { error, codeContext, language, maxOutputTokens, safetySettings, tools } = subject;
+
+  const resolved = await resolveOrchestration(tools, ctx, {
+    toolKey: 'review',
+    mode: 'failure',
+  });
+  if (resolved.error) return resolved.error;
+
+  const googleSearchEnabled = resolved.orchestration.activeCapabilities.has('googleSearch');
+  const resolvedUrls = tools?.overrides?.urls;
+
+  const prompt = buildErrorDiagnosisPrompt({
+    codeContext: focus
+      ? [codeContext, 'Review focus: ' + focus].filter(Boolean).join('\n\n')
+      : codeContext,
+    error,
+    googleSearchEnabled,
+    language,
+    urls: resolvedUrls,
+  });
+
+  const { progress } = createToolContext('reviewFailure', ctx);
+  await progress.send(0, undefined, 'Diagnosing');
+  await mcpLog(ctx, 'info', `Review failure: ${error.length} chars`);
+
+  return await executor.runStream(
+    ctx,
+    'review_failure',
+    TOOL_LABELS.reviewFailure,
+    () =>
+      getAI().models.generateContentStream({
+        model: getGeminiModel(),
+        contents: [prompt.promptText],
+        config: buildGenerateContentConfig(
+          {
+            systemInstruction: prompt.systemInstruction,
+            costProfile: 'review.failure',
+            thinkingLevel,
+            maxOutputTokens,
+            safetySettings,
+            tools: resolved.orchestration.geminiParams.tools,
+            toolConfig: resolved.orchestration.geminiParams.toolConfig,
+          },
+          getWorkSignal(ctx),
+        ),
+      }),
+    (_streamResult, textContent: string) => ({
+      structuredContent: {
+        summary: textContent || '',
+      },
+    }),
+  );
+}
+
+// ── Tool registration ────────────────────────────────────────────────────
 
 function buildReviewStructuredContent(
   structured: Record<string, unknown>,

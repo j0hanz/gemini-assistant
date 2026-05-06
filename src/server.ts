@@ -9,7 +9,7 @@ import { logger } from './lib/logger.js';
 import { buildServerRootsFetcher, type RootsFetcher } from './lib/path-guard.js';
 import { createStoreRegistry } from './lib/store-registry.js';
 import { createSharedTaskInfra, type SharedTaskInfra } from './lib/tasks.js';
-import type { ToolServices } from './lib/tool-context.js';
+import type { ToolServices } from './lib/tool-executor.js';
 import { createWorkspaceAccess, createWorkspaceCacheManager } from './lib/workspace-context.js';
 
 import { getExposeSessionResources, getStatelessTransportFlag } from './config.js';

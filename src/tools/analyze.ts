@@ -22,10 +22,11 @@ import {
 } from '../lib/tasks.js';
 import {
   createDefaultToolServices,
+  createToolContext,
+  executor,
   type ToolRootsFetcher,
   type ToolServices,
-} from '../lib/tool-context.js';
-import { createToolContext, executor } from '../lib/tool-executor.js';
+} from '../lib/tool-executor.js';
 import { type AnalyzeInput, AnalyzeInputSchema } from '../schemas/inputs.js';
 import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 

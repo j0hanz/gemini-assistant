@@ -7,8 +7,11 @@ import { logger } from '../lib/logger.js';
 import { getAllowedRoots } from '../lib/path-guard.js';
 import { sendProgress } from '../lib/progress.js';
 import { DESTRUCTIVE_ANNOTATIONS, registerWorkTool } from '../lib/tasks.js';
-import type { ToolRootsFetcher, ToolServices } from '../lib/tool-context.js';
-import { createToolContext } from '../lib/tool-executor.js';
+import {
+  createToolContext,
+  type ToolRootsFetcher,
+  type ToolServices,
+} from '../lib/tool-executor.js';
 import type { IngestInput } from '../schemas/ingest-input.js';
 import { IngestInputSchema } from '../schemas/ingest-input.js';
 import { type IngestOutput, IngestOutputSchema } from '../schemas/ingest-output.js';

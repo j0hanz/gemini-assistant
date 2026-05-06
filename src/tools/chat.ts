@@ -35,11 +35,12 @@ import {
 import { getTaskEmitter, MUTABLE_ANNOTATIONS, registerWorkTool } from '../lib/tasks.js';
 import {
   buildContextUsed,
+  createToolContext,
   emptyContextUsed,
+  executor,
   type ToolServices,
   type ToolWorkspaceAccess,
-} from '../lib/tool-context.js';
-import { createToolContext, executor } from '../lib/tool-executor.js';
+} from '../lib/tool-executor.js';
 import {
   ProfileValidationError,
   type ResolvedProfile,

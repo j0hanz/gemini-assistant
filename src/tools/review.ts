@@ -27,12 +27,13 @@ import {
 } from '../lib/tasks.js';
 import {
   createDefaultToolServices,
+  createToolContext,
+  executor,
   isPathWithinRoot,
   type ToolRootsFetcher,
   type ToolServices,
   type ToolWorkspaceCacheManager,
-} from '../lib/tool-context.js';
-import { createToolContext, executor } from '../lib/tool-executor.js';
+} from '../lib/tool-executor.js';
 import {
   type GeminiResponseSchema,
   type ReviewInput,

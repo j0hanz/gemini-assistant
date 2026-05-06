@@ -57,8 +57,13 @@ import {
   READONLY_NON_IDEMPOTENT_ANNOTATIONS,
   registerWorkTool,
 } from '../lib/tasks.js';
-import { createDefaultToolServices, type ToolServices } from '../lib/tool-context.js';
-import { createToolContext, executor, validateStreamResult } from '../lib/tool-executor.js';
+import {
+  createDefaultToolServices,
+  createToolContext,
+  executor,
+  validateStreamResult,
+  type ToolServices,
+} from '../lib/tool-executor.js';
 import type { ToolsSpecInput } from '../lib/tool-profiles.js';
 import { type AnalyzeInput, type ResearchInput, ResearchInputSchema } from '../schemas/inputs.js';
 import { ResearchOutputSchema } from '../schemas/outputs.js';

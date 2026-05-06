@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 
 import type { RootsFetcher } from '../lib/path-guard.js';
 import type { StoreRegistry } from '../lib/store-registry.js';
-import type { ToolServices } from '../lib/tool-context.js';
+import type { ToolServices } from '../lib/tool-executor.js';
 
 import type { SessionStore } from '../sessions.js';
 import { registerDiscoverResources } from './discover.js';

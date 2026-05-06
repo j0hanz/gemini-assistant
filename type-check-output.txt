@@ -1,4 +1,0 @@
-
-> @j0hanz/gemini-assistant@0.1.0 type-check
-> tsc -p tsconfig.json --noEmit
-

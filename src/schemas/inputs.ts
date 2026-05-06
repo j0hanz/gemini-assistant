@@ -321,9 +321,7 @@ export type ResearchInput = z.infer<typeof ResearchInputSchema>;
 const AnalyzeInputBaseSchema = z.strictObject({
   goal: goalText('Question or analysis goal for the selected targets'),
   targetKind: analyzeTargetKind(ANALYZE_TARGET_KIND_DESCRIPTION),
-  filePath: optionalField(
-    completable(workspacePath('File path to analyze.'), () => []),
-  ),
+  filePath: optionalField(completable(workspacePath('File path to analyze.'), () => [])),
   urls: createUrlContextFields({
     itemDescription: 'Public URL to analyze',
     description: 'Public URLs to analyze.',

@@ -909,11 +909,26 @@ export async function startHttpTransport(
   assertHostValidationIsConfigured(host, allowedHosts);
   const rateLimiter = createRateLimiter({ rps: rateLimitRps, burst: rateLimitBurst });
 
-  // Build the express app directly so applyCors runs before any
-  // host-validation middleware. CORS headers must be present on 403 responses
-  // so browsers surface the real status. The SDK's createMcpExpressApp
-  // auto-installs localhost-rebinding protection ahead of any user middleware,
-  // which would strip CORS from those 403s.
+  // NOTE: createMcpExpressApp from @modelcontextprotocol/express is intentionally NOT used.
+  //
+  // Reason: The SDK's hostHeaderValidation middleware sends 403 JSON-RPC error responses
+  // directly without delegating to CORS middleware. This means validation failures return
+  // 403 responses without CORS headers, preventing browsers from surfacing the correct
+  // status code (they block the response due to CORS policy).
+  //
+  // Current design: Build Express app manually with CORS middleware first so that all
+  // responses — including 403 host validation failures — include CORS headers. This
+  // allows browsers to properly display validation errors instead of generic CORS blocks.
+  //
+  // The SDK would need to support either:
+  // (a) A pre-validation hook to inject CORS middleware before host validation, OR
+  // (b) A CORS configuration parameter passed to createMcpExpressApp, OR
+  // (c) The hostHeaderValidation middleware to delegate error responses through
+  //     the Express middleware stack instead of sending directly to res.
+  //
+  // Tracked in: https://github.com/modelcontextprotocol/typescript-sdk/issues
+  // (SDK issue not yet filed as of 2026-05-07)
+  //
   const app = express();
   app.use(express.json());
 

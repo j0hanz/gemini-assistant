@@ -21,10 +21,7 @@ describe('validateSchemaOutput', () => {
     };
     const warnings = validateSchemaOutput({}, schema);
     assert.equal(warnings.length >= 1, true);
-    assert.equal(
-      warnings.some((w) => w.includes('name') || w.length > 0),
-      true,
-    );
+    assert.ok(warnings.some((w) => w.includes('name') || w.includes('required')));
   });
 
   it('returns a fallback warning when validation throws', () => {
@@ -67,6 +64,7 @@ describe('buildSchemaValidationWarnings', () => {
       required: ['name'],
     };
     const warnings = buildSchemaValidationWarnings({}, true, schema);
-    assert.equal(warnings.length >= 1, true);
+    assert.ok(warnings.length > 0);
+    assert.ok(warnings.some((w) => w.length > 10)); // must be a meaningful message, not empty
   });
 });

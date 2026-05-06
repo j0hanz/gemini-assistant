@@ -78,6 +78,8 @@ import type {
   TranscriptEntry,
 } from '../sessions.js';
 
+// ── Types ────────────────────────────────────────────────────────────────
+
 type InternalAskArgs = Omit<ChatInput, 'goal' | 'responseSchemaJson'> & {
   message: string;
   responseSchema?: GeminiResponseSchema;
@@ -127,154 +129,18 @@ interface AskExecutionResult {
   urls?: string[];
 }
 
+interface PreparedAskRequest {
+  effectiveArgs: AskArgs;
+  contextUsed: ContextUsed;
+  warnings: string[];
+}
+
+// ── Constants ────────────────────────────────────────────────────────────
+
 const JSON_REPAIR_MAX_RETRIES = 1;
 const JSON_REPAIR_WARNING_TEXT_LIMIT = 2_000;
 
-function isRetryableSchemaFailure(
-  warnings: string[],
-  parsedData: unknown,
-  jsonMode: boolean | undefined,
-): boolean {
-  return jsonMode === true && (parsedData === undefined || warnings.length > 0);
-}
-
-function buildReducedRepairPrompt(
-  originalPrompt: string,
-  invalidOutput: string,
-  warnings: readonly string[],
-): string {
-  const warningText = warnings
-    .map((warning) => `- ${warning}`)
-    .join('\n')
-    .slice(0, JSON_REPAIR_WARNING_TEXT_LIMIT);
-  const invalidOutputText = invalidOutput.slice(0, 4_000);
-
-  return [
-    'Fix the invalid JSON from the previous turn.',
-    'Return only valid JSON that matches the provided schema.',
-    `User request:\n${originalPrompt}`,
-    `Validation errors:\n${warningText}`,
-    `Previous output:\n${invalidOutputText}`,
-  ].join('\n\n');
-}
-
-function appendAskWarnings(result: CallToolResult, warnings: readonly string[]): CallToolResult {
-  if (result.isError || warnings.length === 0) {
-    return result;
-  }
-
-  return mergeStructured(
-    result,
-    getAskStructuredContent(result)
-      ? undefined
-      : {
-          answer: extractTextContent(result.content),
-        },
-    { warnings },
-  );
-}
-
-function buildAskStructuredContent(
-  text: string,
-  streamResult: Pick<
-    StreamResult,
-    | 'functionCalls'
-    | 'thoughtText'
-    | 'toolEvents'
-    | 'usageMetadata'
-    | 'safetyRatings'
-    | 'finishMessage'
-    | 'citationMetadata'
-    | 'groundingMetadata'
-    | 'urlContextMetadata'
-    | 'warnings'
-  >,
-  jsonMode?: boolean,
-  responseSchema?: GeminiResponseSchema,
-  contextUsed?: ContextUsed,
-): AskStructuredContent {
-  const parsedData = jsonMode ? tryParseJsonResponse(text) : undefined;
-  const answer = parsedData === undefined ? text : '';
-  const usage = extractUsage(streamResult.usageMetadata);
-  const warnings: string[] = [];
-
-  // Fold schema validation warnings into warnings array
-  const schemaWarnings = buildSchemaValidationWarnings(parsedData, jsonMode, responseSchema);
-  if (schemaWarnings.length > 0) {
-    warnings.push(...schemaWarnings);
-  }
-  if (streamResult.warnings && streamResult.warnings.length > 0) {
-    warnings.push(...streamResult.warnings);
-  }
-
-  return buildStructuredResponse(
-    pickDefined({
-      answer,
-      data: parsedData,
-      warnings: warnings.length > 0 ? warnings : undefined,
-    }),
-    pickDefined({
-      contextUsed,
-      functionCalls: streamResult.functionCalls,
-      includeThoughts: getExposeThoughts(),
-      thoughtText: streamResult.thoughtText,
-      toolEvents: streamResult.toolEvents,
-      usage,
-      safetyRatings: streamResult.safetyRatings,
-      finishMessage: streamResult.finishMessage,
-      citationMetadata: streamResult.citationMetadata,
-      groundingMetadata: streamResult.groundingMetadata,
-      urlContextMetadata: streamResult.urlContextMetadata,
-    }),
-  );
-}
-
-function formatStructuredResult(
-  result: CallToolResult,
-  streamResult: Pick<
-    StreamResult,
-    | 'functionCalls'
-    | 'thoughtText'
-    | 'toolEvents'
-    | 'usageMetadata'
-    | 'safetyRatings'
-    | 'finishMessage'
-    | 'citationMetadata'
-  >,
-  jsonMode?: boolean,
-  responseSchema?: GeminiResponseSchema,
-  contextUsed?: ContextUsed,
-): CallToolResult {
-  if (result.isError) return result;
-  const structured = buildAskStructuredContent(
-    extractTextContent(result.content),
-    streamResult,
-    jsonMode,
-    responseSchema,
-    contextUsed,
-  );
-
-  return {
-    ...result,
-    content: [
-      { type: 'text', text: structured.answer },
-      ...result.content.filter((content) => content.type !== 'text'),
-      ...(Array.isArray(structured.warnings) && structured.warnings.length > 0
-        ? [
-            {
-              type: 'text' as const,
-              text: `Warnings:\n${structured.warnings.map((warning) => `- ${warning}`).join('\n')}`,
-            },
-          ]
-        : []),
-    ],
-    structuredContent: structured,
-  };
-}
-
-function getAskStructuredContent(result: CallToolResult): AskStructuredContent | undefined {
-  return readStructuredObject(result) as AskStructuredContent | undefined;
-}
+// ── Validation ───────────────────────────────────────────────────────────
 
 function validateAskConflict(condition: boolean, message: string): CallToolResult | undefined {
   return condition ? new AppError('chat', message).toToolResult() : undefined;
@@ -365,6 +231,54 @@ function validateAskRequest(
   return undefined;
 }
 
+// ── Schema validation & JSON repair ──────────────────────────────────────
+
+function isRetryableSchemaFailure(
+  warnings: string[],
+  parsedData: unknown,
+  jsonMode: boolean | undefined,
+): boolean {
+  return jsonMode === true && (parsedData === undefined || warnings.length > 0);
+}
+
+function buildReducedRepairPrompt(
+  originalPrompt: string,
+  invalidOutput: string,
+  warnings: readonly string[],
+): string {
+  const warningText = warnings
+    .map((warning) => `- ${warning}`)
+    .join('\n')
+    .slice(0, JSON_REPAIR_WARNING_TEXT_LIMIT);
+  const invalidOutputText = invalidOutput.slice(0, 4_000);
+
+  return [
+    'Fix the invalid JSON from the previous turn.',
+    'Return only valid JSON that matches the provided schema.',
+    `User request:\n${originalPrompt}`,
+    `Validation errors:\n${warningText}`,
+    `Previous output:\n${invalidOutputText}`,
+  ].join('\n\n');
+}
+
+function appendAskWarnings(result: CallToolResult, warnings: readonly string[]): CallToolResult {
+  if (result.isError || warnings.length === 0) {
+    return result;
+  }
+
+  return mergeStructured(
+    result,
+    getAskStructuredContent(result)
+      ? undefined
+      : {
+          answer: extractTextContent(result.content),
+        },
+    { warnings },
+  );
+}
+
+// ── Request building ─────────────────────────────────────────────────────
+
 function buildAskPrompt(message: string, urls?: readonly string[]): string {
   if (!urls || urls.length === 0) {
     return message;
@@ -446,6 +360,49 @@ function buildAskGenerationOptions(
   };
 }
 
+async function resolveWorkspaceCacheName(
+  args: AskArgs,
+  workspace: ToolWorkspaceAccess,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  if (args.systemInstruction || args.seed !== undefined || !getWorkspaceCacheEnabled()) {
+    return undefined;
+  }
+
+  try {
+    const allowedRoots = await workspace.allowedRoots();
+    if (allowedRoots.length === 0) {
+      return undefined;
+    }
+    return await workspace.getOrCreateCache(allowedRoots, signal);
+  } catch (err) {
+    logger.child('workspace').warn(`Failed to resolve workspace cache: ${String(err)}`);
+    return undefined;
+  }
+}
+
+function buildWorkspaceCacheSkipWarnings(args: AskArgs): string[] {
+  if (!getWorkspaceCacheEnabled()) {
+    return [];
+  }
+
+  const reasons: string[] = [];
+  if (args.systemInstruction) {
+    reasons.push('custom systemInstruction');
+  }
+  if (args.seed !== undefined) {
+    reasons.push('custom seed');
+  }
+
+  if (reasons.length === 0) {
+    return [];
+  }
+
+  return [`Automatic workspace cache skipped because this request uses ${reasons.join(', ')}.`];
+}
+
+// ── Streaming execution ──────────────────────────────────────────────────
+
 async function runAskStream(
   ctx: ServerContext,
   streamGenerator: () => ReturnType<ReturnType<typeof getAI>['models']['generateContentStream']>,
@@ -502,47 +459,6 @@ async function runAskStream(
     toolProfile,
     ...(urls && urls.length > 0 ? { urls } : {}),
   };
-}
-
-function appendSessionResource(
-  result: CallToolResult,
-  sessionId: string,
-  turnIndex?: number,
-  taskId?: string,
-): void {
-  if (result.isError) return;
-  result.content.push(
-    withRelatedTaskMeta(
-      createResourceLink(sessionResourceUri(sessionId), `Chat Session ${sessionId}`),
-      taskId,
-    ),
-  );
-  if (!getExposeSessionResources()) {
-    return;
-  }
-  result.content.push(
-    withRelatedTaskMeta(
-      createResourceLink(sessionTranscriptUri(sessionId), `Chat Session ${sessionId} Transcript`),
-      taskId,
-    ),
-  );
-  result.content.push(
-    withRelatedTaskMeta(
-      createResourceLink(sessionEventsUri(sessionId), `Chat Session ${sessionId} Events`),
-      taskId,
-    ),
-  );
-  if (turnIndex !== undefined && turnIndex >= 0) {
-    result.content.push(
-      withRelatedTaskMeta(
-        createResourceLink(
-          turnPartsUri(sessionId, turnIndex),
-          `Chat Session ${sessionId} Turn ${String(turnIndex)} Parts`,
-        ),
-        taskId,
-      ),
-    );
-  }
 }
 
 async function askWithoutSession(
@@ -671,60 +587,6 @@ async function askWithoutSession(
   return { ...askResult, sentMessage: prompt };
 }
 
-async function resolveWorkspaceCacheName(
-  args: AskArgs,
-  workspace: ToolWorkspaceAccess,
-  signal?: AbortSignal,
-): Promise<string | undefined> {
-  if (args.systemInstruction || args.seed !== undefined || !getWorkspaceCacheEnabled()) {
-    return undefined;
-  }
-
-  try {
-    const allowedRoots = await workspace.allowedRoots();
-    if (allowedRoots.length === 0) {
-      return undefined;
-    }
-    return await workspace.getOrCreateCache(allowedRoots, signal);
-  } catch (err) {
-    logger.child('workspace').warn(`Failed to resolve workspace cache: ${String(err)}`);
-    return undefined;
-  }
-}
-
-function buildWorkspaceCacheSkipWarnings(args: AskArgs): string[] {
-  if (!getWorkspaceCacheEnabled()) {
-    return [];
-  }
-
-  const reasons: string[] = [];
-  if (args.systemInstruction) {
-    reasons.push('custom systemInstruction');
-  }
-  if (args.seed !== undefined) {
-    reasons.push('custom seed');
-  }
-
-  if (reasons.length === 0) {
-    return [];
-  }
-
-  return [`Automatic workspace cache skipped because this request uses ${reasons.join(', ')}.`];
-}
-
-function createDefaultAskDependencies(sessionAccess: SessionAccess): AskDependencies {
-  return {
-    appendSessionEvent: (sessionId, item) => sessionAccess.appendEvent(sessionId, item),
-    appendSessionTranscript: (sessionId, item) => sessionAccess.appendTranscript(sessionId, item),
-    getSessionEntry: (sessionId) => sessionAccess.getSessionEntry(sessionId),
-    getSessionInteractionId: (sessionId) => sessionAccess.getSessionInteractionId(sessionId),
-    isEvicted: (sessionId) => sessionAccess.isEvicted(sessionId),
-    listSessionTranscriptEntries: (sessionId) => sessionAccess.listTranscriptEntries(sessionId),
-    now: () => Date.now(),
-    runWithoutSession: askWithoutSession,
-  };
-}
-
 async function askWithInteractions(
   args: AskArgs & { sessionId: string },
   ctx: ServerContext,
@@ -835,6 +697,205 @@ async function askWithInteractions(
   }
 }
 
+// ── Response shaping ─────────────────────────────────────────────────────
+
+function buildAskStructuredContent(
+  text: string,
+  streamResult: Pick<
+    StreamResult,
+    | 'functionCalls'
+    | 'thoughtText'
+    | 'toolEvents'
+    | 'usageMetadata'
+    | 'safetyRatings'
+    | 'finishMessage'
+    | 'citationMetadata'
+    | 'groundingMetadata'
+    | 'urlContextMetadata'
+    | 'warnings'
+  >,
+  jsonMode?: boolean,
+  responseSchema?: GeminiResponseSchema,
+  contextUsed?: ContextUsed,
+): AskStructuredContent {
+  const parsedData = jsonMode ? tryParseJsonResponse(text) : undefined;
+  const answer = parsedData === undefined ? text : '';
+  const usage = extractUsage(streamResult.usageMetadata);
+  const warnings: string[] = [];
+
+  // Fold schema validation warnings into warnings array
+  const schemaWarnings = buildSchemaValidationWarnings(parsedData, jsonMode, responseSchema);
+  if (schemaWarnings.length > 0) {
+    warnings.push(...schemaWarnings);
+  }
+  if (streamResult.warnings && streamResult.warnings.length > 0) {
+    warnings.push(...streamResult.warnings);
+  }
+
+  return buildStructuredResponse(
+    pickDefined({
+      answer,
+      data: parsedData,
+      warnings: warnings.length > 0 ? warnings : undefined,
+    }),
+    pickDefined({
+      contextUsed,
+      functionCalls: streamResult.functionCalls,
+      includeThoughts: getExposeThoughts(),
+      thoughtText: streamResult.thoughtText,
+      toolEvents: streamResult.toolEvents,
+      usage,
+      safetyRatings: streamResult.safetyRatings,
+      finishMessage: streamResult.finishMessage,
+      citationMetadata: streamResult.citationMetadata,
+      groundingMetadata: streamResult.groundingMetadata,
+      urlContextMetadata: streamResult.urlContextMetadata,
+    }),
+  );
+}
+
+function formatStructuredResult(
+  result: CallToolResult,
+  streamResult: Pick<
+    StreamResult,
+    | 'functionCalls'
+    | 'thoughtText'
+    | 'toolEvents'
+    | 'usageMetadata'
+    | 'safetyRatings'
+    | 'finishMessage'
+    | 'citationMetadata'
+  >,
+  jsonMode?: boolean,
+  responseSchema?: GeminiResponseSchema,
+  contextUsed?: ContextUsed,
+): CallToolResult {
+  if (result.isError) return result;
+  const structured = buildAskStructuredContent(
+    extractTextContent(result.content),
+    streamResult,
+    jsonMode,
+    responseSchema,
+    contextUsed,
+  );
+
+  return {
+    ...result,
+    content: [
+      { type: 'text', text: structured.answer },
+      ...result.content.filter((content) => content.type !== 'text'),
+      ...(Array.isArray(structured.warnings) && structured.warnings.length > 0
+        ? [
+            {
+              type: 'text' as const,
+              text: `Warnings:\n${structured.warnings.map((warning) => `- ${warning}`).join('\n')}`,
+            },
+          ]
+        : []),
+    ],
+    structuredContent: structured,
+  };
+}
+
+function getAskStructuredContent(result: CallToolResult): AskStructuredContent | undefined {
+  return readStructuredObject(result) as AskStructuredContent | undefined;
+}
+
+function extractSessionId(
+  result: CallToolResult,
+  requestedSessionId: string | undefined,
+): string | undefined {
+  if (requestedSessionId) {
+    return requestedSessionId;
+  }
+
+  for (const item of result.content) {
+    if (item.type !== 'resource_link' || typeof item.uri !== 'string') continue;
+    const match = /^memory:\/\/sessions\/([^/]+)$/.exec(item.uri);
+    if (match?.[1]) {
+      return decodeURIComponent(match[1]);
+    }
+  }
+
+  return undefined;
+}
+
+function assembleChatOutput(
+  result: CallToolResult,
+  sessionIdHint: string | undefined,
+  _taskId: string | undefined,
+  ctx: ServerContext,
+): CallToolResult {
+  if (result.isError) {
+    return result;
+  }
+
+  const structured = result.structuredContent ?? {};
+  const answer =
+    typeof structured.answer === 'string' ? structured.answer : extractTextContent(result.content);
+  const warnings = Array.isArray(structured.schemaWarnings)
+    ? structured.schemaWarnings.filter((value): value is string => typeof value === 'string')
+    : undefined;
+  const extraWarnings = Array.isArray(structured.warnings)
+    ? structured.warnings.filter((value): value is string => typeof value === 'string')
+    : undefined;
+  const sessionId = extractSessionId(result, sessionIdHint);
+  const session = sessionId ? { id: sessionId } : undefined;
+  return createToolContext('chat', ctx).validateOutput(
+    ChatOutputSchema,
+    pickDefined({
+      ...buildBaseStructuredOutput([...(warnings ?? []), ...(extraWarnings ?? [])]),
+      answer,
+      data: structured.data,
+      session,
+    }),
+    result,
+  );
+}
+
+// ── Session persistence ──────────────────────────────────────────────────
+
+function appendSessionResource(
+  result: CallToolResult,
+  sessionId: string,
+  turnIndex?: number,
+  taskId?: string,
+): void {
+  if (result.isError) return;
+  result.content.push(
+    withRelatedTaskMeta(
+      createResourceLink(sessionResourceUri(sessionId), `Chat Session ${sessionId}`),
+      taskId,
+    ),
+  );
+  if (!getExposeSessionResources()) {
+    return;
+  }
+  result.content.push(
+    withRelatedTaskMeta(
+      createResourceLink(sessionTranscriptUri(sessionId), `Chat Session ${sessionId} Transcript`),
+      taskId,
+    ),
+  );
+  result.content.push(
+    withRelatedTaskMeta(
+      createResourceLink(sessionEventsUri(sessionId), `Chat Session ${sessionId} Events`),
+      taskId,
+    ),
+  );
+  if (turnIndex !== undefined && turnIndex >= 0) {
+    result.content.push(
+      withRelatedTaskMeta(
+        createResourceLink(
+          turnPartsUri(sessionId, turnIndex),
+          `Chat Session ${sessionId} Turn ${String(turnIndex)} Parts`,
+        ),
+        taskId,
+      ),
+    );
+  }
+}
+
 function appendSessionTurn(
   sessionId: string,
   askResult: AskExecutionResult,
@@ -897,12 +958,6 @@ function appendSessionTurn(
   );
 }
 
-interface PreparedAskRequest {
-  effectiveArgs: AskArgs;
-  contextUsed: ContextUsed;
-  warnings: string[];
-}
-
 async function prepareAskRequest(
   args: AskArgs,
   deps: AskDependencies,
@@ -935,6 +990,21 @@ function isPreparedRequest(
   value: PreparedAskRequest | CallToolResult,
 ): value is PreparedAskRequest {
   return 'effectiveArgs' in value;
+}
+
+// ── Tool registration ────────────────────────────────────────────────────
+
+function createDefaultAskDependencies(sessionAccess: SessionAccess): AskDependencies {
+  return {
+    appendSessionEvent: (sessionId, item) => sessionAccess.appendEvent(sessionId, item),
+    appendSessionTranscript: (sessionId, item) => sessionAccess.appendTranscript(sessionId, item),
+    getSessionEntry: (sessionId) => sessionAccess.getSessionEntry(sessionId),
+    getSessionInteractionId: (sessionId) => sessionAccess.getSessionInteractionId(sessionId),
+    isEvicted: (sessionId) => sessionAccess.isEvicted(sessionId),
+    listSessionTranscriptEntries: (sessionId) => sessionAccess.listTranscriptEntries(sessionId),
+    now: () => Date.now(),
+    runWithoutSession: askWithoutSession,
+  };
 }
 
 function createAskWork(deps: AskDependencies, workspace: ToolWorkspaceAccess) {
@@ -975,58 +1045,6 @@ function createAskWork(deps: AskDependencies, workspace: ToolWorkspaceAccess) {
 
     return appendAskWarnings(askResult.result, warnings);
   };
-}
-
-function extractSessionId(
-  result: CallToolResult,
-  requestedSessionId: string | undefined,
-): string | undefined {
-  if (requestedSessionId) {
-    return requestedSessionId;
-  }
-
-  for (const item of result.content) {
-    if (item.type !== 'resource_link' || typeof item.uri !== 'string') continue;
-    const match = /^memory:\/\/sessions\/([^/]+)$/.exec(item.uri);
-    if (match?.[1]) {
-      return decodeURIComponent(match[1]);
-    }
-  }
-
-  return undefined;
-}
-
-function assembleChatOutput(
-  result: CallToolResult,
-  sessionIdHint: string | undefined,
-  _taskId: string | undefined,
-  ctx: ServerContext,
-): CallToolResult {
-  if (result.isError) {
-    return result;
-  }
-
-  const structured = result.structuredContent ?? {};
-  const answer =
-    typeof structured.answer === 'string' ? structured.answer : extractTextContent(result.content);
-  const warnings = Array.isArray(structured.schemaWarnings)
-    ? structured.schemaWarnings.filter((value): value is string => typeof value === 'string')
-    : undefined;
-  const extraWarnings = Array.isArray(structured.warnings)
-    ? structured.warnings.filter((value): value is string => typeof value === 'string')
-    : undefined;
-  const sessionId = extractSessionId(result, sessionIdHint);
-  const session = sessionId ? { id: sessionId } : undefined;
-  return createToolContext('chat', ctx).validateOutput(
-    ChatOutputSchema,
-    pickDefined({
-      ...buildBaseStructuredOutput([...(warnings ?? []), ...(extraWarnings ?? [])]),
-      answer,
-      data: structured.data,
-      session,
-    }),
-    result,
-  );
 }
 
 async function chatWork(

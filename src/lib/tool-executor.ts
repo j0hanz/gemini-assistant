@@ -137,13 +137,18 @@ export type ToolRootsFetcher = ToolServices['rootsFetcher'];
 export type ToolWorkspaceAccess = ToolServices['workspace'];
 export type ToolWorkspaceCacheManager = WorkspaceCacheManagerImpl;
 
-export function createDefaultToolServices(): ToolServices {
+function createDefaultToolServices(): ToolServices {
   return {
     rootsFetcher: () => Promise.resolve([]),
     session: createSessionAccess(createSessionStore()),
     workspace: createWorkspaceAccess(createWorkspaceCacheManager()),
     clientCapabilities: () => undefined,
   };
+}
+
+/** Return the provided ToolServices or a freshly built default. */
+export function resolveToolServices(services?: ToolServices): ToolServices {
+  return services ?? createDefaultToolServices();
 }
 
 export { isPathWithinRoot, buildContextUsed, emptyContextUsed };

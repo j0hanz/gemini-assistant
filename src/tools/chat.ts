@@ -27,6 +27,7 @@ import {
   withRelatedTaskMeta,
 } from '../lib/response.js';
 import {
+  emptyStreamResult,
   extractUsage,
   type FunctionCallEntry,
   type StreamResult,
@@ -439,19 +440,7 @@ async function runAskStream(
     },
   });
 
-  const streamResult =
-    capturedStreamResult ??
-    ({
-      text: '',
-      textByWave: [''],
-      thoughtText: '',
-      parts: [],
-      toolsUsed: [],
-      toolsUsedOccurrences: [],
-      functionCalls: [],
-      toolEvents: [],
-      hadCandidate: false,
-    } satisfies StreamResult);
+  const streamResult = capturedStreamResult ?? emptyStreamResult();
 
   return {
     result,
@@ -470,17 +459,7 @@ async function askWithoutSession(
   if ('error' in resolved) {
     return {
       result: resolved.error,
-      streamResult: {
-        text: '',
-        textByWave: [''],
-        thoughtText: '',
-        parts: [],
-        toolsUsed: [],
-        toolsUsedOccurrences: [],
-        functionCalls: [],
-        toolEvents: [],
-        hadCandidate: false,
-      } satisfies StreamResult,
+      streamResult: emptyStreamResult(),
       toolProfile: 'none',
     };
   }
@@ -597,17 +576,7 @@ async function askWithInteractions(
   if (!prompt) {
     return {
       result: new AppError('chat', 'Failed to resolve tooling').toToolResult(),
-      streamResult: {
-        text: '',
-        textByWave: [''],
-        thoughtText: '',
-        parts: [],
-        toolsUsed: [],
-        toolsUsedOccurrences: [],
-        functionCalls: [],
-        toolEvents: [],
-        hadCandidate: false,
-      } satisfies StreamResult,
+      streamResult: emptyStreamResult(),
       toolProfile: 'none',
     };
   }
@@ -662,18 +631,13 @@ async function askWithInteractions(
 
     return {
       result,
-      streamResult: {
+      streamResult: emptyStreamResult({
         text: interactionResult.text ?? '',
         textByWave: [interactionResult.text ?? ''],
-        thoughtText: '',
         parts: interactionResult.text ? [{ text: interactionResult.text }] : [],
-        toolsUsed: [],
-        toolsUsedOccurrences: [],
-        functionCalls: [],
-        toolEvents: [],
         hadCandidate: true,
         finishReason: FinishReason.STOP,
-      },
+      }),
       toolProfile: 'interactions',
       ...(urls && urls.length > 0 ? { urls } : {}),
     };
@@ -681,17 +645,7 @@ async function askWithInteractions(
     const errorMsg = error instanceof Error ? error.message : String(error);
     return {
       result: new AppError('chat', `Interaction failed: ${errorMsg}`).toToolResult(),
-      streamResult: {
-        text: '',
-        textByWave: [''],
-        thoughtText: '',
-        parts: [],
-        toolsUsed: [],
-        toolsUsedOccurrences: [],
-        functionCalls: [],
-        toolEvents: [],
-        hadCandidate: false,
-      } satisfies StreamResult,
+      streamResult: emptyStreamResult(),
       toolProfile: 'interactions',
     };
   }

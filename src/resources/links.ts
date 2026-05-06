@@ -1,3 +1,6 @@
+import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
+
+import { createToolContext } from '../lib/tool-executor.js';
 import type { ResourceLink } from '../schemas/outputs.js';
 
 import {
@@ -10,6 +13,8 @@ import {
   WORKSPACE_CACHE_CONTENTS_URI,
   WORKSPACE_CACHE_URI,
 } from './uris.js';
+
+type ToolKey = 'chat' | 'research' | 'analyze' | 'review' | 'ingest';
 
 /**
  * Options for appendResourceLinks()
@@ -29,7 +34,7 @@ interface ResourceLinkOptions {
  * @returns Array of ResourceLink objects suggesting relevant resources
  */
 export function appendResourceLinks(
-  toolName: 'chat' | 'research' | 'analyze' | 'review' | 'ingest',
+  toolName: ToolKey,
   options?: ResourceLinkOptions,
 ): ResourceLink[] {
   const links: ResourceLink[] = [];
@@ -167,4 +172,28 @@ export function appendResourceLinks(
   }
 
   return links;
+}
+
+/**
+ * Validate a tool's structured content against its output schema and attach the
+ * resource links suggested for that tool. Centralizes the boilerplate every
+ * top-level tool ran at the end of a successful work function.
+ */
+export function finalizeToolResult(
+  toolKey: ToolKey,
+  ctx: ServerContext,
+  outputSchema: unknown,
+  structuredContent: unknown,
+  result: CallToolResult,
+  options?: ResourceLinkOptions,
+): CallToolResult {
+  const validated = createToolContext(toolKey, ctx).validateOutput(
+    outputSchema,
+    structuredContent,
+    result,
+  );
+  return {
+    ...validated,
+    resourceLink: appendResourceLinks(toolKey, options),
+  };
 }

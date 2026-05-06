@@ -26,10 +26,10 @@ import {
   registerWorkTool,
 } from '../lib/tasks.js';
 import {
-  createDefaultToolServices,
   createToolContext,
   executor,
   isPathWithinRoot,
+  resolveToolServices,
   type ToolRootsFetcher,
   type ToolServices,
   type ToolWorkspaceCacheManager,
@@ -44,7 +44,7 @@ import { DocumentationDriftSchema, ReviewOutputSchema } from '../schemas/outputs
 import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getGeminiModel, getReviewDocs } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
-import { appendResourceLinks } from '../resources/index.js';
+import { finalizeToolResult } from '../resources/index.js';
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -1420,16 +1420,13 @@ async function reviewWork(
   }
 
   const structured = result.structuredContent ?? {};
-  const output = createToolContext('review', ctx).validateOutput(
+  return finalizeToolResult(
+    'review',
+    ctx,
     ReviewOutputSchema,
     buildReviewStructuredContent(structured),
     result,
   );
-  const resourceLinks = appendResourceLinks('review');
-  return {
-    ...output,
-    resourceLink: resourceLinks,
-  };
 }
 
 export function registerReviewTool(
@@ -1437,7 +1434,7 @@ export function registerReviewTool(
   services?: ToolServices,
   _gitReader?: GitReader,
 ): void {
-  const resolvedServices = services ?? createDefaultToolServices();
+  const resolvedServices = resolveToolServices(services);
   const compareWork = createCompareFileWork(resolvedServices.rootsFetcher);
 
   registerWorkTool<ReviewInput>({

@@ -58,9 +58,9 @@ import {
   registerWorkTool,
 } from '../lib/tasks.js';
 import {
-  createDefaultToolServices,
   createToolContext,
   executor,
+  resolveToolServices,
   type ToolServices,
   validateStreamResult,
 } from '../lib/tool-executor.js';
@@ -71,7 +71,7 @@ import { ResearchOutputSchema } from '../schemas/outputs.js';
 import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getGeminiModel } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
-import { appendResourceLinks } from '../resources/index.js';
+import { finalizeToolResult } from '../resources/index.js';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -1136,22 +1136,19 @@ async function researchWork(
   }
 
   const structured = result.structuredContent ?? {};
-  const output = createToolContext('research', ctx).validateOutput(
+  return finalizeToolResult(
+    'research',
+    ctx,
     ResearchOutputSchema,
     buildResearchStructuredContent(args, ctx, structured),
     result,
   );
-  const resourceLinks = appendResourceLinks('research');
-  return {
-    ...output,
-    resourceLink: resourceLinks,
-  };
 }
 
 // ── Tool registration ─────────────────────────────────────────────────────
 
 export function registerResearchTool(server: McpServer, services?: ToolServices): void {
-  const resolvedServices = services ?? createDefaultToolServices();
+  const resolvedServices = resolveToolServices(services);
   registerWorkTool<ResearchInput>({
     server,
     tool: {

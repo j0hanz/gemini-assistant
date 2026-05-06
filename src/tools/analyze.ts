@@ -21,9 +21,9 @@ import {
   registerWorkTool,
 } from '../lib/tasks.js';
 import {
-  createDefaultToolServices,
   createToolContext,
   executor,
+  resolveToolServices,
   type ToolRootsFetcher,
   type ToolServices,
 } from '../lib/tool-executor.js';
@@ -33,7 +33,7 @@ import { AnalyzeOutputSchema } from '../schemas/outputs.js';
 import { buildGenerateContentConfig, getAI } from '../client.js';
 import { getGeminiModel } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
-import { appendResourceLinks } from '../resources/index.js';
+import { finalizeToolResult } from '../resources/index.js';
 import { analyzeUrlWork } from './research.js';
 
 interface AnalyzeDiagramInput {
@@ -485,23 +485,20 @@ async function analyzeWork(
   }
 
   const structured = result.structuredContent ?? {};
-  const output = createToolContext('analyze', ctx).validateOutput(
+  const resourceLinkOptions =
+    args.targetKind === 'file' ? { filePaths: [args.filePath] } : undefined;
+  return finalizeToolResult(
+    'analyze',
+    ctx,
     AnalyzeOutputSchema,
     buildAnalyzeStructuredContent(args, ctx, structured),
     result,
+    resourceLinkOptions,
   );
-
-  const resourceLinkOptions =
-    args.targetKind === 'file' ? { filePaths: [args.filePath] } : undefined;
-  const resourceLinks = appendResourceLinks('analyze', resourceLinkOptions);
-  return {
-    ...output,
-    resourceLink: resourceLinks,
-  };
 }
 
 export function registerAnalyzeTool(server: McpServer, services?: ToolServices): void {
-  const resolvedServices = services ?? createDefaultToolServices();
+  const resolvedServices = resolveToolServices(services);
   const fileWork = createAnalyzeFileWork(resolvedServices.rootsFetcher, resolvedServices);
 
   registerWorkTool<AnalyzeInput>({

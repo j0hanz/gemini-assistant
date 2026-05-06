@@ -12,7 +12,7 @@ import {
 } from '../client.js';
 import type { AskThinkingLevel } from '../public-contract.js';
 import { AppError } from './errors.js';
-import type { StreamResult } from './streaming.js';
+import { emptyStreamResult, type StreamResult } from './streaming.js';
 import type { ResolvedProfile } from './tool-profiles.js';
 
 const BUILT_IN_TO_INTERACTION_TOOL: Readonly<Record<string, Interactions.Tool>> = {
@@ -167,17 +167,12 @@ function extractTextFromInteraction(interaction: Interactions.Interaction): stri
 export function interactionToStreamResult(interaction: Interactions.Interaction): StreamResult {
   const text = extractTextFromInteraction(interaction);
 
-  return {
+  return emptyStreamResult({
     text,
     textByWave: [text],
-    thoughtText: '',
     parts: text ? ([{ text }] as Part[]) : [],
-    toolsUsed: [],
-    toolsUsedOccurrences: [],
-    functionCalls: [],
-    toolEvents: [],
     hadCandidate: true,
-  };
+  });
 }
 
 interface InteractionStreamResult {

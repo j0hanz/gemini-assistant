@@ -85,6 +85,27 @@ export interface StreamAnomalies {
   namelessFunctionCalls?: number;
 }
 
+/**
+ * Build an empty StreamResult — used as a fallback when a Gemini call short-circuits
+ * (validation errors, missing tooling, exceptions) and no streamed candidate was produced.
+ * Optional overrides allow callers to populate fields known at construction time
+ * (e.g. text + parts when the result was synthesized from a non-streaming path).
+ */
+export function emptyStreamResult(overrides: Partial<StreamResult> = {}): StreamResult {
+  return {
+    text: '',
+    textByWave: [''],
+    thoughtText: '',
+    parts: [],
+    toolsUsed: [],
+    toolsUsedOccurrences: [],
+    functionCalls: [],
+    toolEvents: [],
+    hadCandidate: false,
+    ...overrides,
+  };
+}
+
 export interface StreamObserver {
   onProgress(current: number, total: number, message: string): Promise<void>;
   onThoughtDelta(delta: string, totalLen: number, seq: number): Promise<void>;

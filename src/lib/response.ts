@@ -3,6 +3,7 @@ import {
   RELATED_TASK_META_KEY as SDK_RELATED_TASK_META_KEY,
 } from '@modelcontextprotocol/server';
 
+import { Validator } from '@cfworker/json-schema';
 import { type GroundingMetadata, type UrlMetadata, UrlRetrievalStatus } from '@google/genai';
 import { z } from 'zod/v4';
 
@@ -453,6 +454,35 @@ export function auditClaimedToolUsage(text: string, toolsUsed: readonly string[]
     if (pattern.test(text) && !toolsUsedSet.has(capability)) {
       warnings.push(`prose claims ${capability} but it was not invoked this turn`);
     }
+  }
+
+  return warnings;
+}
+
+export function validateSchemaOutput(data: unknown, schema: Record<string, unknown>): string[] {
+  try {
+    const validator = new Validator(schema, '2020-12', false);
+    const result = validator.validate(data);
+    if (result.valid) return [];
+    return result.errors.map((error) => `${error.instanceLocation}: ${error.error}`);
+  } catch {
+    return ['Schema validation could not be performed'];
+  }
+}
+
+export function buildSchemaValidationWarnings(
+  parsedData: unknown,
+  jsonMode: boolean | undefined,
+  responseSchema: Record<string, unknown> | undefined,
+): string[] {
+  const warnings: string[] = [];
+
+  if (jsonMode && parsedData === undefined) {
+    warnings.push('Failed to parse JSON from model response');
+  }
+
+  if (parsedData !== undefined && responseSchema) {
+    warnings.push(...validateSchemaOutput(parsedData, responseSchema));
   }
 
   return warnings;

@@ -1,6 +1,5 @@
 import type { CallToolResult, McpServer, ServerContext } from '@modelcontextprotocol/server';
 
-import { Validator } from '@cfworker/json-schema';
 import { FinishReason } from '@google/genai';
 import type {
   Chat,
@@ -17,6 +16,7 @@ import { appendFunctionCallingInstruction } from '../lib/model-prompts.js';
 import { resolveOrchestration } from '../lib/orchestration.js';
 import {
   buildBaseStructuredOutput,
+  buildSchemaValidationWarnings,
   buildStructuredResponse,
   createResourceLink,
   extractTextContent,
@@ -130,35 +130,6 @@ interface AskExecutionResult {
 const JSON_REPAIR_MAX_RETRIES = 1;
 const JSON_REPAIR_WARNING_TEXT_LIMIT = 2_000;
 
-function validateJsonAgainstSchema(data: unknown, schema: GeminiResponseSchema): string[] {
-  try {
-    const validator = new Validator(schema, '2020-12', false);
-    const result = validator.validate(data);
-    if (result.valid) return [];
-    return result.errors.map((error) => `${error.instanceLocation}: ${error.error}`);
-  } catch {
-    return ['Schema validation could not be performed'];
-  }
-}
-
-function buildAskWarnings(
-  parsedData: unknown,
-  jsonMode: boolean | undefined,
-  responseSchema: GeminiResponseSchema | undefined,
-): string[] {
-  const warnings: string[] = [];
-
-  if (jsonMode && parsedData === undefined) {
-    warnings.push('Failed to parse JSON from model response');
-  }
-
-  if (parsedData !== undefined && responseSchema) {
-    warnings.push(...validateJsonAgainstSchema(parsedData, responseSchema));
-  }
-
-  return warnings;
-}
-
 function isRetryableSchemaFailure(
   warnings: string[],
   parsedData: unknown,
@@ -228,7 +199,7 @@ function buildAskStructuredContent(
   const warnings: string[] = [];
 
   // Fold schema validation warnings into warnings array
-  const schemaWarnings = buildAskWarnings(parsedData, jsonMode, responseSchema);
+  const schemaWarnings = buildSchemaValidationWarnings(parsedData, jsonMode, responseSchema);
   if (schemaWarnings.length > 0) {
     warnings.push(...schemaWarnings);
   }

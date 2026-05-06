@@ -1,8 +1,7 @@
 import type { GroundingMetadata, Part, UrlContextMetadata } from '@google/genai';
 
 import type { FunctionCallEntry, StreamAnomalies, ToolEvent } from './lib/streaming.js';
-import type { GroundingRollup } from './schemas/grounding.js';
-import type { UsageMetadata } from './schemas/outputs.js';
+import type { GroundingRollup, UsageMetadata } from './schemas/outputs.js';
 
 import { getSessionLimits, getSlimSessionEvents } from './config.js';
 

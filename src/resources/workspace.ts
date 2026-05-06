@@ -6,8 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { normalizeWorkspacePath, validateScanPath } from '../lib/path-guard.js';
 import type { WorkspaceAccess } from '../lib/workspace-context.js';
 
-import { buildResourceMeta } from './metadata.js';
-import { registerStaticResource, registerTemplateResource } from './registry.js';
+import { buildResourceMeta, registerStaticResource, registerTemplateResource } from './index.js';
 import {
   decodeTemplateParam,
   FILE_RESOURCE_TEMPLATE,

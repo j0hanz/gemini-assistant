@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-import { buildResourceMeta } from '../../src/resources/metadata.js';
+import { buildResourceMeta } from '../../src/resources/index.js';
 
 // ────────────────────────────────────────────────────────────────────────────
 // buildResourceMeta tests

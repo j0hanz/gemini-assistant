@@ -3,8 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 
 import type { StoreRegistry } from '../lib/store-registry.js';
 
-import { buildResourceMeta } from './metadata.js';
-import { registerStaticResource, registerTemplateResource } from './registry.js';
+import { buildResourceMeta, registerStaticResource, registerTemplateResource } from './index.js';
 import { decodeTemplateParam, STORE_DOCUMENTS_TEMPLATE, STORES_LIST_URI } from './uris.js';
 
 /**

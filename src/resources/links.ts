@@ -1,4 +1,4 @@
-import type { ResourceLink } from '../schemas/resource-meta.js';
+import type { ResourceLink } from '../schemas/outputs.js';
 
 import {
   ASSISTANT_CATALOG_URI,

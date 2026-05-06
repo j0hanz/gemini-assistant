@@ -2,8 +2,7 @@ import type { McpServer, ReadResourceResult } from '@modelcontextprotocol/server
 import { ProtocolError, ProtocolErrorCode, ResourceTemplate } from '@modelcontextprotocol/server';
 
 import type { SessionStore } from '../sessions.js';
-import { ResourceMemo } from './index.js';
-import { buildResourceMeta } from './metadata.js';
+import { buildResourceMeta, ResourceMemo } from './index.js';
 import {
   decodeTemplateParam,
   requireTemplateParam,

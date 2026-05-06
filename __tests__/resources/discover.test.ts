@@ -70,7 +70,7 @@ test('discover resources — catalog content is markdown', async () => {
 test('discover resources — catalog metadata includes ttl', async () => {
   const { listDiscoveryEntries, renderDiscoveryCatalogMarkdown } =
     await import('../../src/catalog.js');
-  const { buildResourceMeta } = await import('../../src/resources/metadata.js');
+  const { buildResourceMeta } = await import('../../src/resources/index.js');
 
   const entries = listDiscoveryEntries();
   const markdown = renderDiscoveryCatalogMarkdown(entries);
@@ -100,7 +100,7 @@ test('discover resources — workflows content is markdown', async () => {
 test('discover resources — workflows metadata includes 1 hour ttl', async () => {
   const { listWorkflowEntries, renderWorkflowCatalogMarkdown } =
     await import('../../src/catalog.js');
-  const { buildResourceMeta } = await import('../../src/resources/metadata.js');
+  const { buildResourceMeta } = await import('../../src/resources/index.js');
 
   const entries = listWorkflowEntries();
   const markdown = renderWorkflowCatalogMarkdown(entries);
@@ -127,7 +127,7 @@ The gemini-assistant context resources provide real-time insights into the serve
 });
 
 test('discover resources — context metadata includes 5 minute ttl', async () => {
-  const { buildResourceMeta } = await import('../../src/resources/metadata.js');
+  const { buildResourceMeta } = await import('../../src/resources/index.js');
 
   const meta = buildResourceMeta({
     source: 'gemini-assistant',
@@ -165,7 +165,7 @@ test('discover resources — profiles content is valid json', async () => {
 });
 
 test('discover resources — profiles metadata has infinite ttl', async () => {
-  const { buildResourceMeta } = await import('../../src/resources/metadata.js');
+  const { buildResourceMeta } = await import('../../src/resources/index.js');
 
   const meta = buildResourceMeta({
     source: 'gemini-assistant',
@@ -190,7 +190,7 @@ The gemini-assistant is an MCP server that provides a job-first interface over G
 });
 
 test('discover resources — instructions metadata includes 30 minute ttl', async () => {
-  const { buildResourceMeta } = await import('../../src/resources/metadata.js');
+  const { buildResourceMeta } = await import('../../src/resources/index.js');
 
   const meta = buildResourceMeta({
     source: 'gemini-assistant',
@@ -214,7 +214,7 @@ test('discover resources — all resources have valid assistant:// URIs', () => 
 test('discover resources — catalog resource uri is in _meta', async () => {
   const { listDiscoveryEntries, renderDiscoveryCatalogMarkdown } =
     await import('../../src/catalog.js');
-  const { buildResourceMeta } = await import('../../src/resources/metadata.js');
+  const { buildResourceMeta } = await import('../../src/resources/index.js');
 
   const entries = listDiscoveryEntries();
   const markdown = renderDiscoveryCatalogMarkdown(entries);
@@ -231,7 +231,7 @@ test('discover resources — catalog resource uri is in _meta', async () => {
 });
 
 test('discover resources — metadata has generatedAt timestamp', async () => {
-  const { buildResourceMeta } = await import('../../src/resources/metadata.js');
+  const { buildResourceMeta } = await import('../../src/resources/index.js');
 
   const meta = buildResourceMeta({
     source: 'gemini-assistant',

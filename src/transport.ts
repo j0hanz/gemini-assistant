@@ -20,10 +20,10 @@ import { isIP } from 'node:net';
 import express, { type Express } from 'express';
 
 import { AppError } from './lib/errors.js';
-import { resolveAllowedHosts, validateHostHeader } from './lib/host-guard.js';
 import { logger } from './lib/logger.js';
 import { createRateLimiter, type RateLimiter } from './lib/rate-limit.js';
 import { createSharedTaskInfra, type SharedTaskInfra } from './lib/tasks.js';
+import { resolveAllowedHosts, validateHostHeader } from './lib/url-guard.js';
 
 import { getTransportConfig } from './config.js';
 

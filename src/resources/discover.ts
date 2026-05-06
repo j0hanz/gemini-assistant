@@ -9,8 +9,7 @@ import {
   renderDiscoveryCatalogMarkdown,
   renderWorkflowCatalogMarkdown,
 } from '../catalog.js';
-import { ResourceMemo } from './index.js';
-import { buildResourceMeta } from './metadata.js';
+import { buildResourceMeta, ResourceMemo } from './index.js';
 import {
   ASSISTANT_CATALOG_URI,
   ASSISTANT_CONTEXT_URI,

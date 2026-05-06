@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { resolveAllowedHosts, validateHostHeader } from '../../src/lib/host-guard.js';
+import { resolveAllowedHosts, validateHostHeader } from '../../src/lib/url-guard.js';
 
 describe('host-guard', () => {
   describe('validateHostHeader', () => {

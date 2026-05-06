@@ -5,10 +5,8 @@ import { dirname, relative } from 'node:path';
 import { test } from 'node:test';
 
 import { safeValidateStructuredContent } from '../../src/lib/response.js';
-import { IngestInputSchema } from '../../src/schemas/ingest-input.js';
-import type { IngestInput } from '../../src/schemas/ingest-input.js';
-import { IngestOutputSchema } from '../../src/schemas/ingest-output.js';
-import type { IngestOutput } from '../../src/schemas/ingest-output.js';
+import { IngestInputSchema, IngestOutputSchema } from '../../src/schemas/ingest.js';
+import type { IngestInput, IngestOutput } from '../../src/schemas/ingest.js';
 import { uploadAll, uploadOne } from '../../src/tools/ingest.js';
 
 test('ingest schema: create-store operation validates correctly', () => {

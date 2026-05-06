@@ -12,9 +12,8 @@ import {
   type ToolRootsFetcher,
   type ToolServices,
 } from '../lib/tool-executor.js';
-import type { IngestInput } from '../schemas/ingest-input.js';
-import { IngestInputSchema } from '../schemas/ingest-input.js';
-import { type IngestOutput, IngestOutputSchema } from '../schemas/ingest-output.js';
+import type { IngestInput, IngestOutput } from '../schemas/ingest.js';
+import { IngestInputSchema, IngestOutputSchema } from '../schemas/ingest.js';
 
 import { getAI } from '../client.js';
 import { appendResourceLinks } from '../resources/index.js';

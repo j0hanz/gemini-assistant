@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { IngestOutputSchema } from '../../src/schemas/ingest-output.js';
+import { IngestOutputSchema } from '../../src/schemas/ingest.js';
 
 describe('IngestOutputSchema', () => {
   describe('valid output', () => {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { IngestInputSchema } from '../../src/schemas/ingest-input.js';
+import { IngestInputSchema } from '../../src/schemas/ingest.js';
 
 describe('IngestInputSchema', () => {
   describe('create-store operation', () => {

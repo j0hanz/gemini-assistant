@@ -1,6 +1,13 @@
 import { z } from 'zod/v4';
 
-import { FileSearchStoreNameSchema, optionalField, textField } from './fields.js';
+import {
+  FileSearchStoreNameSchema,
+  optionalField,
+  textField,
+  withFieldMetadata,
+} from './fields.js';
+
+// ── Operation enum ──
 
 /**
  * Flat input schema for the `ingest` tool.
@@ -18,12 +25,14 @@ import { FileSearchStoreNameSchema, optionalField, textField } from './fields.js
  * Workspace-wide uploads are intentionally unsupported: large workspaces
  * exceed MCP request timeouts. Always scope to a directory like `src`.
  */
-export const IngestOperationEnum = z.enum([
+const IngestOperationEnum = z.enum([
   'create-store',
   'upload',
   'delete-store',
   'delete-document',
 ] as const);
+
+// ── Input schema ──
 
 const RawIngestInputSchema = z.strictObject({
   operation: IngestOperationEnum.describe(
@@ -78,3 +87,39 @@ export const IngestInputSchema = RawIngestInputSchema.superRefine((value, ctx) =
 });
 
 export type IngestInput = z.infer<typeof IngestInputSchema>;
+
+// ── Output schema ──
+
+export const IngestOutputSchema = z.strictObject({
+  operation: withFieldMetadata(
+    IngestOperationEnum,
+    'Which operation was performed (create-store, upload, delete-store, delete-document)',
+  ),
+  storeName: optionalField(
+    withFieldMetadata(z.string(), 'The store name involved in the operation'),
+  ),
+  documentName: optionalField(
+    withFieldMetadata(z.string(), 'Document name (populated for single-file upload)'),
+  ),
+  uploadedCount: optionalField(
+    withFieldMetadata(z.number().int().nonnegative(), 'Number of files uploaded (batch upload)'),
+  ),
+  skippedCount: optionalField(
+    withFieldMetadata(
+      z.number().int().nonnegative(),
+      'Number of files skipped (binary, oversized, ignored directory, or cap reached)',
+    ),
+  ),
+  uploadedFiles: optionalField(
+    withFieldMetadata(
+      z.array(z.string()).max(200),
+      'Sample of uploaded file paths (truncated to first 200)',
+    ),
+  ),
+  created: optionalField(
+    withFieldMetadata(z.boolean(), 'True if the store was auto-created during this upload'),
+  ),
+  message: textField('Human-readable result message'),
+});
+
+export type IngestOutput = z.infer<typeof IngestOutputSchema>;

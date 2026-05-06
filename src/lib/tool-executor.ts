@@ -1,5 +1,5 @@
 import { ProtocolError } from '@modelcontextprotocol/server';
-import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
+import type { CallToolResult, ClientCapabilities, ServerContext } from '@modelcontextprotocol/server';
 
 import { randomUUID } from 'node:crypto';
 
@@ -32,6 +32,16 @@ import {
 import { executeToolStream, type StreamResult, type ToolEvent } from './streaming.js';
 import { getWorkSignal } from './tasks.js';
 import { validateUrls } from './url-guard.js';
+import { createSessionAccess, createSessionStore, type SessionAccess } from '../sessions.js';
+import { isPathWithinRoot, type RootsFetcher } from './path-guard.js';
+import {
+  buildContextUsed,
+  createWorkspaceAccess,
+  createWorkspaceCacheManager,
+  emptyContextUsed,
+  type WorkspaceAccess,
+  type WorkspaceCacheManagerImpl,
+} from './workspace-context.js';
 
 // ── Gemini Request Preflight ──────────────────────────────────────────────
 
@@ -43,7 +53,7 @@ type PreflightCapability =
   | 'fileSearch'
   | 'functions';
 
-export interface GeminiRequestPreflight {
+interface GeminiRequestPreflight {
   allowExistingSessionSchema?: boolean | undefined;
   hasExistingSession?: boolean | undefined;
   jsonMode?: boolean | undefined;
@@ -100,13 +110,39 @@ const PREFLIGHT_CHECKS: readonly PreflightCheck[] = [
   disallowSchemaInExistingSession,
 ];
 
-export function validateGeminiRequest(req: GeminiRequestPreflight): CallToolResult | undefined {
+function validateGeminiRequest(req: GeminiRequestPreflight): CallToolResult | undefined {
   for (const check of PREFLIGHT_CHECKS) {
     const result = check(req);
     if (result) return result;
   }
   return undefined;
 }
+
+// ── Tool services (consolidated from tool-context.ts) ──────────────────────
+
+type ClientCapabilitiesAccessor = () => ClientCapabilities | undefined;
+
+export interface ToolServices {
+  rootsFetcher: RootsFetcher;
+  session: SessionAccess;
+  workspace: WorkspaceAccess;
+  clientCapabilities: ClientCapabilitiesAccessor;
+}
+
+export type ToolRootsFetcher = ToolServices['rootsFetcher'];
+export type ToolWorkspaceAccess = ToolServices['workspace'];
+export type ToolWorkspaceCacheManager = WorkspaceCacheManagerImpl;
+
+export function createDefaultToolServices(): ToolServices {
+  return {
+    rootsFetcher: () => Promise.resolve([]),
+    session: createSessionAccess(createSessionStore()),
+    workspace: createWorkspaceAccess(createWorkspaceCacheManager()),
+    clientCapabilities: () => undefined,
+  };
+}
+
+export { isPathWithinRoot, buildContextUsed, emptyContextUsed };
 
 type ToolLabelKey = keyof typeof TOOL_LABELS;
 

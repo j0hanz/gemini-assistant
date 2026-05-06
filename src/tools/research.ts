@@ -73,12 +73,16 @@ import { getGeminiModel } from '../config.js';
 import { TOOL_LABELS } from '../public-contract.js';
 import { appendResourceLinks } from '../resources/index.js';
 
+// ── Types ────────────────────────────────────────────────────────────────
+
 const MAX_DEEP_RESEARCH_TURNS = 4;
 const log = logger.child('research');
 
 type QuickResearchInput = Extract<ResearchInput, { mode: 'quick' }>;
 type DeepResearchInput = Extract<ResearchInput, { mode: 'deep' }>;
 type AnalyzeUrlInput = Extract<AnalyzeInput, { targetKind: 'url' }>;
+
+// ── Sampling enrichment ──────────────────────────────────────────────────
 
 async function enrichTopicWithSampling(
   topic: string,
@@ -131,6 +135,110 @@ async function enrichTopicWithSampling(
   }
 }
 
+// ── Quick research mode ──────────────────────────────────────────────────
+
+function buildPromptCapabilities(
+  activeCapabilities: ReadonlySet<string>,
+  multiTurnRetrieval = false,
+): Capabilities {
+  return {
+    googleSearch: activeCapabilities.has('googleSearch'),
+    urlContext: activeCapabilities.has('urlContext'),
+    codeExecution: activeCapabilities.has('codeExecution'),
+    fileSearch: activeCapabilities.has('fileSearch'),
+    ...(multiTurnRetrieval ? { multiTurnRetrieval: true } : {}),
+  };
+}
+
+function summarizeRetrieval(text: string, maxChars = 1_500): string {
+  const findingsIndex = text.indexOf('## Findings');
+  const candidate = findingsIndex >= 0 ? text.slice(findingsIndex) : text;
+  const trimmed = candidate.trim();
+  return trimmed.length <= maxChars ? trimmed : `${trimmed.slice(0, maxChars).trimEnd()}...`;
+}
+
+function isQuickResearchInput(args: ResearchInput): args is ResearchInput & {
+  mode: 'quick';
+} {
+  return args.mode === 'quick';
+}
+
+function isDeepResearchInput(
+  args: ResearchInput,
+): args is Extract<ResearchInput, { mode: 'deep' }> {
+  return args.mode === 'deep';
+}
+
+async function searchWork(
+  {
+    goal,
+    systemInstruction,
+    tools: toolsSpec,
+    thinkingLevel,
+    maxOutputTokens,
+    safetySettings,
+  }: QuickResearchInput,
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  const tasks = getTaskEmitter(ctx);
+  const { progress } = createToolContext('search', ctx);
+  await progress.send(0, undefined, 'Starting');
+  await mcpLog(ctx, 'info', 'Search requested');
+
+  const resolved = await resolveOrchestration(toolsSpec, ctx, {
+    toolKey: 'research',
+    mode: 'quick',
+  });
+  if (resolved.error) return resolved.error;
+
+  const { tools, toolConfig } = resolved.orchestration.geminiParams;
+  const resolvedUrls = toolsSpec?.overrides?.urls;
+  const prompt = buildGroundedAnswerPrompt(
+    goal,
+    resolvedUrls,
+    undefined,
+    buildPromptCapabilities(resolved.orchestration.activeCapabilities, false),
+  );
+
+  await tasks.phase('retrieving');
+  const result = await executor.runWithProgress(ctx, {
+    toolKey: 'research',
+    label: TOOL_LABELS.search,
+    initialMsg: 'Starting',
+    generator: () =>
+      getAI().models.generateContentStream({
+        model: getGeminiModel(),
+        contents: prompt.promptText,
+        config: buildGenerateContentConfig(
+          {
+            systemInstruction: systemInstruction ?? prompt.systemInstruction,
+            costProfile: 'research.quick',
+            thinkingLevel,
+            maxOutputTokens,
+            safetySettings,
+            tools,
+            toolConfig,
+          },
+          getWorkSignal(ctx),
+        ),
+      }),
+    responseBuilder: (streamResult, textContent) => buildSearchResult(streamResult, textContent),
+  });
+  await tasks.phase('finalizing');
+  return result;
+}
+
+async function runQuickResearch(
+  args: ResearchInput & {
+    mode: 'quick';
+  },
+  ctx: ServerContext,
+): Promise<CallToolResult> {
+  return await searchWork(args, ctx);
+}
+
+// ── Deep research mode (interactions API + polling) ──────────────────────
+
 function emitDeepResearchToolBudgetLogs(
   ctx: ServerContext,
   streamResult: StreamResult,
@@ -172,250 +280,6 @@ function emitDeepResearchToolBudgetLogs(
   return warnings;
 }
 
-function computeResearchContext(streamResult: StreamResult) {
-  const groundedSourcesResult = collectGroundedSourcesWithCounts(streamResult.groundingMetadata);
-  const urlMetadataResult = collectUrlMetadataWithCounts(
-    streamResult.urlContextMetadata?.urlMetadata,
-  );
-  const urlContextSources = collectUrlContextSources(urlMetadataResult.items);
-  const groundedSourceDetailsResult = collectGroundedSourceDetailsWithCounts(
-    streamResult.groundingMetadata,
-    new Set(urlContextSources),
-  );
-  const sourceDetails = mergeSourceDetails(
-    groundedSourceDetailsResult.items,
-    buildUrlContextSourceDetails(urlContextSources),
-  );
-  const { citations, droppedSupportCount } = collectGroundingCitations(
-    streamResult.groundingMetadata,
-  );
-  const findings = deriveFindingsFromCitations(citations);
-  const groundingSignals = computeGroundingSignals(
-    streamResult,
-    citations,
-    urlMetadataResult.items,
-    sourceDetails,
-  );
-  const status = deriveOverallStatus(groundingSignals);
-  const warnings = buildDroppedSupportWarnings({
-    droppedSupportCount,
-    droppedChunkCount: groundedSourceDetailsResult.droppedNonPublic,
-    droppedUrlCount: urlMetadataResult.droppedNonPublic,
-  });
-  const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
-
-  return {
-    groundedSources: groundedSourcesResult.items,
-    urlMetadata: urlMetadataResult.items,
-    urlContextSources,
-    sourceDetails,
-    citations,
-    findings,
-    groundingSignals,
-    status,
-    warnings,
-    computations,
-  };
-}
-
-function buildPromptCapabilities(
-  activeCapabilities: ReadonlySet<string>,
-  multiTurnRetrieval = false,
-): Capabilities {
-  return {
-    googleSearch: activeCapabilities.has('googleSearch'),
-    urlContext: activeCapabilities.has('urlContext'),
-    codeExecution: activeCapabilities.has('codeExecution'),
-    fileSearch: activeCapabilities.has('fileSearch'),
-    ...(multiTurnRetrieval ? { multiTurnRetrieval: true } : {}),
-  };
-}
-
-function buildAgenticSearchResult(
-  streamResult: StreamResult,
-  textContent: string,
-  ctx: ServerContext,
-  searchDepth: number,
-  resolvedRetrievalBudget: number,
-  extraWarnings: readonly string[] = [],
-  retrievalTurnsRan?: number,
-) {
-  const deepResearchWarnings = emitDeepResearchToolBudgetLogs(
-    ctx,
-    streamResult,
-    searchDepth,
-    resolvedRetrievalBudget,
-    retrievalTurnsRan,
-  );
-
-  const context = computeResearchContext(streamResult);
-  const warnings = [
-    ...context.warnings,
-    ...auditClaimedToolUsage(textContent, streamResult.toolsUsed),
-    ...deepResearchWarnings,
-    ...extraWarnings,
-  ];
-  const contentAdditions: CallToolResult['content'] = [];
-
-  appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
-  appendUrlStatus(contentAdditions, context.urlMetadata);
-
-  return {
-    resultMod: (result: CallToolResult) => ({
-      content: [...result.content, ...contentAdditions],
-    }),
-    structuredContent: buildStructuredResponse(
-      pickDefined({
-        report: textContent,
-        sources: context.sourceDetails.length > 0 ? undefined : context.groundedSources,
-        sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
-        urlContextSources:
-          context.sourceDetails.length > 0
-            ? undefined
-            : context.urlContextSources.length > 0
-              ? context.urlContextSources
-              : undefined,
-        urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
-        toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
-        status: context.status,
-        groundingSignals: context.groundingSignals,
-        findings: context.findings.length > 0 ? context.findings : undefined,
-        citations: context.citations.length > 0 ? context.citations : undefined,
-        computations: context.computations.length > 0 ? context.computations : undefined,
-        warnings: warnings.length > 0 ? warnings : undefined,
-      }),
-      {
-        functionCalls: streamResult.functionCalls,
-        toolEvents: streamResult.toolEvents,
-        usage: streamResult.usageMetadata ? extractUsage(streamResult.usageMetadata) : undefined,
-        safetyRatings: streamResult.safetyRatings,
-        finishMessage: streamResult.finishMessage,
-        citationMetadata: streamResult.citationMetadata,
-        groundingMetadata: streamResult.groundingMetadata,
-        urlContextMetadata: streamResult.urlContextMetadata,
-      },
-    ),
-    reportMessage: buildSourceReportMessage(context.groundedSources.length),
-  };
-}
-
-function buildSearchResult(streamResult: StreamResult, textContent: string) {
-  const context = computeResearchContext(streamResult);
-  const warnings = [
-    ...context.warnings,
-    ...auditClaimedToolUsage(textContent, streamResult.toolsUsed),
-  ];
-  const contentAdditions: CallToolResult['content'] = [];
-
-  appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
-  appendUrlStatus(contentAdditions, context.urlMetadata);
-  if (context.status === 'ungrounded') {
-    contentAdditions.unshift({
-      type: 'text',
-      text: '[status: ungrounded]',
-    });
-  }
-  if (context.groundedSources.length === 0 && context.urlMetadata.length === 0) {
-    contentAdditions.push({
-      type: 'text',
-      text: 'No grounded sources were retrieved; the answer may be ungrounded.',
-    });
-  }
-
-  return {
-    resultMod: (result: CallToolResult) => ({
-      content: [...result.content, ...contentAdditions],
-    }),
-    structuredContent: buildStructuredResponse(
-      pickDefined({
-        answer: textContent,
-        sources: context.sourceDetails.length > 0 ? undefined : context.groundedSources,
-        sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
-        urlContextSources:
-          context.sourceDetails.length > 0
-            ? undefined
-            : context.urlContextSources.length > 0
-              ? context.urlContextSources
-              : undefined,
-        urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
-        status: context.status,
-        groundingSignals: context.groundingSignals,
-        warnings: warnings.length > 0 ? warnings : undefined,
-      }),
-    ),
-    reportMessage: buildSourceReportMessage(context.groundedSources.length),
-  };
-}
-
-function summarizeRetrieval(text: string, maxChars = 1_500): string {
-  const findingsIndex = text.indexOf('## Findings');
-  const candidate = findingsIndex >= 0 ? text.slice(findingsIndex) : text;
-  const trimmed = candidate.trim();
-  return trimmed.length <= maxChars ? trimmed : `${trimmed.slice(0, maxChars).trimEnd()}...`;
-}
-
-function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) {
-  const context = computeResearchContext(streamResult);
-  const contentAdditions: CallToolResult['content'] = [];
-
-  appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
-  appendUrlStatus(contentAdditions, context.urlMetadata);
-
-  return {
-    resultMod: (result: CallToolResult) => ({
-      content: [...result.content, ...contentAdditions],
-    }),
-    structuredContent: pickDefined({
-      summary: textContent,
-      sources: context.groundedSources.length > 0 ? context.groundedSources : undefined,
-      sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
-      urlContextSources:
-        context.urlContextSources.length > 0 ? context.urlContextSources : undefined,
-      urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
-      status: context.status,
-      groundingSignals: context.groundingSignals,
-      citations: context.citations.length > 0 ? context.citations : undefined,
-      computations: context.computations.length > 0 ? context.computations : undefined,
-      warnings: context.warnings.length > 0 ? context.warnings : undefined,
-    }),
-    reportMessage: `${formatCountLabel(context.urlMetadata.length, 'URL')} retrieved`,
-  };
-}
-
-function parsePlannedSubQueries(
-  text: string,
-  fallbackTopic: string,
-  searchDepth: number,
-): { queries: string[]; warnings: string[] } {
-  const maxQueries = Math.min(searchDepth, 5);
-  const parsed = parseJson(text);
-  const candidates = Array.isArray(parsed)
-    ? parsed
-    : typeof parsed === 'object' && parsed !== null && 'queries' in parsed
-      ? (parsed as { queries?: unknown }).queries
-      : undefined;
-  if (Array.isArray(candidates)) {
-    const queries = candidates
-      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-      .map((entry) => entry.trim())
-      .slice(0, maxQueries);
-    if (queries.length > 0) {
-      return { queries, warnings: [] };
-    }
-  }
-
-  return {
-    queries: [
-      fallbackTopic,
-      `${fallbackTopic} evidence and sources`,
-      `${fallbackTopic} recent developments`,
-      `${fallbackTopic} comparisons and tradeoffs`,
-      `${fallbackTopic} open questions`,
-    ].slice(0, maxQueries),
-    warnings: ['research: planner JSON unparseable; using fallback queries'],
-  };
-}
-
 function dedupeGroundingSupports(
   groundingMetadata: GroundingMetadata | undefined,
 ): GroundingMetadata | undefined {
@@ -430,7 +294,7 @@ function dedupeGroundingSupports(
       .map((index) => groundingMetadata.groundingChunks?.[index]?.web?.uri)
       .filter((url): url is string => typeof url === 'string')
       .sort();
-    const key = `${text}\u0000${urls.join('\u0000')}`;
+    const key = `${text} ${urls.join(' ')}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -556,6 +420,40 @@ function aggregateStreamResults(
   };
 }
 
+function parsePlannedSubQueries(
+  text: string,
+  fallbackTopic: string,
+  searchDepth: number,
+): { queries: string[]; warnings: string[] } {
+  const maxQueries = Math.min(searchDepth, 5);
+  const parsed = parseJson(text);
+  const candidates = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === 'object' && parsed !== null && 'queries' in parsed
+      ? (parsed as { queries?: unknown }).queries
+      : undefined;
+  if (Array.isArray(candidates)) {
+    const queries = candidates
+      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+      .map((entry) => entry.trim())
+      .slice(0, maxQueries);
+    if (queries.length > 0) {
+      return { queries, warnings: [] };
+    }
+  }
+
+  return {
+    queries: [
+      fallbackTopic,
+      `${fallbackTopic} evidence and sources`,
+      `${fallbackTopic} recent developments`,
+      `${fallbackTopic} comparisons and tradeoffs`,
+      `${fallbackTopic} open questions`,
+    ].slice(0, maxQueries),
+    warnings: ['research: planner JSON unparseable; using fallback queries'],
+  };
+}
+
 async function runDeepResearchTurn(
   ctx: ServerContext,
   label: string,
@@ -577,6 +475,30 @@ async function runDeepResearchTurn(
   );
   const result = validateStreamResult(streamResult, 'research');
   return { result, streamResult };
+}
+
+async function promptForConstraints(
+  ctx: ServerContext,
+  topic: string,
+  searchDepth: number,
+  deliverable?: string,
+): Promise<string> {
+  if (searchDepth >= 5 || (searchDepth >= 4 && !deliverable)) {
+    try {
+      const constraint = await elicitTaskInput(
+        ctx,
+        `High depth research requested (${searchDepth}). What specific aspect should the agent focus on? (Or reply 'none' to proceed)`,
+        'Waiting for constraints for deep research',
+      );
+      if (constraint && constraint.trim().toLowerCase() !== 'none') {
+        return `${topic}\n\nAdditional User Constraint: ${constraint}`;
+      }
+    } catch (err) {
+      await mcpLog(ctx, 'warning', 'Elicitation skipped; continuing without extra constraints');
+      log.warn('Elicitation skipped or failed', { error: AppError.formatMessage(err) });
+    }
+  }
+  return topic;
 }
 
 async function runDeepResearchPlan(
@@ -787,123 +709,6 @@ async function runDeepResearchPlan(
   };
 }
 
-async function searchWork(
-  {
-    goal,
-    systemInstruction,
-    tools: toolsSpec,
-    thinkingLevel,
-    maxOutputTokens,
-    safetySettings,
-  }: QuickResearchInput,
-  ctx: ServerContext,
-): Promise<CallToolResult> {
-  const tasks = getTaskEmitter(ctx);
-  const { progress } = createToolContext('search', ctx);
-  await progress.send(0, undefined, 'Starting');
-  await mcpLog(ctx, 'info', 'Search requested');
-
-  const resolved = await resolveOrchestration(toolsSpec, ctx, {
-    toolKey: 'research',
-    mode: 'quick',
-  });
-  if (resolved.error) return resolved.error;
-
-  const { tools, toolConfig } = resolved.orchestration.geminiParams;
-  const resolvedUrls = toolsSpec?.overrides?.urls;
-  const prompt = buildGroundedAnswerPrompt(
-    goal,
-    resolvedUrls,
-    undefined,
-    buildPromptCapabilities(resolved.orchestration.activeCapabilities, false),
-  );
-
-  await tasks.phase('retrieving');
-  const result = await executor.runWithProgress(ctx, {
-    toolKey: 'research',
-    label: TOOL_LABELS.search,
-    initialMsg: 'Starting',
-    generator: () =>
-      getAI().models.generateContentStream({
-        model: getGeminiModel(),
-        contents: prompt.promptText,
-        config: buildGenerateContentConfig(
-          {
-            systemInstruction: systemInstruction ?? prompt.systemInstruction,
-            costProfile: 'research.quick',
-            thinkingLevel,
-            maxOutputTokens,
-            safetySettings,
-            tools,
-            toolConfig,
-          },
-          getWorkSignal(ctx),
-        ),
-      }),
-    responseBuilder: (streamResult, textContent) => buildSearchResult(streamResult, textContent),
-  });
-  await tasks.phase('finalizing');
-  return result;
-}
-
-export async function analyzeUrlWork(
-  { urls, goal, thinkingLevel, maxOutputTokens, safetySettings }: AnalyzeUrlInput,
-  ctx: ServerContext,
-  services?: ToolServices,
-): Promise<CallToolResult> {
-  const prompt = buildFileAnalysisPrompt({
-    goal,
-    kind: 'url',
-    urls,
-  });
-
-  const { progress } = createToolContext('analyzeUrl', ctx);
-  await progress.send(0, undefined, 'Fetching');
-  await mcpLog(ctx, 'info', `Analyze URL requested for ${urls.length} urls`);
-
-  return await executor.executeGeminiPipeline(ctx, {
-    toolName: 'analyze_url',
-    label: TOOL_LABELS.analyzeUrl,
-    cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
-    commonInputs: { urls },
-    buildContents: () => ({
-      contents: [prompt.promptText],
-      systemInstruction: prompt.systemInstruction,
-    }),
-    config: {
-      costProfile: 'analyze.summary',
-      thinkingLevel,
-      maxOutputTokens,
-      safetySettings,
-    },
-    responseBuilder: buildAnalyzeUrlResult,
-  });
-}
-
-async function promptForConstraints(
-  ctx: ServerContext,
-  topic: string,
-  searchDepth: number,
-  deliverable?: string,
-): Promise<string> {
-  if (searchDepth >= 5 || (searchDepth >= 4 && !deliverable)) {
-    try {
-      const constraint = await elicitTaskInput(
-        ctx,
-        `High depth research requested (${searchDepth}). What specific aspect should the agent focus on? (Or reply 'none' to proceed)`,
-        'Waiting for constraints for deep research',
-      );
-      if (constraint && constraint.trim().toLowerCase() !== 'none') {
-        return `${topic}\n\nAdditional User Constraint: ${constraint}`;
-      }
-    } catch (err) {
-      await mcpLog(ctx, 'warning', 'Elicitation skipped; continuing without extra constraints');
-      log.warn('Elicitation skipped or failed', { error: AppError.formatMessage(err) });
-    }
-  }
-  return topic;
-}
-
 async function agenticSearchWork(
   {
     deliverable,
@@ -1025,15 +830,6 @@ async function agenticSearchWork(
   };
 }
 
-async function runQuickResearch(
-  args: ResearchInput & {
-    mode: 'quick';
-  },
-  ctx: ServerContext,
-): Promise<CallToolResult> {
-  return await searchWork(args, ctx);
-}
-
 async function runDeepResearch(
   args: Extract<ResearchInput, { mode: 'deep' }>,
   ctx: ServerContext,
@@ -1054,16 +850,232 @@ async function runDeepResearch(
   );
 }
 
-function isQuickResearchInput(args: ResearchInput): args is ResearchInput & {
-  mode: 'quick';
-} {
-  return args.mode === 'quick';
+// ── URL analysis sub-tool ────────────────────────────────────────────────
+
+function buildAnalyzeUrlResult(streamResult: StreamResult, textContent: string) {
+  const context = computeResearchContext(streamResult);
+  const contentAdditions: CallToolResult['content'] = [];
+
+  appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
+  appendUrlStatus(contentAdditions, context.urlMetadata);
+
+  return {
+    resultMod: (result: CallToolResult) => ({
+      content: [...result.content, ...contentAdditions],
+    }),
+    structuredContent: pickDefined({
+      summary: textContent,
+      sources: context.groundedSources.length > 0 ? context.groundedSources : undefined,
+      sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
+      urlContextSources:
+        context.urlContextSources.length > 0 ? context.urlContextSources : undefined,
+      urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
+      status: context.status,
+      groundingSignals: context.groundingSignals,
+      citations: context.citations.length > 0 ? context.citations : undefined,
+      computations: context.computations.length > 0 ? context.computations : undefined,
+      warnings: context.warnings.length > 0 ? context.warnings : undefined,
+    }),
+    reportMessage: `${formatCountLabel(context.urlMetadata.length, 'URL')} retrieved`,
+  };
 }
 
-function isDeepResearchInput(
-  args: ResearchInput,
-): args is Extract<ResearchInput, { mode: 'deep' }> {
-  return args.mode === 'deep';
+export async function analyzeUrlWork(
+  { urls, goal, thinkingLevel, maxOutputTokens, safetySettings }: AnalyzeUrlInput,
+  ctx: ServerContext,
+  services?: ToolServices,
+): Promise<CallToolResult> {
+  const prompt = buildFileAnalysisPrompt({
+    goal,
+    kind: 'url',
+    urls,
+  });
+
+  const { progress } = createToolContext('analyzeUrl', ctx);
+  await progress.send(0, undefined, 'Fetching');
+  await mcpLog(ctx, 'info', `Analyze URL requested for ${urls.length} urls`);
+
+  return await executor.executeGeminiPipeline(ctx, {
+    toolName: 'analyze_url',
+    label: TOOL_LABELS.analyzeUrl,
+    cacheName: services ? await services.workspace.resolveCacheName(ctx) : undefined,
+    commonInputs: { urls },
+    buildContents: () => ({
+      contents: [prompt.promptText],
+      systemInstruction: prompt.systemInstruction,
+    }),
+    config: {
+      costProfile: 'analyze.summary',
+      thinkingLevel,
+      maxOutputTokens,
+      safetySettings,
+    },
+    responseBuilder: buildAnalyzeUrlResult,
+  });
+}
+
+// ── Response shaping ─────────────────────────────────────────────────────
+
+function computeResearchContext(streamResult: StreamResult) {
+  const groundedSourcesResult = collectGroundedSourcesWithCounts(streamResult.groundingMetadata);
+  const urlMetadataResult = collectUrlMetadataWithCounts(
+    streamResult.urlContextMetadata?.urlMetadata,
+  );
+  const urlContextSources = collectUrlContextSources(urlMetadataResult.items);
+  const groundedSourceDetailsResult = collectGroundedSourceDetailsWithCounts(
+    streamResult.groundingMetadata,
+    new Set(urlContextSources),
+  );
+  const sourceDetails = mergeSourceDetails(
+    groundedSourceDetailsResult.items,
+    buildUrlContextSourceDetails(urlContextSources),
+  );
+  const { citations, droppedSupportCount } = collectGroundingCitations(
+    streamResult.groundingMetadata,
+  );
+  const findings = deriveFindingsFromCitations(citations);
+  const groundingSignals = computeGroundingSignals(
+    streamResult,
+    citations,
+    urlMetadataResult.items,
+    sourceDetails,
+  );
+  const status = deriveOverallStatus(groundingSignals);
+  const warnings = buildDroppedSupportWarnings({
+    droppedSupportCount,
+    droppedChunkCount: groundedSourceDetailsResult.droppedNonPublic,
+    droppedUrlCount: urlMetadataResult.droppedNonPublic,
+  });
+  const computations = deriveComputationsFromToolEvents(streamResult.toolEvents);
+
+  return {
+    groundedSources: groundedSourcesResult.items,
+    urlMetadata: urlMetadataResult.items,
+    urlContextSources,
+    sourceDetails,
+    citations,
+    findings,
+    groundingSignals,
+    status,
+    warnings,
+    computations,
+  };
+}
+
+function buildAgenticSearchResult(
+  streamResult: StreamResult,
+  textContent: string,
+  ctx: ServerContext,
+  searchDepth: number,
+  resolvedRetrievalBudget: number,
+  extraWarnings: readonly string[] = [],
+  retrievalTurnsRan?: number,
+) {
+  const deepResearchWarnings = emitDeepResearchToolBudgetLogs(
+    ctx,
+    streamResult,
+    searchDepth,
+    resolvedRetrievalBudget,
+    retrievalTurnsRan,
+  );
+
+  const context = computeResearchContext(streamResult);
+  const warnings = [
+    ...context.warnings,
+    ...auditClaimedToolUsage(textContent, streamResult.toolsUsed),
+    ...deepResearchWarnings,
+    ...extraWarnings,
+  ];
+  const contentAdditions: CallToolResult['content'] = [];
+
+  appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
+  appendUrlStatus(contentAdditions, context.urlMetadata);
+
+  return {
+    resultMod: (result: CallToolResult) => ({
+      content: [...result.content, ...contentAdditions],
+    }),
+    structuredContent: buildStructuredResponse(
+      pickDefined({
+        report: textContent,
+        sources: context.sourceDetails.length > 0 ? undefined : context.groundedSources,
+        sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
+        urlContextSources:
+          context.sourceDetails.length > 0
+            ? undefined
+            : context.urlContextSources.length > 0
+              ? context.urlContextSources
+              : undefined,
+        urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
+        toolsUsed: streamResult.toolsUsed.length > 0 ? streamResult.toolsUsed : undefined,
+        status: context.status,
+        groundingSignals: context.groundingSignals,
+        findings: context.findings.length > 0 ? context.findings : undefined,
+        citations: context.citations.length > 0 ? context.citations : undefined,
+        computations: context.computations.length > 0 ? context.computations : undefined,
+        warnings: warnings.length > 0 ? warnings : undefined,
+      }),
+      {
+        functionCalls: streamResult.functionCalls,
+        toolEvents: streamResult.toolEvents,
+        usage: streamResult.usageMetadata ? extractUsage(streamResult.usageMetadata) : undefined,
+        safetyRatings: streamResult.safetyRatings,
+        finishMessage: streamResult.finishMessage,
+        citationMetadata: streamResult.citationMetadata,
+        groundingMetadata: streamResult.groundingMetadata,
+        urlContextMetadata: streamResult.urlContextMetadata,
+      },
+    ),
+    reportMessage: buildSourceReportMessage(context.groundedSources.length),
+  };
+}
+
+function buildSearchResult(streamResult: StreamResult, textContent: string) {
+  const context = computeResearchContext(streamResult);
+  const warnings = [
+    ...context.warnings,
+    ...auditClaimedToolUsage(textContent, streamResult.toolsUsed),
+  ];
+  const contentAdditions: CallToolResult['content'] = [];
+
+  appendSources(contentAdditions, formatSourceLabels(context.sourceDetails));
+  appendUrlStatus(contentAdditions, context.urlMetadata);
+  if (context.status === 'ungrounded') {
+    contentAdditions.unshift({
+      type: 'text',
+      text: '[status: ungrounded]',
+    });
+  }
+  if (context.groundedSources.length === 0 && context.urlMetadata.length === 0) {
+    contentAdditions.push({
+      type: 'text',
+      text: 'No grounded sources were retrieved; the answer may be ungrounded.',
+    });
+  }
+
+  return {
+    resultMod: (result: CallToolResult) => ({
+      content: [...result.content, ...contentAdditions],
+    }),
+    structuredContent: buildStructuredResponse(
+      pickDefined({
+        answer: textContent,
+        sources: context.sourceDetails.length > 0 ? undefined : context.groundedSources,
+        sourceDetails: context.sourceDetails.length > 0 ? context.sourceDetails : undefined,
+        urlContextSources:
+          context.sourceDetails.length > 0
+            ? undefined
+            : context.urlContextSources.length > 0
+              ? context.urlContextSources
+              : undefined,
+        urlMetadata: context.urlMetadata.length > 0 ? context.urlMetadata : undefined,
+        status: context.status,
+        groundingSignals: context.groundingSignals,
+        warnings: warnings.length > 0 ? warnings : undefined,
+      }),
+    ),
+    reportMessage: buildSourceReportMessage(context.groundedSources.length),
+  };
 }
 
 const SUMMARY_MAX_CHARS = 600;
@@ -1135,6 +1147,8 @@ async function researchWork(
     resourceLink: resourceLinks,
   };
 }
+
+// ── Tool registration ─────────────────────────────────────────────────────
 
 export function registerResearchTool(server: McpServer, services?: ToolServices): void {
   const resolvedServices = services ?? createDefaultToolServices();

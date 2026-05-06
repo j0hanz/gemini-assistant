@@ -27,6 +27,8 @@ import { createSharedTaskInfra, type SharedTaskInfra } from './lib/tasks.js';
 
 import { getTransportConfig } from './config.js';
 
+// ── Types & runtime config ────────────────────────────────────────────────
+
 interface BunServerHandle {
   stop: () => void | Promise<void>;
 }
@@ -61,6 +63,16 @@ interface CleanupEventStore extends EventStore {
 
 export interface ServerInstance {
   server: McpServer;
+  close: () => Promise<void>;
+}
+
+export interface HttpTransportResult {
+  httpServer: Server;
+  close: () => Promise<void>;
+}
+
+export interface WebStandardTransportResult {
+  handler: (req: Request) => Promise<Response>;
   close: () => Promise<void>;
 }
 
@@ -124,6 +136,14 @@ interface ResolvedTransportConfig {
   trustProxy: boolean;
 }
 
+const log = logger.child('transport');
+
+const APPLICATION_JSON = 'application/json' as const;
+const BROAD_BIND_HOSTS = new Set(['0.0.0.0', '::', '']);
+const HEADERS_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 30_000;
+const KEEP_ALIVE_TIMEOUT_MS = 5_000;
+
 function resolveTransportRuntimeConfig(): ResolvedTransportConfig {
   const {
     allowUnauthenticatedLoopbackHttp,
@@ -174,26 +194,35 @@ function createAsyncLock(): () => Promise<() => void> {
   };
 }
 
-export interface HttpTransportResult {
-  httpServer: Server;
-  close: () => Promise<void>;
+// ── Auth (bearer token) ──────────────────────────────────────────────────
+
+function extractBearerIdentity(authorization: string | undefined | null): string | undefined {
+  const prefix = 'Bearer ';
+  if (!authorization?.startsWith(prefix)) {
+    return undefined;
+  }
+
+  const token = authorization.slice(prefix.length).trim();
+  if (!token) {
+    return undefined;
+  }
+
+  return `auth:${createHash('sha256').update(token).digest('hex')}`;
 }
 
-export interface WebStandardTransportResult {
-  handler: (req: Request) => Promise<Response>;
-  close: () => Promise<void>;
-}
-
-const log = logger.child('transport');
-
-const APPLICATION_JSON = 'application/json' as const;
-const BROAD_BIND_HOSTS = new Set(['0.0.0.0', '::', '']);
-const HEADERS_TIMEOUT_MS = 10_000;
-const REQUEST_TIMEOUT_MS = 30_000;
-const KEEP_ALIVE_TIMEOUT_MS = 5_000;
-
-function isLoopbackBindHost(host: string): boolean {
-  return host === '127.0.0.1' || host === '::1' || host === 'localhost';
+function isAuthorized(
+  authorization: string | undefined | null,
+  token: string | undefined,
+): boolean {
+  if (!token) return true;
+  const prefix = 'Bearer ';
+  if (!authorization?.startsWith(prefix)) return false;
+  const supplied = authorization.slice(prefix.length);
+  const suppliedBuffer = Buffer.from(supplied);
+  const tokenBuffer = Buffer.from(token);
+  return (
+    suppliedBuffer.length === tokenBuffer.length && timingSafeEqual(suppliedBuffer, tokenBuffer)
+  );
 }
 
 function assertHttpBindIsProtected(
@@ -210,6 +239,26 @@ function assertHttpBindIsProtected(
   }
 }
 
+function nodeUnauthorizedResponse(res: ServerResponse): void {
+  if (res.headersSent) return;
+  res.statusCode = 401;
+  res.setHeader('WWW-Authenticate', 'Bearer');
+  res.setHeader('Content-Type', APPLICATION_JSON);
+  res.end(JSON.stringify(rpcErrorPayload('Unauthorized')));
+}
+
+function webUnauthorizedResponse(corsOrigin: string): Response {
+  return withCors(
+    new Response(JSON.stringify(rpcErrorPayload('Unauthorized')), {
+      status: 401,
+      headers: { 'content-type': APPLICATION_JSON, 'www-authenticate': 'Bearer' },
+    }),
+    corsOrigin,
+  );
+}
+
+// ── Rate limiting (per-session / per-IP / per-token) ─────────────────────
+
 function parseForwardedForHeader(value: string | null | undefined): string | undefined {
   if (!value) {
     return undefined;
@@ -225,20 +274,6 @@ function parseForwardedForHeader(value: string | null | undefined): string | und
   }
 
   return first;
-}
-
-function extractBearerIdentity(authorization: string | undefined | null): string | undefined {
-  const prefix = 'Bearer ';
-  if (!authorization?.startsWith(prefix)) {
-    return undefined;
-  }
-
-  const token = authorization.slice(prefix.length).trim();
-  if (!token) {
-    return undefined;
-  }
-
-  return `auth:${createHash('sha256').update(token).digest('hex')}`;
 }
 
 function nodeRateLimitKey(
@@ -306,41 +341,8 @@ function webRateLimitKey(
   return undefined;
 }
 
-function assertHostValidationIsConfigured(host: string, allowedHosts: string[] | undefined): void {
-  if (BROAD_BIND_HOSTS.has(host) && !allowedHosts) {
-    throw new AppError(
-      'transport',
-      `HTTP transport bound to ${host} requires ALLOWED_HOSTS for Host header validation.`,
-      'server',
-    );
-  }
-}
-
-function isAuthorized(
-  authorization: string | undefined | null,
-  token: string | undefined,
-): boolean {
-  if (!token) return true;
-  const prefix = 'Bearer ';
-  if (!authorization?.startsWith(prefix)) return false;
-  const supplied = authorization.slice(prefix.length);
-  const suppliedBuffer = Buffer.from(supplied);
-  const tokenBuffer = Buffer.from(token);
-  return (
-    suppliedBuffer.length === tokenBuffer.length && timingSafeEqual(suppliedBuffer, tokenBuffer)
-  );
-}
-
 function takeRateLimit(rateLimiter: RateLimiter, key: string): boolean {
   return rateLimiter.take(key);
-}
-
-function nodeUnauthorizedResponse(res: ServerResponse): void {
-  if (res.headersSent) return;
-  res.statusCode = 401;
-  res.setHeader('WWW-Authenticate', 'Bearer');
-  res.setHeader('Content-Type', APPLICATION_JSON);
-  res.end(JSON.stringify(rpcErrorPayload('Unauthorized')));
 }
 
 function nodeRateLimitedResponse(res: ServerResponse): void {
@@ -356,16 +358,6 @@ function nodeMissingIdentityResponse(res: ServerResponse): void {
   res.statusCode = 400;
   res.setHeader('Content-Type', APPLICATION_JSON);
   res.end(JSON.stringify(rpcErrorPayload('Unable to derive caller identity for rate limiting')));
-}
-
-function webUnauthorizedResponse(corsOrigin: string): Response {
-  return withCors(
-    new Response(JSON.stringify(rpcErrorPayload('Unauthorized')), {
-      status: 401,
-      headers: { 'content-type': APPLICATION_JSON, 'www-authenticate': 'Bearer' },
-    }),
-    corsOrigin,
-  );
 }
 
 function webRateLimitedResponse(corsOrigin: string): Response {
@@ -391,6 +383,24 @@ function webMissingIdentityResponse(corsOrigin: string): Response {
   );
 }
 
+// ── Host validation ──────────────────────────────────────────────────────
+
+function isLoopbackBindHost(host: string): boolean {
+  return host === '127.0.0.1' || host === '::1' || host === 'localhost';
+}
+
+function assertHostValidationIsConfigured(host: string, allowedHosts: string[] | undefined): void {
+  if (BROAD_BIND_HOSTS.has(host) && !allowedHosts) {
+    throw new AppError(
+      'transport',
+      `HTTP transport bound to ${host} requires ALLOWED_HOSTS for Host header validation.`,
+      'server',
+    );
+  }
+}
+
+// ── CORS ─────────────────────────────────────────────────────────────────
+
 function appendUniqueHeaderValue(existing: string | null, value: string): string {
   const values = (existing ?? '')
     .split(',')
@@ -414,10 +424,70 @@ function appendHeadersVaryHeader(headers: Headers, value: string): void {
   headers.set('Vary', appendUniqueHeaderValue(headers.get('Vary'), value));
 }
 
-function logListening(host: string, port: number, runtime?: string): void {
-  const suffix = runtime ? ` (${runtime})` : '';
-  log.info(`listening on http://${host}:${port}/mcp${suffix}`);
+function applyCors(app: Express, corsOrigin: string): void {
+  if (!corsOrigin) {
+    return;
+  }
+
+  app.use((_req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+    if (corsOrigin !== '*') {
+      appendResponseVaryHeader(res, 'Origin');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Authorization, Content-Type, mcp-session-id, Last-Event-Id, mcp-protocol-version',
+    );
+    res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id, mcp-protocol-version');
+    next();
+  });
+  app.options('/mcp', (_req, res) => {
+    res.sendStatus(204);
+  });
 }
+
+function applyCorsHeaders(headers: Headers, corsOrigin: string): void {
+  if (!corsOrigin) {
+    return;
+  }
+
+  headers.set('Access-Control-Allow-Origin', corsOrigin);
+  if (corsOrigin !== '*') {
+    appendHeadersVaryHeader(headers, 'Origin');
+  }
+  headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  headers.set(
+    'Access-Control-Allow-Headers',
+    'Authorization, Content-Type, mcp-session-id, Last-Event-Id, mcp-protocol-version',
+  );
+  // Credentials mode is intentionally unsupported. Do not emit
+  // Access-Control-Allow-Credentials without a dedicated stateful-session review.
+  headers.set('Access-Control-Expose-Headers', 'mcp-session-id, mcp-protocol-version');
+}
+
+function withCors(response: Response, corsOrigin: string): Response {
+  if (!corsOrigin) {
+    return response;
+  }
+
+  const headers = new Headers(response.headers);
+  applyCorsHeaders(headers, corsOrigin);
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function corsPreflightResponse(corsOrigin: string): Response {
+  const headers = new Headers();
+  applyCorsHeaders(headers, corsOrigin);
+  return new Response(null, { status: 204, headers });
+}
+
+// ── Session pool (LRU + TTL sweep) ───────────────────────────────────────
 
 function sessionRef(sessionId: string): string {
   return createHash('sha256').update(sessionId).digest('hex').slice(0, 12);
@@ -450,120 +520,6 @@ function buildBaseTransportOptions(
     ...(eventStore ? { eventStore } : {}),
     ...(!isStateless ? { sessionIdGenerator: () => randomUUID() } : {}),
   };
-}
-
-function rpcErrorPayload(message: string) {
-  return {
-    jsonrpc: JSONRPC_VERSION,
-    error: { code: ProtocolErrorCode.InternalError, message },
-    id: null,
-  };
-}
-
-function nodeErrorResponse(res: ServerResponse, status: number, message: string): void {
-  if (res.headersSent) return;
-  res.statusCode = status;
-  res.setHeader('Content-Type', APPLICATION_JSON);
-  res.end(JSON.stringify(rpcErrorPayload(message)));
-}
-
-function nodeMethodNotAllowedResponse(res: ServerResponse): void {
-  res.setHeader('Allow', 'POST, OPTIONS');
-  nodeErrorResponse(res, 405, 'Method Not Allowed');
-}
-
-function responseError(status: number, message: string): Response {
-  return new Response(JSON.stringify(rpcErrorPayload(message)), {
-    status,
-    headers: { 'content-type': APPLICATION_JSON },
-  });
-}
-
-function webMethodNotAllowedResponse(corsOrigin: string): Response {
-  const response = responseError(405, 'Method Not Allowed');
-  response.headers.set('Allow', 'POST, OPTIONS');
-  return withCors(response, corsOrigin);
-}
-
-function getNodeSessionId(req: IncomingMessage): string | undefined {
-  const header = req.headers['mcp-session-id'];
-  return typeof header === 'string' && header.trim() ? header : undefined;
-}
-
-function getRequestSessionId(req: Request): string | undefined {
-  const header = req.headers.get('mcp-session-id');
-  return header?.trim() ? header : undefined;
-}
-
-function rejectDeleteWithoutSession(
-  method: string,
-  sessionId: string | undefined,
-  isStateless: boolean,
-): boolean {
-  return method === 'DELETE' && !sessionId && !isStateless;
-}
-
-async function createManagedPair<TTransport extends ServerTransport>(
-  createServer: ServerFactory,
-  Transport: TransportConstructor<TTransport>,
-  isStateless: boolean,
-  createEventStore?: EventStoreFactory,
-): Promise<ManagedPair<TTransport>> {
-  const instance = await createServer();
-  const eventStore = isStateless ? undefined : createEventStore?.();
-  const transport = new Transport(buildBaseTransportOptions(isStateless, eventStore));
-
-  try {
-    await instance.server.connect(transport);
-  } catch (error) {
-    eventStore?.cleanup?.();
-    await instance.close();
-    throw error;
-  }
-
-  let closed = false;
-  return {
-    instance,
-    lastAccessAt: now(),
-    transport,
-    ...(eventStore ? { eventStore } : {}),
-    close: async () => {
-      if (closed) return;
-      closed = true;
-      eventStore?.cleanup?.();
-      await instance.close();
-    },
-  };
-}
-
-function createNodePair(
-  createServer: ServerFactory,
-  isStateless: boolean,
-  createEventStore?: EventStoreFactory,
-): Promise<ManagedPair<NodeStreamableHTTPServerTransport>> {
-  return createManagedPair(createServer, NodeHttpTransport, isStateless, createEventStore);
-}
-
-async function createWebPair(
-  createServer: ServerFactory,
-  isStateless: boolean,
-  createEventStore?: EventStoreFactory,
-): Promise<ManagedPair<WebStandardStreamableHTTPServerTransport>> {
-  return createManagedPair(createServer, WebHttpTransport, isStateless, createEventStore);
-}
-
-function logRequestFailure(
-  label: string,
-  err: unknown,
-  meta: { requestMethod: string; sessionId?: string },
-): void {
-  const errorMessage = err instanceof Error ? err.message : String(err);
-  const stack = err instanceof Error ? err.stack : undefined;
-  log.error(label, {
-    ...meta,
-    error: errorMessage,
-    stack,
-  });
 }
 
 function touchManagedPair<TTransport>(pair: ManagedPair<TTransport>): void {
@@ -740,6 +696,76 @@ function startStatefulIdleSweep<TTransport>(
   };
 }
 
+function logListening(host: string, port: number, runtime?: string): void {
+  const suffix = runtime ? ` (${runtime})` : '';
+  log.info(`listening on http://${host}:${port}/mcp${suffix}`);
+}
+
+// ── Request orchestration (managed pair lifecycle) ───────────────────────
+
+async function createManagedPair<TTransport extends ServerTransport>(
+  createServer: ServerFactory,
+  Transport: TransportConstructor<TTransport>,
+  isStateless: boolean,
+  createEventStore?: EventStoreFactory,
+): Promise<ManagedPair<TTransport>> {
+  const instance = await createServer();
+  const eventStore = isStateless ? undefined : createEventStore?.();
+  const transport = new Transport(buildBaseTransportOptions(isStateless, eventStore));
+
+  try {
+    await instance.server.connect(transport);
+  } catch (error) {
+    eventStore?.cleanup?.();
+    await instance.close();
+    throw error;
+  }
+
+  let closed = false;
+  return {
+    instance,
+    lastAccessAt: now(),
+    transport,
+    ...(eventStore ? { eventStore } : {}),
+    close: async () => {
+      if (closed) return;
+      closed = true;
+      eventStore?.cleanup?.();
+      await instance.close();
+    },
+  };
+}
+
+function createNodePair(
+  createServer: ServerFactory,
+  isStateless: boolean,
+  createEventStore?: EventStoreFactory,
+): Promise<ManagedPair<NodeStreamableHTTPServerTransport>> {
+  return createManagedPair(createServer, NodeHttpTransport, isStateless, createEventStore);
+}
+
+async function createWebPair(
+  createServer: ServerFactory,
+  isStateless: boolean,
+  createEventStore?: EventStoreFactory,
+): Promise<ManagedPair<WebStandardStreamableHTTPServerTransport>> {
+  return createManagedPair(createServer, WebHttpTransport, isStateless, createEventStore);
+}
+
+function logRequestFailure(
+  label: string,
+  err: unknown,
+  meta: { requestMethod: string; sessionId?: string },
+): void {
+  const errorMessage = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? err.stack : undefined;
+  log.error(label, {
+    ...meta,
+    error: errorMessage,
+    stack,
+  });
+}
+
 async function handleManagedRequest<TTransport, TResult>({
   createPair,
   getSessionId,
@@ -808,95 +834,57 @@ async function handleManagedRequest<TTransport, TResult>({
   }
 }
 
-function applyCors(app: Express, corsOrigin: string): void {
-  if (!corsOrigin) {
-    return;
-  }
+// ── HTTP transport (Express) ─────────────────────────────────────────────
 
-  app.use((_req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', corsOrigin);
-    if (corsOrigin !== '*') {
-      appendResponseVaryHeader(res, 'Origin');
-    }
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Authorization, Content-Type, mcp-session-id, Last-Event-Id, mcp-protocol-version',
-    );
-    res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id, mcp-protocol-version');
-    next();
-  });
-  app.options('/mcp', (_req, res) => {
-    res.sendStatus(204);
-  });
+function rpcErrorPayload(message: string) {
+  return {
+    jsonrpc: JSONRPC_VERSION,
+    error: { code: ProtocolErrorCode.InternalError, message },
+    id: null,
+  };
 }
 
-function applyCorsHeaders(headers: Headers, corsOrigin: string): void {
-  if (!corsOrigin) {
-    return;
-  }
-
-  headers.set('Access-Control-Allow-Origin', corsOrigin);
-  if (corsOrigin !== '*') {
-    appendHeadersVaryHeader(headers, 'Origin');
-  }
-  headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  headers.set(
-    'Access-Control-Allow-Headers',
-    'Authorization, Content-Type, mcp-session-id, Last-Event-Id, mcp-protocol-version',
-  );
-  // Credentials mode is intentionally unsupported. Do not emit
-  // Access-Control-Allow-Credentials without a dedicated stateful-session review.
-  headers.set('Access-Control-Expose-Headers', 'mcp-session-id, mcp-protocol-version');
+function nodeErrorResponse(res: ServerResponse, status: number, message: string): void {
+  if (res.headersSent) return;
+  res.statusCode = status;
+  res.setHeader('Content-Type', APPLICATION_JSON);
+  res.end(JSON.stringify(rpcErrorPayload(message)));
 }
 
-function withCors(response: Response, corsOrigin: string): Response {
-  if (!corsOrigin) {
-    return response;
-  }
+function nodeMethodNotAllowedResponse(res: ServerResponse): void {
+  res.setHeader('Allow', 'POST, OPTIONS');
+  nodeErrorResponse(res, 405, 'Method Not Allowed');
+}
 
-  const headers = new Headers(response.headers);
-  applyCorsHeaders(headers, corsOrigin);
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
+function responseError(status: number, message: string): Response {
+  return new Response(JSON.stringify(rpcErrorPayload(message)), {
+    status,
+    headers: { 'content-type': APPLICATION_JSON },
   });
 }
 
-function corsPreflightResponse(corsOrigin: string): Response {
-  const headers = new Headers();
-  applyCorsHeaders(headers, corsOrigin);
-  return new Response(null, { status: 204, headers });
+function webMethodNotAllowedResponse(corsOrigin: string): Response {
+  const response = responseError(405, 'Method Not Allowed');
+  response.headers.set('Allow', 'POST, OPTIONS');
+  return withCors(response, corsOrigin);
 }
 
-function startDetectedRuntime(
-  runtimes: RuntimeGlobals,
-  handler: (req: Request) => Promise<Response>,
-  host: string,
-  port: number,
-): (() => Promise<void>) | undefined {
-  if (runtimes.Bun) {
-    const serverHandle = runtimes.Bun.serve({ fetch: handler, port, hostname: host });
-    logListening(host, port, 'Bun');
-    return async () => {
-      await serverHandle.stop();
-    };
-  }
+function getNodeSessionId(req: IncomingMessage): string | undefined {
+  const header = req.headers['mcp-session-id'];
+  return typeof header === 'string' && header.trim() ? header : undefined;
+}
 
-  if (runtimes.Deno) {
-    const serverHandle = runtimes.Deno.serve(handler, { port, hostname: host });
-    logListening(host, port, 'Deno');
-    return async () => {
-      await serverHandle.shutdown();
-    };
-  }
+function getRequestSessionId(req: Request): string | undefined {
+  const header = req.headers.get('mcp-session-id');
+  return header?.trim() ? header : undefined;
+}
 
-  log.info(
-    'web-standard handler created without Bun/Deno auto-serve; wire the exported handler manually.',
-  );
-  return undefined;
+function rejectDeleteWithoutSession(
+  method: string,
+  sessionId: string | undefined,
+  isStateless: boolean,
+): boolean {
+  return method === 'DELETE' && !sessionId && !isStateless;
 }
 
 export async function startHttpTransport(
@@ -1083,6 +1071,36 @@ export async function startHttpTransport(
   return { httpServer, close };
 }
 
+// ── Web-standard transport (Bun/Deno/Workers) ────────────────────────────
+
+function startDetectedRuntime(
+  runtimes: RuntimeGlobals,
+  handler: (req: Request) => Promise<Response>,
+  host: string,
+  port: number,
+): (() => Promise<void>) | undefined {
+  if (runtimes.Bun) {
+    const serverHandle = runtimes.Bun.serve({ fetch: handler, port, hostname: host });
+    logListening(host, port, 'Bun');
+    return async () => {
+      await serverHandle.stop();
+    };
+  }
+
+  if (runtimes.Deno) {
+    const serverHandle = runtimes.Deno.serve(handler, { port, hostname: host });
+    logListening(host, port, 'Deno');
+    return async () => {
+      await serverHandle.shutdown();
+    };
+  }
+
+  log.info(
+    'web-standard handler created without Bun/Deno auto-serve; wire the exported handler manually.',
+  );
+  return undefined;
+}
+
 /**
  * Creates a WebStandard-based MCP transport for Bun / Deno / Cloudflare Workers.
  *
@@ -1218,3 +1236,9 @@ export function startWebStandardTransport(
 
   return Promise.resolve({ handler, close });
 }
+
+// ── Public entry ─────────────────────────────────────────────────────────
+// Public surface: startHttpTransport (HTTP/Express) and
+// startWebStandardTransport (Bun/Deno/Workers) — both exported above.
+// Types exported from this module: ServerInstance, HttpTransportResult,
+// WebStandardTransportResult.

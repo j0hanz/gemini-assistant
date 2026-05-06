@@ -1,3 +1,4 @@
+import { completable } from '@modelcontextprotocol/server';
 import { z } from 'zod/v4';
 
 import {
@@ -41,14 +42,17 @@ const RawIngestInputSchema = z.strictObject({
   storeName: FileSearchStoreNameSchema.describe(
     'File Search Store name. Required for all operations. Format: alphanumerics, _, -, /.',
   ),
-  filePath: z
-    .string()
-    .trim()
-    .max(4096)
-    .optional()
-    .describe(
-      "Path to a file or directory (required for 'upload'). Absolute or workspace-relative (e.g. 'src').",
-    ),
+  filePath: completable(
+    z
+      .string()
+      .trim()
+      .max(4096)
+      .optional()
+      .describe(
+        "Path to a file or directory (required for 'upload'). Absolute or workspace-relative (e.g. 'src').",
+      ),
+    () => [],
+  ),
   documentName: optionalField(
     textField(
       'Document resource name from a previous upload (required when operation = delete-document).',

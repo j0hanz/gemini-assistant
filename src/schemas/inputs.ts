@@ -321,7 +321,9 @@ export type ResearchInput = z.infer<typeof ResearchInputSchema>;
 const AnalyzeInputBaseSchema = z.strictObject({
   goal: goalText('Question or analysis goal for the selected targets'),
   targetKind: analyzeTargetKind(ANALYZE_TARGET_KIND_DESCRIPTION),
-  filePath: optionalField(workspacePath('File path to analyze.')),
+  filePath: optionalField(
+    completable(workspacePath('File path to analyze.'), () => []),
+  ),
   urls: createUrlContextFields({
     itemDescription: 'Public URL to analyze',
     description: 'Public URLs to analyze.',
@@ -329,13 +331,16 @@ const AnalyzeInputBaseSchema = z.strictObject({
     max: 20,
     optional: true,
   }).urls,
-  filePaths: workspacePathArray({
-    description: 'Local files to analyze.',
-    itemDescription: 'Workspace-relative or absolute path to a local file',
-    min: 2,
-    max: 5,
-    optional: true,
-  }),
+  filePaths: completable(
+    workspacePathArray({
+      description: 'Local files to analyze.',
+      itemDescription: 'Workspace-relative or absolute path to a local file',
+      min: 2,
+      max: 5,
+      optional: true,
+    }),
+    () => [],
+  ),
   outputKind: analyzeOutputKind(ANALYZE_OUTPUT_KIND_DESCRIPTION),
   diagramType: withFieldMetadata(
     z.enum(DIAGRAM_TYPES).optional(),
@@ -379,7 +384,10 @@ const AnalyzeFileSchema = z
       ANALYZE_TARGET_KIND_DESCRIPTION,
     ),
     ...analyzeSharedShape,
-    filePath: workspacePath('Workspace-relative or absolute path to analyze when targetKind=file'),
+    filePath: completable(
+      workspacePath('Workspace-relative or absolute path to analyze when targetKind=file'),
+      () => [],
+    ),
   })
   .superRefine(validateAnalyzeOutputSelection);
 
@@ -466,8 +474,8 @@ const ReviewDiffSchema = z.strictObject({
 
 const ReviewComparisonSchema = z.strictObject({
   subjectKind: withFieldMetadata(z.literal('comparison'), REVIEW_SUBJECT_KIND_DESCRIPTION),
-  filePathA: workspacePath('First file to compare.'),
-  filePathB: workspacePath('Second file to compare.'),
+  filePathA: completable(workspacePath('First file to compare.'), () => []),
+  filePathB: completable(workspacePath('Second file to compare.'), () => []),
   question: optionalField(textField('Comparison focus (behavior, APIs, security, etc.).')),
   ...reviewCommonShape,
 });

@@ -165,6 +165,47 @@ describe('IngestInputSchema', () => {
     });
   });
 
+  describe('filePath with completable', () => {
+    it('parses filePath correctly with upload operation', () => {
+      const input = {
+        operation: 'upload',
+        storeName: 'my-store',
+        filePath: 'src',
+      };
+      const result = IngestInputSchema.safeParse(input);
+      assert.equal(result.success, true);
+      if (result.success) {
+        assert.equal(result.data.filePath, 'src');
+      }
+    });
+
+    it('parses filePath with absolute path', () => {
+      const input = {
+        operation: 'upload',
+        storeName: 'my-store',
+        filePath: '/absolute/path/to/file',
+      };
+      const result = IngestInputSchema.safeParse(input);
+      assert.equal(result.success, true);
+      if (result.success) {
+        assert.equal(result.data.filePath, '/absolute/path/to/file');
+      }
+    });
+
+    it('trims whitespace from filePath', () => {
+      const input = {
+        operation: 'upload',
+        storeName: 'my-store',
+        filePath: '  src  ',
+      };
+      const result = IngestInputSchema.safeParse(input);
+      assert.equal(result.success, true);
+      if (result.success) {
+        assert.equal(result.data.filePath, 'src');
+      }
+    });
+  });
+
   describe('discriminator validation', () => {
     it('rejects unknown operation', () => {
       const input = {

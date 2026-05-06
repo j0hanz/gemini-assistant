@@ -80,6 +80,15 @@ test('AnalyzeInputSchema — extra properties rejected', () => {
   assert.strictEqual(result.success, false);
 });
 
+test('AnalyzeInputSchema — multi target with filePaths passes', () => {
+  const result = AnalyzeInputSchema.safeParse({
+    goal: 'analyze multiple files',
+    targetKind: 'multi',
+    filePaths: ['/file1.ts', '/file2.ts'],
+  });
+  assert.strictEqual(result.success, true);
+});
+
 test('ReviewInputSchema — valid diff subject passes', () => {
   const result = ReviewInputSchema.safeParse({ subjectKind: 'diff' });
   assert.strictEqual(result.success, true);
@@ -103,4 +112,23 @@ test('ChatInputSchema — thinkingBudget field is rejected (removed field)', () 
 test('ResearchInputSchema — thinkingBudget field is rejected (removed field)', () => {
   const result = ResearchInputSchema.safeParse({ goal: 'hello', thinkingBudget: 1000 });
   assert.strictEqual(result.success, false);
+});
+
+test('ReviewInputSchema — valid comparison subject with filePathA and filePathB passes', () => {
+  const result = ReviewInputSchema.safeParse({
+    subjectKind: 'comparison',
+    filePathA: 'src/file1.ts',
+    filePathB: 'src/file2.ts',
+  });
+  assert.strictEqual(result.success, true);
+});
+
+test('ReviewInputSchema — comparison subject with optional question passes', () => {
+  const result = ReviewInputSchema.safeParse({
+    subjectKind: 'comparison',
+    filePathA: 'src/file1.ts',
+    filePathB: 'src/file2.ts',
+    question: 'Check for behavior differences',
+  });
+  assert.strictEqual(result.success, true);
 });

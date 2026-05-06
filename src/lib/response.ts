@@ -20,6 +20,8 @@ import { logger } from './logger.js';
 import type { ToolEvent } from './streaming.js';
 import { isPublicHttpUrl } from './url-guard.js';
 
+// ── pickDefined / stripEmpty / mergeStructured ───────────────────────────
+
 type PickDefined<T> = {
   [K in keyof T as undefined extends T[K] ? K : never]?: Exclude<T[K], undefined>;
 } & {
@@ -97,12 +99,36 @@ export function mergeStructured(
   };
 }
 
-interface CollectedItems<T> {
-  items: T[];
-  droppedNonPublic: number;
-}
+// ── JSON parsing ─────────────────────────────────────────────────────────
 
 const JSON_CODE_BLOCK_PATTERN = /```(?:json)?\s*([\s\S]*?)\s*```/i;
+
+interface ParseJsonOptions<T> {
+  candidates?: readonly string[];
+  fallback?: T;
+}
+
+export function parseJson<T = unknown>(
+  text: string,
+  options: ParseJsonOptions<T> = {},
+): T | undefined {
+  const candidates = options.candidates ?? [text];
+
+  for (const candidate of candidates) {
+    const trimmed = candidate.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    try {
+      return JSON.parse(trimmed) as T;
+    } catch {
+      continue;
+    }
+  }
+
+  return options.fallback;
+}
 
 export function tryParseJsonResponse(text: string): unknown {
   const candidates = [text.trim()];
@@ -116,7 +142,12 @@ export function tryParseJsonResponse(text: string): unknown {
   return parseJson(text, { candidates });
 }
 
-// ── URL Metadata ──────────────────────────────────────────────────────
+// ── URL metadata collection ──────────────────────────────────────────────
+
+interface CollectedItems<T> {
+  items: T[];
+  droppedNonPublic: number;
+}
 
 function domainFromPublicUrl(url: string): string | undefined {
   try {
@@ -148,6 +179,22 @@ function collectUniquePublicEntries<S, T>(
   return { items, droppedNonPublic };
 }
 
+export function buildUrlContextSourceDetails(
+  urls: readonly string[],
+): { domain?: string; origin: 'urlContext'; url: string }[] {
+  return urls.map((url) =>
+    pickDefined({ domain: domainFromPublicUrl(url), origin: 'urlContext' as const, url }),
+  );
+}
+
+export function collectUrlContextSources(
+  urlMetadata: readonly { status: string; url: string }[],
+): string[] {
+  return urlMetadata
+    .filter((entry) => entry.status === 'URL_RETRIEVAL_STATUS_SUCCESS')
+    .map((entry) => entry.url);
+}
+
 export function collectUrlMetadataWithCounts(
   urlMetadata: UrlMetadata[] | undefined,
 ): CollectedItems<UrlMetadataEntry> {
@@ -166,7 +213,114 @@ export function collectUrlMetadataWithCounts(
   );
 }
 
-// ── Grounding Sources ─────────────────────────────────────────────────
+export function appendUrlStatus(
+  content: CallToolResult['content'],
+  urlMetadata: UrlMetadataEntry[],
+): void {
+  appendBulletListSection(
+    content,
+    'URL Retrieval Status',
+    urlMetadata.map((meta) => `${meta.url}: ${meta.status}`),
+  );
+}
+
+// ── Grounding citations ──────────────────────────────────────────────────
+
+export function collectGroundingCitations(groundingMetadata: GroundingMetadata | undefined): {
+  citations: GroundingCitation[];
+  droppedSupportCount: number;
+} {
+  if (!groundingMetadata?.groundingSupports || !groundingMetadata.groundingChunks) {
+    return { citations: [], droppedSupportCount: 0 };
+  }
+
+  const citations: GroundingCitation[] = [];
+  let droppedSupportCount = 0;
+  for (const support of groundingMetadata.groundingSupports) {
+    const text = support.segment?.text;
+    if (!text) continue;
+
+    const sourceUrls: string[] = [];
+    const seen = new Set<string>();
+    for (const index of support.groundingChunkIndices ?? []) {
+      const url = groundingMetadata.groundingChunks[index]?.web?.uri;
+      if (!url || seen.has(url) || !isPublicHttpUrl(url)) continue;
+
+      seen.add(url);
+      sourceUrls.push(url);
+    }
+
+    if (sourceUrls.length === 0) {
+      droppedSupportCount += 1;
+      continue;
+    }
+
+    citations.push(
+      pickDefined({
+        text,
+        startIndex: support.segment?.startIndex,
+        endIndex: support.segment?.endIndex,
+        sourceUrls,
+      }),
+    );
+  }
+
+  return { citations, droppedSupportCount };
+}
+
+const GROUNDING_MEDIUM_CONFIDENCE_SUPPORTS = 1;
+const GROUNDING_HIGH_CONFIDENCE_SUPPORTS = 3;
+
+export function computeGroundingSignals(
+  _streamResult: unknown,
+  citations: readonly GroundingCitation[],
+  urlMetadata: readonly UrlMetadataEntry[],
+  sourceDetails: readonly SourceDetail[],
+): GroundingSignals {
+  const retrievalPerformed = sourceDetails.length > 0 || urlMetadata.length > 0;
+  const urlContextUsed = sourceDetails.some(
+    (source) => source.origin === 'urlContext' || source.origin === 'both',
+  );
+  const confidence =
+    citations.length >= GROUNDING_HIGH_CONFIDENCE_SUPPORTS
+      ? 'high'
+      : citations.length >= GROUNDING_MEDIUM_CONFIDENCE_SUPPORTS
+        ? 'medium'
+        : retrievalPerformed
+          ? 'low'
+          : 'none';
+
+  return {
+    retrievalPerformed,
+    urlContextUsed,
+    groundingSupportsCount: citations.length,
+    confidence,
+  };
+}
+
+export function deriveFindingsFromCitations(citations: readonly GroundingCitation[]): Finding[] {
+  const findings = new Map<string, Finding>();
+
+  for (const citation of citations) {
+    if (findings.has(citation.text)) continue;
+    findings.set(citation.text, {
+      claim: citation.text,
+      supportingSourceUrls: [...citation.sourceUrls],
+      verificationStatus: 'cited',
+    });
+  }
+
+  return [...findings.values()];
+}
+
+export function countOccurrences(values: readonly string[]): Record<string, number> {
+  return values.reduce<Record<string, number>>((acc, value) => {
+    acc[value] = (acc[value] ?? 0) + 1;
+    return acc;
+  }, {});
+}
+
+// ── Source details ───────────────────────────────────────────────────────
 
 export function collectGroundedSourcesWithCounts(
   groundingMetadata: GroundingMetadata | undefined,
@@ -220,85 +374,70 @@ export function mergeSourceDetails(
   return [...merged.values()];
 }
 
-// ── Grounding Citations & Signals ─────────────────────────────────────
+export function formatSourceLabels(
+  sourceDetails: readonly { title?: string | undefined; url: string }[],
+): string[] {
+  return sourceDetails.map((source) =>
+    source.title ? `${source.title}: ${source.url}` : source.url,
+  );
+}
 
-export function collectGroundingCitations(groundingMetadata: GroundingMetadata | undefined): {
-  citations: GroundingCitation[];
+export function formatCountLabel(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+export function buildSourceReportMessage(sourceCount: number): string {
+  return sourceCount > 0
+    ? `${formatCountLabel(sourceCount, 'source')} found`
+    : 'completed with no grounded sources surfaced';
+}
+
+export function deriveOverallStatus(
+  signals: GroundingSignals,
+): 'grounded' | 'partially_grounded' | 'ungrounded' {
+  if (signals.confidence === 'high') return 'grounded';
+  if (signals.confidence === 'medium' || signals.confidence === 'low') {
+    return 'partially_grounded';
+  }
+  return 'ungrounded';
+}
+
+export function extractSampledText(content: unknown): string {
+  if (Array.isArray(content)) {
+    return content
+      .map((entry: unknown) =>
+        typeof entry === 'object' && entry !== null && 'text' in entry ? String(entry.text) : '',
+      )
+      .join('\n');
+  }
+
+  return typeof content === 'object' && content !== null && 'text' in content
+    ? String(content.text)
+    : '';
+}
+
+// ── Warnings & schema validation ─────────────────────────────────────────
+
+export function buildDroppedSupportWarnings({
+  droppedChunkCount,
+  droppedSupportCount,
+  droppedUrlCount,
+}: {
+  droppedChunkCount: number;
   droppedSupportCount: number;
-} {
-  if (!groundingMetadata?.groundingSupports || !groundingMetadata.groundingChunks) {
-    return { citations: [], droppedSupportCount: 0 };
-  }
-
-  const citations: GroundingCitation[] = [];
-  let droppedSupportCount = 0;
-  for (const support of groundingMetadata.groundingSupports) {
-    const text = support.segment?.text;
-    if (!text) continue;
-
-    const sourceUrls: string[] = [];
-    const seen = new Set<string>();
-    for (const index of support.groundingChunkIndices ?? []) {
-      const url = groundingMetadata.groundingChunks[index]?.web?.uri;
-      if (!url || seen.has(url) || !isPublicHttpUrl(url)) continue;
-
-      seen.add(url);
-      sourceUrls.push(url);
-    }
-
-    if (sourceUrls.length === 0) {
-      droppedSupportCount += 1;
-      continue;
-    }
-
-    citations.push(
-      pickDefined({
-        text,
-        startIndex: support.segment?.startIndex,
-        endIndex: support.segment?.endIndex,
-        sourceUrls,
-      }),
-    );
-  }
-
-  return { citations, droppedSupportCount };
-}
-
-export function deriveFindingsFromCitations(citations: readonly GroundingCitation[]): Finding[] {
-  const findings = new Map<string, Finding>();
-
-  for (const citation of citations) {
-    if (findings.has(citation.text)) continue;
-    findings.set(citation.text, {
-      claim: citation.text,
-      supportingSourceUrls: [...citation.sourceUrls],
-      verificationStatus: 'cited',
-    });
-  }
-
-  return [...findings.values()];
-}
-
-const GROUNDING_MEDIUM_CONFIDENCE_SUPPORTS = 1;
-const GROUNDING_HIGH_CONFIDENCE_SUPPORTS = 3;
-
-export function deriveDiagramSyntaxValidation(toolEvents: readonly ToolEvent[]): {
-  syntaxValid?: boolean;
-  syntaxErrors?: string[];
-} {
-  const result = [...toolEvents].reverse().find((event) => event.kind === 'code_execution_result');
-  if (!result) {
-    return {};
-  }
-
-  if (result.outcome === 'OUTCOME_OK') {
-    return { syntaxValid: true };
-  }
-
-  return {
-    syntaxValid: false,
-    syntaxErrors: [result.output ?? result.outcome ?? 'unknown error'],
-  };
+  droppedUrlCount: number;
+}): string[] {
+  return [
+    ...(droppedSupportCount > 0
+      ? [`dropped ${String(droppedSupportCount)} non-public grounding supports`]
+      : []),
+    ...(droppedChunkCount > 0
+      ? [`dropped ${String(droppedChunkCount)} non-public grounding chunks`]
+      : []),
+    ...(droppedUrlCount > 0
+      ? [`dropped ${String(droppedUrlCount)} non-public URL metadata entries`]
+      : []),
+  ];
 }
 
 export function auditClaimedToolUsage(text: string, toolsUsed: readonly string[]): string[] {
@@ -319,128 +458,6 @@ export function auditClaimedToolUsage(text: string, toolsUsed: readonly string[]
   return warnings;
 }
 
-export function computeGroundingSignals(
-  _streamResult: unknown,
-  citations: readonly GroundingCitation[],
-  urlMetadata: readonly UrlMetadataEntry[],
-  sourceDetails: readonly SourceDetail[],
-): GroundingSignals {
-  const retrievalPerformed = sourceDetails.length > 0 || urlMetadata.length > 0;
-  const urlContextUsed = sourceDetails.some(
-    (source) => source.origin === 'urlContext' || source.origin === 'both',
-  );
-  const confidence =
-    citations.length >= GROUNDING_HIGH_CONFIDENCE_SUPPORTS
-      ? 'high'
-      : citations.length >= GROUNDING_MEDIUM_CONFIDENCE_SUPPORTS
-        ? 'medium'
-        : retrievalPerformed
-          ? 'low'
-          : 'none';
-
-  return {
-    retrievalPerformed,
-    urlContextUsed,
-    groundingSupportsCount: citations.length,
-    confidence,
-  };
-}
-
-export function deriveOverallStatus(
-  signals: GroundingSignals,
-): 'grounded' | 'partially_grounded' | 'ungrounded' {
-  if (signals.confidence === 'high') return 'grounded';
-  if (signals.confidence === 'medium' || signals.confidence === 'low') {
-    return 'partially_grounded';
-  }
-  return 'ungrounded';
-}
-
-export function promptBlockedError(toolName: string, blockReason?: string): CallToolResult {
-  return new SafetyError(toolName, 'prompt_blocked', blockReason).toToolResult();
-}
-
-interface SharedStructuredMetadata {
-  warnings?: string[];
-}
-
-// ── Structured Content ────────────────────────────────────────────────
-
-export function buildSharedStructuredMetadata({
-  warnings,
-}: {
-  warnings?: readonly string[];
-}): SharedStructuredMetadata {
-  return pickDefined({
-    warnings: warnings && warnings.length > 0 ? [...warnings] : undefined,
-  });
-}
-
-export function buildBaseStructuredOutput(warnings?: readonly string[]): {
-  status: 'completed';
-  warnings?: string[];
-} {
-  return pickDefined({
-    status: 'completed' as const,
-    warnings: warnings && warnings.length > 0 ? [...warnings] : undefined,
-  });
-}
-
-const SHARED_STRUCTURED_RESULT_KEYS = ['warnings'] as const;
-
-type SharedStructuredResultKey = (typeof SHARED_STRUCTURED_RESULT_KEYS)[number];
-
-function pickSharedStructuredResultFields(
-  structured: Record<string, unknown>,
-): Partial<Record<SharedStructuredResultKey, unknown>> {
-  return pickDefined(
-    Object.fromEntries(
-      SHARED_STRUCTURED_RESULT_KEYS.map((key) => [key, structured[key]]),
-    ) as Record<SharedStructuredResultKey, unknown>,
-  );
-}
-
-export function buildStructuredResponse<T extends Record<string, unknown>>(
-  domain: T,
-  shared?: {
-    warnings?: readonly string[];
-    functionCalls?: readonly unknown[];
-    includeThoughts?: boolean;
-    thoughtText?: string;
-    toolEvents?: readonly unknown[];
-    usage?: UsageMetadata | undefined;
-    safetyRatings?: unknown;
-    finishMessage?: string | undefined;
-    citationMetadata?: unknown;
-    groundingMetadata?: unknown;
-    urlContextMetadata?: unknown;
-  },
-): T & SharedStructuredMetadata & Record<string, unknown> {
-  return {
-    ...domain,
-    ...(shared ? buildSharedStructuredMetadata(shared) : {}),
-  };
-}
-
-export function buildSuccessfulStructuredContent<TDomain extends Record<string, unknown>>({
-  warnings,
-  domain,
-  shared,
-}: {
-  warnings?: readonly string[] | undefined;
-  domain: TDomain;
-  shared?: Record<string, unknown> | undefined;
-}): TDomain & ReturnType<typeof buildBaseStructuredOutput> & Record<string, unknown> {
-  const merged = pickDefined({
-    ...buildBaseStructuredOutput(warnings),
-    ...domain,
-    ...(shared ? pickSharedStructuredResultFields(shared) : {}),
-  });
-  return stripEmpty(merged) as TDomain &
-    ReturnType<typeof buildBaseStructuredOutput> &
-    Record<string, unknown>;
-}
-
 const responseLog = logger.child('response');
 
 function hasSafeParse(outputSchema: unknown): outputSchema is z.ZodType {
@@ -449,6 +466,29 @@ function hasSafeParse(outputSchema: unknown): outputSchema is z.ZodType {
     outputSchema !== null &&
     'safeParse' in outputSchema &&
     typeof (outputSchema as { safeParse?: unknown }).safeParse === 'function'
+  );
+}
+
+export function safeValidateStructuredContent(
+  toolName: string,
+  outputSchema: unknown,
+  structuredContent: unknown,
+  result: CallToolResult,
+): CallToolResult {
+  return attachValidatedStructuredContent(toolName, outputSchema, structuredContent, result, true);
+}
+
+export function validateStructuredToolResult(
+  toolName: string,
+  outputSchema: unknown,
+  result: CallToolResult,
+): CallToolResult {
+  return attachValidatedStructuredContent(
+    toolName,
+    outputSchema,
+    result.structuredContent,
+    result,
+    false,
   );
 }
 
@@ -533,30 +573,99 @@ function attachValidatedStructuredContent(
   return buildStructuredValidationErrorResult(toolName, result, parsed.error);
 }
 
-export function safeValidateStructuredContent(
-  toolName: string,
-  outputSchema: unknown,
-  structuredContent: unknown,
-  result: CallToolResult,
-): CallToolResult {
-  return attachValidatedStructuredContent(toolName, outputSchema, structuredContent, result, true);
+export function extractTextContent(
+  content: { type: string; text?: string; [key: string]: unknown }[],
+): string {
+  return content
+    .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+    .map((c) => c.text)
+    .join('');
 }
 
-export function validateStructuredToolResult(
-  toolName: string,
-  outputSchema: unknown,
-  result: CallToolResult,
-): CallToolResult {
-  return attachValidatedStructuredContent(
-    toolName,
-    outputSchema,
-    result.structuredContent,
-    result,
-    false,
+export function promptBlockedError(toolName: string, blockReason?: string): CallToolResult {
+  return new SafetyError(toolName, 'prompt_blocked', blockReason).toToolResult();
+}
+
+// ── Structured content builders ──────────────────────────────────────────
+
+interface SharedStructuredMetadata {
+  warnings?: string[];
+}
+
+export function buildSharedStructuredMetadata({
+  warnings,
+}: {
+  warnings?: readonly string[];
+}): SharedStructuredMetadata {
+  return pickDefined({
+    warnings: warnings && warnings.length > 0 ? [...warnings] : undefined,
+  });
+}
+
+export function buildBaseStructuredOutput(warnings?: readonly string[]): {
+  status: 'completed';
+  warnings?: string[];
+} {
+  return pickDefined({
+    status: 'completed' as const,
+    warnings: warnings && warnings.length > 0 ? [...warnings] : undefined,
+  });
+}
+
+const SHARED_STRUCTURED_RESULT_KEYS = ['warnings'] as const;
+
+type SharedStructuredResultKey = (typeof SHARED_STRUCTURED_RESULT_KEYS)[number];
+
+function pickSharedStructuredResultFields(
+  structured: Record<string, unknown>,
+): Partial<Record<SharedStructuredResultKey, unknown>> {
+  return pickDefined(
+    Object.fromEntries(
+      SHARED_STRUCTURED_RESULT_KEYS.map((key) => [key, structured[key]]),
+    ) as Record<SharedStructuredResultKey, unknown>,
   );
 }
 
-// ── Content Builders ──────────────────────────────────────────────────
+export function buildStructuredResponse<T extends Record<string, unknown>>(
+  domain: T,
+  shared?: {
+    warnings?: readonly string[];
+    functionCalls?: readonly unknown[];
+    includeThoughts?: boolean;
+    thoughtText?: string;
+    toolEvents?: readonly unknown[];
+    usage?: UsageMetadata | undefined;
+    safetyRatings?: unknown;
+    finishMessage?: string | undefined;
+    citationMetadata?: unknown;
+    groundingMetadata?: unknown;
+    urlContextMetadata?: unknown;
+  },
+): T & SharedStructuredMetadata & Record<string, unknown> {
+  return {
+    ...domain,
+    ...(shared ? buildSharedStructuredMetadata(shared) : {}),
+  };
+}
+
+export function buildSuccessfulStructuredContent<TDomain extends Record<string, unknown>>({
+  warnings,
+  domain,
+  shared,
+}: {
+  warnings?: readonly string[] | undefined;
+  domain: TDomain;
+  shared?: Record<string, unknown> | undefined;
+}): TDomain & ReturnType<typeof buildBaseStructuredOutput> & Record<string, unknown> {
+  const merged = pickDefined({
+    ...buildBaseStructuredOutput(warnings),
+    ...domain,
+    ...(shared ? pickSharedStructuredResultFields(shared) : {}),
+  });
+  return stripEmpty(merged) as TDomain &
+    ReturnType<typeof buildBaseStructuredOutput> &
+    Record<string, unknown>;
+}
 
 function appendBulletListSection(
   content: CallToolResult['content'],
@@ -576,34 +685,6 @@ export function appendSources(
   sources: readonly string[],
 ): void {
   appendBulletListSection(content, 'Sources', sources);
-}
-
-export function formatCountLabel(count: number, singular: string, plural = `${singular}s`): string {
-  return `${count} ${count === 1 ? singular : plural}`;
-}
-
-export function appendUrlStatus(
-  content: CallToolResult['content'],
-  urlMetadata: UrlMetadataEntry[],
-): void {
-  appendBulletListSection(
-    content,
-    'URL Retrieval Status',
-    urlMetadata.map((meta) => `${meta.url}: ${meta.status}`),
-  );
-}
-
-export function createResourceLink(
-  uri: string,
-  name: string,
-  mimeType = 'application/json',
-): Extract<CallToolResult['content'][number], { type: 'resource_link' }> {
-  return {
-    type: 'resource_link',
-    uri,
-    name,
-    mimeType,
-  };
 }
 
 const RELATED_TASK_META_KEY = SDK_RELATED_TASK_META_KEY;
@@ -630,115 +711,36 @@ export function withRelatedTaskMeta<T extends Record<string, unknown>>(
   };
 }
 
-/**
- * Helper to extract text from a CallToolResult's content array.
- */
-export function extractTextContent(
-  content: { type: string; text?: string; [key: string]: unknown }[],
-): string {
-  return content
-    .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-    .map((c) => c.text)
-    .join('');
-}
-
-// ── Grounding Presentation ───
-export function buildSourceReportMessage(sourceCount: number): string {
-  return sourceCount > 0
-    ? `${formatCountLabel(sourceCount, 'source')} found`
-    : 'completed with no grounded sources surfaced';
-}
-
-export function formatSourceLabels(
-  sourceDetails: readonly { title?: string | undefined; url: string }[],
-): string[] {
-  return sourceDetails.map((source) =>
-    source.title ? `${source.title}: ${source.url}` : source.url,
-  );
-}
-
-export function collectUrlContextSources(
-  urlMetadata: readonly { status: string; url: string }[],
-): string[] {
-  return urlMetadata
-    .filter((entry) => entry.status === 'URL_RETRIEVAL_STATUS_SUCCESS')
-    .map((entry) => entry.url);
-}
-
-export function buildUrlContextSourceDetails(
-  urls: readonly string[],
-): { domain?: string; origin: 'urlContext'; url: string }[] {
-  return urls.map((url) =>
-    pickDefined({ domain: domainFromPublicUrl(url), origin: 'urlContext' as const, url }),
-  );
-}
-
-export function buildDroppedSupportWarnings({
-  droppedChunkCount,
-  droppedSupportCount,
-  droppedUrlCount,
-}: {
-  droppedChunkCount: number;
-  droppedSupportCount: number;
-  droppedUrlCount: number;
-}): string[] {
-  return [
-    ...(droppedSupportCount > 0
-      ? [`dropped ${String(droppedSupportCount)} non-public grounding supports`]
-      : []),
-    ...(droppedChunkCount > 0
-      ? [`dropped ${String(droppedChunkCount)} non-public grounding chunks`]
-      : []),
-    ...(droppedUrlCount > 0
-      ? [`dropped ${String(droppedUrlCount)} non-public URL metadata entries`]
-      : []),
-  ];
-}
-
-export function extractSampledText(content: unknown): string {
-  if (Array.isArray(content)) {
-    return content
-      .map((entry: unknown) =>
-        typeof entry === 'object' && entry !== null && 'text' in entry ? String(entry.text) : '',
-      )
-      .join('\n');
+export function deriveDiagramSyntaxValidation(toolEvents: readonly ToolEvent[]): {
+  syntaxValid?: boolean;
+  syntaxErrors?: string[];
+} {
+  const result = [...toolEvents].reverse().find((event) => event.kind === 'code_execution_result');
+  if (!result) {
+    return {};
   }
 
-  return typeof content === 'object' && content !== null && 'text' in content
-    ? String(content.text)
-    : '';
-}
-
-export function countOccurrences(values: readonly string[]): Record<string, number> {
-  return values.reduce<Record<string, number>>((acc, value) => {
-    acc[value] = (acc[value] ?? 0) + 1;
-    return acc;
-  }, {});
-}
-
-interface ParseJsonOptions<T> {
-  candidates?: readonly string[];
-  fallback?: T;
-}
-
-export function parseJson<T = unknown>(
-  text: string,
-  options: ParseJsonOptions<T> = {},
-): T | undefined {
-  const candidates = options.candidates ?? [text];
-
-  for (const candidate of candidates) {
-    const trimmed = candidate.trim();
-    if (!trimmed) {
-      continue;
-    }
-
-    try {
-      return JSON.parse(trimmed) as T;
-    } catch {
-      continue;
-    }
+  if (result.outcome === 'OUTCOME_OK') {
+    return { syntaxValid: true };
   }
 
-  return options.fallback;
+  return {
+    syntaxValid: false,
+    syntaxErrors: [result.output ?? result.outcome ?? 'unknown error'],
+  };
+}
+
+// ── Resource link helpers ────────────────────────────────────────────────
+
+export function createResourceLink(
+  uri: string,
+  name: string,
+  mimeType = 'application/json',
+): Extract<CallToolResult['content'][number], { type: 'resource_link' }> {
+  return {
+    type: 'resource_link',
+    uri,
+    name,
+    mimeType,
+  };
 }

@@ -224,3 +224,101 @@ test('builtInsToInteractionTools maps fileSearch to file_search', () => {
   const result = builtInsToInteractionTools(['fileSearch']);
   assert.deepStrictEqual(result, [{ type: 'file_search' }]);
 });
+
+test('buildInteractionParams — includes function tools from overrides.functions', () => {
+  const profile: ResolvedProfile = {
+    profile: 'plain',
+    builtIns: [],
+    thinkingLevel: 'minimal',
+    autoPromoted: false,
+    overrides: {
+      functions: [
+        {
+          name: 'getUserData',
+          description: 'Fetch user data from the database',
+          parametersJsonSchema: {
+            type: 'object',
+            properties: {
+              userId: { type: 'string' },
+            },
+            required: ['userId'],
+          },
+        },
+      ],
+    },
+  };
+
+  const result = buildInteractionParams({
+    profile,
+    model: 'gemini-3-pro-preview',
+    prompt: 'Test',
+  });
+
+  const tools = (result as Record<string, unknown>).tools as Record<string, unknown>[];
+  assert(Array.isArray(tools));
+  assert(tools.length >= 1);
+  const functionTool = tools.find((t) => t.type === 'function');
+  assert(functionTool !== undefined);
+  assert.strictEqual(functionTool.name, 'getUserData');
+});
+
+test('buildInteractionParams — combines builtIns and function tools', () => {
+  const profile: ResolvedProfile = {
+    profile: 'grounded',
+    builtIns: ['googleSearch'],
+    thinkingLevel: 'medium',
+    autoPromoted: false,
+    overrides: {
+      functions: [
+        {
+          name: 'calculateSum',
+          description: 'Add two numbers',
+          parametersJsonSchema: {
+            type: 'object',
+            properties: {
+              a: { type: 'number' },
+              b: { type: 'number' },
+            },
+            required: ['a', 'b'],
+          },
+        },
+      ],
+    },
+  };
+
+  const result = buildInteractionParams({
+    profile,
+    model: 'gemini-3-pro-preview',
+    prompt: 'Test',
+  });
+
+  const tools = (result as Record<string, unknown>).tools as Record<string, unknown>[];
+  assert(Array.isArray(tools));
+  assert.strictEqual(tools.length, 2);
+
+  const googleSearchTool = tools.find((t) => t.type === 'google_search');
+  assert(googleSearchTool !== undefined);
+
+  const functionTool = tools.find((t) => t.type === 'function');
+  assert(functionTool !== undefined);
+  assert.strictEqual(functionTool.name, 'calculateSum');
+});
+
+test('buildInteractionParams — omits tools key when builtIns and functions are both empty', () => {
+  const profile: ResolvedProfile = {
+    profile: 'plain',
+    builtIns: [],
+    thinkingLevel: 'minimal',
+    autoPromoted: false,
+    overrides: {},
+  };
+
+  const result = buildInteractionParams({
+    profile,
+    model: 'gemini-3-pro-preview',
+    prompt: 'Test',
+  });
+
+  const tools = (result as Record<string, unknown>).tools as unknown[] | undefined;
+  assert(!tools || tools.length === 0);
+});

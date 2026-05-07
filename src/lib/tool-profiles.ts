@@ -135,7 +135,7 @@ export class ProfileValidationError extends Error {
 
 // ── Input / resolved types ────────────────────────────────────────────────────
 
-interface FunctionDeclarationInput {
+export interface FunctionDeclarationInput {
   name: string;
   description: string;
   parametersJsonSchema?: Record<string, unknown> | undefined;

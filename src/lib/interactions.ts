@@ -13,7 +13,7 @@ import {
 import type { AskThinkingLevel } from '../public-contract.js';
 import { AppError } from './errors.js';
 import { emptyStreamResult, type StreamResult } from './streaming.js';
-import type { ResolvedProfile } from './tool-profiles.js';
+import type { FunctionDeclarationInput, ResolvedProfile } from './tool-profiles.js';
 
 const BUILT_IN_TO_INTERACTION_TOOL: Readonly<Record<string, Interactions.Tool>> = {
   googleSearch: { type: 'google_search' },
@@ -70,8 +70,11 @@ export function buildInteractionParams(
     generationConfig.thinking_level = level.toLowerCase();
   }
 
-  // Build tools array from builtIns
-  const tools = builtInsToInteractionTools(profile.builtIns);
+  // Build tools array from builtIns and functions
+  const tools = [
+    ...builtInsToInteractionTools(profile.builtIns),
+    ...functionsToInteractionTools(profile.overrides.functions ?? []),
+  ];
 
   // Build the final params object with conditional spreads for optional fields
   return {
@@ -98,6 +101,19 @@ export function builtInsToInteractionTools(builtIns: readonly string[]): Interac
     const tool = BUILT_IN_TO_INTERACTION_TOOL[builtIn];
     return tool ? [tool] : [];
   });
+}
+
+function functionsToInteractionTools(
+  functions: readonly FunctionDeclarationInput[],
+): Interactions.Tool[] {
+  return functions.flatMap((fn): Interactions.Tool[] => [
+    {
+      type: 'function' as const,
+      name: fn.name,
+      description: fn.description,
+      ...(fn.parametersJsonSchema ? { parameters: fn.parametersJsonSchema } : {}),
+    },
+  ]);
 }
 
 export async function createBackgroundInteraction(
